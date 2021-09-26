@@ -22,8 +22,8 @@
  *		index_markpos	- mark a scan position
  *		index_restrpos	- restore a scan position
  *		index_getnext_tid	- get the next TID from a scan
- *		index_fetch_heap		- get the scan's next heap tuple
- *		index_getnext	- get the next heap tuple from a scan
+ *		IndexFetchTuple		- get the scan's next tuple
+ *		index_getnext	- get the next tuple from a scan
  *		index_getbitmap - get all tuples from a scan
  *		index_column_getbitmap
  *		index_bulk_delete	- bulk deletion of index tuples
@@ -82,7 +82,9 @@
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/procarray.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "access/ustore/knl_uvisibility.h"
+#include "access/ustore/knl_uscan.h"
 #include "utils/snapmgr.h"
 #include "access/heapam.h"
 #include "vecexecutor/vecnodes.h"
@@ -198,6 +200,15 @@ void index_close(Relation relation, LOCKMODE lockmode)
     if (lockmode != NoLock)
         UnlockRelationId(&relid, lockmode);
 }
+
+bool UBTreeDelete(Relation indexRelation, Datum* values, const bool* isnull, ItemPointer heapTCtid);
+
+void index_delete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heap_t_ctid)
+{
+    /* Assert(Ustore) Assert(B tree) */
+    UBTreeDelete(index_relation, values, isnull, heap_t_ctid);
+}
+
 
 /* ----------------
  *		index_insert - insert an index tuple into a relation
@@ -374,6 +385,10 @@ void index_endscan(IndexScanDesc scan)
         GPIScanEnd(scan->xs_gpi_scan);
     }
 
+    if (scan->xs_cbi_scan != NULL) {
+        cbi_scan_end(scan->xs_cbi_scan);
+    }
+
     /* Release the scan data structure itself */
     IndexScanEnd(scan);
 }
@@ -475,6 +490,17 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
     return &scan->xs_ctup.t_self;
 }
 
+bool 
+IndexFetchSlot(IndexScanDesc scan, TupleTableSlot *slot, bool isUHeap)
+{
+    if (isUHeap) {
+        return IndexFetchUHeap(scan, slot);
+    } else {
+        HeapTuple tuple = (HeapTuple)IndexFetchTuple(scan);
+        return tuple != NULL;
+    }
+}
+
 /* ----------------
  *		index_fetch_heap - get the scan's next heap tuple
  *
@@ -485,7 +511,7 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
  * one such tuple to exist.)
  *
  * On success, the buffer containing the heap tup is pinned (the pin will be
- * dropped in a future index_getnext_tid, index_fetch_heap or index_endscan
+ * dropped in a future index_getnext_tid, IndexFetchTuple or index_endscan
  * call).
  *
  * Note: caller must check scan->xs_recheck, and perform rechecking of the
@@ -493,18 +519,17 @@ ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
  * enough information to do it efficiently in the general case.
  * ----------------
  */
-HeapTuple index_fetch_heap(IndexScanDesc scan)
+Tuple IndexFetchTuple(IndexScanDesc scan)
 {
     bool all_dead = false;
-    HeapTuple fetched_heap_tuple = NULL;
+    Tuple fetchedTuple = NULL;
 
 
-    fetched_heap_tuple = tableam_scan_index_fetch_tuple(scan, &all_dead);
+    fetchedTuple = tableam_scan_index_fetch_tuple(scan, &all_dead);
 
-    if(fetched_heap_tuple)
-    {
+    if (fetchedTuple) {
         pgstat_count_heap_fetch(scan->indexRelation);
-        return fetched_heap_tuple;
+        return fetchedTuple;
     }
     /*
      * If we scanned a whole HOT chain and found only dead tuples, tell index
@@ -519,23 +544,135 @@ HeapTuple index_fetch_heap(IndexScanDesc scan)
     return NULL;
 }
 
+UHeapTuple UHeapamIndexFetchTuple(IndexScanDesc scan, bool *all_dead)
+{
+    Relation rel = scan->heapRelation;
+    Buffer xsCbuf = scan->xs_cbuf;
+    ItemPointer tid = &scan->xs_ctup.t_self;
+
+    /* Switch to correct buffer if we don't have it already */
+    scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
+
+    LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
+
+    UHeapTuple uheapTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, scan->xs_snapshot, all_dead);
+
+    /* Save the XID of the last modified tuple, which is used to determine whether the tuple of the USTORE table 
+     * was modified by another transaction. For performance reasons, we reuse t_xid_base or t_multi_base 
+     * to record the last modified XID of a tuple.
+     */
+    if (scan->isUpsert && uheapTuple) {
+        if (UHeapTupleHasMultiLockers((uheapTuple)->disk_tuple->flag)) {
+            uheapTuple->t_xid_base = UHeapTupleGetTransXid(uheapTuple, scan->xs_cbuf, false);
+        } else {
+            uheapTuple->t_multi_base = UHeapTupleGetTransXid(uheapTuple, scan->xs_cbuf, false);
+        }
+    }
+
+    LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+
+
+    return uheapTuple;
+}
+
+bool UHeapamIndexFetchTupleInSlot(IndexScanDesc scan, ItemPointer tid, Snapshot snapshot,
+TupleTableSlot *slot, bool *callAgain, bool *allDead)
+{
+    Relation rel = scan->heapRelation;
+    Buffer xsCbuf = scan->xs_cbuf;
+
+    /* No HOT chains in UStore. */
+    Assert(!*callAgain);
+
+    /*
+     * IndexScanDesc contains a memory that can hold up to MaxHeapTupleSize,
+     * see RelationGetIndexScan() where the memory for IndexScanDesc is allocated.
+     * That memory is used to uncompress Heap tuples but currently is not used in Ustore.
+     * So in Ustore, we will start using that memory to hold the datapage tuple instead. 
+     * This allows us to reduce memory allocation in UHeapSearchBuffer() -> UHeapGetTuple().
+     */
+    Size usableSize PG_USED_FOR_ASSERTS_ONLY = (Size) (SizeofHeapTupleHeader + MaxHeapTupleSize);
+    UHeapTuple dataPageTuple = (UHeapTuple)&scan->xs_ctbuf_hdr;
+    dataPageTuple->disk_tuple = (UHeapDiskTuple) ((char *) dataPageTuple + UHeapTupleDataSize);
+
+    /* Switch to correct buffer if we don't have it already */
+    scan->xs_cbuf = ReleaseAndReadBuffer(xsCbuf, rel, ItemPointerGetBlockNumber(tid));
+
+    LockBuffer(scan->xs_cbuf, BUFFER_LOCK_SHARE);
+    UHeapTuple visibleTuple = UHeapSearchBuffer(tid, rel, scan->xs_cbuf, snapshot, allDead, dataPageTuple);
+
+    LockBuffer(scan->xs_cbuf, BUFFER_LOCK_UNLOCK);
+
+    if (visibleTuple) {
+        Assert(visibleTuple->disk_tuple_size <= usableSize);
+        ExecStoreTuple(visibleTuple, slot, InvalidBuffer, (visibleTuple != dataPageTuple));
+    }
+
+    return visibleTuple != NULL;
+}
+
+
 /* ----------------
- *		index_getnext - get the next heap tuple from a scan
+ * IndexFetchUHeap - get the scan's next heap tuple
  *
- * The result is the next heap tuple satisfying the scan keys and the
- * snapshot, or NULL if no more matching tuples exist.
+ * The result is a visible heap tuple associated with the index TID most
+ * recently fetched by index_getnext_tid, or NULL if no more matching tuples
+ * exist.  (There can be more than one matching tuple because of HOT chains,
+ * although when using an MVCC snapshot it should be impossible for more than
+ * one such tuple to exist.)
  *
  * On success, the buffer containing the heap tup is pinned (the pin will be
- * dropped in a future index_getnext_tid, index_fetch_heap or index_endscan
+ * dropped in a future index_getnext_tid, IndexFetchTuple or index_endscan
+ * call).
+ *
+ * Note: caller must check scan->xs_recheck, and perform rechecking of the
+ * scan keys if required.  We do not do that here because we don't have
+ * enough information to do it efficiently in the general case.
+ * ----------------
+ */
+bool IndexFetchUHeap(IndexScanDesc scan, TupleTableSlot *slot)
+{
+    ItemPointer tid = &scan->xs_ctup.t_self;
+    bool allDead = false;
+    bool found = UHeapamIndexFetchTupleInSlot(scan, tid, scan->xs_snapshot, 
+                                              slot, &scan->xs_continue_hot, &allDead);
+
+    if (found) {
+        pgstat_count_heap_fetch(scan->indexRelation);
+        return true;
+    }
+
+    /*
+     * If we scanned a whole HOT chain and found only dead tuples, tell index
+     * AM to kill its entry for that TID (this will take effect in the next
+     * amgettuple call, in index_getnext_tid).      We do not do this when in
+     * recovery because it may violate MVCC to do so.  See comments in
+     * RelationGetIndexScan().
+     */
+    if (!scan->xactStartedInRecovery)
+        scan->kill_prior_tuple = allDead;
+
+    return false;
+}
+
+
+/* ----------------
+ *		index_getnext - get the next tuple from a scan
+ *
+ * The result is the next tuple satisfying the scan keys and the
+ * snapshot, or NULL if no more matching tuples exist.
+ *
+ * On success, the buffer containing the tup is pinned (the pin will be
+ * dropped in a future index_getnext_tid, IndexFetchTuple or index_endscan
  * call).
  *
  * Note: caller must check scan->xs_recheck, and perform rechecking of the
  * scan keys if required.  We do not do that here because we don't have
  * enough information to do it efficiently in the general case.
  */
-HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction)
+Tuple index_getnext(IndexScanDesc scan, ScanDirection direction)
 {
-    HeapTuple heap_tuple;
+    Tuple tuple;
     ItemPointer tid;
 
     for (;;) {
@@ -572,13 +709,87 @@ HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction)
          * If we don't find anything, loop around and grab the next TID from
          * the index.
          */
-        heap_tuple = index_fetch_heap(scan);
-        if (heap_tuple != NULL) {
-            Assert(!HEAP_TUPLE_IS_COMPRESSED(heap_tuple->t_data));
-            return heap_tuple;
+        tuple = IndexFetchTuple(scan);
+        if (tuple != NULL) {
+            return tuple;
         }
     }
     return NULL; /* failure exit */
+}
+
+bool UHeapSysIndexGetnextSlot(SysScanDesc scan, ScanDirection direction, TupleTableSlot *slot)
+{
+    Assert(scan->iscan);
+    return IndexGetnextSlot(scan->iscan, direction, slot);
+}
+
+/* ---------------
+ *              IndexGetnextSlot - get the next heap tuple from a scan
+ *
+ * The result is true if a tuple satisfying the scan keys and the snapshot was
+ * found, false otherwise.  The tuple is stored in the specified slot.
+ *
+ * On success, resources (like buffer pins) are likely to be held, and will be
+ * dropped by a future index_getnext_tid, IndexFetchTuple or index_endscan
+ * call).
+ *
+ * Note: caller must check scan->xs_recheck, and perform rechecking of the
+ * scan keys if required.  We do not do that here because we don't have
+ * enough information to do it efficiently in the general case.
+
+ * ----------------
+ */
+bool IndexGetnextSlot(IndexScanDesc scan, ScanDirection direction, TupleTableSlot *slot)
+{
+    ItemPointer tid;
+    for (;;) {
+        /* IO collector and IO scheduler */
+        if (ENABLE_WORKLOAD_CONTROL)
+            IOSchedulerAndUpdate(IO_TYPE_READ, 1, IO_TYPE_ROW);
+
+
+        if (likely(!scan->xs_continue_hot)) {
+            /* Time to fetch the next TID from the index */
+            tid = index_getnext_tid(scan, direction);
+
+            /* If we're out of index entries, we're done */
+            if (tid == NULL)
+                break;
+
+            if (IndexScanNeedSwitchPartRel(scan)) {
+                /*
+                 * Change the heapRelation in indexScanDesc to Partition Relation of current index
+                 */
+                if (!GPIGetNextPartRelation(scan->xs_gpi_scan, CurrentMemoryContext, AccessShareLock)) {
+                    continue;
+                }
+                scan->heapRelation = scan->xs_gpi_scan->fakePartRelation;
+            }
+        } else {
+            /*
+             * We are resuming scan of a HOT chain after having returned an
+             * earlier member.      Must still hold pin on current heap page.
+             */
+            Assert(BufferIsValid(scan->xs_cbuf));
+            Assert(ItemPointerGetBlockNumber(&scan->xs_ctup.t_self) == BufferGetBlockNumber(scan->xs_cbuf));
+        }
+
+        /*
+         * Fetch the next (or only) visible heap tuple for this index entry.
+         * If we don't find anything, loop around and grab the next TID from
+         * the index.
+         */
+
+        if (IndexFetchUHeap(scan, slot)) {
+            /* recheck IndexTuple when necessary */
+            if (scan->xs_recheck_itup && !RecheckIndexTuple(scan, slot)) {
+                continue;
+            }
+            return true;
+        }
+    }
+
+    return false; /* failure exit */
 }
 
 /* ----------------

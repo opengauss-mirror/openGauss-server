@@ -19,7 +19,7 @@ where masking_actions can be:
 masking_function ON LABEL(label_name [, ... ])
 
 where masking_function can be:
-{ maskall | randommasking | creditcardmasking | basicemailmasking | fullemailmasking | shufflemasking | alldigitsmasking }
+{ maskall | randommasking | creditcardmasking | basicemailmasking | fullemailmasking | shufflemasking | alldigitsmasking | regexpmasking }
 
 where filter_group_clause can be:
 FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }

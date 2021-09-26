@@ -397,9 +397,11 @@ IndexesUsableType eliminate_partition_index_unusable(Oid indexOid, PruningResult
             outIndexUnusable_bm = bms_add_member(outIndexUnusable_bm, partSeq);
         }
 
-        // close index partition and table partition, but keep the lock until executor end
-        partitionClose(indexRel, indexpartition, NoLock);
-        partitionClose(heapRel, tablepart, NoLock);
+        /*
+         * Already hold parent table lock, it's safe to release lock.
+         */
+        partitionClose(indexRel, indexpartition, AccessShareLock);
+        partitionClose(heapRel, tablepart, AccessShareLock);
     }
 
     relation_close(heapRel, NoLock);

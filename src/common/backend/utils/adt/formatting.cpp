@@ -9,7 +9,7 @@
  *
  *	 TO_CHAR(); TO_TIMESTAMP(); TO_DATE(); TO_NUMBER();
  *
- *	 The PostgreSQL routines for a timestamp/int/float/numeric formatting,
+ *	 The openGauss routines for a timestamp/int/float/numeric formatting,
  *	 inspired by the A db TO_CHAR() / TO_DATE() / TO_NUMBER() routines.
  *
  *
@@ -2387,7 +2387,7 @@ char* str_tolower(const char* buff, size_t nbytes, Oid collid)
         /*
          * Note: we assume that tolower_l() will not be so broken as to need
          * an isupper_l() guard test.  When using the default collation, we
-         * apply the traditional Postgres behavior that forces ASCII-style
+         * apply the traditional openGauss behavior that forces ASCII-style
          * treatment of I/i, but in non-default collations you get exactly
          * what the collation says.
          */
@@ -2541,7 +2541,7 @@ static char* str_toupper_locale_encode(const char* buff, size_t nbytes, Oid coll
         /*
          * Note: we assume that toupper_l() will not be so broken as to need
          * an islower_l() guard test.  When using the default collation, we
-         * apply the traditional Postgres behavior that forces ASCII-style
+         * apply the traditional openGauss behavior that forces ASCII-style
          * treatment of I/i, but in non-default collations you get exactly
          * what the collation says.
          */
@@ -2671,7 +2671,7 @@ char* str_initcap(const char* buff, size_t nbytes, Oid collid)
         /*
          * Note: we assume that toupper_l()/tolower_l() will not be so broken
          * as to need guard tests.	When using the default collation, we apply
-         * the traditional Postgres behavior that forces ASCII-style treatment
+         * the traditional openGauss behavior that forces ASCII-style treatment
          * of I/i, but in non-default collations you get exactly what the
          * collation says.
          */
@@ -6339,12 +6339,11 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                     errmsg("\"%c\" not supported", *(Np->inout_p))));
-                        if (plen > 0 && plen <= MAX_HEX_LEN_FOR_INT32) {
-                            if ((int64)Np->read_pre * 16 + curNum > INT_MAX) {
-                                ereport(ERROR,
-                                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                                        errmsg("The hexadecimal number is greater than the maximum INT value")));
-                            }
+
+                        /* The conversion of an 8-bit hexadecimal number to a decimal number may be greater than
+                         * INT_MAX. Therefore, we only process a 7-bit hexadecimal number in the INT_MAX range.
+                         */
+                        if (plen > 0 && plen < MAX_HEX_LEN_FOR_INT32) {
                             Np->read_pre = Np->read_pre * 16 + curNum;
                             int pre_len = 1, dup_read_pre = Np->read_pre;
 
@@ -6353,7 +6352,7 @@ static char* NUM_processor(FormatNode* node, NUMDesc* Num, char* inout, char* nu
 
                             ret = sprintf_s(Np->number, pre_len + 1, "%d", Np->read_pre);
                             securec_check_ss(ret, "\0", "\0");
-                        } else if (plen > MAX_HEX_LEN_FOR_INT32 && plen <= MAX_POWER + 1) {
+                        } else if (plen >= MAX_HEX_LEN_FOR_INT32 && plen <= MAX_POWER + 1) {
                             long_int_add(long_int_buffer, g_HexToDecMatrix[MAX_POWER + 1 + power - plen][curNum]);
                             ret = sprintf_s(Np->number, strlen(long_int_buffer) + 1, "%s", long_int_buffer);
                             securec_check_ss(ret, "\0", "\0");
@@ -7818,7 +7817,7 @@ static void init_time_format_info(TimeFormatInfo* tm_fmt_info)
         tm_const->next_sep = is_next_separator(node);
 
         /* FM suppresses leading zeroes and trailing blanks that would otherwise
-         * be added to make the output of a pattern be fixed-width. In PostgreSQL,
+         * be added to make the output of a pattern be fixed-width. In openGauss,
          * FM modifies only the next specification. this information can be fetch
          * from time format pattern.
          */

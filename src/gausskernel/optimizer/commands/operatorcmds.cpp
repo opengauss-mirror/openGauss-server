@@ -111,7 +111,7 @@ void DefineOperator(List* names, List* parameters)
 
     /*
      * The SQL standard committee has decided that => should be used for named
-     * parameters; therefore, a future release of PostgreSQL may disallow it
+     * parameters; therefore, a future release of openGauss may disallow it
      * as the name of a user-defined operator.
      */
     if (strcmp(oprName, "=>") == 0)

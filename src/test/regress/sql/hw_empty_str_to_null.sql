@@ -169,7 +169,64 @@ select split_part('abc~@~~@~ghi', '#', 2) is null; -- expect t;
 
  select substring('123', 5, 2) is null;
  select substring('123', 1, 2);
+
+-- textanycat check
+create database mydb;
+\c mydb
+select 'aa'||cast(null as CLOB);
+select 'aa'||cast(null as BLOB);
+select 'aa'||cast(null as money);
+select 'aa'||cast(null as boolean);
+select 'aa'||cast(null as int);
+select 'aa'||cast(null as inet);
+select 'aa'||cast(null as cidr);
+select 'aa'||cast(null as circle);
+select 'aa'||cast(null as box);
+select 'aa'||cast(null as path);
+select 'aa'||cast(null as lseg);
+select 'aa'||cast(null as point);
+select 'aa'||cast(null as macaddr);
+select 'aa'||cast(null as uuid);
+select 'aa'||cast(null as tsvector);
+select 'aa'||cast(null as oid);
+select 'aa'||cast(null as CLOB)||'bb';
+select 'aa'||cast(null as BLOB)||'bb';
+select 'aa'||cast(null as money)||'bb';
+select 'aa'||cast(null as boolean)||'bb';
+select 'aa'||cast(null as int)||'bb';
+select 'aa'||cast(null as inet)||'bb';
+select 'aa'||cast(null as cidr)||'bb';
+select 'aa'||cast(null as circle)||'bb';
+select 'aa'||cast(null as box)||'bb';
+select 'aa'||cast(null as path)||'bb';
+select 'aa'||cast(null as lseg)||'bb';
+select 'aa'||cast(null as point)||'bb';
+select 'aa'||cast(null as macaddr)||'bb';
+select 'aa'||cast(null as uuid)||'bb';
+select 'aa'||cast(null as tsvector)||'bb';
+select 'aa'||cast(null as oid)||'bb';
+
  create database music DBCOMPATIBILITY 'A' ENCODING 'SQL_ASCII' TEMPLATE template0 lc_collate = 'C' lc_ctype = 'C';
  \c music
  select substring('123', 5, 2) is null;
  select substring('123', 1, 2);
+
+create database music_pg DBCOMPATIBILITY 'PG' ENCODING 'SQL_ASCII' TEMPLATE template0 lc_collate = 'C' lc_ctype = 'C';
+\c music_pg
+---textanycat check whith sql_compatibility = PG
+select 'aa'||cast(null as CLOB);
+select 'aa'||cast(null as BLOB);
+select 'aa'||cast(null as money);
+select 'aa'||cast(null as boolean);
+select 'aa'||cast(null as int);
+select 'aa'||cast(null as inet);
+select 'aa'||cast(null as cidr);
+select 'aa'||cast(null as circle);
+select 'aa'||cast(null as box);
+select 'aa'||cast(null as path);
+select 'aa'||cast(null as lseg);
+select 'aa'||cast(null as point);
+select 'aa'||cast(null as macaddr);
+select 'aa'||cast(null as uuid);
+select 'aa'||cast(null as tsvector);
+select 'aa'||cast(null as oid);

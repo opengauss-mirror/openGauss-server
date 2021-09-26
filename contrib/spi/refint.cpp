@@ -15,24 +15,14 @@
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "knl/knl_instance.h"
 
 PG_MODULE_MAGIC;
 
 extern "C" Datum check_primary_key(PG_FUNCTION_ARGS);
 extern "C" Datum check_foreign_key(PG_FUNCTION_ARGS);
 
-typedef struct {
-    char* ident;
-    int nplans;
-    SPIPlanPtr* splan;
-} EPlan;
-
-static EPlan* FPlans = NULL;
-static int nFPlans = 0;
-static EPlan* PPlans = NULL;
-static int nPPlans = 0;
-
-static EPlan* find_plan(char* ident, EPlan** eplan, int* nplans);
+static EPlanRefInt* find_plan(char* ident, EPlanRefInt** eplan, int* nplans);
 
 /*
  * check_primary_key () -- check that key in tuple being inserted/updated
@@ -58,7 +48,7 @@ Datum check_primary_key(PG_FUNCTION_ARGS)
     Relation rel;                /* triggered relation */
     HeapTuple tuple = NULL;      /* tuple to return */
     TupleDesc tupdesc;           /* tuple description */
-    EPlan* plan = NULL;          /* prepared plan */
+    EPlanRefInt* plan = NULL;          /* prepared plan */
     Oid* argtypes = NULL;        /* key types to prepare execution plan */
     bool isnull = false;         /* to know is some column NULL or not */
     char ident[2 * NAMEDATALEN]; /* to identify myself */
@@ -125,7 +115,7 @@ Datum check_primary_key(PG_FUNCTION_ARGS)
      * find prepared execution plan.
      */
     snprintf(ident, sizeof(ident), "%s$%u", trigger->tgname, rel->rd_id);
-    plan = find_plan(ident, &PPlans, &nPPlans);
+    plan = find_plan(ident, &g_instance.spi_plan_cxt.PPlans, &g_instance.spi_plan_cxt.nPPlans);
 
     /* if there is no plan then allocate argtypes for preparation */
     if (plan->nplans <= 0)
@@ -193,7 +183,10 @@ Datum check_primary_key(PG_FUNCTION_ARGS)
         if (SPI_keepplan(pplan))
             /* internal error */
             elog(ERROR, "check_primary_key: SPI_keepplan failed");
-        plan->splan = (SPIPlanPtr*)malloc(sizeof(SPIPlanPtr));
+
+        MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.spi_plan_cxt.global_spi_plan_context);
+        plan->splan = (SPIPlanPtr*)palloc(sizeof(SPIPlanPtr));
+        (void)MemoryContextSwitchTo(oldcontext);
 
         if (NULL == plan->splan) {
             ereport(ERROR, (errcode(ERRCODE_TRIGGERED_ACTION_EXCEPTION), errmsg("out of memory")));
@@ -258,7 +251,7 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
     HeapTuple trigtuple = NULL;  /* tuple to being changed */
     HeapTuple newtuple = NULL;   /* tuple to return */
     TupleDesc tupdesc;           /* tuple description */
-    EPlan* plan = NULL;          /* prepared plan(s) */
+    EPlanRefInt* plan = NULL;          /* prepared plan(s) */
     Oid* argtypes = NULL;        /* key types to prepare execution plan */
     bool isnull = false;         /* to know is some column NULL or not */
     bool isequal = true;         /* are keys in both tuples equal (in UPDATE) */
@@ -345,7 +338,7 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
      * find prepared execution plan(s).
      */
     snprintf(ident, sizeof(ident), "%s$%u", trigger->tgname, rel->rd_id);
-    plan = find_plan(ident, &FPlans, &nFPlans);
+    plan = find_plan(ident, &g_instance.spi_plan_cxt.FPlans, &g_instance.spi_plan_cxt.nFPlans);
 
     /* if there is no plan(s) then allocate argtypes for preparation */
     if (plan->nplans <= 0)
@@ -563,7 +556,7 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
         relname = args[0];
 
         snprintf(ident, sizeof(ident), "%s$%u", trigger->tgname, rel->rd_id);
-        plan = find_plan(ident, &FPlans, &nFPlans);
+        plan = find_plan(ident, &g_instance.spi_plan_cxt.FPlans, &g_instance.spi_plan_cxt.nFPlans);
         ret = SPI_execp(plan->splan[r], kvals, NULL, tcount);
         /* we have no NULLs - so we pass   ^^^^  here */
 
@@ -595,10 +588,13 @@ Datum check_foreign_key(PG_FUNCTION_ARGS)
     return PointerGetDatum((newtuple == NULL) ? trigtuple : newtuple);
 }
 
-static EPlan* find_plan(char* ident, EPlan** eplan, int* nplans)
+static EPlanRefInt* find_plan(char* ident, EPlanRefInt** eplan, int* nplans)
 {
-    EPlan* newp = NULL;
+    EPlanRefInt* newp = NULL;
     int i;
+
+    InitSPIPlanCxt();
+    MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.spi_plan_cxt.global_spi_plan_context);
 
     if (*nplans > 0) {
         for (i = 0; i < *nplans; i++) {
@@ -607,10 +603,10 @@ static EPlan* find_plan(char* ident, EPlan** eplan, int* nplans)
         }
         if (i != *nplans)
             return (*eplan + i);
-        *eplan = (EPlan*)realloc(*eplan, (i + 1) * sizeof(EPlan));
+        *eplan = (EPlanRefInt*)repalloc(*eplan, (i + 1) * sizeof(EPlanRefInt));
         newp = *eplan + i;
     } else {
-        newp = *eplan = (EPlan*)malloc(sizeof(EPlan));
+        newp = *eplan = (EPlanRefInt*)palloc(sizeof(EPlanRefInt));
         (*nplans) = i = 0;
     }
 
@@ -618,13 +614,15 @@ static EPlan* find_plan(char* ident, EPlan** eplan, int* nplans)
         ereport(ERROR, (errcode(ERRCODE_TRIGGERED_ACTION_EXCEPTION), errmsg("out of memory")));
     }
 
-    newp->ident = (char*)malloc(strlen(ident) + 1);
+    newp->ident = (char*)palloc(strlen(ident) + 1);
     Assert(NULL != newp->ident);
 
     strcpy(newp->ident, ident);
     newp->nplans = 0;
     newp->splan = NULL;
     (*nplans)++;
+
+    (void)MemoryContextSwitchTo(oldcontext);
 
     return (newp);
 }

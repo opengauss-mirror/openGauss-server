@@ -82,6 +82,7 @@
 #include "cipher.h"
 #include "pgstat.h"
 #include "workload/workload.h"
+#include "communication/commproxy_interface.h"
 
 #ifdef USE_SSL
 typedef enum DHKeyLength {
@@ -125,6 +126,10 @@ static const char* ssl_ciphers_map[] = {
     TLS1_TXT_DHE_RSA_WITH_AES_256_GCM_SHA384,   /* TLS_DHE_RSA_WITH_AES_256_GCM_SHA384 */
     TLS1_TXT_DHE_RSA_WITH_AES_128_CCM,          /* TLS_DHE_RSA_WITH_AES_128_CCM */
     TLS1_TXT_DHE_RSA_WITH_AES_256_CCM,          /* TLS_DHE_RSA_WITH_AES_256_CCM */
+    TLS1_TXT_ECDHE_RSA_WITH_AES_256_GCM_SHA384,     /* TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384 */
+    TLS1_TXT_ECDHE_RSA_WITH_AES_128_GCM_SHA256,     /* TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256 */
+    TLS1_TXT_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,   /* TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 */
+    TLS1_TXT_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,   /* TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 */
     NULL};
 
 #endif
@@ -304,7 +309,9 @@ ssize_t secure_read(Port* port, void* ptr, size_t len)
             prepare_for_client_read();
             PGSTAT_INIT_TIME_RECORD();
             PGSTAT_START_TIME_RECORD();
-            n = recv(port->sock, ptr, len, 0);
+
+            /* CommProxy Interface Support */
+            n = comm_recv(port->sock, ptr, len, 0);
             END_NET_RECV_INFO(n);
             client_read_ended();
         }
@@ -399,7 +406,9 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
     } else {
         PGSTAT_INIT_TIME_RECORD();
         PGSTAT_START_TIME_RECORD();
-        n = send(port->sock, ptr, len, 0);
+
+        /* CommProxy Interface Support */
+        n = comm_send(port->sock, ptr, len, 0);
         PGSTAT_END_TIME_RECORD(NET_SEND_TIME);
         END_NET_SEND_INFO(n);
         
@@ -428,14 +437,64 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
  *  criteria (e.g., accepting self-signed or expired certs), but
  *  for now we accept the default checks.
  */
-static int verify_cb(int ok, X509_STORE_CTX* ctx)
-{
-    return ok;
-}
+
+ static int verify_cb(int ok, X509_STORE_CTX* ctx)
+ {
+	int cert_error = X509_STORE_CTX_get_error(ctx);
+
+	if (!ok)
+	{
+                ereport(LOG, (errmsg("verify error:num=%d:%s \n", cert_error,
+                X509_verify_cert_error_string(cert_error))));
+		switch (cert_error)
+		{
+			case X509_V_ERR_CRL_HAS_EXPIRED:
+				ok = 1;
+				break;
+			case X509_V_ERR_UNABLE_TO_GET_CRL:
+				ok = 1;
+				break;	
+			case X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE:
+				ok = 1;
+				break;	
+			case X509_V_ERR_CRL_SIGNATURE_FAILURE:
+				ok = 1;
+				break;
+			case X509_V_ERR_CRL_NOT_YET_VALID:
+				ok = 1;
+				break;	
+			case X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD:
+				ok = 1;
+				break;
+			case X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD:
+				ok = 1;
+				break;
+			case X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER:
+				ok = 1;
+				break;
+			case X509_V_ERR_KEYUSAGE_NO_CRL_SIGN:
+				ok = 1;
+				break;
+			case X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION:
+				ok = 1;
+				break;
+			case X509_V_ERR_DIFFERENT_CRL_SCOPE:
+				ok = 1;
+				break;
+			case X509_V_ERR_CRL_PATH_VALIDATION_ERROR:
+				ok = 1;
+				break;
+			default:
+				break;
+		}
+	}
+
+	return ok;
+ }
 
 /*
  *  This callback is used to copy SSL information messages
- *  into the PostgreSQL log.
+ *  into the openGauss log.
  */
 static void info_cb(const SSL* ssl, int type, int args)
 {
@@ -777,7 +836,7 @@ static void initialize_SSL(void)
             if (1 == X509_STORE_load_locations(cvstore, g_instance.attr.attr_security.ssl_crl_file, NULL)) {
                 (void)X509_STORE_set_flags(cvstore, X509_V_FLAG_CRL_CHECK);
             } else {
-                ereport(FATAL,
+                ereport(WARNING,
                     (errmsg("could not load SSL certificate revocation list file \"%s\": %s",
                         g_instance.attr.attr_security.ssl_crl_file,
                         SSLerrmessage())));
@@ -1022,7 +1081,9 @@ ssize_t secure_raw_read(Port* port, void* ptr, size_t len)
 #endif
     PGSTAT_INIT_TIME_RECORD();
     PGSTAT_START_TIME_RECORD();
-    n = recv(port->sock, ptr, len, 0);
+
+    /* CommProxy Interface Support */
+    n = comm_recv(port->sock, ptr, len, 0);
     END_NET_RECV_INFO(n);
 #ifdef WIN32
     pgwin32_noblock = false;
@@ -1040,7 +1101,9 @@ ssize_t secure_raw_write(Port* port, const void* ptr, size_t len)
 #endif
     PGSTAT_INIT_TIME_RECORD();
     PGSTAT_START_TIME_RECORD();
-    n = send(port->sock, ptr, len, 0);
+
+    /* CommProxy Interface Support */
+    n = comm_send(port->sock, ptr, len, 0);
     END_NET_SEND_INFO(n);
 #ifdef WIN32
     pgwin32_noblock = false;

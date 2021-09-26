@@ -19,7 +19,8 @@ COPY table_name [ ( column_name [, ...] ) ]
     [ REJECT LIMIT 'limit' ]
     [ [ WITH ] ( option [, ...] ) ]
     | copy_option
-    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ];
+    | [ FIXED FORMATTER ( { column_name( offset, length ) } [, ...] ) ]
+    | [ TRANSFORM ( { column_name [ data_type ] [ AS transform_expr ] } [, ...] ) ];
 COPY table_name [ ( column_name [, ...] ) ]
     TO { 'filename' | STDOUT }
     [ [ USING ] DELIMITERS 'delimiters' ]

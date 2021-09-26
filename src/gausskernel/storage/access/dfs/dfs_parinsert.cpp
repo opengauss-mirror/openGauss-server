@@ -676,7 +676,7 @@ void DfsPartitionInsert::TupleInsert(Datum *values, bool *nulls, int option)
             return;
 
         /* insert tuple into delta table */
-        HeapTuple tuple = heap_form_tuple(m_delta->rd_att, values, nulls);
+        HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_delta->rd_att, values, nulls, HEAP_TUPLE);
         (void)tableam_tuple_insert(m_delta, tuple, GetCurrentCommandId(true), option, NULL);
 
         /* free the temp materialized tuple */
@@ -750,7 +750,7 @@ void DfsPartitionInsert::TupleInsert(Datum *values, bool *nulls, int option)
         }
         (void)MemoryContextSwitchTo(oldMemoryContext);
 
-        HeapTuple tuple = heap_form_tuple(m_delta->rd_att, values, nulls);
+        HeapTuple tuple = (HeapTuple)tableam_tops_form_tuple(m_delta->rd_att, values, nulls, HEAP_TUPLE);
 
         nwrites = BufFileWrite(psf->sfile, tuple, HEAPTUPLESIZE + tuple->t_len);
         if (nwrites != (size_t)HEAPTUPLESIZE + tuple->t_len) {
@@ -825,7 +825,7 @@ void DfsPartitionInsert::HandleTailData(int options)
             if (nread == 0) /* end of file */
                 break;
 
-            HeapTuple tuple = (HeapTupleData *)palloc0(HEAPTUPLESIZE + t_len);
+            HeapTuple tuple = (HeapTupleData *)heaptup_alloc(HEAPTUPLESIZE + t_len);
             t_readlen = HEAPTUPLESIZE + t_len - sizeof(uint32);
             tuple->t_len = t_len;
 

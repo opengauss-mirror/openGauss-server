@@ -1,0 +1,37 @@
+
+create table toasttest (col1 int4, col2 int4 NOT NULL, col3 text default 'testing') with (storage_type=USTORE);
+
+\! rm -f @abs_srcdir@/concurrent_uheaptoast4a
+\! echo "UHEAP_DELETE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast4a
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast4a
+\! echo "UHEAP_TOAST_DELETE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast4a
+\! echo "UHEAP_TOAST_INSERT_UPDATE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast4a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheaptoast4a';
+
+-- case 4a: concurrent toast update and delete; delete is delayed for 0.5 seconds
+truncate table toasttest;
+insert into toasttest values (30, 50, repeat('x', 10000));
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update toasttest set col3=repeat('y', 100000000);" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from toasttest;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 5
+select count(*) from toasttest;
+
+\! rm -f @abs_srcdir@/concurrent_uheaptoast4b
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast4b
+\! echo "UHEAP_TOAST_INSERT_UPDATE,SUSPEND,TIMEOUT=10000000,ENABLED=0" >> @abs_srcdir@/concurrent_uheaptoast4b
+\! echo "UHEAP_UPDATE,ENABLE,TARGET_TEST_STUB=UHEAP_TOAST_INSERT_UPDATE" >> @abs_srcdir@/concurrent_uheaptoast4b
+\! echo "UHEAP_TOAST_DELETE,DISABLE,TARGET_TEST_STUB=UHEAP_TOAST_INSERT_UPDATE" >> @abs_srcdir@/concurrent_uheaptoast4b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheaptoast4b';
+
+-- case 4b: concurrent toast update and delete; delete is delayed for 2.0 seconds
+truncate table toasttest;
+insert into toasttest values (30, 50, repeat('x', 10000));
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update toasttest set col3=repeat('y', 100000000);" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(2.0); delete from toasttest;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select count(*) from toasttest;
+
+drop table toasttest;
+

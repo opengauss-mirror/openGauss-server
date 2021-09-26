@@ -106,6 +106,7 @@ extern void MemoryContextStats(MemoryContext context);
 extern void MemoryContextSeal(MemoryContext context);
 extern void MemoryContextUnSeal(MemoryContext context);
 extern void MemoryContextUnSealChildren(MemoryContext context);
+extern void MemoryContextAllowInCriticalSection(MemoryContext context, bool allow);
 
 #ifdef MEMORY_CONTEXT_CHECKING
 extern void MemoryContextCheck(MemoryContext context, bool own_by_session);

@@ -282,4 +282,8 @@ $$ language sql;
 select fcompos1((1, 1));
 select * from compos;
 
+begin
+a.b.c();
+end;
+/
 drop schema hw_function_p_4 cascade;

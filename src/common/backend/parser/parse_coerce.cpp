@@ -755,6 +755,10 @@ static Node* build_coercion_expression(Node* node, CoercionPathType pathtype, Oi
         }
         procstruct = (Form_pg_proc)GETSTRUCT(tp);
 
+        // No need to check Anum_pg_proc_proargtypesext attribute, because cast function
+        // will not have more than FUNC_MAX_ARGS_INROW parameters
+        Assert(procstruct->pronargs <= FUNC_MAX_ARGS_INROW);
+
         /*
          * These Asserts essentially check that function is a legal coercion
          * function.  We can't make the seemingly obvious tests on prorettype

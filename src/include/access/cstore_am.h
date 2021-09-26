@@ -425,6 +425,8 @@ extern int CStoreGetfstColIdx(Relation rel);
 void CStoreAbortCU();
 void VerifyAbortCU();
 
+extern void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, const bool* isnull);
+
 /*
  * CUDescScan is used to determine the visibility of CU rows.
  */
@@ -454,5 +456,6 @@ private:
     List* m_needFreeMasks;
     List* m_valids;
 };
+
 
 #endif

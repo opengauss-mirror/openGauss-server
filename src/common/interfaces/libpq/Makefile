@@ -24,12 +24,14 @@ DOXYGEN="$(top_builddir)/../$(BUILD_TOOLS_PATH)/doxygen/bin/doxygen"
 override CPPFLAGS :=  -DFRONTEND -DFRONTEND_PARSER -DUNSAFE_STAT_OK -I$(srcdir) $(CPPFLAGS) -I$(top_builddir)/src/common/port -I$(top_srcdir)/src/common/port
 override CPPFLAGS += -DPGXC -I$(srcdir) -I$(top_builddir)/src/ -I$(top_builddir)/src/include -I$(top_builddir)/src/include/libpq/
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks
+override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/cmk_entity_manager_hooks
 override CPPFLAGS += -I$(top_builddir)/$(subdir)/client_logic_hooks/encryption_hooks
+override CPPFLAGS += -I$(CJSON_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) -lcjson -lcurl
 
 ifeq "$(ENABLE_CE)" "1"
 override CPPFLAGS += -DHAVE_CE -DWORDS_BIGENDIAN
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-override CPPFLAGS += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
+override CPPFLAGS += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 endif
 
@@ -111,19 +113,23 @@ SHLIB_LINK +=  -lssl -lcrypto
 SHLIB_EXPORTS = exports.txt
 
 ifeq "$(ENABLE_CE)" "1"
-SUBDIRS = frontend_parser client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks
+SUBDIRS = frontend_parser client_logic_common client_logic_expressions client_logic_cache client_logic_processor client_logic_fmt client_logic_hooks client_logic_data_fetcher
 encryption_hooks_files := $(shell find client_logic_hooks/encryption_hooks -name '*.cpp' | sort)
+cmk_entity_manager_hooks_files := $(shell find client_logic_hooks/cmk_entity_manager_hooks -maxdepth 1 -name '*.cpp' | sort)
 
-OBJS += $(hooks_files:.cpp=.o)
 OBJS += $(encryption_hooks_files:.cpp=.o)
+OBJS += $(cmk_entity_manager_hooks_files:.cpp=.o)
+endif
 
+ifneq ($(enable_ut), yes)
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-OBJS := $(filter-out client_logic_hooks/encryption_hooks/localkms_gen_cmk.o, $(OBJS))
+OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_local_kms.o, $(OBJS))
 else
-OBJS := $(filter-out client_logic_hooks/encryption_hooks/gs_ktool_interface.o, $(OBJS))
+OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_huawei_kms.o, $(OBJS))
+OBJS := $(filter-out client_logic_hooks/cmk_entity_manager_hooks/register_gs_ktool.o, $(OBJS))
+endif
 endif
 
-endif
 
 files:= $(foreach DIR,$(SUBDIRS),  $(wildcard $(DIR)/*.cpp) )
 ifneq "$(ENABLE_CE)" "1"
@@ -138,6 +144,11 @@ CE_OBJS += cl_state.o
 
 OBJS:=$(CE_OBJS)
 NAME:=pq_ce
+
+gs_ktool:
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
+	$(MAKE) -C $(top_builddir)/../distribute/bin/gs_ktool
+endif
 
 libpq_ce/fe-protocol3.o libpq_ce/fe-exec.o: client_logic_cache/types_to_oid.h
 libpq_ce/fe-%.o: fe-%.cpp
@@ -168,20 +179,17 @@ ifneq "$(ENABLE_CE)" "1"
 all-lib-depends: frontend_parser_basic
 	$(MAKE) all-lib
 else
-all-lib-depends: libpq_ce subsystem
+all-lib-depends: gs_ktool libpq_ce subsystem
 	$(MAKE) all-lib
 endif
 
-ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-all: gs_ktool all-lib-depends
-gs_ktool:
-	$(MAKE) -C $(top_builddir)/src/distribute/bin/gs_ktool
-else
 all: all-lib-depends
-endif
 
 utlibpq: all-lib
-	cp libpq.so $(top_builddir)/src/distribute/test/ut/lib/libutlibpq.so
+	cp libpq.so $(top_builddir)/../distribute/test/ut/lib/libutlibpq.so
+
+utlibpq_ce: all-lib
+	cp libpq_ce.so $(top_builddir)/../distribute/test/ut/lib/libutlibpq_ce.so
 
 # Shared library stuff
 include $(top_srcdir)/src/Makefile.shlib
@@ -229,9 +237,7 @@ install: all installdirs install-lib
 	$(INSTALL_DATA) $(top_builddir)/src/include/libpq/libpq-int.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(top_builddir)/src/include/libpq/pqexpbuffer.h '$(DESTDIR)$(includedir_internal)'
 	$(INSTALL_DATA) $(srcdir)/pg_service.conf.sample '$(DESTDIR)$(datadir)/pg_service.conf.sample'
-ifeq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
 	$(MKDIR_P) '$(DESTDIR)$(includedir)/../etc/localkms'
-endif
 
 installcheck:
 	$(MAKE) -C test $@

@@ -135,35 +135,6 @@ bool scan_policy_labels(loaded_labels *tmp_labels)
     return label_type_found;
 }
 
-/*
- * get_label_tables
- *    return sets of existing labels from given labelname
- */
-bool get_label_tables(const char *label_name, policy_default_str_uset *label_tables)
-{
-    loaded_labels *tmp = get_policy_labels();
-    if (tmp == NULL) {
-        return false;
-    }
-    loaded_labels::const_iterator it = tmp->find(label_name);
-    if (it == tmp->end()) {
-        return false;
-    }
-
-    typed_labels::const_iterator fit = it->second->find(O_TABLE);
-    if (fit != it->second->end()) {
-        gs_policy_label_set::const_iterator tit = fit->second->begin();
-        gs_policy_label_set::const_iterator teit = fit->second->end();
-        for (; tit != teit; ++tit) {
-            gs_stl::gs_string value;
-            tit->get_fqdn_value(&value);
-            label_tables->insert(value.c_str());
-        }
-    }
-
-    return true;
-}
-
 bool is_label_exist(const char *name)
 {
     if (!strcasecmp(name, "all")) { /* any label */
@@ -180,40 +151,6 @@ loaded_labels *get_policy_labels()
 {
     load_policy_labels(true);
     return all_labels;
-}
-
-/*
- * is_labels_has_object
- *    this function is for other features (masking, auditing etc.)
- *    check given fqdn name is bound to labels, and this label is belong to policies
- *    CheckLabelBoundPolicy is the check function provided by other features that label is of policies
- *    labels means used labels in other features.
- */
-bool is_labels_has_object(const GsPolicyFQDN *fqdn, const policy_default_str_set *labels,
-                          bool (*CheckLabelBoundPolicy)(bool, const gs_stl::gs_string))
-{
-    static const PrivObject check_obj_types[] = {
-        O_VIEW,
-        O_TABLE,
-        O_COLUMN,
-        O_UNKNOWN
-    };
-    PolicyLabelItem object(0, fqdn->m_value_object, O_UNKNOWN);
-
-    for (uint8 i = 0; check_obj_types[i] != O_UNKNOWN; ++i) {
-        object.m_obj_type = check_obj_types[i];
-        if (check_obj_types[i] == O_COLUMN) {
-            int rc = snprintf_s(object.m_column, sizeof(object.m_column),
-                fqdn->m_value_object_attrib.size(), "%s", fqdn->m_value_object_attrib.c_str());
-            securec_check_ss(rc, "\0", "\0");
-        }
-
-        if (check_label_has_object(&object, CheckLabelBoundPolicy, false, labels)) {
-            return true;
-        }
-    }
-
-    return false;
 }
 
 bool load_policy_labels(bool reload)

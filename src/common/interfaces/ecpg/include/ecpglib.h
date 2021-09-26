@@ -1,5 +1,5 @@
 /*
- * this is a small part of c.h since we don't want to leak all postgres
+ * this is a small part of c.h since we don't want to leak all openGauss
  * definitions into ecpg programs
  * src/interfaces/ecpg/include/ecpglib.h
  */

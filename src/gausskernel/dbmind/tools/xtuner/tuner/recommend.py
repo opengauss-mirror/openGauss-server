@@ -179,7 +179,7 @@ class OpenGaussKnobAdvisor:
         min_mem = round4((total_mem - min_free_mem) * omega_min / nb_gaussdb)
 
         if min_mem <= self.metric["max_process_memory"] <= suitable_mem:
-            self.report.print_info("We only found %s gaussdb process(es). "
+            self.report.print_warn("We only found %s gaussdb process(es). "
                                    "In this case, your 'max_process_memory' setting may be just fitting."
                                    % self.metric.nb_gaussdb)
 
@@ -241,12 +241,13 @@ class OpenGaussKnobAdvisor:
             self.report.print_warn("The number of CPU cores is a little small. "
                                    "Please do not run too high concurrency. "
                                    "You are recommended to set max_connections based on the number of CPU cores. "
-                                   "If your job does not consume much CPU, you can also increase it.")
+                                   "If your job/workload does not consume much CPU, you can also increase it.")
 
+        MIN_SETTING = 50
         if self.metric.workload_type == WORKLOAD_TYPE.TP:
             upper = max(500, cores * 8)
-            lower = max(20, cores * 3)
-            recommend = clip(recommend, max(20, cores * 5), max(100, cores * 7))
+            lower = max(MIN_SETTING, cores * 3)
+            recommend = clip(recommend, max(MIN_SETTING, cores * 5), max(100, cores * 7))
 
             return instantiate_knob(name="max_connections",
                                     recommend=recommend,
@@ -268,7 +269,7 @@ class OpenGaussKnobAdvisor:
         # AP and HTAP
         # The value of work_mem is adapted based on the value of max_connections.
         work_mem = max(self.metric["work_mem"], self.metric.temp_file_size * 4)
-        lower = max(15, cores * 3)
+        lower = max(MIN_SETTING, cores * 3)
         recommend = max(remain_mem / (work_mem + 0.01), lower)
         return instantiate_knob(name="max_connections",
                                 recommend=recommend,

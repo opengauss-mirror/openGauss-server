@@ -27,20 +27,28 @@
 
 #include "access/relscan.h"
 #include "access/tableam.h"
-#include "executor/execdebug.h"
-#include "executor/nodeModifyTable.h"
-#include "executor/nodeSamplescan.h"
-#include "executor/nodeSeqscan.h"
+#include "commands/cluster.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeModifyTable.h"
+#include "executor/node/nodeSamplescan.h"
+#include "executor/node/nodeSeqscan.h"
 #include "pgxc/redistrib.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/tcap.h"
 #include "utils/guc.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "utils/snapmgr.h"
 #include "nodes/execnodes.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/pruning.h"
-#include "vecexecutor/vecexecutor.h" 
+#include "parser/parsetree.h"
+#include "access/ustore/knl_uheap.h"
+#include "access/ustore/knl_uscan.h"
+
+#include "optimizer/var.h"
+#include "optimizer/tlist.h"
 
 extern void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, int* quantity, int* trigger);
 /* ----------------------------------------------------------------
@@ -205,6 +213,7 @@ static TupleTableSlot* SeqNext(SeqScanState* node)
     estate = node->ps.state;
     direction = estate->es_direction;
     slot = node->ss_ScanTupleSlot;
+
     GetTableScanDesc(scanDesc, node->ss_currentRelation)->rs_ss_accessor = node->ss_scanaccessor;
 
     /*
@@ -255,11 +264,6 @@ TupleTableSlot* ExecSeqScan(SeqScanState* node)
     return ExecScan((ScanState*)node, node->ScanNextMtd, (ExecScanRecheckMtd)SeqRecheck);
 }
 
-VectorBatch* ExecBatchSeqScan(SeqScanState* node)
-{
-    return ExecBatchScan((ScanState*)node, node->ScanNextMtd, (ExecScanRecheckMtd)SeqRecheck);
-}
-
 /* ----------------------------------------------------------------
  *		SeqScan_Pref_Quantity
  *
@@ -300,10 +304,10 @@ void SeqScan_Init(TableScanDesc scan, SeqScanAccessor* p_accessor, Relation rela
     SeqScan_Pref_Quantity(scan, p_accessor, relation);
 }
 
-RangeScanInRedis reset_scan_qual(Relation curr_heap_rel, ScanState* node)
+RangeScanInRedis reset_scan_qual(Relation curr_heap_rel, ScanState* node, bool isRangeScanInRedis)
 {
     if (node == NULL) {
-        return {false, 0, 0};
+        return {isRangeScanInRedis, 0, 0};
     }
     if (u_sess->attr.attr_sql.enable_cluster_resize && RelationInRedistribute(curr_heap_rel)) {
         List* new_qual = eval_ctid_funcs(curr_heap_rel, node->ps.plan->qual, &node->rangeScanInRedis);
@@ -320,11 +324,59 @@ RangeScanInRedis reset_scan_qual(Relation curr_heap_rel, ScanState* node)
 static TableScanDesc InitBeginScan(SeqScanState* node, Relation current_relation)
 {
     TableScanDesc current_scan_desc = NULL;
+    Snapshot scanSnap;
+
+    /*
+     * Choose user-specified snapshot if TimeCapsule clause exists, otherwise 
+     * estate->es_snapshot instead.
+     */
+    scanSnap = TvChooseScanSnap(current_relation, (Scan *)node->ps.plan, (ScanState *)node);
+
     if (!node->isSampleScan) {
-        current_scan_desc = scan_handler_tbl_beginscan(current_relation, node->ps.state->es_snapshot, 0, NULL, (ScanState*)node);
+        current_scan_desc = scan_handler_tbl_beginscan(current_relation, 
+            scanSnap, 0, NULL, (ScanState*)node);
     } else {
         current_scan_desc = InitSampleScanDesc((ScanState*)node, current_relation);
     }
+    return current_scan_desc;
+}
+
+TableScanDesc BeginScanRelation(SeqScanState* node, Relation relation, TransactionId relfrozenxid64, int eflags)
+{
+    Snapshot scanSnap;
+    TableScanDesc current_scan_desc = NULL;
+    bool isUstoreRel = RelationIsUstoreFormat(relation);
+
+    /*
+     * Choose user-specified snapshot if TimeCapsule clause exists, otherwise 
+     * estate->es_snapshot instead.
+     */
+    scanSnap = TvChooseScanSnap(relation, (Scan *)node->ps.plan, (ScanState *)node);
+
+    if (isUstoreRel) {
+        /*
+         * Verify if a DDL operation that froze all tuples in the relation
+         * occured after taking the snapshot. Skip for explain only commands.
+         */
+        if (!(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
+            if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
+                !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
+                TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_SNAPSHOT_INVALID),
+                         (errmsg("Snapshot too old."))));
+            }
+        }
+
+        if (!node->isPartTbl) {
+            (void)reset_scan_qual(relation, node);
+        }
+
+        current_scan_desc = UHeapBeginScan(relation, scanSnap, 0);
+    } else {
+        current_scan_desc = InitBeginScan(node, relation);
+    }
+
     return current_scan_desc;
 }
 
@@ -335,7 +387,7 @@ static TableScanDesc InitBeginScan(SeqScanState* node, Relation current_relation
  *		subplans of scans.
  * ----------------------------------------------------------------
  */
-void InitScanRelation(SeqScanState* node, EState* estate)
+void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
 {
     Relation current_relation;
     Relation current_part_rel = NULL;
@@ -343,6 +395,7 @@ void InitScanRelation(SeqScanState* node, EState* estate)
     bool is_target_rel = false;
     LOCKMODE lockmode = AccessShareLock;
     TableScanDesc current_scan_desc = NULL;
+    bool isUstoreRel = false;
 
     is_target_rel = ExecRelationIsTargetRelation(estate, ((SeqScan*)node->ps.plan)->scanrelid);
 
@@ -352,15 +405,26 @@ void InitScanRelation(SeqScanState* node, EState* estate)
      */
     current_relation = ExecOpenScanRelation(estate, ((SeqScan*)node->ps.plan)->scanrelid);
 
+    isUstoreRel = RelationIsUstoreFormat(current_relation);
+
     /*
      * tuple table initialization
      */
     ExecInitResultTupleSlot(estate, &node->ps, current_relation->rd_tam_type);
     ExecInitScanTupleSlot(estate, node, current_relation->rd_tam_type);
 
+    if (((Scan*)node->ps.plan)->tablesample && node->sampleScanInfo.tsm_state == NULL) {
+        if (isUstoreRel) {
+            node->sampleScanInfo.tsm_state = New(CurrentMemoryContext) UstoreTableSample((ScanState*)node);
+        } else {
+            node->sampleScanInfo.tsm_state = New(CurrentMemoryContext) RowTableSample((ScanState*)node);
+        }
+    }
+
     if (!node->isPartTbl) {
         /* add qual for redis */
-        current_scan_desc = InitBeginScan(node, current_relation);
+        TransactionId relfrozenxid64 = getRelationRelfrozenxid(current_relation);
+        current_scan_desc = BeginScanRelation(node, current_relation, relfrozenxid64, eflags);
     } else {
         plan = (SeqScan*)node->ps.plan;
 
@@ -427,7 +491,8 @@ void InitScanRelation(SeqScanState* node, EState* estate)
             node->ss_currentPartition = current_part_rel;
 
             /* add qual for redis */
-            current_scan_desc = InitBeginScan(node, current_part_rel);
+            TransactionId relfrozenxid64 = getPartitionRelfrozenxid(current_part_rel);
+            current_scan_desc = BeginScanRelation(node, current_part_rel, relfrozenxid64, eflags);
         } else {
             node->ss_currentPartition = NULL;
             node->ps.qual = (List*)ExecInitExpr((Expr*)node->ps.plan->qual, (PlanState*)&node->ps);
@@ -451,6 +516,105 @@ static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
     }
 }
 
+/*
+ * Extract column numbers (var numbers) from a flattened targetlist
+ * Set valid found columns to false (not null) in boolArr
+ */
+static inline void FlatTLtoBool(const List* targetList, bool* boolArr, AttrNumber natts)
+{
+    ListCell* tl = NULL;
+    foreach (tl, targetList) {
+        GenericExprState* gstate = (GenericExprState*)lfirst(tl);
+        Var* variable = (Var*)gstate->xprstate.expr;
+        Assert(variable != NULL); /* if this happens we've messed up */
+        if ((variable->varoattno > 0) && (variable->varoattno <= natts)) {
+            boolArr[variable->varoattno - 1] = false; /* sometimes varattno in parent is different */
+        }
+        elog(DEBUG1, "PMZ-InitSeq FlatTLtoBool: varoattno: %d", variable->varoattno);
+    }
+}
+
+/*
+ * Given a seq scan node's quals, extract all valid column numbers
+ * Set valid found columns to false (not null) in boolArr
+ */
+uint16 TraverseVars(List* qual, bool* boolArr, int natts, List* vars, ListCell* l)
+{
+    uint16 foundvars = 0;
+    foreach (l, vars) {
+        Var* var = (Var*)lfirst(l);
+        AttrNumber varoattno = var->varoattno;
+        if ((varoattno > 0) && (varoattno <= natts)) {
+            elog(DEBUG1, "PMZ-newQual: qual found varoattno: %d", varoattno);
+            boolArr[varoattno - 1] = false;
+            foundvars++;
+        } else {
+            elog(DEBUG1, "PMZ-newQual: rejecting varoattno: %d", varoattno);
+        }
+    }
+    return foundvars;
+}
+
+static inline bool QualtoBool(List* qual, bool* boolArr, int natts)
+{
+    List* vars = NIL;
+    ListCell* l = NULL;
+    vars = pull_var_clause((Node*)qual, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
+    if (TraverseVars(qual, boolArr, natts, vars, l) > 0)
+        return true;
+    return false;
+}
+
+/* create a new flattened tlist from targetlist, if valid then set attributes in boolArr */
+static inline void TLtoBool(List* targetlist, bool* boolArr, AttrNumber natts)
+{
+    PVCAggregateBehavior myaggbehavior = PVC_RECURSE_AGGREGATES;
+    PVCPlaceHolderBehavior myphbehavior = PVC_RECURSE_PLACEHOLDERS;
+    List* flatlist = NULL;
+    flatlist = flatten_tlist(targetlist, myaggbehavior, myphbehavior);
+    if ((flatlist != NULL) && (flatlist->length > 0)) {
+        FlatTLtoBool(flatlist, boolArr, natts);
+    }
+}
+
+/* return total count of non-null attributes */
+static inline int BoolNatts(const bool* boolArr, AttrNumber natts)
+{
+    AttrNumber result = 0;
+    for (int i = 0; i < natts; i++) {
+        if (boolArr[i] == false) {
+            result++;
+        }
+    }
+    return result;
+}
+
+/* calulate position of last column (non-inclusive) */
+static inline AttrNumber LastVarPos(bool* boolArr, AttrNumber natts)
+{
+    AttrNumber lastVar = natts - 1;
+    while ((boolArr[lastVar] == true) && (lastVar > -1)) {
+        lastVar--;
+    }
+    lastVar++;
+    return lastVar;
+}
+
+/* get simple vars in projinfo and set corresponding bool in boolArr */
+static inline void SimpleVartoBool(bool* boolArr, AttrNumber natts, ProjectionInfo* psProjInfo)
+{
+    for (int i = 0; i<psProjInfo->pi_numSimpleVars; i++) {
+        if ((psProjInfo->pi_varNumbers[i] > 0) && (psProjInfo->pi_varNumbers[i] <= natts)) {
+            boolArr[psProjInfo->pi_varNumbers[i] - 1] = false;
+        }
+    }
+}
+
+static inline bool CheckSeqScanFallback(const AttrNumber natts, const AttrNumber selectAtts, const AttrNumber lastVar)
+{
+    return ((selectAtts > natts / 2) || (selectAtts == 0) || (lastVar >= (natts * 7 / 10)) || (lastVar <= 0));
+}
+
 /* ----------------------------------------------------------------
  *		ExecInitSeqScan
  * ----------------------------------------------------------------
@@ -458,6 +622,7 @@ static inline void InitSeqNextMtd(SeqScan* node, SeqScanState* scanstate)
 SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
 {
     TableSampleClause* tsc = NULL;
+    int rc;
 
     /*
      * Once upon a time it was possible to have an outerPlan of a SeqScan, but
@@ -502,12 +667,6 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
         scanstate->sampleScanInfo.repeatable = ExecInitExpr(tsc->repeatable, (PlanState*)scanstate);
 
         scanstate->sampleScanInfo.sampleType = tsc->sampleType;
-        /*
-         * Initialize RowTableSample
-         */
-        if (scanstate->sampleScanInfo.tsm_state == NULL) {
-            scanstate->sampleScanInfo.tsm_state = New(CurrentMemoryContext) RowTableSample(scanstate);
-        }
     }
 
     /*
@@ -516,7 +675,8 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
     ExecInitResultTupleSlot(estate, &scanstate->ps);
     ExecInitScanTupleSlot(estate, scanstate);
 
-    InitScanRelation(scanstate, estate);
+    InitScanRelation(scanstate, estate, eflags);
+
     ADIO_RUN()
     {
         /* add prefetch related information */
@@ -547,15 +707,115 @@ SeqScanState* ExecInitSeqScan(SeqScan* node, EState* estate, int eflags)
 
     ExecAssignScanProjectionInfo(scanstate);
 
-    if (node->executeBatch) {
-        /*
-         * Init result batch and work batch. Work batch has to contain all columns as qual is
-         * running against it. we shall avoid with this after we fix projection elimination.
-         */
-        scanstate->m_pCurrentBatch = New(CurrentMemoryContext)
-            VectorBatch(CurrentMemoryContext, scanstate->ps.ps_ResultTupleSlot->tts_tupleDescriptor);
+    AttrNumber natts = scanstate->ss_ScanTupleSlot->tts_tupleDescriptor->natts;
+    AttrNumber lastVar = -1;
+    bool *isNullProj = NULL;
 
-        scanstate->ps.vectorized = true;
+    /* if scanstate or scantupleslot are NULL immediately fallback */
+    if ((scanstate == NULL) || (scanstate->ss_ScanTupleSlot == NULL))
+        goto fallback;
+
+    /* if partial sequential scan is disabled by GUC, or table is not ustore, or partition table, skip */
+    if ((!u_sess->attr.attr_storage.enable_ustore_partial_seqscan) ||
+        (scanstate->ss_ScanTupleSlot->tts_tupleDescriptor->tdTableAmType != TAM_USTORE) ||
+        (scanstate->ss_currentScanDesc == NULL) || (scanstate->ss_currentScanDesc->rs_rd == NULL) ||
+        (!RelationIsNonpartitioned(scanstate->ss_currentScanDesc->rs_rd)) ||
+        (RelationIsPartition(scanstate->ss_currentScanDesc->rs_rd))) {
+        elog(DEBUG1, "Partial seq scan disabled by GUC, or table is not UStore, or table is/has partition");
+        goto fallback;
+    }
+
+    /* Get number of attributes (natts), allocate null array, initialize all as null  */
+
+    elog(DEBUG1, "PMZ-InitScan: preparing scan on relation with %d total atts", natts);
+    isNullProj = (bool *)palloc(sizeof(bool) * natts);
+    rc = memset_s(isNullProj, natts, 1, natts);
+    securec_check(rc, "\0", "\0");
+
+    if ((scanstate->ps.plan->flatList != NULL) && (scanstate->ps.plan->flatList->length > 0)) {
+        if (scanstate->ps.ps_ProjInfo != NULL) {
+            TLtoBool(scanstate->ps.plan->targetlist, isNullProj, natts);
+            SimpleVartoBool(isNullProj, natts, scanstate->ps.ps_ProjInfo);
+        }
+
+        /* likely got here from ExecInitAgg, expand flatList that was passed down */
+        FlatTLtoBool(scanstate->ps.plan->flatList, isNullProj, natts);
+        if (scanstate->ps.plan->targetlist->length < natts)
+            if (scanstate->ps.plan->targetlist->length > scanstate->ps.plan->flatList->length) {
+                FlatTLtoBool(scanstate->ps.plan->targetlist, isNullProj, natts); /* parent unaware of 'HAVING' clause */
+            }
+
+        if ((scanstate->ps.plan->qual != NULL) && (scanstate->ps.plan->qual->length > 0)) /* query has qualifications */
+            if (QualtoBool(scanstate->ps.plan->qual, isNullProj, natts) == false) {
+                elog(DEBUG1, "PMZ-InitScan-wfl: triggering fallback because QualtoBool failed");
+                goto fallback;
+            }
+        lastVar = LastVarPos(isNullProj, natts);
+        AttrNumber selectAtts = BoolNatts(isNullProj, natts);
+        elog(DEBUG1, "PMZ-InitScan-wfl: selectAtts=%d , lastVar=%d", selectAtts, lastVar);
+
+        if (CheckSeqScanFallback(natts, selectAtts, lastVar)) {
+            elog(DEBUG1, "PMZ-InitScan-wfl: fallback because no selected atts, or writing over 5/10 of atts, or "
+                         "reading over 7/10 of src tuple");
+            goto fallback;
+        }
+
+        scanstate->ss_currentScanDesc->lastVar = lastVar;
+        scanstate->ss_currentScanDesc->boolArr = isNullProj;
+        elog(DEBUG1, "PMZ-InitScan-wfl: partial seq scan with sort/aggregation,  %d selected atts, and lastVar %d",
+            selectAtts, lastVar);
+    /* ProjInfo may be null if parent node is aggregate */
+    } else if (scanstate->ps.ps_ProjInfo != NULL) {
+        /* a basic seq scan node may contain FuncExpr in tlist so check targetlist */
+        if (scanstate->ps.ps_ProjInfo->pi_numSimpleVars > 0) {
+            TLtoBool(scanstate->ps.plan->targetlist, isNullProj, natts);
+            /* if query has quals then parse and add them */
+            if ((scanstate->ps.plan->qual != NULL) && (scanstate->ps.plan->qual->length > 0)) {
+                if (QualtoBool(scanstate->ps.plan->qual, isNullProj, natts) == false) {
+                    elog(DEBUG1, "PMZ-InitScan-simple: triggering fallback because QualtoBool failed");
+                    goto fallback;
+                }
+            }
+            SimpleVartoBool(isNullProj, natts, scanstate->ps.ps_ProjInfo);
+            lastVar = LastVarPos(isNullProj, natts);
+            AttrNumber selectAtts = BoolNatts(isNullProj, natts);
+            elog(DEBUG1, "PMZ-InitScan-simple: selectAtts=%d , lastVar=%d", selectAtts, lastVar);
+
+            if (CheckSeqScanFallback(natts, selectAtts, lastVar)) {
+                elog(DEBUG1, "PMZ-InitScan-simple: fallback because no selected atts, or writing over 5/10 of atts, or "
+                             "reading over 7/10 of src tuple");
+                goto fallback;
+            }
+
+            scanstate->ss_currentScanDesc->lastVar = lastVar;
+            scanstate->ss_currentScanDesc->boolArr = isNullProj;
+
+            elog(DEBUG1, "PMZ-InitScan-simple: regular seq scan with %d simple vars, %d selected atts, and lastVar %d",
+                scanstate->ps.ps_ProjInfo->pi_numSimpleVars, selectAtts, lastVar);
+        } else {
+            elog(DEBUG1, "PMZ-InitScan-simple: triggering fallback because no simple vars");
+            goto fallback;
+        }
+    } else {
+        /* usually SELECT * (no flatlist from parent or proj info or sufficiently selective targetlist) */
+        elog(DEBUG1,
+            "PMZ-InitScan: fallback because no parent flatlist or proj info (probably SELECT *)");
+    fallback:
+        if (isNullProj != NULL) {
+            pfree(isNullProj);
+        }
+        elog(DEBUG1, "PMZ-InitScan: using fallback mode for seq scan");
+        if (scanstate->ss_currentScanDesc != NULL) {
+            if (scanstate->ss_currentScanDesc->rs_rd != NULL &&
+                RELATION_CREATE_BUCKET(scanstate->ss_currentScanDesc->rs_rd)) {
+            } else {
+                scanstate->ss_currentScanDesc->lastVar = -1;
+                scanstate->ss_currentScanDesc->boolArr = NULL;
+            }
+        } else {
+            ((Plan *) node)->flatList = NULL;
+            elog(DEBUG1, "PMZ-InitScan: No scan descriptor");
+        }
     }
 
     return scanstate;
@@ -593,13 +853,12 @@ void ExecEndSeqScan(SeqScanState* node)
      * close heap scan
      */
     if (scanDesc != NULL) {
-        scan_handler_tbl_endscan((TableScanDesc)scanDesc, relation);
+        scan_handler_tbl_endscan((TableScanDesc)scanDesc);
     }
     if (node->isPartTbl) {
         if (PointerIsValid(node->partitions)) {
             Assert(node->ss_currentPartition);
             releaseDummyRelation(&(node->ss_currentPartition));
-
             releasePartitionList(node->ss_currentRelation, &(node->partitions), NoLock);
         }
     }
@@ -642,26 +901,22 @@ void ExecReScanSeqScan(SeqScanState* node)
     if (node->isPartTbl) {
         if (PointerIsValid(node->partitions)) {
             /* end scan the prev partition first, */
-            scan_handler_tbl_endscan(scan, node->ss_currentRelation);
+            scan_handler_tbl_endscan(scan);
 
             /* finally init Scan for the next partition */
             ExecInitNextPartitionForSeqScan(node);
-
             scan = node->ss_currentScanDesc;
         }
     } else {
         scan_handler_tbl_rescan(scan, NULL, node->ss_currentRelation);
     }
 
+    if ((scan != NULL) && (scan->rs_rd->rd_tam_type == TAM_USTORE)) {
+        scan->lastVar = -1;
+        scan->boolArr = NULL;
+    }
     scan_handler_tbl_init_parallel_seqscan(scan, node->ps.plan->dop, node->partScanDirection);
     ExecScanReScan((ScanState*)node);
-}
-
-void ExecReScanBatchSeqScan(SeqScanState* node)
-{
-    node->is_scan_end = false;
-    node->m_pCurrentBatch->m_rows = 0;
-    ExecReScan(&(node->ps));
 }
 
 /* ----------------------------------------------------------------
@@ -730,6 +985,7 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
 
     /* update partition scan-related fileds in SeqScanState  */
     node->ss_currentScanDesc = InitBeginScan(node, currentpartitionrel);
+
     ADIO_RUN()
     {
         SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentpartitionrel);

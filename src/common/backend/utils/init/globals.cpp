@@ -40,7 +40,7 @@ THR_LOCAL char my_exec_path[MAXPGPATH]; /* full path to my executable */
  */
 THR_LOCAL object_access_hook_type object_access_hook = NULL;
 
-int8 ce_cache_refresh_type = 0;
+uint8 ce_cache_refresh_type = 0;
 
 /*
  * standalone backend).  IsUnderPostmaster is true in postmaster child
@@ -59,8 +59,9 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92310;
+const uint32 GRAND_VERSION_NUM = 92420;
 
+const uint32 HINT_ENHANCEMENT_VERSION_NUM = 92359;
 const uint32 MATVIEW_VERSION_NUM = 92213;
 const uint32 PARTIALPUSH_VERSION_NUM = 92087;
 const uint32 SUBLINKPULLUP_VERSION_NUM = 92094;
@@ -77,12 +78,29 @@ const uint32 RANGE_LIST_DISTRIBUTION_VERSION_NUM = 92272;
 const uint32 BACKUP_SLOT_VERSION_NUM = 92282;
 const uint32 ML_OPT_MODEL_VERSION_NUM = 92284;
 const uint32 FIX_SQL_ADD_RELATION_REF_COUNT = 92291;
-const uint32 GENERATED_COL_VERSION_NUM = 92303;
-const uint32 ANALYZER_HOOK_VERSION_NUM = 92306;
-const uint32 SUPPORT_HASH_XLOG_VERSION_NUM = 92309;
+const uint32 INPLACE_UPDATE_WERSION_NUM = 92350;
+const uint32 GENERATED_COL_VERSION_NUM = 92355;
+const uint32 SEGMENT_PAGE_VERSION_NUM = 92360;
+const uint32 COMMENT_PROC_VERSION_NUM = 92372;
+const uint32 CLIENT_ENCRYPTION_PROC_VERSION_NUM = 92383;
+const uint32 DECODE_ABORT_VERSION_NUM = 92386;
+const uint32 COPY_TRANSFORM_VERSION_NUM = 92394;
+const uint32 COMMENT_PCT_TYPE_VERSION_NUM = 92396;
+const uint32 TDE_VERSION_NUM = 92407;
+/* Version number of the guc parameter backend_version added in V500R001C20 */
+const uint32 V5R1C20_BACKEND_VERSION_NUM = 92305;
+/* Version number starting from V500R002C00 */
+const uint32 V5R2C00_START_VERSION_NUM = 92350;
+/* Version number of the guc parameter backend_version added in V500R002C00 */
+const uint32 V5R2C00_BACKEND_VERSION_NUM = 92412;
+
+const uint32 ANALYZER_HOOK_VERSION_NUM = 92420;
+const uint32 SUPPORT_HASH_XLOG_VERSION_NUM = 92420;
 
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;
+
+const uint32 TWOPHASE_FILE_VERSION = 92414;
 
 bool InplaceUpgradePrecommit = false;
 

@@ -121,17 +121,17 @@ create server server_remote
 foreign data wrapper gc_fdw
 options(address '127.0.0.1:@portstring@', dbname 'test', username 'test', password 'Gauss@123');
 CREATE FOREIGN TABLE t1(c1 int, c2 int NULL, c3 int) server server_remote options (table_name 't1');
-ERROR:  column constraint on postgres foreign tables are not supported
+ERROR:  column constraint on openGauss foreign tables are not supported
 CREATE FOREIGN TABLE t1(c1 int, c2 int NOT NULL, c3 int) server server_remote options (table_name 't1');
-ERROR:  column constraint on postgres foreign tables are not supported
+ERROR:  column constraint on openGauss foreign tables are not supported
 CREATE FOREIGN TABLE t1(c1 int, c2 int default 3, c3 int) server server_remote options (table_name 't1');
-ERROR:  column constraint on postgres foreign tables are not supported
+ERROR:  column constraint on openGauss foreign tables are not supported
 CREATE FOREIGN TABLE t1(c1 int, c2 serial, c3 int) server server_remote options (table_name 't1');
 NOTICE:  CREATE FOREIGN TABLE will create implicit sequence "t1_c2_seq" for serial column "t1.c2"
-ERROR:  column constraint on postgres foreign tables are not supported
+ERROR:  column constraint on openGauss foreign tables are not supported
 create table t2(c4 int, c5 int);
 CREATE FOREIGN TABLE t1(x int, y t2, z int) server server_remote options (table_name 't1');
-ERROR:  relation type column on postgres foreign tables are not supported
+ERROR:  relation type column on openGauss foreign tables are not supported
 drop table t2;
 create sequence s1
     increment by 1
@@ -141,7 +141,7 @@ create sequence s1
 NOTICE:  Not advised to use MAXVALUE or MINVALUE together with CACHE.
 DETAIL:  If CACHE is defined, some sequence values may be wasted, causing available sequence numbers to be less than expected.
 CREATE FOREIGN TABLE t1(c1 int, c2 s1, c3 int) server server_remote options (table_name 't1');
-ERROR:  relation type column on postgres foreign tables are not supported
+ERROR:  relation type column on openGauss foreign tables are not supported
 drop sequence s1;
 CREATE FOREIGN TABLE t1(c1 int, c2 int, c3 int) server server_remote options (table_name 't1', xue 'xue');
 ERROR:  invalid option "xue"
@@ -394,7 +394,7 @@ drop foreign table t1;
 drop table t2;
 create table t2(x int, y int NOT NULL);
 CREATE FOREIGN TABLE t1(like t2) server server_remote;
-ERROR:  column constraint on postgres foreign tables are not supported
+ERROR:  column constraint on openGauss foreign tables are not supported
 drop table t2;
 drop server server_remote;
 /*

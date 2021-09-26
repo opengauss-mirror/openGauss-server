@@ -155,7 +155,7 @@ static int szdatetktbl = sizeof datetktbl / sizeof datetktbl[0];
 
 static datetkn deltatktbl[] = {
     /* text, token, lexval */
-    {"@", IGNORE_DTF, 0},                 /* postgres relative prefix */
+    {"@", IGNORE_DTF, 0},                 /* openGauss relative prefix */
     {DAGO, AGO, 0},                       /* "ago" indicates negative time offset */
     {"c", UNITS, DTK_CENTURY},            /* "century" relative */
     {"cent", UNITS, DTK_CENTURY},         /* "century" relative */
@@ -2845,17 +2845,17 @@ int DecodeInterval(char** field, const int* ftype, int nf, int range, int* dtype
     /* ----------
      * The SQL standard defines the interval literal
      *	 '-1 1:00:00'
-     * to mean "negative 1 days and negative 1 hours", while Postgres
+     * to mean "negative 1 days and negative 1 hours", while openGauss
      * traditionally treats this as meaning "negative 1 days and positive
      * 1 hours".  In SQL_STANDARD intervalstyle, we apply the leading sign
      * to all fields if there are no other explicit signs.
      *
      * We leave the signs alone if there are additional explicit signs.
-     * This protects us against misinterpreting postgres-style dump output,
+     * This protects us against misinterpreting openGauss-style dump output,
      * since the postgres-style output code has always put an explicit sign on
      * all fields following a negative field.  But note that SQL-spec output
      * is ambiguous and can be misinterpreted on load!	(So it's best practice
-     * to dump in postgres style, not SQL style.)
+     * to dump in openGauss style, not SQL style.)
 
      * Because A db used standard SQL interval format. In order to simulate A db,
      * there deleted the judge of IntervalStyle. So it will always use SQL_STANDARD.
@@ -3333,7 +3333,7 @@ void EncodeDateOnly(struct pg_tm* tm, int style, char* str)
 
         case USE_POSTGRES_DATES:
         default:
-            /* traditional date-only style for Postgres */
+            /* traditional date-only style for openGauss */
             if (u_sess->time_cxt.DateOrder == DATEORDER_DMY)
                 rc = sprintf_s(str, MAXDATELEN + 1, "%02d-%02d", tm->tm_mday, tm->tm_mon);
             else
@@ -3384,7 +3384,7 @@ void EncodeTimeOnly(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, int st
  * style, str is where to write the output.
  *
  * Supported date styles:
- *	Postgres - day mon hh:mm:ss yyyy tz
+ *	openGauss - day mon hh:mm:ss yyyy tz
  *	SQL - mm/dd/yyyy hh:mm:ss.ss tz
  *	ISO - yyyy-mm-dd hh:mm:ss+/-tz
  *	German - dd.mm.yyyy hh:mm:ss tz
@@ -3508,7 +3508,7 @@ void EncodeDateTime(struct pg_tm* tm, fsec_t fsec, bool print_tz, int tz, const 
 
         case USE_POSTGRES_DATES:
         default:
-            /* Backward-compatible with traditional Postgres abstime dates */
+            /* Backward-compatible with traditional openGauss abstime dates */
 
             day = date2j(tm->tm_year, tm->tm_mon, tm->tm_mday);
             tm->tm_wday = j2day(day);
@@ -3572,7 +3572,7 @@ static char* AddISO8601IntPart(char* cp, int value, char units)
     return cp + strlen(cp);
 }
 
-/* Append a postgres-style interval field, but only if value isn't zero */
+/* Append a openGauss interval field, but only if value isn't zero */
 static char* AddPostgresIntPart(char* cp, int value, const char* units, bool* is_zero, bool* is_before)
 {
     if (value == 0)

@@ -14,8 +14,9 @@
 #define REWRITE_HEAP_H
 
 #include "access/htup.h"
+#include "access/ustore/knl_utuple.h"
 #include "storage/item/itemptr.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/relcache.h"
 
 /* struct definition is private to rewriteheap.c */
@@ -25,6 +26,7 @@ extern RewriteState begin_heap_rewrite(
     Relation OldHeap, Relation NewHeap, TransactionId OldestXmin, TransactionId FreezeXid, bool use_wal);
 extern void end_heap_rewrite(RewriteState state);
 extern void rewrite_heap_tuple(RewriteState state, HeapTuple oldTuple, HeapTuple newTuple);
+extern void RewriteUHeapTuple(RewriteState state, UHeapTuple oldTuple, UHeapTuple newTuple);
 extern bool rewrite_heap_dead_tuple(RewriteState state, HeapTuple oldTuple);
 
 // private memory context must be used for forming new tuples and caching them

@@ -255,8 +255,6 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
                     continue; /* skip OUT arguments */
                 }
 
-                Assert(types[i] == procStruct->proargtypes.values[pos]);
-
                 argTypeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(types[i]));
                 if (!HeapTupleIsValid(argTypeTup)) {
                     elog(ERROR, "cache lookup failed for type %u", types[i]);

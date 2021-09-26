@@ -1,0 +1,442 @@
+-- setups
+drop schema if exists pl_debugger cascade;
+NOTICE:  schema "pl_debugger" does not exist, skipping
+create schema pl_debugger;
+set search_path = pl_debugger;
+create table test(a int, b varchar(40), c timestamp);
+insert into test values (2, 'Giving to the Needy', '2020-02-02');
+insert into test values (3, 'Prayer', '2021-12-02');
+insert into test values (5, 'Fasting', '2030-03-02');
+insert into test values (7, 'Treasures in Heaven', '2040-04-02');
+CREATE OR REPLACE FUNCTION test_debug(x int) RETURNS SETOF test AS
+$BODY$
+DECLARE
+    sql_stmt VARCHAR2(500);
+    r test%rowtype;
+    rec record;
+    b_tmp text;
+    cnt int;
+    a_tmp int;
+    cur refcursor;
+    n_tmp NUMERIC(24,6);
+    t_tmp tsquery;
+    CURSOR cur_arg(criterion INTEGER) IS
+        SELECT * FROM test WHERE a < criterion;
+BEGIN
+    cnt := 0;
+    FOR r IN SELECT * FROM test
+    WHERE a > x
+    LOOP
+        RETURN NEXT r;
+    END LOOP;
+
+    FOR rec in SELECT * FROM test
+    WHERE a < x
+    LOOP
+        RETURN NEXT rec;
+    END LOOP;
+
+    FORALL index_1 IN 0..1
+        INSERT INTO test VALUES (index_1, 'Happy Children''s Day!', '2021-6-1');
+
+    SELECT b FROM test where a = 7 INTO b_tmp;
+    sql_stmt := 'select a from test where b = :1;';
+    OPEN cur FOR sql_stmt USING b_tmp;
+    IF cur%isopen then LOOP
+        FETCH cur INTO a_tmp;
+        EXIT WHEN cur%notfound;
+        END LOOP;
+    END IF;
+    CLOSE cur;
+    WHILE cnt < 3 LOOP
+        cnt := cnt + 1;
+    END LOOP;
+
+    RAISE INFO 'cnt is %', cnt;
+
+    RETURN;
+
+END
+$BODY$
+LANGUAGE plpgsql;
+create table show_code_table(lineno int, code text, canBreak bool);
+do $$
+declare
+    funcoid oid;
+begin
+    select oid from pg_proc into funcoid where proname = 'test_debug';
+    INSERT INTO show_code_table SELECT * FROM dbe_pldebugger.info_code(funcoid);
+end;
+$$;
+select * from show_code_table;
+ lineno |                                       code                                       | canbreak 
+--------+----------------------------------------------------------------------------------+----------
+        | CREATE OR REPLACE FUNCTION pl_debugger.test_debug(x integer)                     | f
+        |  RETURNS SETOF test                                                              | f
+        |  LANGUAGE plpgsql                                                                | f
+        |  NOT FENCED NOT SHIPPABLE                                                        | f
+      1 | AS $function$                                                                    | f
+      2 | DECLARE                                                                          | f
+      3 |     sql_stmt VARCHAR2(500);                                                      | f
+      4 |     r test%rowtype;                                                              | f
+      5 |     rec record;                                                                  | f
+      6 |     b_tmp text;                                                                  | f
+      7 |     cnt int;                                                                     | f
+      8 |     a_tmp int;                                                                   | f
+      9 |     cur refcursor;                                                               | f
+     10 |     n_tmp NUMERIC(24,6);                                                         | f
+     11 |     t_tmp tsquery;                                                               | f
+     12 |     CURSOR cur_arg(criterion INTEGER) IS                                         | f
+     13 |         SELECT * FROM test WHERE a < criterion;                                  | f
+     14 | BEGIN                                                                            | f
+     15 |     cnt := 0;                                                                    | t
+     16 |     FOR r IN SELECT * FROM test                                                  | t
+     17 |     WHERE a > x                                                                  | f
+     18 |     LOOP                                                                         | f
+     19 |         RETURN NEXT r;                                                           | t
+     20 |     END LOOP;                                                                    | f
+     21 |                                                                                  | f
+     22 |     FOR rec in SELECT * FROM test                                                | t
+     23 |     WHERE a < x                                                                  | f
+     24 |     LOOP                                                                         | f
+     25 |         RETURN NEXT rec;                                                         | t
+     26 |     END LOOP;                                                                    | f
+     27 |                                                                                  | f
+     28 |     FORALL index_1 IN 0..1                                                       | t
+     29 |         INSERT INTO test VALUES (index_1, 'Happy Children''s Day!', '2021-6-1'); | t
+     30 |                                                                                  | f
+     31 |     SELECT b FROM test where a = 7 INTO b_tmp;                                   | t
+     32 |     sql_stmt := 'select a from test where b = :1;';                              | t
+     33 |     OPEN cur FOR sql_stmt USING b_tmp;                                           | t
+     34 |     IF cur%isopen then LOOP                                                      | t
+     35 |         FETCH cur INTO a_tmp;                                                    | t
+     36 |         EXIT WHEN cur%notfound;                                                  | t
+     37 |         END LOOP;                                                                | f
+     38 |     END IF;                                                                      | f
+     39 |     CLOSE cur;                                                                   | t
+     40 |     WHILE cnt < 3 LOOP                                                           | t
+     41 |         cnt := cnt + 1;                                                          | t
+     42 |     END LOOP;                                                                    | f
+     43 |                                                                                  | f
+     44 |     RAISE INFO 'cnt is %', cnt;                                                  | t
+     45 |                                                                                  | f
+     46 |     RETURN;                                                                      | t
+     47 |                                                                                  | f
+     48 | END                                                                              | f
+     49 | $function$;                                                                      | f
+(53 rows)
+
+create table debug_info(nodename text, port smallint);
+create function turn_on_debugger(funcname text)
+    returns int
+as $$
+declare
+    funcoid bigint;
+    cnt int;
+begin
+    select count(*) from pg_proc into cnt where proname = funcname;
+    if cnt != 1 then
+        raise exception 'There are multiple/no function with name %', funcname;
+    end if;
+
+    select oid from pg_proc into funcoid where proname = funcname;
+    insert into debug_info select * from dbe_pldebugger.turn_on(funcoid);
+    return 0;
+end
+$$ language plpgsql;
+-- next without attach
+select * from dbe_pldebugger.next();
+ERROR:  must attach a execute func before execute dbe_pldebugger.next
+DETAIL:  execute func not attached before execute dbe_pldebugger.next
+-- info locals without attach
+select * from dbe_pldebugger.info_locals();
+ERROR:  must attach a execute func before execute dbe_pldebugger.info_locals
+DETAIL:  execute func not attached before execute dbe_pldebugger.info_locals
+-- attach fail (target not turned on)
+select * from dbe_pldebugger.attach('sgnode', 1);
+ERROR:  wrong debug nodename, should be datanode1.
+-- abort without attach
+select * from dbe_pldebugger.abort();
+ERROR:  must attach a execute func before execute dbe_pldebugger.abort
+DETAIL:  execute func not attached before execute dbe_pldebugger.abort
+-- turn off without turn on
+select * from dbe_pldebugger.turn_off(1);
+WARNING:  function 1 has not be turned on
+ turn_off 
+----------
+ f
+(1 row)
+
+-- turn on dropped function
+CREATE OR REPLACE FUNCTION pld_simple(a int)
+ RETURNS boolean
+AS $$
+declare
+begin
+    insert into test values(a);
+    return true;
+end
+$$ language plpgsql;
+do $$
+declare
+    funcoid bigint;
+begin
+    select oid from pg_proc into funcoid where proname = 'pld_simple';
+    drop function pld_simple;
+    insert into debug_info select * from dbe_pldebugger.turn_on(funcoid);
+end;
+$$;
+--?ERROR:  cache lookup failed for function.*
+CONTEXT:  SQL statement "insert into debug_info select * from dbe_pldebugger.turn_on(funcoid)"
+PL/pgSQL function inline_code_block line 7 at SQL statement
+truncate debug_info;
+-- turn on language sql function
+select dbe_pldebugger.turn_on(f.oid) from pg_proc f, pg_language l where f.prolang = l.oid and l.lanname = 'sql' limit 1;
+ERROR:  pl debugger only support function with language plpgsql
+DETAIL:  the given language name of function is sql
+CONTEXT:  referenced column: turn_on
+-- turn on language java function (no such thing)
+-- turn on language internal function
+select dbe_pldebugger.turn_on(f.oid) from pg_proc f, pg_language l where f.prolang = l.oid and l.lanname = 'internal' limit 1;
+ERROR:  pl debugger only support function with language plpgsql
+DETAIL:  the given language name of function is internal
+CONTEXT:  referenced column: turn_on
+-- turn on language c function
+select dbe_pldebugger.turn_on(f.oid) from pg_proc f, pg_language l where f.prolang = l.oid and l.lanname = 'c' limit 1;
+ERROR:  pl debugger only support function with language plpgsql
+DETAIL:  the given language name of function is c
+CONTEXT:  referenced column: turn_on
+-- turn on correctly
+truncate debug_info;
+select * from turn_on_debugger('test_debug');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from dbe_pldebugger.local_debug_server_info();
+--?.*
+--?.*
+--? datanode1 |    .* |   .*
+(1 row)
+
+select * from debug_info;
+--?.*
+--?.*
+--? datanode1 |    .*
+(1 row)
+
+-- start debug - 1st run
+select * from test_debug(4);
+INFO:  cnt is 3
+ a |          b          |            c             
+---+---------------------+--------------------------
+ 5 | Fasting             | Sat Mar 02 00:00:00 2030
+ 7 | Treasures in Heaven | Mon Apr 02 00:00:00 2040
+ 2 | Giving to the Needy | Sun Feb 02 00:00:00 2020
+ 3 | Prayer              | Thu Dec 02 00:00:00 2021
+(4 rows)
+
+-- start debug - 2nd run - to be aborted
+select * from test_debug(4);
+ERROR:  receive abort message
+CONTEXT:  PL/pgSQL function test_debug(integer) line 15 at assignment
+-- commit/rollback in procedure
+create table tb1(a int);
+create or replace procedure test_debug2 as
+begin
+    insert into tb1 values (1000);
+    commit;
+    insert into tb1 values (2000);
+    rollback;
+end;
+/
+truncate debug_info;
+select * from turn_on_debugger('test_debug2');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from dbe_pldebugger.local_debug_server_info();
+--?.*
+--?.*
+--? datanode1 |    .* |   .*
+--? datanode1 |    .* |   .*
+(2 rows)
+
+select * from debug_info;
+--?.*
+--?.*
+--? datanode1 |    .*
+(1 row)
+
+select dbe_pldebugger.turn_off(oid) from pg_proc where proname = 'test_debug';
+ turn_off 
+----------
+ t
+(1 row)
+
+-- start debug
+select * from test_debug2();
+ test_debug2 
+-------------
+ 
+(1 row)
+
+-- test for implicit variables
+CREATE OR REPLACE PROCEDURE test_debug3(a in integer, b out integer)
+AS
+BEGIN
+    CASE a
+        WHEN 1 THEN
+            b := 111;
+        ELSE
+            b := 999;
+    END CASE;
+    raise info 'pi_return : %',pi_return ;
+    EXCEPTION WHEN others THEN
+        b := 101;
+END;
+/
+truncate debug_info;
+select * from turn_on_debugger('test_debug3');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from dbe_pldebugger.local_debug_server_info();
+--?.*
+--?.*
+--? datanode1 |    .* |   .*
+--? datanode1 |    .* |   .*
+(2 rows)
+
+select * from debug_info;
+--?.*
+--?.*
+--? datanode1 |    .*
+(1 row)
+
+select dbe_pldebugger.turn_off(oid) from pg_proc where proname = 'test_debug2';
+ turn_off 
+----------
+ t
+(1 row)
+
+-- start debug
+select * from test_debug3(1);
+  b  
+-----
+ 101
+(1 row)
+
+-- test for step into
+CREATE OR REPLACE PROCEDURE test_debug4(a in integer, b out integer)
+AS
+BEGIN
+    CASE a
+        WHEN 1 THEN
+            b := 111;
+            call test_debug(a);
+        ELSE
+            b := 999;
+    END CASE;
+    raise info 'pi_return : %',pi_return ;
+    EXCEPTION WHEN others THEN
+        b := 101;
+END;
+/
+truncate debug_info;
+select * from turn_on_debugger('test_debug4');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from dbe_pldebugger.local_debug_server_info();
+--?.*
+--?.*
+--? datanode1 |    .* |   .*
+--? datanode1 |    .* |   .*
+(2 rows)
+
+select * from debug_info;
+--?.*
+--?.*
+--? datanode1 |    .*
+(1 row)
+
+select * from test_debug4(1);
+INFO:  cnt is 3
+CONTEXT:  SQL statement "call test_debug(a)"
+PL/pgSQL function test_debug4(integer) line 6 at SQL statement
+  b  
+-----
+ 101
+(1 row)
+
+-- test with breakpoint
+select * from test_debug4(1);
+INFO:  cnt is 3
+CONTEXT:  SQL statement "call test_debug(a)"
+PL/pgSQL function test_debug4(integer) line 6 at SQL statement
+  b  
+-----
+ 101
+(1 row)
+
+select dbe_pldebugger.turn_off(oid) from pg_proc where proname = 'test_debug3';
+ turn_off 
+----------
+ t
+(1 row)
+
+select dbe_pldebugger.turn_off(oid) from pg_proc where proname = 'test_debug4';
+ turn_off 
+----------
+ t
+(1 row)
+
+create or replace function test_debug_recursive (ct int, pr int)
+returns table (counter int, product int)
+language plpgsql
+as $$
+begin
+    return query select ct, pr;
+    if ct < 5 then
+        return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
+    end if;
+end $$;
+truncate debug_info;
+select * from turn_on_debugger('test_debug_recursive');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from test_debug_recursive (1, 1);
+ counter | product 
+---------+---------
+       1 |       1
+       2 |       2
+       3 |       6
+       4 |      24
+       5 |     120
+(5 rows)
+
+drop schema pl_debugger cascade;
+NOTICE:  drop cascades to 12 other objects
+DETAIL:  drop cascades to table test
+drop cascades to function test_debug(integer)
+drop cascades to table show_code_table
+drop cascades to table debug_info
+drop cascades to function turn_on_debugger(text)
+drop cascades to function pld_simple(integer)
+drop cascades to table tmp_holder
+drop cascades to table tb1
+drop cascades to function test_debug2()
+drop cascades to function test_debug3(integer)
+drop cascades to function test_debug4(integer)
+drop cascades to function test_debug_recursive(integer,integer)

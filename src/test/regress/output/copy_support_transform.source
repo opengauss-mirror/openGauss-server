@@ -1,0 +1,171 @@
+create schema copy_support_transform;
+set current_schema = copy_support_transform;
+----As a reference, create a basic table and export its data to copy_support_transform.data.
+----create table basic(mes1 text, mes2 float8, mes3 timestamp with time zone, mes4 INTEGER);
+----copy basic to '@abs_srcdir@/data/copy_support_transform.data';
+create table test(mes int, mes1 text, mes2 float8, mes3 timestamp with time zone, mes4 INTEGER);
+create table test1(mes int, mes1 text, mes2 float8, mes3 timestamp with time zone, mes4 SMALLINT);
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text AS mes1 || mes2, mes2 float8 AS mes2 + 1, mes3 timestamp with time zone AS date_trunc('year', mes3));
+select * from test order by mes1;
+ mes |    mes1     |  mes2   |             mes3             | mes4  
+-----+-------------+---------+------------------------------+-------
+   1 | mmoo12.6789 | 13.6789 | Thu Jan 01 00:00:00 1970 PST | 32767
+   2 | yyds180.883 | 181.883 | Sun Jan 01 00:00:00 2012 PST | 32768
+(2 rows)
+
+truncate table test;
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 AS mes1 || mes2, mes2 AS mes2 + 1, mes3 AS date_trunc('year', mes3));	
+select * from test order by mes1;
+ mes |    mes1     |  mes2   |             mes3             | mes4  
+-----+-------------+---------+------------------------------+-------
+   1 | mmoo12.6789 | 13.6789 | Thu Jan 01 00:00:00 1970 PST | 32767
+   2 | yyds180.883 | 181.883 | Sun Jan 01 00:00:00 2012 PST | 32768
+(2 rows)
+
+truncate table test;
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text, mes2 float8, mes3 timestamp with time zone);
+select * from test order by mes1;
+ mes | mes1 |  mes2   |             mes3             | mes4  
+-----+------+---------+------------------------------+-------
+   1 | mmoo | 12.6789 | Thu Jan 01 15:04:28 1970 PST | 32767
+   2 | yyds | 180.883 | Thu Jun 21 19:00:00 2012 PDT | 32768
+(2 rows)
+
+truncate table test;
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1, mes2, mes3);
+select * from test order by mes1;
+ mes | mes1 |  mes2   |             mes3             | mes4  
+-----+------+---------+------------------------------+-------
+   1 | mmoo | 12.6789 | Thu Jan 01 15:04:28 1970 PST | 32767
+   2 | yyds | 180.883 | Thu Jun 21 19:00:00 2012 PDT | 32768
+(2 rows)
+
+truncate table test;
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 char(3), mes2 int, mes3 date);	
+ERROR:  value too long for type character(3)
+CONTEXT:  COPY test, line 1, column mes1: "mmoo"
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text AS mes1 || mes2, mes2 float8 AS mes2 + 1E400, mes3 timestamp with time zone AS date_trunc('year', mes3));
+ERROR:  "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000" is out of range for type double precision
+CONTEXT:  COPY test, line 1: "1	mmoo	12.6789	Thu Jan 01 15:04:28 1970 PST	32767"
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes5 text AS mes1 || mes2, mes2 float8 AS mes2 + 1, mes3 timestamp with time zone AS date_trunc('year', mes3));
+ERROR:  column "mes5" of relation "test" does not exist
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text AS mes5 || mes2, mes2 float8 AS mes2 + 1, mes3 timestamp with time zone AS date_trunc('year', mes3));
+ERROR:  column "mes5" does not exist
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes3 timestamp with time zone AS date_trunc('year', mes3), mes1 text AS mes1 || mes2, mes2 float8 AS mes2 + 1);
+select * from test order by mes1;
+ mes |    mes1     |  mes2   |             mes3             | mes4  
+-----+-------------+---------+------------------------------+-------
+   1 | mmoo12.6789 | 13.6789 | Thu Jan 01 00:00:00 1970 PST | 32767
+   2 | yyds180.883 | 181.883 | Sun Jan 01 00:00:00 2012 PST | 32768
+(2 rows)
+
+truncate table test;
+copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text AS mes1 || mes2);
+select * from test order by mes1;
+ mes |    mes1     |  mes2   |             mes3             | mes4  
+-----+-------------+---------+------------------------------+-------
+   1 | mmoo12.6789 | 12.6789 | Thu Jan 01 15:04:28 1970 PST | 32767
+   2 | yyds180.883 | 180.883 | Thu Jun 21 19:00:00 2012 PDT | 32768
+(2 rows)
+
+truncate table test;
+copy test1(mes, mes1, mes2, mes3, mes4) from '@abs_srcdir@/data/copy_support_transform.data' transform (mes4 INTEGER as mes4 % 32767);
+select * from test1 order by mes1;
+ mes | mes1 |  mes2   |             mes3             | mes4 
+-----+------+---------+------------------------------+------
+   1 | mmoo | 12.6789 | Thu Jan 01 15:04:28 1970 PST |    0
+   2 | yyds | 180.883 | Thu Jun 21 19:00:00 2012 PDT |    1
+(2 rows)
+
+truncate table test1;
+-- called in procedure.
+create or replace procedure copy_in_procedure()
+AS
+    BEGIN
+        copy test from '@abs_srcdir@/data/copy_support_transform.data' transform (mes1 text AS mes1 || mes2, mes2 float8 AS mes2 + 1, mes3 timestamp with time zone AS date_trunc('year', mes3));
+    END;
+/
+select copy_in_procedure();
+ copy_in_procedure 
+-------------------
+ 
+(1 row)
+
+select * from test order by mes1;
+ mes |    mes1     |  mes2   |             mes3             | mes4  
+-----+-------------+---------+------------------------------+-------
+   1 | mmoo12.6789 | 13.6789 | Thu Jan 01 00:00:00 1970 PST | 32767
+   2 | yyds180.883 | 181.883 | Sun Jan 01 00:00:00 2012 PST | 32768
+(2 rows)
+
+drop procedure copy_in_procedure;
+drop table test;
+drop table test1;
+create table copy_transform_explicit_cast (
+ c_id int,
+ c_bigint int,
+ c_varchar varchar(30),
+ c_data date
+ )
+PARTITION BY RANGE(C_BIGINT)
+(
+PARTITION P_20000_BEFORE VALUES LESS THAN (20000),
+PARTITION P_30000 VALUES LESS THAN (30000),
+PARTITION P_30000_AFTER VALUES LESS THAN (MAXVALUE)
+);
+-- expr type will explicit cast to column type
+copy copy_transform_explicit_cast from '@abs_srcdir@/data/copy_transform_explicit_cast.data' TRANSFORM (c_bigint bigint AS c_bigint * 2) delimiter ',';
+select * from copy_transform_explicit_cast order by c_bigint;
+ c_id | c_bigint |   c_varchar    |          c_data          
+------+----------+----------------+--------------------------
+    1 |        2 | 大唐芙蓉园     | Thu Jun 14 00:00:00 2007
+    2 |        4 | 曲江公园       | Fri Nov 30 00:00:00 2007
+    3 |        6 | 樊川公园       | Wed May 30 00:00:00 2007
+    4 |        8 | 大明宫遗址公园 | Thu Oct 18 00:00:00 2007
+    5 |       10 | 昆明池         | Fri Feb 16 00:00:00 2007
+    6 |       12 | 壶口瀑布       | Fri Sep 14 00:00:00 2007
+    7 |       14 | 黄帝陵         | Sat Jan 27 00:00:00 2007
+    8 |       16 | 华山           | Mon Aug 20 00:00:00 2007
+    9 |       18 | 华清池         | Sun Jun 17 00:00:00 2007
+   10 |       20 | 大雁塔         | Sat Jul 28 00:00:00 2007
+(10 rows)
+
+-- There is no way to explicit cast between date and int4
+copy copy_transform_explicit_cast from '@abs_srcdir@/data/copy_transform_explicit_cast.data' TRANSFORM (c_bigint bigint AS c_bigint::text::date) delimiter ',';
+ERROR:  cannot convert timestamp without time zone to integer
+DETAIL:  column "c_bigint" is of type integer, but expression is of type timestamp without time zone
+drop table copy_transform_explicit_cast;
+----DTS2021042807RJQKP1F00
+CREATE TABLE float_type_t2
+(
+FT_COL INTEGER,
+FT_COL1 INTEGER,
+FT_COL2 FLOAT4,
+FT_COL3 FLOAT8,
+FT_COL4 FLOAT(3),
+FT_COL5 BINARY_DOUBLE,
+FT_COL6 DECIMAL(10,4),
+FT_COL7 INTEGER(6,3)
+);
+INSERT INTO float_type_t2 VALUES(1,10,10.365456,123456.1234,10.3214, 321.321, 123.123654, 123.123654);
+SELECT * FROM float_type_t2;
+ ft_col | ft_col1 | ft_col2 |   ft_col3   | ft_col4 | ft_col5 | ft_col6  | ft_col7 
+--------+---------+---------+-------------+---------+---------+----------+---------
+      1 |      10 | 10.3655 | 123456.1234 | 10.3214 | 321.321 | 123.1237 | 123.124
+(1 row)
+
+copy float_type_t2 to '@abs_srcdir@/data/copy_support_transform_dts.data';
+copy float_type_t2 from '@abs_srcdir@/data/copy_support_transform_dts.data' TRANSFORM (FT_COL1 varchar as FT_COL1);
+SELECT * FROM float_type_t2;
+ ft_col | ft_col1 | ft_col2 |   ft_col3   | ft_col4 | ft_col5 | ft_col6  | ft_col7 
+--------+---------+---------+-------------+---------+---------+----------+---------
+      1 |      10 | 10.3655 | 123456.1234 | 10.3214 | 321.321 | 123.1237 | 123.124
+      1 |      10 | 10.3655 | 123456.1234 | 10.3214 | 321.321 | 123.1237 | 123.124
+(2 rows)
+
+drop table float_type_t2;
+-- There will be a success on Centralized, or a failure on Distributed.
+create table copy_transform_first_col(mes int, mes1 text, mes2 float8, mes3 timestamp with time zone, mes4 INTEGER);
+copy copy_transform_first_col from '@abs_srcdir@/data/copy_support_transform.data' transform (mes int AS mes + 1);
+drop table copy_transform_first_col;
+drop schema copy_support_transform;

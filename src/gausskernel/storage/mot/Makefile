@@ -25,7 +25,7 @@ subdir = src/gausskernel/storage/mot
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = core/src fdw_adapter/src jit_exec/src
+SUBDIRS     = core fdw_adapter jit_exec
 
 export MASSTREE_HOME
 

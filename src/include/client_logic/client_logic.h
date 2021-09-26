@@ -32,6 +32,13 @@
 #include "catalog/gs_encrypted_columns.h"
 #include "lib/stringinfo.h"
 
+typedef struct {
+    Oid key_oid;
+    NameData key_name;
+} KeyOidNameMap;
+
+void delete_client_master_keys(Oid roleid);
+void delete_column_keys(Oid roleid);
 int set_column_encryption(const ColumnDef *def, CeHeapInfo *ce_heap_info);
 int process_global_settings(CreateClientLogicGlobal *parsetree);
 int process_column_settings(CreateClientLogicColumn *parsetree);

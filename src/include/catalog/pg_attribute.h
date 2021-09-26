@@ -45,7 +45,7 @@ CATALOG(pg_attribute,1249) BKI_BOOTSTRAP BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(75) BK
 	 * atttypid is the OID of the instance in Catalog Class pg_type that
 	 * defines the data type of this attribute (e.g. int4).  Information in
 	 * that instance is redundant with the attlen, attbyval, and attalign
-	 * attributes of this instance, so they had better match or Postgres will
+	 * attributes of this instance, so they had better match or openGauss will
 	 * fail.
 	 */
 	Oid			atttypid;

@@ -149,7 +149,8 @@ void process_request(StringInfo input_message)
             break;
 
         case 'I':  // cp CN => DWS CN
-            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "cpwlm", MEMORY_CONTEXT_CBB);
+            t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "cpwlm",
+                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
             exec_init_poolhandles();
             send_cpinfo();
             break;
@@ -1378,6 +1379,7 @@ static char* get_conn_data()
     char abs_path[MAXPGPATH];
     errno_t rc = EOK;
     char* gausshome = NULL;
+    char real_gausshome[PATH_MAX + 1] = {'\0'};
 
     /*
      * Important: function getenv() is not thread safe.
@@ -1385,20 +1387,22 @@ static char* get_conn_data()
     LWLockAcquire(OBSGetPathLock, LW_SHARED);
     gausshome = gs_getenv_r("GAUSSHOME");
     LWLockRelease(OBSGetPathLock);
-    if (NULL == gausshome) {
+    if (gausshome == NULL || realpath(gausshome, real_gausshome) == NULL) {
         ereport(ERROR, (errmodule(MOD_ACCELERATE), errcode(ERRCODE_UNDEFINED_OBJECT),
                 errmsg("Failed to get the values of $GAUSSHOME")));
     }
 
-    if (backend_env_valid(gausshome, "GAUSSHOME") == false) {
+    if (backend_env_valid(real_gausshome, "GAUSSHOME") == false) {
         ereport(ERROR, (errmodule(MOD_ACCELERATE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("Incorrect backend environment variable $GAUSSHOME"),
             errdetail("Please refer to the backend instance log for the detail")));
     }
-    rc = sprintf_s(abs_path, MAXPGPATH, "%s/bin/%s", gausshome, "cp_client.conf");
+    rc = sprintf_s(abs_path, MAXPGPATH, "%s/bin/%s", real_gausshome, "cp_client.conf");
     securec_check_ss(rc, "", "");
 
     gausshome = NULL;
+    rc = memset_s(real_gausshome, sizeof(real_gausshome), 0, sizeof(real_gausshome));
+    securec_check(rc, "\0", "\0");
 
     int fd = open(abs_path, O_RDONLY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
@@ -1837,9 +1841,9 @@ static void NormalBackendInit()
          * pooler thread does NOT exist any more, PoolerLock of LWlock is used instead.
          *
          * PoolManagerDisconnect() which is called by PGXCNodeCleanAndRelease()
-         * is the last call to pooler in the postgres thread, and PoolerLock is
+         * is the last call to pooler in the openGauss thread, and PoolerLock is
          * used in PoolManagerDisconnect(), but it is called after ProcKill()
-         * when postgres thread exits.
+         * when openGauss thread exits.
          * ProcKill() releases any of its held LW locks. So Assert(!(proc == NULL ...))
          * will fail in LWLockAcquire() which is called by PoolManagerDisconnect().
          *

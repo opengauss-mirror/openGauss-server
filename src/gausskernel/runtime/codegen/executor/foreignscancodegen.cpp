@@ -130,7 +130,7 @@ bool ForeignScanCodeGen::IsJittableExpr(Expr* expr)
 }
 
 llvm::Value* ForeignScanCodeGen::buildConstValue(
-    Expr* node, llvm::Value* llvm_args[], GsCodeGen::LlvmBuilder builder, StringInfo fname)
+    Expr* node, llvm::Value* llvm_args[], GsCodeGen::LlvmBuilder& builder, StringInfo fname)
 {
     GsCodeGen* llvmCodeGen = (GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj;
 

@@ -26,7 +26,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeUnique.h"
+#include "executor/node/nodeUnique.h"
 #include "vecexecutor/vecunique.h"
 #include "vecexecutor/vecgrpuniq.h"
 

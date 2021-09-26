@@ -4,6 +4,8 @@
 # in the numbering sequence for the benefit of DTrace and other external
 # debugging scripts.
 
+# TODO please recheck UndoZoneLock 100 RollbackReqHashLock  101 UHeapStatLock 102
+
 BufFreelistLock						0
 CUSlotListLock						1
 ShmemIndexLock						2
@@ -104,6 +106,18 @@ PartIdCacheLock 96
 PartOidCacheLock 97
 DeleteCompactionLock 98
 DeleteConsumerLock 99
-ConsumerStateLock 100
-HypoIndexLock 101
-UniqueSqlEvictLock 102
+UndoZoneLock 100
+RollbackReqHashLock  101
+UHeapStatLock 102
+ConsumerStateLock 103
+HypoIndexLock 104
+WALWritePaxosLock 105
+SyncPaxosLock 106
+BackgroundWorkerLock 107
+BlockchainVersionLock 108
+GlobalPrevHashLock 109
+PldebugLock 110
+HadrSwitchoverLock 111
+TDEKeyCacheLock 112
+RoleIdLock 113
+UniqueSqlEvictLock 114

@@ -22,7 +22,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeLimit.h"
+#include "executor/node/nodeLimit.h"
 #include "nodes/nodeFuncs.h"
 
 static void pass_down_bound(LimitState* node, PlanState* child_node);

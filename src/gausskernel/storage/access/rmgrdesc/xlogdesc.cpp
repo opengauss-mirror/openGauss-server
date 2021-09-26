@@ -23,6 +23,7 @@
 #ifdef FRONTEND
 #include "common/fe_memutils.h"
 #endif
+#define CKPTPLUSLEN 112
 
 /*
  * GUC support
@@ -44,6 +45,7 @@ void xlog_desc(StringInfo buf, XLogReaderState *record)
     if (info == XLOG_CHECKPOINT_SHUTDOWN || info == XLOG_CHECKPOINT_ONLINE) {
         CheckPoint *checkpoint = (CheckPoint *)rec;
         CheckPointPlus *ckpt_plus = (CheckPointPlus *)rec;
+        CheckPointUndo *ckpt_undo = (CheckPointUndo *)rec;
         time_t time_tmp;
         char ckpttime_str[128];
         const char *strftime_fmt = "%c";
@@ -62,12 +64,14 @@ void xlog_desc(StringInfo buf, XLogReaderState *record)
                          "len %lu; next_csn %lu; recent_global_xmin %lu; "
                          "tli %u; fpw %s; xid " XID_FMT "; oid %u; multi %lu; offset " UINT64_FORMAT
                          "; "
-                         "oldest xid " XID_FMT " in DB %u; oldest running xid " XID_FMT "; %s at %s; remove_seg %X/%X",
+                         "oldest xid " XID_FMT " in DB %u; oldest running xid " XID_FMT "; "
+                         "oldest xid with epoch having undo " XID_FMT "; %s at %s; remove_seg %X/%X",
                          (uint32)(checkpoint->redo >> 32), (uint32)checkpoint->redo, ckpt_plus->length,
                          ckpt_plus->next_csn, ckpt_plus->recent_global_xmin, checkpoint->ThisTimeLineID,
                          checkpoint->fullPageWrites ? "true" : "false", checkpoint->nextXid, checkpoint->nextOid,
                          checkpoint->nextMulti, checkpoint->nextMultiOffset, checkpoint->oldestXid,
                          checkpoint->oldestXidDB, checkpoint->oldestActiveXid,
+                         (ckpt_plus->length > CKPTPLUSLEN)  ? ckpt_undo->oldestXidInUndo : 0,
                          (info == XLOG_CHECKPOINT_SHUTDOWN) ? "shutdown" : "online", ckpttime_str,
                          (uint32)(checkpoint->remove_seg >> 32), (uint32)checkpoint->remove_seg);
     } else if (info == XLOG_NOOP) {

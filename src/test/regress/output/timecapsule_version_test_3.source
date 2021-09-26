@@ -1,0 +1,571 @@
+-- test: sighup
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+----------------------------------------------------------------------------------
+-- test version query, restore in one transaction
+----------------------------------------------------------------------------------
+create schema schema_test_3;
+set search_path = schema_test_3;
+drop table tmplog;
+ERROR:  table "tmplog" does not exist
+create table tmplog(tag int, csn1 number);
+create or replace procedure f_save_csn(tag_ int)
+as
+begin
+    -- perform pg_sleep(4);
+    insert into tmplog select tag_, int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+end;
+/
+create or replace function f_get_csn(tag_ int)
+return number
+as
+    csn_ number;
+begin
+    select csn1 into csn_ from tmplog where tag = tag_;
+    return csn_;
+end;
+/
+create or replace procedure f_clean_csn
+as
+begin
+    delete from tmplog;
+end;
+/
+-- testcase: in xact test
+rollback;
+NOTICE:  there is no transaction in progress
+call f_clean_csn();
+ f_clean_csn 
+-------------
+ 
+(1 row)
+
+drop table t1;
+ERROR:  table "t1" does not exist
+create table t1 (c1 int);
+alter table t1 enable row movement;  
+ERROR:  can not enable row movement against NON-PARTITIONED table
+call f_save_csn(-1);
+ f_save_csn 
+------------
+ 
+(1 row)
+
+insert into t1 values (0);
+insert into t1 values (1);
+insert into t1 values (2);
+insert into t1 values (3);
+commit;
+WARNING:  there is no transaction in progress
+call f_save_csn(0);
+ f_save_csn 
+------------
+ 
+(1 row)
+
+commit;
+WARNING:  there is no transaction in progress
+start transaction;
+update t1 set c1 = 10 where c1 = 0;
+delete from t1 where c1 = 1;
+insert into t1 values (4);
+insert into t1 values (5);
+insert into t1 values (6);
+call f_save_csn(1);
+ f_save_csn 
+------------
+ 
+(1 row)
+
+update t1 set c1 = 100 where c1 = 10;
+delete from t1 where c1 = 2;
+delete from t1 where c1 = 4;
+update t1 set c1 = 50 where c1 = 5;
+insert into t1 values (7);
+insert into t1 values (8);
+insert into t1 values (9);
+call f_save_csn(2);
+ f_save_csn 
+------------
+ 
+(1 row)
+
+update t1 set c1 = 1000 where c1 = 100;
+update t1 set c1 = 70 where c1 = 7;
+delete from t1 where c1 = 3;
+delete from t1 where c1 = 8;
+insert into t1 values (100000);
+call f_save_csn(3);
+ f_save_csn 
+------------
+ 
+(1 row)
+
+savepoint s0;
+select * from t1 timecapsule csn f_get_csn(-1);
+ c1 
+----
+(0 rows)
+
+rollback to s0;
+select * from t1 timecapsule csn f_get_csn(0);
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+select * from t1 timecapsule csn f_get_csn(1);
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+select * from t1 timecapsule csn f_get_csn(2);
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+select * from t1 timecapsule csn f_get_csn(3);
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+savepoint s1;
+timecapsule table t1 to csn f_get_csn(0);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(1);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(2);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(3);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(3);
+select * from t1 order by c1; 
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(2);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(1);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(0);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+rollback to s1;
+commit;
+select * from t1 order by c1;
+   c1   
+--------
+      6
+      9
+     50
+     70
+   1000
+ 100000
+(6 rows)
+
+call f_save_csn(4); 
+ f_save_csn 
+------------
+ 
+(1 row)
+
+update t1 set c1 = 1001 where c1 = 1000;
+update t1 set c1 = 500 where c1 = 50;
+delete from t1 where c1 = 6;
+update t1 set c1 = 90 where c1 = 9;
+delete from t1 where c1 = 100000;
+insert into t1 values (100001);
+insert into t1 values (100002);
+insert into t1 values (100003);
+commit; 
+WARNING:  there is no transaction in progress
+select * from t1 order by c1;
+   c1   
+--------
+     70
+     90
+    500
+   1001
+ 100001
+ 100002
+ 100003
+(7 rows)
+
+call f_save_csn(5);
+ f_save_csn 
+------------
+ 
+(1 row)
+
+timecapsule table t1 to csn f_get_csn(-1);
+select * from t1 order by c1;
+ c1 
+----
+(0 rows)
+
+timecapsule table t1 to csn f_get_csn(0);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(1);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(2);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(3);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(4);
+select * from t1 order by c1;
+   c1   
+--------
+      6
+      9
+     50
+     70
+   1000
+ 100000
+(6 rows)
+
+timecapsule table t1 to csn f_get_csn(5);
+select * from t1 order by c1;
+   c1   
+--------
+     70
+     90
+    500
+   1001
+ 100001
+ 100002
+ 100003
+(7 rows)
+
+timecapsule table t1 to csn f_get_csn(0);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(1);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(2);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(3);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(4);
+select * from t1 order by c1;
+   c1   
+--------
+      6
+      9
+     50
+     70
+   1000
+ 100000
+(6 rows)
+
+timecapsule table t1 to csn f_get_csn(5);
+select * from t1 order by c1; 
+   c1   
+--------
+     70
+     90
+    500
+   1001
+ 100001
+ 100002
+ 100003
+(7 rows)
+
+timecapsule table t1 to csn f_get_csn(4);
+select * from t1 order by c1;
+   c1   
+--------
+      6
+      9
+     50
+     70
+   1000
+ 100000
+(6 rows)
+
+timecapsule table t1 to csn f_get_csn(3);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(2);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(1);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(0);
+select * from t1 order by c1;
+ c1 
+----
+  0
+  1
+  2
+  3
+(4 rows)
+
+timecapsule table t1 to csn f_get_csn(5);
+select * from t1 order by c1;
+   c1   
+--------
+     70
+     90
+    500
+   1001
+ 100001
+ 100002
+ 100003
+(7 rows)
+
+commit;
+WARNING:  there is no transaction in progress
+select * from t1 order by c1;
+   c1   
+--------
+     70
+     90
+    500
+   1001
+ 100001
+ 100002
+ 100003
+(7 rows)
+
+drop table t1;
+drop table tmplog;
+drop procedure f_save_csn;
+drop function f_get_csn;
+drop procedure f_clean_csn;
+drop schema schema_test_3 cascade;
+reset search_path;
+-- reset vacuum_defer_cleanup_age
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+

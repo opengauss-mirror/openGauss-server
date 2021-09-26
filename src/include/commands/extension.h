@@ -37,11 +37,15 @@ extern void ExecAlterExtensionContentsStmt(AlterExtensionContentsStmt* stmt);
 
 extern Oid get_extension_oid(const char* extname, bool missing_ok);
 extern char* get_extension_name(Oid ext_oid);
+extern Oid get_extension_schema(Oid ext_oid);
 
 extern void AlterExtensionNamespace(List* names, const char* newschema);
 
 extern void AlterExtensionOwner_oid(Oid extensionOid, Oid newOwnerId);
 
+/* Retuen true if the extension is supported. */
+extern bool CheckExtensionValid(const char *extentName);
+extern bool CheckExtensionSqlValid(char *queryString);
 extern void RepallocSessionVarsArrayIfNecessary();
 
 #endif /* EXTENSION_H */

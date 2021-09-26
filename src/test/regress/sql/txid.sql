@@ -2,7 +2,6 @@
 -- txid_snapshot data type and related functions
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 -- i/o
 select '12:13:'::txid_snapshot;

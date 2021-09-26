@@ -42,6 +42,7 @@
 #include "access/xlogdefs.h"
 #include "access/xlogproc.h"
 #include "access/redo_common.h"
+#include "storage/smgr/fd.h"
 
 typedef enum {
     XLOG_FULL_PAGE_ORIG_BLOCK_NUM = 0,
@@ -79,13 +80,13 @@ XLogRecParseState *xlog_xlog_common_parse_to_block(XLogReaderState *record, uint
         return NULL;
     }
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_XLOG_COMMON_TYPE, InvalidForkNumber, InvalidBlockNumber, NULL,
-                               recordstatehead);
+    RelFileNodeForkNum filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_XLOG_COMMON_TYPE, filenode, recordstatehead);
     char *maindata = XLogRecGetData(record);
     Size maindatalen = XLogRecGetDataLen(record);
     XLogRecSetXlogCommonState(&recordstatehead->blockparse.extra_rec.blockxlogcommon, maindata, maindatalen,
                               record->ReadRecPtr);
-    recordstatehead->isFullSyncCheckpoint = record->isFullSyncCheckpoint;
+    recordstatehead->isFullSync = record->isFullSync;
     return recordstatehead;
 }
 

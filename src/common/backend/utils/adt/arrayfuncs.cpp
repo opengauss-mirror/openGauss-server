@@ -27,6 +27,8 @@
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/typcache.h"
+#include "nodes/nodes.h"
+#include "nodes/nodeFuncs.h"
 
 /*
  * Local definitions
@@ -861,6 +863,52 @@ void CopyArrayEls(ArrayType* array, Datum* values, const bool* nulls, int nitems
 
     if (bitmap != NULL && bitmask != 1)
         *bitmap = bitval;
+}
+
+
+Datum tdigest_in(PG_FUNCTION_ARGS)
+{
+    // get string from dn and returns the TdigestData to cn
+    char* str = PG_GETARG_CSTRING(0);
+
+    if (NULL == strstr(str, "TdigestData")) {
+        ereport(ERROR, (errmodule(MOD_OPT_AGG), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("This input type is not supported for tdigest_in()"), errdetail("N/A"),
+                        errcause("input type is not supported"),
+                        erraction("Check tdigest_in syntax to obtain the supported privilege types")));
+        PG_RETURN_NULL();
+    }
+    TdigestData* oldres = (TdigestData*) stringToNode(str);
+    Size BuffSize = sizeof(TdigestData) + (oldres->cap * sizeof(CentroidPoint));
+    SET_VARSIZE(oldres, BuffSize);
+    PG_RETURN_POINTER(oldres);
+}
+
+Datum tdigest_out(PG_FUNCTION_ARGS)
+{
+    // get TdigestData and returns the string to cn
+    TdigestData* oldres = (TdigestData*)PG_DETOAST_DATUM(PG_GETARG_DATUM(0));
+
+    // convert TdigestData to a string
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfoChar(&str, '{');
+    appendStringInfoString(&str, "TdigestData");
+    appendStringInfo(&str, " :" CppAsString(compression) " " "%.2f", oldres->compression);
+    appendStringInfo(&str, " :" CppAsString(cap) " %d", oldres->cap);
+    appendStringInfo(&str, " :" CppAsString(merged_nodes) " %d", oldres->merged_nodes);
+    appendStringInfo(&str, " :" CppAsString(unmerged_nodes) " %d", oldres->unmerged_nodes);
+    appendStringInfo(&str, " :" CppAsString(merged_count) " " "%.2f", oldres->merged_count);
+    appendStringInfo(&str, " :" CppAsString(unmerged_count) " " "%.2f", oldres->unmerged_count);
+    appendStringInfo(&str, " :" CppAsString(valuetoc) " " "%f", oldres->valuetoc);
+    for (int i = 0; i < oldres->merged_nodes + oldres->unmerged_nodes; i++) {
+        appendStringInfo(&str, " :nodes[%d]", i);
+        appendStringInfo(&str, " %f", oldres->nodes[i].mean);
+        appendStringInfo(&str, " %ld", oldres->nodes[i].count);
+    }
+    appendStringInfoChar(&str, '}');
+    
+    PG_RETURN_CSTRING(str.data);
 }
 
 /*
@@ -3797,7 +3845,7 @@ static int array_copy(
  * bits in the destination map are changed, not any before or after.
  *
  * Note: this could certainly be optimized using standard bitblt methods.
- * However, it's not clear that the typical Postgres array has enough elements
+ * However, it's not clear that the typical openGauss array has enough elements
  * to make it worth worrying too much.	For the moment, KISS.
  */
 void array_bitmap_copy(bits8* destbitmap, int destoffset, const bits8* srcbitmap, int srcoffset, int nitems)

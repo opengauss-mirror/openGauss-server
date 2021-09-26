@@ -15,6 +15,7 @@
 #define VACUUM_H
 #include "dfsdesc.h"
 #include "access/htup.h"
+#include "access/genam.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_statistic.h"
 #include "catalog/pg_type.h"
@@ -22,6 +23,7 @@
 #include "storage/buf/buf.h"
 #include "storage/cu.h"
 #include "storage/lock/lock.h"
+#include "utils/pg_rusage.h"
 #include "utils/relcache.h"
 
 typedef enum DELETE_STATS_OPTION {
@@ -269,6 +271,62 @@ typedef struct {
 
 typedef bool (*EqualFunc)(const void*, const void*);
 
+typedef struct VacItemPointerData {
+    ItemPointerData itemPointerData;
+    int2 bktId;
+} VacItemPointerData;
+
+typedef VacItemPointerData* VacItemPointer;
+
+#define VacItemPtrDataGetItemPtr(vacItemPtrData) (&((vacItemPtrData).itemPointerData))
+#define VacItemPtrGetItemPtr(vacItemPtr) (&((vacItemPtr)->itemPointerData))
+
+typedef struct LVRelStats {
+    /* hasindex = true means two-pass strategy; false means one-pass */
+    bool hasindex;
+    /* Overall statistics about rel */
+    BlockNumber old_rel_pages; /* previous value of pg_class.relpages */
+    BlockNumber rel_pages;     /* total number of pages */
+    BlockNumber scanned_pages; /* number of pages we examined */
+    BlockNumber tupcount_pages; /* pages whose tuples we counted */
+    BlockNumber new_visible_pages; /* number of pages marked all visible */
+    double old_live_tuples;        /* previous value of pg_class.reltuples */
+    double scanned_tuples;     /* counts only tuples on scanned pages */
+    double old_rel_tuples;     /* previous value of pg_class.reltuples */
+    double new_rel_tuples;     /* new estimated total # of tuples */
+    double          new_dead_tuples;        /* new estimated total # of dead tuples */
+    BlockNumber pages_removed;
+    double tuples_deleted;
+    BlockNumber nonempty_pages; /* actually, last nonempty page + 1 */
+    /* List of TIDs of tuples we intend to delete */
+    /* NB: this list is ordered by TID address */
+    int num_dead_tuples;     /* current # of entries */
+    int max_dead_tuples;     /* # slots allocated in array */
+    VacItemPointer dead_tuples; /* array of ItemPointerData */
+    int curr_heap_start;
+    int num_index_scans;
+    TransactionId latestRemovedXid;
+    bool lock_waiter_detected;
+    BlockNumber* new_idx_pages;
+    double* new_idx_tuples;
+    bool* idx_estimated;
+    Oid currVacuumPartOid;    /* current lazy vacuum partition oid */
+    int2 currVacuumBktId;     /* current lazy vacuum bucket id */
+    oidvector* bucketlist;
+    bool hasKeepInvisbleTuples;
+} LVRelStats;
+
+typedef struct VacRelPrintStats {
+    double tupsVacuumed;
+    double numTuples;
+    BlockNumber scannedPages;
+    BlockNumber nblocks;
+    double nkeep;
+    double nunused;
+    BlockNumber emptyPages;
+    PGRUsage ruVac;
+} VACRelPrintStats;
+
 /* GUC parameters */
 extern THR_LOCAL PGDLLIMPORT int default_statistics_target; /* PGDLLIMPORT for
                                                              * PostGIS */
@@ -427,5 +485,19 @@ extern void updateTotalRows(Oid relid, double n);
 extern void analyze_concurrency_process(Oid relid, int16 attnum, MemoryContext oldcontext, const char* funcname);
 
 extern int GetOneTupleSize(VacuumStmt* stmt, Relation rel);
+
+extern void lazy_vacuum_index(Relation indrel,
+                                  IndexBulkDeleteResult **stats,
+                                  const LVRelStats *vacrelstats,
+                                  BufferAccessStrategy vacStrategy);
+extern IndexBulkDeleteResult* lazy_cleanup_index(
+    Relation indrel, IndexBulkDeleteResult* stats, LVRelStats* vacrelstats, BufferAccessStrategy vac_strategy);
+extern bool ShouldAttemptTruncation(const LVRelStats *vacrelstats);
+extern void lazy_record_dead_tuple(LVRelStats *vacrelstats,
+                                           ItemPointer itemptr);
+extern BlockNumber CountNondeletablePages(Relation onerel,
+                                                 LVRelStats *vacrelstats);
+extern void vacuum_log_cleanup_info(Relation rel, LVRelStats *vacrelstats);
+extern void CBIOpenLocalCrossbucketIndex(Relation onerel, LOCKMODE lockmode, int* nindexes, Relation** iRel);
 
 #endif /* VACUUM_H */

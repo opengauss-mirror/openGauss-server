@@ -39,6 +39,7 @@
 #include "optimizer/pgxcplan.h"
 #include "optimizer/pgxcship.h"
 #include "optimizer/planmain.h"
+#include "optimizer/prep.h"
 #include "optimizer/tlist.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
@@ -47,6 +48,7 @@
 #include "pgxc/pgxcnode.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
+#include "utils/hotkey.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -158,6 +160,48 @@ static bool PgxcIsDistInfoSame(ExecNodes *innerEn, ExecNodes *outerEn);
 
 /* Other functions */
 static void make_params_transparent(Query* query, int query_level);
+static bool has_consistent_execnodes(ExecNodes* exec_nodes_rte, ExecNodes* exec_nodes_qry, int* dcol_cnt);
+static Expr* find_distcol_expr(void* query, Index varno, AttrNumber attrNum, Node* quals);
+
+/*
+ * A set of functions for get_var_from_node() argument
+ * reject: return false all time (please set to default)
+ * pass: return true all time (in some condition)
+ * restricted: switch between set of oids and return true if found.
+ */
+Var* get_var_from_node(Node* node, bool (*func)(Oid) = func_oid_check_reject);
+bool func_oid_check_reject(Oid oid)
+{
+    return false;
+}
+
+bool func_oid_check_restricted(Oid oid)
+{
+    switch (oid) {
+        case INT1TOINT2OID:
+        case INT1TOINT4OID:
+        case INT1TOINT8OID:
+        case INT2TOINT4OID:
+        case INT4TOINT2OID:
+        case INT2TOINT8OID:
+        case INT8TOINT2OID:
+        case INT4TOINT8OID:
+        case INT8TOINT4OID:
+        case FLOAT4TOFLOAT8OID:
+        case FLOAT8TOFLOAT4OID:
+            return true;
+            break;    /* a candy for compiler */
+        default:
+            return false;
+    }
+    /* shouldn't get here, but to keep compiler happy */
+    return false;
+}
+
+bool func_oid_check_pass(Oid oid)
+{
+    return true;
+}
 
 /*
  * Set the given reason in Shippability_context indicating why the query can not be
@@ -245,15 +289,18 @@ static ExecNodes* pgxc_FQS_datanodes_for_rtr(Index varno, Shippability_context* 
             ExecNodes* exec_nodes = NULL;
             bool contain_column_store = sc_context->sc_contain_column_store;
             bool use_star_targets = false;
+
             /*
              * Subquery in RangeTbleEntry is not scanned while scanning the
              * parent query, since we don't scan the parent query's rtable.
              */
-            exec_nodes = pgxc_is_query_shippable(rte->subquery,
-                sc_context->sc_query_level + 1,
-                sc_context->sc_light_proxy,
-                &contain_column_store,
-                &use_star_targets);
+            exec_nodes = (sc_context->sc_inselect) ? sc_context->sc_exec_nodes :
+                pgxc_is_query_shippable(rte->subquery,
+                    sc_context->sc_query_level + 1,
+                    sc_context->sc_light_proxy,
+                    &contain_column_store,
+                    &use_star_targets);
+
             /* once contain cstore, always constain */
             if (contain_column_store)
                 sc_context->sc_contain_column_store = contain_column_store;
@@ -1280,7 +1327,7 @@ static bool pgxc_shippability_walker(Node* node, Shippability_context* sc_contex
              */
         case T_FieldStore:
             /*
-             * PostgreSQL deparsing logic does not handle the FieldStore
+             * openGauss deparsing logic does not handle the FieldStore
              * for more than one fields (see processIndirection()). So, let's
              * handle it through standard planner, where whole row will be
              * constructed.
@@ -1772,12 +1819,21 @@ static bool pgxc_shippability_walker(Node* node, Shippability_context* sc_contex
             pgxc_set_shippability_reason(sc_context, SS_NEED_SINGLENODE);
 
             /*
+             * row_number() is not shippable for replication tables, since
+             * the data may not have the same order on all datanodes.
+             */
+            if (winf->winfnoid == ROWNUMBERFUNCOID) {
+                pgxc_set_shippability_reason(sc_context, SS_UNSHIPPABLE_EXPR);
+            }
+
+            /*
              * A window function is not shippable as part of a stand-alone
              * expression. If the window function is non-immutable, it can not
              * be shipped to the datanodes.
              */
-            if (sc_context->sc_for_expr || !pgxc_is_func_shippable(winf->winfnoid))
+            if (sc_context->sc_for_expr || !pgxc_is_func_shippable(winf->winfnoid)) {
                 pgxc_set_shippability_reason(sc_context, SS_UNSHIPPABLE_EXPR);
+            }
 
             pgxc_set_exprtype_shippability(exprType(node), sc_context);
         } break;
@@ -2579,13 +2635,16 @@ ExecNodes* pgxc_merge_exec_nodes(ExecNodes* en1, ExecNodes* en2, int jointype)
      * to make sure they will go to the same datanode/s.
      */
     bool single_expr_en1 =
-        (en1->en_expr != NIL && en1->baselocatortype == LOCATOR_TYPE_HASH && en1->accesstype == RELATION_ACCESS_READ);
+        (en1->en_expr != NIL && IsExecNodesColumnDistributed(en1) && en1->accesstype == RELATION_ACCESS_READ);
     bool single_expr_en2 =
-        (en2->en_expr != NIL && en2->baselocatortype == LOCATOR_TYPE_HASH && en2->accesstype == RELATION_ACCESS_READ);
+        (en2->en_expr != NIL && IsExecNodesColumnDistributed(en2) && en2->accesstype == RELATION_ACCESS_READ);
     bool single_node_en1 = (IsExecNodesColumnDistributed(en1) && list_length(en1->nodeList) == 1);
     bool single_node_en2 = (IsExecNodesColumnDistributed(en2) && list_length(en2->nodeList) == 1);
+    bool has_list_range_node = IsExecNodesDistributedBySlice(en1) || IsExecNodesDistributedBySlice(en2);
 
-    if (!IsLocatorDistributedBySlice(en1->baselocatortype) && !IsLocatorDistributedBySlice(en2->baselocatortype)) {
+    /* If any of node1 or node2 contains parameters, we check whether them can be merged.
+     * For hash, we only check the node; for list/range, we should make sure they are from same distribution too. */
+    if (!has_list_range_node || (has_list_range_node && PgxcIsDistInfoSame(en1, en2))) {
         if (single_expr_en1 && single_expr_en2) {
             /* must to be the same node group */
             if (ng_is_same_group(&en1->distribution, &en2->distribution)) {
@@ -2772,7 +2831,7 @@ ExecNodes* pgxc_merge_exec_nodes(ExecNodes* en1, ExecNodes* en2, int jointype)
     ereport(ERROR,
         (errmodule(MOD_OPT),
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Postgres-XC does not support this distribution type yet"),
+                errmsg("openGauss does not support this distribution type yet"),
                 errdetail("The feature is not currently supported"))));
 
     /* Keep compiler happy */
@@ -2930,7 +2989,6 @@ bool pgxc_check_index_shippability(
                     result = false;
                     break;
                 }
-
                 /* Nothing to do if no attributes */
                 if (indexAttrs == NIL)
                     break;
@@ -3222,6 +3280,7 @@ List* pgxc_get_dist_var(Index varno, RangeTblEntry* rte, List* tlist)
             if (var && IsA(var, Var) && (var->varno == varno) && (var->varattno == attnum)) {
                 isMatch = true;
                 varList = lappend(varList, (Var*)copyObject(var));
+                break;
             }
         }
         if (isMatch == false) {
@@ -3584,7 +3643,7 @@ static bool pgxc_is_trigger_shippable(int trig_idx, Relation rel)
      * If trigger is based on a constraint or is internal, enforce its launch
      * whatever the node type where we are for the time being.
      * We need to remove this condition once constraints are better
-     * implemented within Postgres-XC as a constraint can be locally
+     * implemented within openGauss as a constraint can be locally
      * evaluated on remote nodes depending on the distribution type of the table
      * on which it is defined or on its parent/child distribution types.
      */
@@ -3661,9 +3720,10 @@ static bool pgxc_is_trigger_shippable(int trig_idx, Relation rel)
  * Get a single Var reference base on node type
  * FuncExpr must have allowed (non hash breaking) type cast funcid to work.
  * @param The input node from expressions
+ *         A function that defines the Oid range of FuncExpr, default is reject(false)
  * @return The Var related to the input node expression
-*/
-Var* get_var_from_node(Node* node)
+ */
+Var* get_var_from_node(Node* node, bool (*func)(Oid))
 {
     Var* var = NULL;
 
@@ -3677,7 +3737,10 @@ Var* get_var_from_node(Node* node)
         }
 
         case T_FuncExpr: {
-            /* Not support any */
+            FuncExpr* fvar = (FuncExpr*)node;
+            if (func(fvar->funcid) && fvar->args) {
+                var = get_var_from_node((Node*)linitial(fvar->args), func);
+            }
             break;
         }
 
@@ -3694,95 +3757,6 @@ Var* get_var_from_node(Node* node)
     }
 
     return var;
-}
-
-/*
- * equal_var
- * Similar to equal(a, b), but only checks varattno and varno.
- * @param two vars to compare
- * @return true if same, else false
- */
-bool equal_var(Var* a, Var* b)
-{
-    if (a == NULL || b == NULL) {
-        return false;
-    }
-
-    if (a->varno == b->varno && a->varattno == b->varattno) {
-        return true;
-    }
-    return false;
-}
-
-/*
- * is_subset_of_quals
- * Find matching Var from quals and return true if found.
- * 1. BoolExpr must be AND_EXPR
- * 2. OpExpr must be equal-like
- * @param From expression and the Var needed to be checked
- * @return true if found, else false
- */
-static bool is_subset_of_quals(FromExpr* from_expr, Var* var, bool* no_quals)
-{
-    ListCell* qcell = NULL;
-    List* lquals = NIL;
-
-    if (from_expr->quals == NULL) /* Special case */
-        return false;
-
-    *no_quals = false;
-
-    if (IsA(from_expr->quals, OpExpr) || IsA(from_expr->quals, NullTest)) {
-        lquals = lappend(lquals, from_expr->quals);
-    } else if (((BoolExpr*)from_expr->quals)->boolop != AND_EXPR) {
-        return false;
-    } else if (!IsA(from_expr->quals, List)) {
-        lquals = make_ands_implicit((Expr*)(from_expr->quals));
-    } else {
-        lquals = (List*)(from_expr->quals);
-    }
-
-    int qual_cnt = list_length(lquals);
-
-    /* Shuffle through all nodes. Find matching Var. */
-    foreach(qcell, lquals) {
-        Expr* qual_expr = (Expr*)lfirst(qcell);
-        Node* op = (Node*)qual_expr;
-        Var* lvar = NULL;
-        Var* rvar = NULL;
-
-        /* Handle special case 'is null' */
-        if (IsA(qual_expr, NullTest) && ((NullTest*)op)->nulltesttype == IS_NULL)
-            lvar = get_var_from_node((Node*)((NullTest*)op)->arg);
-
-        if (equal_var(var, lvar)) {
-            list_free_ext(lquals);
-            return true;
-        }
-
-        /* Filter out non-op expression and non-equal relations */
-        if (!IsA(op, OpExpr) || !isEqualExpr(op))
-            continue;
-
-        lvar = get_var_from_node((Node*)linitial(((OpExpr*)op)->args));
-        rvar = get_var_from_node((Node*)lsecond(((OpExpr*)op)->args));
-        /* Self equal */
-        if (equal_var(lvar, rvar)) {
-            qual_cnt--;
-            continue;
-        }
-        if (equal_var(var, lvar) || equal_var(var, rvar)) {
-            list_free_ext(lquals);
-            return true;
-        }
-    }
-
-    /* Eliminate useless quals */
-    if (qual_cnt == 0)
-        *no_quals = true;
-
-    list_free_ext(lquals);
-    return false; /* Cannot find any */
 }
 
 /*
@@ -3826,7 +3800,7 @@ static RelOrientation get_rte_orientation_recurse(Query* query, Var* var, AttrNu
     TargetEntry* tar = get_tle_by_resno(query->targetList, var->varattno);
     Var* tvar = NULL;
     if (tar) {
-        tvar = get_var_from_node((Node*)tar->expr);
+        tvar = get_var_from_node((Node*)tar->expr, func_oid_check_restricted);
     }
 
     if (tvar == NULL || attrno == NULL) {
@@ -3845,38 +3819,188 @@ static RelOrientation get_rte_orientation_recurse(Query* query, Var* var, AttrNu
     }
 }
 
-/*
- * is_subset_of_quals_recurse:
- * This function traverse all levels of the subquery and
- * calls the is_subset_of_quals() on each level.
- * @param the query, the var from upper-level query's targetEntry,
- * @return if the var is subset of any quals.
- */
-static bool is_subset_of_quals_recurse(Query* query, Var* var, bool* no_quals)
+Expr* get_RelabelType_expr(Expr* expr)
 {
-    check_stack_depth();    /* Check depth */
-    bool subset_of_quals = false;
-    TargetEntry* tar = get_tle_by_resno(query->targetList, var->varattno);
-    Var* tvar = NULL;
-    if (tar) {
-        tvar = get_var_from_node((Node*)tar->expr);
+    if (IsA(expr, RelabelType)) {
+        return ((RelabelType*)expr)->arg;
+    } else if (IsA(expr, FuncExpr) && list_length(((FuncExpr*)expr)->args) == 1 &&
+        IsFunctionShippable(((FuncExpr*)expr)->funcid)) {
+        return (Expr*)linitial(((FuncExpr*)expr)->args);
+    } else {
+        /* do nothing */
     }
+    return expr;
+}
 
-    if (tvar == NULL) {
+bool equal_var(Expr* var, Index varno, AttrNumber attrNum)
+{
+    if (!IsA(var, Var)) {
         return false;
     }
 
-    RangeTblEntry* rte = rt_fetch(tvar->varno, query->rtable);
-    subset_of_quals |= is_subset_of_quals(query->jointree, tvar, no_quals);
-    if (subset_of_quals) {  /* Break on found */
+    if (((Var*)var)->varno == varno && ((Var*)var)->varattno == attrNum) {
         return true;
     }
+    return false;
+}
 
-    if (rte->rtekind == RTE_SUBQUERY) { /* Recurse on subquery */
-        subset_of_quals |= is_subset_of_quals_recurse(rte->subquery, tvar, no_quals);
+/*
+ * find_distcol_expr
+ * This is the slightly twisted version of pgxc_find_distcol_expr
+ * It returns the whole expression instead of the lower level expression.
+ */
+static Expr* find_distcol_expr(void* query_arg, Index varno, AttrNumber attrNum, Node* quals)
+{
+    List* lquals = NULL;
+    ListCell* qual_cell = NULL;
+    Query* query = (Query*)query_arg;
+
+    if (quals == NULL)
+        return NULL;
+
+    if (!IsA(quals, List))
+        lquals = make_ands_implicit((Expr*)quals);
+    else
+        lquals = (List*)quals;
+
+    foreach (qual_cell, lquals) {
+        Expr* qual_expr = (Expr*)lfirst(qual_cell);
+        OpExpr* op = NULL;
+        Expr* lexpr = NULL;
+        Expr* rexpr = NULL;
+        Var* var_expr = NULL;
+        Expr* distcol_expr = NULL;
+
+        if (IsA(qual_expr, NullTest)) {
+            NullTest* nt = (NullTest*)qual_expr;
+            if (nt->nulltesttype == IS_NULL && IsA(nt->arg, Var)) {
+                var_expr = (Var*)(nt->arg);
+                if (!equal_var((Expr*)var_expr, varno, attrNum))
+                    continue;
+                distcol_expr = (Expr*)makeNullConst(var_expr->vartype, var_expr->vartypmod, var_expr->varcollid);
+                /* Found the distribution column expression return it */
+                return distcol_expr;
+            }
+            continue;
+        }
+
+        if (!IsA(qual_expr, OpExpr))
+            continue;
+        op = (OpExpr*)qual_expr;
+        /* If not a binary operator, it can not be '='. */
+        if (list_length(op->args) != 2)
+            continue;
+
+        lexpr = (Expr*)linitial(op->args);
+        rexpr = (Expr*)lsecond(op->args);
+
+        lexpr = get_RelabelType_expr(lexpr);
+        rexpr = get_RelabelType_expr(rexpr);
+
+        if (equal_var(lexpr, varno, attrNum)) {
+            var_expr = (Var*)lexpr;
+            distcol_expr = rexpr;
+        } else if (equal_var(rexpr, varno, attrNum)) {
+            var_expr = (Var*)rexpr;
+            distcol_expr = lexpr;
+        } else {
+            continue;
+        }
+
+        Var baserel_var = *var_expr;
+
+        if (var_expr->varlevelsup == 0) {
+            (void)get_real_rte_varno_attno(query, &(baserel_var.varno), &(baserel_var.varattno));
+
+            var_expr = &baserel_var;
+        }
+
+        if (!equal_var((Expr*)var_expr, varno, attrNum))
+            continue;
+
+        if (!op_mergejoinable(op->opno, exprType((Node*)lexpr)) && !op_hashjoinable(op->opno, exprType((Node*)lexpr)))
+            continue;
+        return distcol_expr;
+    }
+    return NULL;
+}
+
+Expr* get_coerced_expr(Query* query, RelationLocInfo* loc_info, AttrNumber attnum, Expr* distcol_expr)
+{
+    Oid reloid = loc_info->relid;
+    Oid disttype = get_atttype(reloid, attnum);
+    int32 disttypmod = get_atttypmod(reloid, attnum);
+
+    if (distcol_expr != NULL) {
+        Oid exprtype = exprType((Node*)distcol_expr);
+        if (disttype == NUMERICOID || disttype == BPCHAROID || disttype == VARCHAROID) {
+            if (can_coerce_type(1, &exprtype, &disttype, COERCION_ASSIGNMENT)) {
+                distcol_expr = (Expr*)coerce_type(NULL,
+                    (Node*)distcol_expr,
+                    exprtype,
+                    disttype,
+                    disttypmod,
+                    COERCION_ASSIGNMENT,
+                    COERCE_IMPLICIT_CAST,
+                    -1);
+            } else {
+                distcol_expr = NULL;
+            }
+        } else {
+            distcol_expr = (Expr*)coerce_to_target_type(NULL,
+                (Node*)distcol_expr,
+                exprtype,
+                disttype,
+                disttypmod,
+                COERCION_ASSIGNMENT,
+                COERCE_IMPLICIT_CAST,
+                -1);
+        }
+    } else {
+        return NULL;
+    }
+    return distcol_expr;
+}
+
+/*
+ * find_distcol_expr_recurse:
+ * This function can traverse all levels of the subquery and
+ * calls the pgxc_find_distcol_expr() on each level.
+ * @param the query, its jointree and the var from targetEntry, single node flag
+ * @return the expr of given var
+ */
+static Expr* find_distcol_expr_recurse(Query* query, FromExpr* from_expr, Var* var, bool* no_quals, bool single_node)
+{
+    check_stack_depth();    /* Check depth */
+    Expr* expr = NULL;
+    Var* tvar = NULL;
+
+    /* Current level check */
+    RangeTblEntry* rte = rt_fetch(var->varno, query->rtable);
+    if (from_expr == NULL) {
+        return NULL;
+    }
+    if (no_quals) {
+        *no_quals = (from_expr->quals == NULL);
+    }
+    expr = find_distcol_expr(query, var->varno, var->varattno, from_expr->quals);
+    if (rte->rtekind != RTE_SUBQUERY || (expr && !IsA(expr, Var))) {
+        return expr;
     }
 
-    return subset_of_quals;
+    /* Try subquery */
+    Query* subquery = rte->subquery;
+    TargetEntry* tar = get_tle_by_resno(subquery->targetList, var->varattno);
+    if (tar == NULL) {
+        return NULL;
+    }
+
+    tvar = get_var_from_node((Node*)tar->expr, func_oid_check_restricted);
+    if (tvar == NULL) {
+        return single_node ? tar->expr : NULL;
+    }
+
+    return find_distcol_expr_recurse(subquery, subquery->jointree, tvar, no_quals, single_node);
 }
 
 /*
@@ -3890,7 +4014,7 @@ static int has_shippable_col_for_insert(Query* query, TargetEntry* tar, RangeTbl
     Var* tvar = NULL;
 
     /* Fetch the var from target entry */
-    tvar = get_var_from_node((Node*)tar->expr);
+    tvar = get_var_from_node((Node*)tar->expr, func_oid_check_restricted);
     if (tvar == NULL)
         return INSEL_UNSHIPPABLE_COL;
     
@@ -3910,10 +4034,8 @@ static int has_shippable_col_for_insert(Query* query, TargetEntry* tar, RangeTbl
     /* Check the orientation of the source RTE */
     AttrNumber attrno = tvar->varattno;
     RelOrientation orien = REL_ORIENT_UNKNOWN;
-    bool has_subquery = false;
     if (rte_qry->rtekind == RTE_SUBQUERY) { /* recurse on subqueries */
         orien = get_rte_orientation_recurse(rte_qry->subquery, tvar, &attrno);
-        has_subquery = true;
     } else {
         orien = rte_qry->orientation;
     }
@@ -3938,9 +4060,7 @@ static int has_shippable_col_for_insert(Query* query, TargetEntry* tar, RangeTbl
 
     /* Recurse if we can't find anything at top level */
     bool no_quals = true;
-    if (is_subset_of_quals(query->jointree, tvar, &no_quals) ||
-        (has_subquery && is_subset_of_quals_recurse(rte_qry->subquery, tvar, &no_quals)) ||
-        no_quals) {
+    if (find_distcol_expr_recurse(query, query->jointree, tvar, &no_quals, false) || no_quals) {
         return INSEL_SHIPPABLE_DCOL;
     } else {
         return INSEL_UNSHIPPABLE_COL;
@@ -3953,7 +4073,8 @@ static int has_shippable_col_for_insert(Query* query, TargetEntry* tar, RangeTbl
 /*
  * has_consistent_execnodes:
  * Check exec nodes consistency for INSERT SELECT queries. 
- * @param exec nodes of target RTE and subqury from INSERT SELECT; dist column count (update with function)
+ * @param exec nodes of target RTE and subqury from INSERT SELECT; dist column count (update with function);
+ *      single_node flag: single DN execution ignores some of the limitations.
  * @return true if consistent, else false.
  */
 static bool has_consistent_execnodes(ExecNodes* exec_nodes_rte, ExecNodes* exec_nodes_qry, int* dcol_cnt)
@@ -3963,7 +4084,7 @@ static bool has_consistent_execnodes(ExecNodes* exec_nodes_rte, ExecNodes* exec_
     Distribution distr_r;
     Distribution distr_q;
 
-    if (exec_nodes_rte == NULL || exec_nodes_qry == NULL || dcol_cnt == NULL)   /* if not shippable */
+    if (exec_nodes_rte == NULL || exec_nodes_qry == NULL)   /* if not shippable */
         return false;
 
     /* Get node groups */
@@ -3975,15 +4096,15 @@ static bool has_consistent_execnodes(ExecNodes* exec_nodes_rte, ExecNodes* exec_
         return false;
     }
 
-    /* If do not have the same distrbution, return */
-    if (exec_nodes_rte->baselocatortype != exec_nodes_qry->baselocatortype) {
+    /* Make replication table an exception */
+    if (IsExecNodesReplicated(exec_nodes_rte) && IsExecNodesReplicated(exec_nodes_qry)) {
+        return true;
+    }
+
+    if (exec_nodes_qry->accesstype != RELATION_ACCESS_READ) {
         return false;
     }
 
-    /* Make replication table an exception */
-    if (IsExecNodesReplicated(exec_nodes_rte)) {
-        return true;
-    }
 
     /* 
      * Agree on numbers
@@ -4000,7 +4121,9 @@ static bool has_consistent_execnodes(ExecNodes* exec_nodes_rte, ExecNodes* exec_
     if (dcnt <= 0 || list_length(exec_nodes_rte->en_dist_vars) > 1)
         return false;
 
-    *dcol_cnt = dcnt;
+    if (dcol_cnt) {
+        *dcol_cnt = dcnt;
+    }
 
     foreach(lc, exec_nodes_qry->en_dist_vars)
     {
@@ -4015,22 +4138,68 @@ static bool has_consistent_execnodes(ExecNodes* exec_nodes_rte, ExecNodes* exec_
 }
 
 /*
- * is_insert_subquery_parsable
- * Check if this insert statement is able to parse back with get_var_from_node().
+ * is_insert_subquery_deparsable
+ * Check if this INSERT statement is able to parse back with get_var_from_node().
  * Node: We want to make sure it is able to parse back with get_var_from_node()
- *      so that the query can ship to datanodes in correct order.
- * @param targetList of subquery
+ *      so that the query can ship to datanodes with correct column order.
+ * @param query and subquery of INSERT statement
  * @return true if all target entries are able to parse back with get_var_from_node()
  */
-bool is_insert_subquery_parsable(List* targetList)
+static bool is_insert_subquery_deparsable(Query* query, Query* subquery)
 {
     ListCell* lc = NULL;
-    foreach(lc, targetList)
-    {
+
+    /*
+     * Before the targetList is modified by anywhere other than rewriteTargetListIU(),
+     * we can assure that the difference between query's and subquery's targetList is 
+     * default values. Then, we need to make sure all default values can be identified
+     * by our deparser.
+     *
+     * The statement is unshippable(and not valid) if negative number of default values is given.
+     */
+    int default_value_cnt = list_length(query->targetList) - list_length(subquery->targetList);
+    if (unlikely(default_value_cnt < 0)) {
+        return false;
+    }
+
+    foreach(lc, query->targetList) {
         TargetEntry* tar = (TargetEntry*)lfirst(lc);
-        if (get_var_from_node((Node*)tar->expr) == NULL) {
+
+        /*
+         * If we can get a Var from the targetEntry's expr, we can deparse it.
+         */
+        Var* var = get_var_from_node((Node*)tar->expr, func_oid_check_pass);
+        if (var && (var->varattno <= list_length(subquery->targetList))) {
+            continue;
+        }
+        /*
+         * If we can't get a Var, it MUST be a default value.
+         * We make this assumption base on the fact that all default value
+         * should end up being a Const expression.
+         * However, if we found more Const expressions than possible number
+         * of default values, it means that we are unable to deparse all
+         * non-default columns (since we need a Var to do that and one of them
+         * doesn't have one).
+         * (e.g. INSERT INTO t1(a, b) SELECT a, $1 FROM t2;
+         * `b` here is referencing a Param, not a Var,
+         *      and if `t1` has a column `c` with default value '1',
+         *      we will end up here)
+         */
+        if (default_value_cnt == 0) {
             return false;
         }
+        /*
+         * We only handle the expressions that can be evaluated.
+         */
+        if (eval_const_expressions(NULL, (Node*)tar->expr)) {
+            default_value_cnt--;
+        } else {
+            return false;   /* Unshippable if we can't handle it here */
+        }
+    }
+    /* Make sure all predicted default values is checked */
+    if (default_value_cnt != 0) {
+        return false;
     }
     return true;
 }
@@ -4048,8 +4217,7 @@ int get_relative_dist_pos(ExecNodes* exec_nodes, Index varno, AttrNumber varattn
     ListCell* dlc = NULL;
     List* dist_vars = NIL;
 
-    foreach(lc, exec_nodes->en_dist_vars)
-    {
+    foreach(lc, exec_nodes->en_dist_vars) {
         dist_vars = (List*)lfirst(lc);
         int pos = 0;    /* Reset */
         foreach(dlc, dist_vars)
@@ -4065,6 +4233,170 @@ int get_relative_dist_pos(ExecNodes* exec_nodes, Index varno, AttrNumber varattn
 }
 
 /*
+ * get_nodeList_from_dexprs
+ * Get the execute datanode list from distribution expressions.
+ * NOTE: This is a proprietary method, do not use this to get exec_nodes.
+ * @param query, subquery, token list and access type
+ * @return datenode list
+ */
+List* get_nodeList_from_dexprs(
+    Query* query, Query* subquery, List* dexprList, List* idx_dist, List* distcols)
+{
+    int num_of_distcols = list_length(dexprList);
+
+    if (list_length(idx_dist) != num_of_distcols) {
+        list_free_ext(idx_dist);
+        return NULL;
+    }
+
+    /* Allocate evaluate space */
+    Datum* distcol_value = (Datum*)palloc(num_of_distcols * sizeof(Datum));
+    bool* distcol_isnull = (bool*)palloc(num_of_distcols * sizeof(bool));
+    Oid* distcol_type = (Oid*)palloc(num_of_distcols * sizeof(Oid));
+    int i = 0;
+
+    /* Get locator info from result relation */
+    RelationLocInfo* loc_info = GetRelationLocInfo((rt_fetch(query->resultRelation, query->rtable))->relid);
+
+    /* Loop through token list */
+    ListCell* lc = NULL;
+    ListCell* lc2 = NULL;
+    forboth(lc, dexprList, lc2, distcols) {
+        Node* node = (Node*)lfirst(lc);
+        int distAttno = lfirst_int(lc2);
+        Const* const_expr = NULL;
+
+        /* 
+         * We need to find the expression associated with the given Var.
+         * And then try to transform the expression into a equivalent Const.
+         */
+        if (IsA(node, Var)) {
+            Var* var_expr = (Var*)node;
+            Expr* expr = find_distcol_expr_recurse(subquery, subquery->jointree, var_expr, NULL, true);
+            expr = get_coerced_expr(query, loc_info, distAttno, expr);
+            node = eval_const_expressions_params(NULL, (Node*)expr, query->boundParamsQ);
+        }
+
+        /* If it cannot be transformed, quit */
+        if (node == NULL || !IsA(node, Const)) {
+            free_distcol_info(distcol_value, distcol_isnull, distcol_type, idx_dist);   /* free */
+            return NIL;
+        }
+
+        /* 
+         * If it is a Const/can be transformed into Const, 
+         * we simply put it in the eval space.
+         */
+        const_expr = (Const*)node;
+        distcol_value[i] = const_expr->constvalue;
+        distcol_isnull[i] = const_expr->constisnull;
+        distcol_type[i] = const_expr->consttype;
+        i++;
+    }
+
+    /* Get exec_nodes, hotkey handled here */
+    ExecNodes* exec_nodes = GetRelationNodes(
+        loc_info, distcol_value, distcol_isnull, distcol_type, idx_dist, RELATION_ACCESS_READ);
+
+    /* Call free */
+    free_distcol_info(distcol_value, distcol_isnull, distcol_type, idx_dist);
+    return exec_nodes->nodeList;
+}
+
+/*
+ * get_one_dexpr
+ * Roughly get one distribute expression on targetlists.
+ * @param query, subquery, target entry of the INSERT query
+ * @return distribute expression
+ */
+Expr* get_one_dexpr(Query* query, Query* subquery, TargetEntry* tar_rte)
+{
+    Expr* dexpr = NULL;
+
+    /* Append default values to tokenList, we do not expect any func except for type casts here */
+    dexpr = (Expr*)get_var_from_node((Node*)tar_rte->expr, func_oid_check_restricted);
+    if (dexpr == NULL) { /* If not found, it might be a default value here */
+        dexpr = (Expr*)eval_const_expressions(NULL, (Node*)tar_rte->expr);
+        if (dexpr == NULL) {
+            return NULL;       /* Return if not found/not support */
+        }
+        return dexpr;
+    }
+
+    /* Try to get the 'true Var' from subquery's targetlist */
+    TargetEntry* tar_qry = get_tle_by_resno(subquery->targetList, ((Var*)dexpr)->varattno);
+    if (tar_qry == NULL) {
+        return NULL;   /* return on not found */
+    }
+
+    /* We check the 'true var' with same method */
+    dexpr = (Expr*)get_var_from_node((Node*)tar_qry->expr, func_oid_check_restricted);
+    if (dexpr == NULL) {
+        dexpr = (Expr*)eval_const_expressions_params(NULL, (Node*)tar_qry->expr, query->boundParamsQ);
+        if (dexpr == NULL) {
+            return NULL;       /* Return if not found/not support */
+        }
+    }
+    return dexpr;   /* return a Var or Const */
+}
+
+/*
+ * check_insert_subquery_on_singlenode
+ * If subquery can be executed on a single node. All we need to do is to make sure
+ * the INSERT can be executed on the same node.
+ * @param query, subquery, exec_nodes of query and subquery
+ * @return true if node list matches, else false
+ */
+bool check_insert_subquery_on_singlenode(
+    Query* query, Query* subquery, ExecNodes* en_rte, ExecNodes* en_qry, Shippability_context* sc_context)
+{
+    List* dexprList = NIL;  /* List of distrbute column expressions */
+    List* posList = NIL;    /* Position of distributed column, idx_dist */
+    List* refList = NIL;    /* Refence List contains only distribution columns, if there is one */
+    Expr* dexpr = NULL;
+
+    /* Get relation oid of result relation */
+    Oid relid_rte = (rt_fetch(query->resultRelation, query->rtable))->relid;
+
+    /* We loop through targetlist and find the distribution column, or a value if lucky */
+    ListCell* lc = NULL;
+    foreach(lc, query->targetList) {
+        TargetEntry* tar_rte = (TargetEntry*)lfirst(lc);
+        if (!IsDistribColumn(relid_rte, tar_rte->resno)) {
+            continue;
+        }
+
+        /* Position of the distrobute column, freed in get_nodeList_from_dexpr */
+        posList = lappend_int(posList, get_relative_dist_pos(en_rte, 0, tar_rte->resno, true) - 1);
+
+        /* Append one distcol expr into tokenList */
+        dexpr = get_one_dexpr(query, subquery, tar_rte);
+        if (dexpr == NULL) {
+            list_free_ext(dexprList);
+            list_free_ext(posList);
+            list_free_ext(refList);
+            return false;
+        }
+        dexprList = lappend(dexprList, dexpr);
+        if (IsA(dexpr, Var)) {
+            refList = lappend_int(refList, tar_rte->resno);
+        } else {
+            refList = lappend_int(refList, 0);
+        }
+    }
+
+    /* Check if INSERT can be executed on the same datanode as SELECT */
+    List* nodeList = get_nodeList_from_dexprs(query, subquery, dexprList, posList, refList);
+    list_free_ext(dexprList);
+    list_free_ext(refList);
+    if (nodeList && list_is_subset_int(nodeList, en_qry->nodeList) && sc_context->sc_exec_nodes) {
+        sc_context->sc_exec_nodes->nodeList = nodeList;
+        return true;
+    }
+    return false;
+}
+
+/*
  * check_insert_subquery_shippability:
  * Check if an INSERT SELECT query is shippable. 
  * Need to make sure the distribution of the subquery is matching with the distribution of the target table.
@@ -4077,41 +4409,76 @@ static void check_insert_subquery_shippability(Query* query, Query* subquery, Sh
     ExecNodes* exec_nodes_qry = NULL;
     int dcnt_all = 0;   /* Counter of all distribtion columns */
     int dcnt_pst = 0;   /* Counter of presented distribtion columns */
+    bool contain_column_store = sc_context->sc_contain_column_store;
+    bool use_star_targets = false;
 
     /* Don't ship queries with FOR UPDATE/SHARE clause while dealing with INSERT */
     if (query->rowMarks || subquery->rowMarks) {
         return;
     }
+
     RangeTblEntry *rte = rt_fetch(query->resultRelation, query->rtable);
-    if (!has_shippable_insert_rte(rte)) {
+    if (!has_shippable_insert_rte(rte) || !is_insert_subquery_deparsable(query, subquery)) {
         return;
     }
+    
     /* This is required only for target RTE */
     if (rte->rtekind != RTE_RELATION || rte->relid == 0) {
         return;
     }
     Oid relid_rte = rte->relid;
 
-    /* Get execution nodes from target table and subquery */
+    /* Get execution nodes from target table and subquery, save it temporarily */
     exec_nodes_rte = pgxc_FQS_get_relation_nodes(rte, query->resultRelation, query);
-    exec_nodes_qry = pgxc_is_query_shippable(subquery, 0, false);
+    exec_nodes_qry = pgxc_is_query_shippable(subquery,
+        sc_context->sc_query_level + 1,
+        sc_context->sc_light_proxy,
+        &contain_column_store,
+        &use_star_targets);
+
+    /* update necessary values */
+    if (contain_column_store)
+        sc_context->sc_contain_column_store = contain_column_store;
+    if (use_star_targets)
+        query->use_star_targets = use_star_targets;
+
+    /* We donnot expect any value here in current level */
+    if (unlikely(sc_context->sc_exec_nodes != NULL)) {
+        return;
+    }
+    sc_context->sc_exec_nodes = exec_nodes_qry;
+
+    /* RTE and query must have consistent exec_nodes features */
     if (!has_consistent_execnodes(exec_nodes_rte, exec_nodes_qry, &dcnt_all)) {
         return;
     }
+
+    /*
+     * If we know it is going to be executed on a single node, we can evaluate the shippability
+     * base on the node being executed on, instead of the consistency of distribution.
+     */
+    if (((IsExecNodesReplicated(exec_nodes_qry) && exec_nodes_rte->baselocatortype == LOCATOR_TYPE_HASH) ||
+        ExecOnSingleNode(exec_nodes_qry->nodeList)) &&
+        check_insert_subquery_on_singlenode(query, subquery, exec_nodes_rte, exec_nodes_qry, sc_context)) {
+        sc_context->sc_inselect = true;
+        return;
+    }
+
+    /* If do not have the same distrbution for multi-node execution, return */
+    if ((exec_nodes_rte->baselocatortype != exec_nodes_qry->baselocatortype)) {
+        return;
+    }
+
     /* Support HASH/REPLICATION/LIST/RANGE for now */
     bool isDistBySlice = IsLocatorDistributedBySlice(exec_nodes_rte->baselocatortype);
     if (exec_nodes_rte->baselocatortype != LOCATOR_TYPE_HASH && !isDistBySlice) {
         /* Handle REPLICATION statements, all target entries need to be parsable */
-        sc_context->sc_inselect = IsExecNodesReplicated(exec_nodes_rte) && \
-            is_insert_subquery_parsable(query->targetList);
+        sc_context->sc_inselect = IsExecNodesReplicated(exec_nodes_rte);
         return;
     }
+
     /* List/Range tables are shippable iff sliceinfo matches, keys and key order match, and NodeGroup matches. */
     if (isDistBySlice && !PgxcIsDistInfoSame(exec_nodes_rte, exec_nodes_qry)) {
-        return;
-    }
-    /* If targets are not consistent throughout the query, drop it */
-    if (list_length(query->targetList) != list_length(subquery->targetList)) {
         return;
     }
 
@@ -4123,63 +4490,52 @@ static void check_insert_subquery_shippability(Query* query, Query* subquery, Sh
      * [table t1(a, b, c) hash(a, b)] and [table t2(b, c, d) hash(b, c)] has the same pattern
      * but
      * [table t1(a, b, c) hash(a, b)] and [table t2(b, c, d) hash(c, b)] does not.
-     * Note that we are not insterested in what happened to those non distribution columns,
+     * Note that we are not interested in what happened to those non distribution columns,
      * but we do apply the same limitations on them for obvious reasons.
      */
-    for (short i = 0; i < list_length(query->targetList); i++) {
-        bool is_dcol_rte = false;
+    ListCell* lc = NULL;
+    foreach (lc, query->targetList) {
         bool is_dcol_qry = false;
-        ListCell* lc = NULL;
         Var* tvar_rte = NULL;
         Var* tvar_qry = NULL;
-        TargetEntry* tar_rte = NULL;
-        TargetEntry* tar_qry = NULL;
-        Index out_varno = 0;    /* Out table varno in subquery */
-        Index std_varno = 0;    /* Standard varno (position of evaluated subquery) */
+        Index src_varno = 0;    /* Source table varno in subquery */
 
-        /* Get corrsponding target_lists */
-        foreach (lc, query->targetList) {
-            tar_rte = (TargetEntry*)lfirst(lc);
-            tvar_rte = get_var_from_node((Node*)tar_rte->expr);
-            if (tvar_rte == NULL)
-                return;
-            if (std_varno == 0)
-                std_varno = tvar_rte->varno;
-            if (tvar_rte->varattno == i + 1 && tvar_rte->varno == std_varno)
-                break;
-            tar_rte = NULL;
-            tvar_rte = NULL;
+        /* Get corrsponding target_lists, ignore the non distribute columns */
+        TargetEntry* tar_rte = (TargetEntry*)lfirst(lc);
+        if (!IsDistribColumn(relid_rte, tar_rte->resno)) {
+            continue;
         }
-        tar_qry = (TargetEntry*)(list_nth(subquery->targetList, (int)i));
-        tvar_qry = get_var_from_node((Node*)tar_qry->expr);
-        if (tvar_rte == NULL || tvar_qry == NULL) {
+        
+        /* Get var from INSERT targetlist */
+        tvar_rte = get_var_from_node((Node*)tar_rte->expr, func_oid_check_restricted);
+        if (tvar_rte == NULL) {     /* If not found, it might be a default value here */
+            return;   /* Do not handle defualt value on distriution column, can't ship */
+        }
+
+        /* Try to get the var from subquery's targetlist */
+        TargetEntry* tar_qry = get_tle_by_resno(subquery->targetList, tvar_rte->varattno);
+        if (tar_qry == NULL) {
+            return;   /* return on not found */
+        }
+        tvar_qry = get_var_from_node((Node*)tar_qry->expr, func_oid_check_restricted);
+        if (tvar_qry == NULL) {
             return;
         }
+
         /* Get distribution info of subquery column */
         int ship_flag = has_shippable_col_for_insert(subquery, tar_qry, rte);
         if (ship_flag == INSEL_SHIPPABLE_DCOL) {
             is_dcol_qry = true;
-        } else if (ship_flag == INSEL_SHIPPABLE_NCOL) {
-            is_dcol_qry = false;
-        } else {   /* GIVE UP on target columns that cannot be traced and varified */
+        } else {
             return;
         }
-        
-        /* Get distribution info of target column */
-        is_dcol_rte = IsDistribColumn(relid_rte, tar_rte->resno);
-        /* If distribution pattern not match */
-        if (is_dcol_rte && !is_dcol_qry) {
-            return;  
-        }
-        if (!is_dcol_rte) {
-            continue;
-        }
+
         /* Count number of distr column in target */
-        Index new_out_varno = tvar_qry->varno;
+        Index new_src_varno = tvar_qry->varno;
         dcnt_pst++;
-        if (out_varno == 0) {
-            out_varno = new_out_varno;
-        } else if (out_varno != new_out_varno) { /* If distribution columns are not from a single table */
+        if (src_varno == 0) {
+            src_varno = new_src_varno;
+        } else if (src_varno != new_src_varno) { /* If distribution columns are not from a single table */
             return;
         } else {
             /* Do nothing */

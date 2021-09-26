@@ -45,8 +45,8 @@
 #include "libpq/libpq.h"
 #include "libcomm/libcomm.h"
 #include <sys/poll.h>
-#include "executor/execStream.h"
-#include "executor/nodeRecursiveunion.h"
+#include "executor/exec/execStream.h"
+#include "executor/node/nodeRecursiveunion.h"
 #include "postmaster/postmaster.h"
 #include "access/transam.h"
 #include "gssignal/gs_signal.h"
@@ -969,12 +969,13 @@ void StreamNodeGroup::syncQuit(StreamObjStatus status)
 
     if (u_sess->stream_cxt.global_obj != NULL) {
 #ifdef ENABLE_MULTIPLE_NODES
-        if (status == STREAM_ERROR)
+        if (status == STREAM_ERROR) {
 #else
         if (status == STREAM_ERROR ||
-            unlikely(u_sess->stream_cxt.global_obj->GetStreamQuitStatus() == STREAM_ERROR))
+            unlikely(u_sess->stream_cxt.global_obj->GetStreamQuitStatus() == STREAM_ERROR)) {
 #endif
             u_sess->stream_cxt.global_obj->MarkSyncControllerStopFlagAll();
+        }
 
         if (StreamTopConsumerAmI()) {
             /*

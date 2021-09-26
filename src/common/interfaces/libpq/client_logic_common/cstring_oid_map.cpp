@@ -25,12 +25,143 @@
 #include "libpq-int.h"
 #include "libpq-fe.h"
 #include "libpq-int.h"
+#include "../client_logic_cache/dataTypes.def"
 #define RESIZE_FACTOR 4
 
-CStringOidMap::CStringOidMap() : size(0), k_v_map(NULL) {}
+CStringOidMap::CStringOidMap() : size(0), k_v_map(NULL) 
+{
+    fill_types_map();
+}
 CStringOidMap::~CStringOidMap()
 {
     clear();
+}
+
+void CStringOidMap::fill_types_map() 
+{
+    set("bool", BOOLOID);
+    set("bytea", BYTEAOID);
+    set("char", CHAROID);
+    set("name", NAMEOID);
+    set("int8", INT8OID);
+    set("int2", INT2OID);
+    set("int1", INT1OID);
+    set("int2vector", INT2VECTOROID);
+    set("int4", INT4OID);
+    set("regproc", REGPROCOID);
+    set("text", TEXTOID);
+    set("oid", OIDOID);
+    set("tid", TIDOID);
+    set("xid", XIDOID);
+    set("shortxid", SHORTXIDOID);
+    set("cid", CIDOID);
+    set("vectoroid", OIDVECTOROID);
+    set("vectorextendoid", OIDVECTOREXTENDOID);
+    set("raw", RAWOID);
+    set("blob", BLOBOID);
+    set("clob", CLOBOID);
+    set("json", JSONOID);
+    set("xml", XMLOID);
+    set("pgnodetree", PGNODETREEOID);
+    set("smgr", SMGROID);
+    set("point", POINTOID);
+    set("lseg", LSEGOID);
+    set("path", PATHOID);
+    set("box", BOXOID);
+    set("polygon", POLYGONOID);
+    set("line", LINEOID);
+    set("float4", FLOAT4OID);
+    set("float8", FLOAT8OID);
+    set("abstime", ABSTIMEOID);
+    set("reltime", RELTIMEOID);
+    set("tinterval", TINTERVALOID);
+    set("unknown", UNKNOWNOID);
+    set("circle", CIRCLEOID);
+    set("cash", CASHOID);
+    set("casharray", CASHARRAYOID);
+    set("macaddr", MACADDROID);
+    set("inet", INETOID);
+    set("cidr", CIDROID);
+    set("boolarray", BOOLARRAYOID);
+    set("bytearray", BYTEARRAYOID);
+    set("chararray", CHARARRAYOID);
+    set("namearray", NAMEARRAYOID);
+    set("int2array", INT2ARRAYOID);
+    set("int1array", INT1ARRAYOID);
+    set("int4array", INT4ARRAYOID);
+    set("textarray", TEXTARRAYOID);
+    set("bpchararray", BPCHARARRAYOID);
+    set("varchararray", VARCHARARRAYOID);
+    set("int8array", INT8ARRAYOID);
+    set("float4array", FLOAT4ARRAYOID);
+    set("float8array", FLOAT8ARRAYOID);
+    set("abstimearray", ABSTIMEARRAYOID);
+    set("reltimearray", RELTIMEARRAYOID);
+    set("arraytinterval", ARRAYTINTERVALOID);
+    set("aclitem", ACLITEMOID);
+    set("aclitemarray", ACLITEMARRAYOID);
+    set("inetarray", INETARRAYOID);
+    set("cidrarray", CIDRARRAYOID);
+    set("cstringarray", CSTRINGARRAYOID);
+    set("bpchar", BPCHAROID);
+    set("varchar", VARCHAROID);
+    set("nvarchar2", NVARCHAR2OID);
+    set("nvarchar2array", NVARCHAR2ARRAYOID);
+    set("date", DATEOID);
+    set("time", TIMEOID);
+    set("timestamp", TIMESTAMPOID);
+    set("timestamparray", TIMESTAMPARRAYOID);
+    set("datearray", DATEARRAYOID);
+    set("timearray", TIMEARRAYOID);
+    set("timestamptz", TIMESTAMPTZOID);
+    set("timestamptzarray", TIMESTAMPTZARRAYOID);
+    set("interval", INTERVALOID);
+    set("arrayinterval", ARRAYINTERVALOID);
+    set("arraynumeric", ARRAYNUMERICOID);
+    set("timetz", TIMETZOID);
+    set("arraytimetz", ARRAYTIMETZOID);
+    set("bit", BITOID);
+    set("bitarray", BITARRAYOID);
+    set("varbit", VARBITOID);
+    set("varbitarray", VARBITARRAYOID);
+    set("numeric", NUMERICOID);
+    set("refcursor", REFCURSOROID);
+    set("regprocedure", REGPROCEDUREOID);
+    set("regoper", REGOPEROID);
+    set("regoperator", REGOPERATOROID);
+    set("regclass", REGCLASSOID);
+    set("regtype", REGTYPEOID);
+    set("regtypearray", REGTYPEARRAYOID);
+    set("uuid", UUIDOID);
+    set("tsvector", TSVECTOROID);
+    set("gtsvector", GTSVECTOROID);
+    set("tsquery", TSQUERYOID);
+    set("regconfig", REGCONFIGOID);
+    set("regdictionary", REGDICTIONARYOID);
+    set("int4range", INT4RANGEOID);
+    set("record", RECORDOID);
+    set("recordarray", RECORDARRAYOID);
+    set("cstring", CSTRINGOID);
+    set("any", ANYOID);
+    set("anyarray", ANYARRAYOID);
+    set("void", VOIDOID);
+    set("trigger", TRIGGEROID);
+    set("language_handler", LANGUAGE_HANDLEROID);
+    set("internal", INTERNALOID);
+    set("opaque", OPAQUEOID);
+    set("anyelement", ANYELEMENTOID);
+    set("anynonarray", ANYNONARRAYOID);
+    set("anyenum", ANYENUMOID);
+    set("fdw_handler", FDW_HANDLEROID);
+    set("anyrange", ANYRANGEOID);
+    set("smalldatetime", SMALLDATETIMEOID);
+    set("smalldatetimearray", SMALLDATETIMEARRAYOID);
+    set("hll_", HLL_OID);
+    set("hll_array", HLL_ARRAYOID);
+    set("hll_hashval_", HLL_HASHVAL_OID);
+    set("hll_hashval_array", HLL_HASHVAL_ARRAYOID);
+    set("byteawithoutorderwithequalcol", BYTEAWITHOUTORDERWITHEQUALCOLOID);
+    set("byteawithoutordercol", BYTEAWITHOUTORDERCOLOID);
 }
 
 void CStringOidMap::set(const char *key, const Oid value)

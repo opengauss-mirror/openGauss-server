@@ -1,7 +1,7 @@
 /*
  * xlogdefs.h
  *
- * Postgres transaction log manager record pointer and
+ * PostgopenGaussres transaction log manager record pointer and
  * timeline number definitions
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -42,6 +42,7 @@ typedef uint64 XLogRecPtr;
 const uint32 g_InvalidTermDN = 0;
 
 #define XLogRecPtrIsInvalid(r) ((r) == InvalidXLogRecPtr)
+#define XLogRecPtrIsValid(r) ((r) != InvalidXLogRecPtr)
 
 /*
  * XLogSegNo - physical log file sequence number.

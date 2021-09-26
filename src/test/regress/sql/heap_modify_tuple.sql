@@ -338,7 +338,6 @@ drop user account2;
 
 
 
-SET enforce_two_phase_commit TO off;
 
 CREATE VIEW street AS
    SELECT r.name, r.thepath, c.cname AS cname

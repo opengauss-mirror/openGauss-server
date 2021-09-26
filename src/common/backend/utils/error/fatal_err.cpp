@@ -45,6 +45,7 @@
 
 #define SIG_BUFLEN 1024
 #define STACK_PRINT_LIMIT 128
+#define TIME_STR_LEN 50
 
 struct sig_unit {
     const char *name;
@@ -72,8 +73,11 @@ static bool open_gs_err(int *fd)
     char path[MAXPGPATH];
     const char *dir = getenv("GAUSSLOG");
 
-    /* If $GAUSSLOG does not set, replace with current directory */
-    dir = dir ? dir : "./";
+    /* If $GAUSSLOG does not set or invalid, replace with current directory */
+    if (check_backend_env_sigsafe(dir) != ENV_OK) {
+        dir = "./";
+    }
+
     res = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/ffic_log", dir);
     if (res == -1) {
         handle_sig_error("fail to concatenate dir name");
@@ -83,13 +87,24 @@ static bool open_gs_err(int *fd)
             errno != EEXIST) {
         handle_sig_error("fail to mkdir $GAUSSLOG/ffic_log");
     }
-
-    res = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/ffic_log/ffic_gaussdb-%lu.log",
-        dir, time(NULL));
-    if (res == -1) {
-        handle_sig_error("fail to concatenate file name");
+    pg_time_t stamp_time = (pg_time_t)time(NULL);
+    char strfbuf[TIME_STR_LEN];
+    pg_tm localTime;
+    pg_tm *p = NULL;
+    if (log_timezone != NULL && (p = pg_localtime_s(&stamp_time, &localTime, log_timezone)) != NULL) {
+        pg_strftime(strfbuf, sizeof(strfbuf), "%Y-%m-%d_%H%M%S", p);
+        res = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/ffic_log/ffic_gaussdb-%s.log",
+            dir, strfbuf);
+        if (res == -1) {
+            handle_sig_error("fail to concatenate file name");
+        }
+    } else {
+        res = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/ffic_log/ffic_gaussdb-%lu.log",
+            dir, time(NULL));
+        if (res == -1) {
+            handle_sig_error("fail to concatenate file name");
+        }
     }
-
     *fd = open(path, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
     if (*fd == -1) {
         handle_sig_error("fail to open log dir");

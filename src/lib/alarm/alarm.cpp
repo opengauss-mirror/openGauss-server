@@ -14,7 +14,7 @@
  * ---------------------------------------------------------------------------------------
  *
  * alarm.cpp
- *    POSTGRES alarm reporting/logging definitions.
+ *    openGauss alarm reporting/logging definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

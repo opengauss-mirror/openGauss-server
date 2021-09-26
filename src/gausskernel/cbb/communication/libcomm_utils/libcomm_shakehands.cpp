@@ -56,7 +56,7 @@
 
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
@@ -218,6 +218,10 @@ void gs_r_close_logic_connection(struct c_mailbox* cmailbox, int close_reason, F
 
     if (cmailbox->state == MAIL_CLOSED) {
         return;
+    }
+
+    if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+        NotifyListener(cmailbox, true, __FUNCTION__);
     }
 
     // 1, if tcp disconnect, we can not send control message on tcp channel,

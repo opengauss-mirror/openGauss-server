@@ -1,0 +1,617 @@
+-- setups
+create schema schema_no_expand;
+set current_schema = schema_no_expand;
+set rewrite_rule = 'magicset, partialpush, uniquecheck, disablerep, intargetlist, predpushforce';
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+drop table if exists t2;
+NOTICE:  table "t2" does not exist, skipping
+drop table if exists t3;
+NOTICE:  table "t3" does not exist, skipping
+create table t1 (a int, b int, c int);
+create table t2 (a int, b int, c int);
+create table t3 (a int, b int, c int);
+-- insert some data to suppress no statistics warning
+insert into t1 values(1,1,1);
+insert into t2 values(1,1,1);
+insert into t3 values(1,1,1);
+analyze t1;
+analyze t2;
+analyze t3;
+\set EXP 'EXPLAIN  (verbose, costs off)'
+-- case: duplicate hint does not matter 
+:EXP select * from t1 where t1.a in (select /*+ no_expand*/ /*+ no_expand no_expand*/ t2.a from t2);
+               QUERY PLAN                
+-----------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: t2.a
+(6 rows)
+
+-- case: non-relavent subquery in from-list
+:EXP select * from t1, (select /*+ no_expand */ a from t2 where a < 10) tt2 where t1.a = tt2.a;
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop
+   Output: t1.a, t1.b, t1.c, t2.a
+   Join Filter: (t1.a = t2.a)
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+   ->  Seq Scan on schema_no_expand.t2
+         Output: t2.a
+         Filter: (t2.a < 10)
+(8 rows)
+
+-- case: in/not sublink in qual
+:EXP select * from t1 where t1.a in (select /*+ no_expand*/ t2.a from t2);
+               QUERY PLAN                
+-----------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: t2.a
+(6 rows)
+
+:EXP select * from t1 where t1.a not in (select /*+ no_expand*/ t2.a from t2);
+               QUERY PLAN                
+-----------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (NOT (hashed SubPlan 1))
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: t2.a
+(6 rows)
+
+-- case: (not) exists sublink in qual
+:EXP select * from t1 where exists (select /*+ no_expand*/ t2.a from t2 where t2.a = t1.a);
+                       QUERY PLAN                        
+---------------------------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (alternatives: SubPlan 1 or hashed SubPlan 2)
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Filter: (schema_no_expand.t2.a = t1.a)
+   SubPlan 2
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.a
+(9 rows)
+
+:EXP select * from t1 where not exists (select /*+ no_expand*/ t2.a from t2 where t2.a = t1.a);
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (NOT (alternatives: SubPlan 1 or hashed SubPlan 2))
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Filter: (schema_no_expand.t2.a = t1.a)
+   SubPlan 2
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.a
+(9 rows)
+
+-- case: any/some sublink in qual
+:EXP select * from t1 where t1.a = any (select /*+ no_expand*/ t2.a from t2);
+               QUERY PLAN                
+-----------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: t2.a
+(6 rows)
+
+:EXP select * from t1 where t1.a = some (select /*+ no_expand*/ t2.a from t2);
+               QUERY PLAN                
+-----------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: t2.a
+(6 rows)
+
+-- case: or/and any sublinks in qual
+:EXP select * from t1 where t1.a = any (select /*+ no_expand*/ t2.a from t2) or t1.b = any (select /*+ no_expand*/ t2.b from t2);
+                      QUERY PLAN                      
+------------------------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: ((hashed SubPlan 1) OR (hashed SubPlan 2))
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.a
+   SubPlan 2
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.b
+(9 rows)
+
+:EXP select * from t1 where t1.a = any (select /*+ no_expand*/ t2.a from t2) and t1.b = any (select /*+ no_expand*/ t2.b from t2);
+                      QUERY PLAN                       
+-------------------------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: ((hashed SubPlan 1) AND (hashed SubPlan 2))
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.a
+   SubPlan 2
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.b
+(9 rows)
+
+-- case: or/and exists sublinks in qual
+:EXP select * from t1 where exists (select /*+ no_expand*/ t2.a from t2 where t2.a = t1.a) or exists(select /*+ no_expand*/ t2.b from t2 where t2.b = t1.b);
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: ((alternatives: SubPlan 1 or hashed SubPlan 2) OR (alternatives: SubPlan 3 or hashed SubPlan 4))
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Filter: (schema_no_expand.t2.a = t1.a)
+   SubPlan 2
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.a
+   SubPlan 3
+     ->  Seq Scan on schema_no_expand.t2
+           Filter: (schema_no_expand.t2.b = t1.b)
+   SubPlan 4
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.b
+(15 rows)
+
+:EXP select * from t1 where exists (select /*+ no_expand*/ t2.a from t2 where t2.a = t1.a) and exists(select /*+ no_expand*/ t2.b from t2 where t2.b = t1.b);
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: ((alternatives: SubPlan 1 or hashed SubPlan 2) AND (alternatives: SubPlan 3 or hashed SubPlan 4))
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Filter: (schema_no_expand.t2.a = t1.a)
+   SubPlan 2
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.a
+   SubPlan 3
+     ->  Seq Scan on schema_no_expand.t2
+           Filter: (schema_no_expand.t2.b = t1.b)
+   SubPlan 4
+     ->  Seq Scan on schema_no_expand.t2
+           Output: schema_no_expand.t2.b
+(15 rows)
+
+-- case: [intargetlist rewrite] limit 1 in qual
+:EXP select * from t2 where t2.a = (select /*+ no_expand */ t3.b from t3 where t3.b = t2.c and t3.b < 10 order by 1 limit 1) and t2.c < 50 order by 1,2,3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Output: t2.a, t2.b, t2.c
+   Sort Key: t2.a, t2.b, t2.c
+   ->  Seq Scan on schema_no_expand.t2
+         Output: t2.a, t2.b, t2.c
+         Filter: ((t2.c < 50) AND (t2.a = (SubPlan 1)))
+         SubPlan 1
+           ->  Limit
+                 Output: t3.b
+                 ->  Seq Scan on schema_no_expand.t3
+                       Output: t3.b
+                       Filter: ((t3.b < 10) AND (t3.b = t2.c))
+(12 rows)
+
+-- case: [intargetlist rewrite] limit 1 in targetlist
+:EXP select (select /*+ no_expand */ t2.a from t2 where t2.b = t1.b and t2.b<10 order by 1 limit 1), b, c from t1 where t1.b <50 order by 1,2,3;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Output: ((SubPlan 1)), t1.b, t1.c
+   Sort Key: ((SubPlan 1)), t1.b, t1.c
+   ->  Seq Scan on schema_no_expand.t1
+         Output: (SubPlan 1), t1.b, t1.c
+         Filter: (t1.b < 50)
+         SubPlan 1
+           ->  Limit
+                 Output: t2.a
+                 ->  Sort
+                       Output: t2.a
+                       Sort Key: t2.a
+                       ->  Seq Scan on schema_no_expand.t2
+                             Output: t2.a
+                             Filter: ((t2.b < 10) AND (t2.b = t1.b))
+(15 rows)
+
+-- case: [intargetlist rewrite] limit 1 in qual
+:EXP select * from t1 where t1.b = (select /*+ no_expand */ t2.b from t2 inner join t3 on t2.c = t3.c where t2.a = t1.a order by 1 limit 1) and t1.c < 10 order by 1,2,3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c
+   Sort Key: t1.a, t1.b, t1.c
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+         Filter: ((t1.c < 10) AND (t1.b = (SubPlan 1)))
+         SubPlan 1
+           ->  Limit
+                 Output: t2.b
+                 ->  Sort
+                       Output: t2.b
+                       Sort Key: t2.b
+                       ->  Nested Loop
+                             Output: t2.b
+                             Join Filter: (t2.c = t3.c)
+                             ->  Seq Scan on schema_no_expand.t2
+                                   Output: t2.a, t2.b, t2.c
+                                   Filter: (t2.a = t1.a)
+                             ->  Seq Scan on schema_no_expand.t3
+                                   Output: t3.a, t3.b, t3.c
+(20 rows)
+
+-- case: [intargetlist rewrite] limit 1 in sublink targetlist
+:EXP select a,(select /*+ no_expand */ t2.b from t2 inner join t3 on t2.c = t3.c where t2.a = t1.a order by 1 limit 1),c from t1 where t1.c < 10 order by 1,2,3;
+                           QUERY PLAN                            
+-----------------------------------------------------------------
+ Sort
+   Output: t1.a, ((SubPlan 1)), t1.c
+   Sort Key: t1.a, ((SubPlan 1)), t1.c
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, (SubPlan 1), t1.c
+         Filter: (t1.c < 10)
+         SubPlan 1
+           ->  Limit
+                 Output: t2.b
+                 ->  Sort
+                       Output: t2.b
+                       Sort Key: t2.b
+                       ->  Nested Loop
+                             Output: t2.b
+                             Join Filter: (t2.c = t3.c)
+                             ->  Seq Scan on schema_no_expand.t2
+                                   Output: t2.a, t2.b, t2.c
+                                   Filter: (t2.a = t1.a)
+                             ->  Seq Scan on schema_no_expand.t3
+                                   Output: t3.a, t3.b, t3.c
+(20 rows)
+
+-- case: [intargetlist rewrite] limit 1 in sublink targetlist + qual
+:EXP select (select /*+ no_expand */ t2.a from t2 where t2.b = t1.b and t2.b<10 order by 1 limit 1), b, c from t1  where a = (select t3.a from t3 where t3.c = t1.c and t3.b<10 order by 1 limit 1) and t1.b <50 order by 1,2,3;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Output: ((SubPlan 1)), t1.b, t1.c
+   Sort Key: ((SubPlan 1)), t1.b, t1.c
+   ->  Seq Scan on schema_no_expand.t1
+         Output: (SubPlan 1), t1.b, t1.c
+         Filter: ((t1.b < 50) AND (t1.a = (SubPlan 2)))
+         SubPlan 1
+           ->  Limit
+                 Output: t2.a
+                 ->  Sort
+                       Output: t2.a
+                       Sort Key: t2.a
+                       ->  Seq Scan on schema_no_expand.t2
+                             Output: t2.a
+                             Filter: ((t2.b < 10) AND (t2.b = t1.b))
+         SubPlan 2
+           ->  Limit
+                 Output: t3.a
+                 ->  Sort
+                       Output: t3.a
+                       Sort Key: t3.a
+                       ->  Seq Scan on schema_no_expand.t3
+                             Output: t3.a
+                             Filter: ((t3.b < 10) AND (t3.c = t1.c))
+(24 rows)
+
+:EXP select (select t2.a from t2 where t2.b = t1.b and t2.b<10 order by 1 limit 1), b, c from t1  where a = (select /*+ no_expand */ t3.a from t3 where t3.c = t1.c and t3.b<10 order by 1 limit 1) and t1.b <50 order by 1,2,3;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Output: ((SubPlan 1)), t1.b, t1.c
+   Sort Key: ((SubPlan 1)), t1.b, t1.c
+   ->  Seq Scan on schema_no_expand.t1
+         Output: (SubPlan 1), t1.b, t1.c
+         Filter: ((t1.b < 50) AND (t1.a = (SubPlan 2)))
+         SubPlan 1
+           ->  Limit
+                 Output: t2.a
+                 ->  Sort
+                       Output: t2.a
+                       Sort Key: t2.a
+                       ->  Seq Scan on schema_no_expand.t2
+                             Output: t2.a
+                             Filter: ((t2.b < 10) AND (t2.b = t1.b))
+         SubPlan 2
+           ->  Limit
+                 Output: t3.a
+                 ->  Sort
+                       Output: t3.a
+                       Sort Key: t3.a
+                       ->  Seq Scan on schema_no_expand.t3
+                             Output: t3.a
+                             Filter: ((t3.b < 10) AND (t3.c = t1.c))
+(24 rows)
+
+-- case: [intargetlist rewrite] agg sublink + targetlist sublink
+:EXP select (select /*+ no_expand */ count(*) from t1 where t2.b = t1.b), b ,c from t2 where t2.a = (select /*+ no_expand */ t3.b from t3 where t3.b = t2.c and t3.b < 10 order by 1 limit 1) and t2.c < 50 order by 1,2,3;
+                          QUERY PLAN                           
+---------------------------------------------------------------
+ Sort
+   Output: ((SubPlan 1)), t2.b, t2.c
+   Sort Key: ((SubPlan 1)), t2.b, t2.c
+   ->  Seq Scan on schema_no_expand.t2
+         Output: (SubPlan 1), t2.b, t2.c
+         Filter: ((t2.c < 50) AND (t2.a = (SubPlan 2)))
+         SubPlan 1
+           ->  Aggregate
+                 Output: count(*)
+                 ->  Seq Scan on schema_no_expand.t1
+                       Output: t1.a, t1.b, t1.c
+                       Filter: (t2.b = t1.b)
+         SubPlan 2
+           ->  Limit
+                 Output: t3.b
+                 ->  Seq Scan on schema_no_expand.t3
+                       Output: t3.b
+                       Filter: ((t3.b < 10) AND (t3.b = t2.c))
+(18 rows)
+
+-- case: [intargetlist rewrite] nvl,concat_ws,listagg+subllink
+:EXP select nvl((select /*+ no_expand */ a from t2 where t2.a = t1.b order by 1 limit 1), (select /*+ no_expand */ b from t2 where t2.a = t1.b order by 1 limit 1)) from t1 order by 1; 
+                             QUERY PLAN                             
+--------------------------------------------------------------------
+ Sort
+   Output: (COALESCE((SubPlan 1), (SubPlan 2)))
+   Sort Key: (COALESCE((SubPlan 1), (SubPlan 2)))
+   ->  Seq Scan on schema_no_expand.t1
+         Output: COALESCE((SubPlan 1), (SubPlan 2))
+         SubPlan 1
+           ->  Limit
+                 Output: schema_no_expand.t2.a
+                 ->  Seq Scan on schema_no_expand.t2
+                       Output: schema_no_expand.t2.a
+                       Filter: (schema_no_expand.t2.a = t1.b)
+         SubPlan 2
+           ->  Limit
+                 Output: schema_no_expand.t2.b
+                 ->  Sort
+                       Output: schema_no_expand.t2.b
+                       Sort Key: schema_no_expand.t2.b
+                       ->  Seq Scan on schema_no_expand.t2
+                             Output: schema_no_expand.t2.b
+                             Filter: (schema_no_expand.t2.a = t1.b)
+(20 rows)
+
+-- case: [intargetlist rewrite] count(*)
+:EXP select * from t1 where t1.a = (select /*+ no_expand */ count(*) from t2 where t2.b = t1.b) order by t1.b;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c
+   Sort Key: t1.b
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+         Filter: (t1.a = (SubPlan 1))
+         SubPlan 1
+           ->  Aggregate
+                 Output: count(*)
+                 ->  Seq Scan on schema_no_expand.t2
+                       Output: t2.a, t2.b, t2.c
+                       Filter: (t2.b = t1.b)
+(12 rows)
+
+-- case: [intargetlist rewrite] coalesce
+:EXP select * from t1 where t1.a = (select /*+ no_expand */ coalesce(avg(t2.a),10) from t2 where t2.b = t1.b) order by t1.b;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c
+   Sort Key: t1.b
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+         Filter: ((t1.a)::numeric = (SubPlan 1))
+         SubPlan 1
+           ->  Aggregate
+                 Output: COALESCE(avg(t2.a), 10::numeric)
+                 ->  Seq Scan on schema_no_expand.t2
+                       Output: t2.a, t2.b, t2.c
+                       Filter: (t2.b = t1.b)
+(12 rows)
+
+-- case: [intargetlist rewrite] case-when
+:EXP select * from t1 where t1.a = (select /*+ no_expand */ case when avg(t2.a) = 10 then 10 else 0 end from t2 where t2.b = t1.b) order by t1.b;
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c
+   Sort Key: t1.b
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+         Filter: (t1.a = (SubPlan 1))
+         SubPlan 1
+           ->  Aggregate
+                 Output: CASE WHEN (avg(t2.a) = 10::numeric) THEN 10 ELSE 0 END
+                 ->  Seq Scan on schema_no_expand.t2
+                       Output: t2.a, t2.b, t2.c
+                       Filter: (t2.b = t1.b)
+(12 rows)
+
+-- case: [intargetlist rewrite] is null
+:EXP select * from t1 where t1.a =(select /*+ no_expand */ avg(t2.a) is null from t2 where t2.b = t1.b) order by t1.a;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c
+   Sort Key: t1.a
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+         Filter: (t1.a = ((SubPlan 1))::bigint)
+         SubPlan 1
+           ->  Aggregate
+                 Output: (avg(t2.a) IS NULL)
+                 ->  Seq Scan on schema_no_expand.t2
+                       Output: t2.a, t2.b, t2.c
+                       Filter: (t2.b = t1.b)
+(12 rows)
+
+-- case: [intargetlist rewrite] opexr targetlist
+:EXP select * from t1 where t1.a = (select /*+ no_expand */ count(*) + coalesce(avg(t2.a),10) + 3 from t2 where t2.b = t1.b) order by t1.b;
+                                           QUERY PLAN                                            
+-------------------------------------------------------------------------------------------------
+ Sort
+   Output: t1.a, t1.b, t1.c
+   Sort Key: t1.b
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+         Filter: ((t1.a)::numeric = (SubPlan 1))
+         SubPlan 1
+           ->  Aggregate
+                 Output: (((count(*))::numeric + COALESCE(avg(t2.a), 10::numeric)) + 3::numeric)
+                 ->  Seq Scan on schema_no_expand.t2
+                       Output: t2.a, t2.b, t2.c
+                       Filter: (t2.b = t1.b)
+(12 rows)
+
+-- case: [intargetlist rewrite] sublink pullup extend
+create table t(a int, b int);
+analyze t;
+:EXP select * from t where exists (select /*+ no_expand */ * from t t1 where t1.a=t.a and t1.b=(select /*+ no_expand */ max(t2.b) from t t2 where t1.a*2=t2.a));
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Seq Scan on schema_no_expand.t
+   Output: t.a, t.b
+   Filter: (alternatives: SubPlan 2 or hashed SubPlan 4)
+   SubPlan 2
+     ->  Seq Scan on schema_no_expand.t t1
+           Filter: ((t1.a = t.a) AND (t1.b = (SubPlan 1)))
+           SubPlan 1
+             ->  Aggregate
+                   Output: max(t2.b)
+                   ->  Seq Scan on schema_no_expand.t t2
+                         Output: t2.a, t2.b
+                         Filter: ((t1.a * 2) = t2.a)
+   SubPlan 4
+     ->  Seq Scan on schema_no_expand.t t1
+           Output: t1.a
+           Filter: (t1.b = (SubPlan 3))
+           SubPlan 3
+             ->  Aggregate
+                   Output: max(t2.b)
+                   ->  Seq Scan on schema_no_expand.t t2
+                         Output: t2.a, t2.b
+                         Filter: ((t1.a * 2) = t2.a)
+(22 rows)
+
+-- case: [intargetlist rewrite] sublink in targetlist with double agg
+set enable_sort = off;
+:EXP select count(distinct b), (select /*+ no_expand */ b from t1 t2 where t1.a=t2.a) from t1 group by a;
+                    QUERY PLAN                     
+---------------------------------------------------
+ GroupAggregate
+   Output: count(DISTINCT t1.b), (SubPlan 1), t1.a
+   Group By Key: t1.a
+   ->  Sort
+         Output: t1.a, t1.b
+         Sort Key: t1.a
+         ->  Seq Scan on schema_no_expand.t1
+               Output: t1.a, t1.b
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t1 t2
+           Output: t2.b
+           Filter: (t1.a = t2.a)
+(12 rows)
+
+reset enable_sort;
+create table sublink_pullup_t1(a1 int, b1 int, c1 int, d1 int) with (orientation=column);
+create table sublink_pullup_t2(a2 int, b2 int, c2 int) with (orientation=column);
+analyze sublink_pullup_t1;
+analyze sublink_pullup_t2;
+-- case: [intargetlist rewrite] test sublink in targetlist
+:EXP select a1 from sublink_pullup_t1 where a1=(select /*+ no_expand */ avg(a2) from sublink_pullup_t2 where a2%5=a1) order by 1;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Sort
+   Output: sublink_pullup_t1.a1
+   Sort Key: sublink_pullup_t1.a1
+   ->  Row Adapter
+         Output: sublink_pullup_t1.a1
+         ->  CStore Scan on schema_no_expand.sublink_pullup_t1
+               Output: sublink_pullup_t1.a1
+               Filter: ((sublink_pullup_t1.a1)::numeric = (SubPlan 1))
+               SubPlan 1
+                 ->  Aggregate
+                       Output: avg(sublink_pullup_t2.a2)
+                       ->  Row Adapter
+                             Output: sublink_pullup_t2.a2
+                             ->  CStore Scan on schema_no_expand.sublink_pullup_t2
+                                   Output: sublink_pullup_t2.a2
+                                   Filter: ((sublink_pullup_t2.a2 % 5) = sublink_pullup_t1.a1)
+(16 rows)
+
+-- case: [intargetlist rewrite] test simple sublink pull up
+:EXP select a1, (select /*+ no_expand */ avg(a2) from sublink_pullup_t2 where b1=b2) + 1 from sublink_pullup_t1 order by 1;
+                                       QUERY PLAN                                        
+-----------------------------------------------------------------------------------------
+ Sort
+   Output: sublink_pullup_t1.a1, (((SubPlan 1) + 1::numeric))
+   Sort Key: sublink_pullup_t1.a1
+   ->  Row Adapter
+         Output: sublink_pullup_t1.a1, (((SubPlan 1) + 1::numeric))
+         ->  CStore Scan on schema_no_expand.sublink_pullup_t1
+               Output: sublink_pullup_t1.a1, ((SubPlan 1) + 1::numeric)
+               SubPlan 1
+                 ->  Aggregate
+                       Output: avg(sublink_pullup_t2.a2)
+                       ->  Row Adapter
+                             Output: sublink_pullup_t2.a2
+                             ->  CStore Scan on schema_no_expand.sublink_pullup_t2
+                                   Output: sublink_pullup_t2.a2
+                                   Filter: (sublink_pullup_t1.b1 = sublink_pullup_t2.b2)
+(15 rows)
+
+-- no_expand hint in view def's subquery can be triggered
+create view ne_view1 as select * from t1 where t1.a = any (select /*+ no_expand*/ t2.a from t2);
+:EXP select * from ne_view1;
+               QUERY PLAN                
+-----------------------------------------
+ Seq Scan on schema_no_expand.t1
+   Output: t1.a, t1.b, t1.c
+   Filter: (hashed SubPlan 1)
+   SubPlan 1
+     ->  Seq Scan on schema_no_expand.t2
+           Output: t2.a
+(6 rows)
+
+-- no_expand hint in view top level query is not effective
+create view ne_view2 as select /*+ no_expand */ * from t1 where t1.a = any (select t2.a from t2);
+:EXP select * from ne_view2;
+              QUERY PLAN               
+---------------------------------------
+ Nested Loop Semi Join
+   Output: t1.a, t1.b, t1.c
+   Join Filter: (t1.a = t2.a)
+   ->  Seq Scan on schema_no_expand.t1
+         Output: t1.a, t1.b, t1.c
+   ->  Seq Scan on schema_no_expand.t2
+         Output: t2.a, t2.b, t2.c
+(7 rows)
+
+-- cleanup
+drop schema schema_no_expand cascade;
+NOTICE:  drop cascades to 8 other objects
+DETAIL:  drop cascades to table t1
+drop cascades to table t2
+drop cascades to table t3
+drop cascades to table t
+drop cascades to table sublink_pullup_t1
+drop cascades to table sublink_pullup_t2
+drop cascades to view ne_view1
+drop cascades to view ne_view2

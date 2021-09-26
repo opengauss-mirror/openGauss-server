@@ -55,6 +55,8 @@ typedef struct ShippingInfo {
 #define STREAM_RECURSIVECTE_SUPPORTED (IS_STREAM_PLAN && u_sess->attr.attr_sql.enable_stream_recursive)
 
 #define NO_FORM_CLAUSE(query) ((!query->jointree || !query->jointree->fromlist) && (!query->setOperations))
+#define IS_STREAM_TYPE(node, stype) (IsA(node, StreamPath) ? ((StreamPath*)node)->type == stype : \
+    (IsA(node, Stream) ? ((Stream*)node)->type == stype : false))
 
 extern char* StreamTypeToString(StreamType type);
 
@@ -124,7 +126,7 @@ extern bool is_execute_on_allnodes(Plan* plan);
 extern bool is_replicated_plan(Plan* plan);
 extern bool is_hashed_plan(Plan* plan);
 extern bool is_rangelist_plan(Plan* plan);
-extern ExecNodes* stream_merge_exec_nodes(Plan* lefttree, Plan* righttree);
+extern ExecNodes* stream_merge_exec_nodes(Plan* lefttree, Plan* righttree, bool push_nodelist = false);
 extern ExecNodes* get_all_data_nodes(char locatortype);
 extern void pushdown_execnodes(Plan* plan, ExecNodes* exec_nodes, bool add_node = false, bool only_nodelist = false);
 extern void stream_join_plan(PlannerInfo* root, Plan* join_plan, JoinPath* join_path);
@@ -136,6 +138,7 @@ extern bool is_redistribute_stream(Stream* stream);
 extern bool is_gather_stream(Stream* stream);
 extern bool is_hybid_stream(Stream* stream);
 extern void mark_distribute_setop(PlannerInfo* root, Node* node, bool isunionall, bool canDiskeyChange);
+extern void CreateGatherPaths(PlannerInfo* root, RelOptInfo* rel, bool is_join);
 
 extern void foreign_qual_context_init(foreign_qual_context* context);
 extern void foreign_qual_context_free(foreign_qual_context* context);
@@ -158,7 +161,7 @@ extern void stream_walker_context_init(shipping_context *context);
 extern ParallelDesc* create_smpDesc(int consumer_dop, int producer_dop, SmpStreamType smp_type);
 extern Plan* create_local_gather(Plan* plan);
 extern Plan* create_local_redistribute(PlannerInfo* root, Plan* lefttree, List* redistribute_keys, double multiple);
-extern uint2* get_bucketmap_by_execnode(ExecNodes* exec_node, PlannedStmt* plannedstmt);
+extern uint2* get_bucketmap_by_execnode(ExecNodes* exec_node, PlannedStmt* plannedstmt, int *bucketCnt);
 extern Oid get_oridinary_or_foreign_relid(List* rtable);
 extern uint2* GetGlobalStreamBucketMap(PlannedStmt* planned_stmt);
 extern int pickup_random_datanode_from_plan(Plan* plan);

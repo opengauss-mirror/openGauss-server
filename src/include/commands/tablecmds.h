@@ -30,15 +30,15 @@
 
 #define FOREIGNTABLE_SUPPORT_AT_CMD(cmd)                                                                           \
     ((cmd) == AT_ChangeOwner || (cmd) == AT_AddNodeList || (cmd) == AT_SubCluster || (cmd) == AT_DeleteNodeList || \
-        (cmd) == AT_GenericOptions)
+        (cmd) == AT_UpdateSliceLike || (cmd) == AT_GenericOptions)
 
 #define DIST_OBS_SUPPORT_AT_CMD(cmd)                                                                               \
     ((cmd) == AT_ChangeOwner || (cmd) == AT_AddNodeList || (cmd) == AT_DeleteNodeList || (cmd) == AT_SubCluster || \
         (cmd) == AT_GenericOptions || (cmd) == AT_DropNotNull || (cmd) == AT_SetNotNull ||                         \
         (cmd) == AT_SetStatistics || (cmd) == AT_AlterColumnType || (cmd) == AT_AlterColumnGenericOptions ||       \
-        (cmd) == AT_AddIndex || (cmd) == AT_DropConstraint)
+        (cmd) == AT_AddIndex || (cmd) == AT_DropConstraint || (cmd) == AT_UpdateSliceLike)
 
-extern Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId);
+extern Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS = false);
 
 extern void RemoveRelationsonMainExecCN(DropStmt* drop, ObjectAddresses* objects);
 
@@ -113,6 +113,7 @@ extern void checkPartNotInUse(Partition part, const char* stmt);
 extern List* transformConstIntoTargetType(Form_pg_attribute* attrs, int2vector* partitionKey, List* boundary);
 extern List* transformIntoTargetType(Form_pg_attribute* attrs, int2 pos, List* boundary);
 
+extern void RenameDistributedTable(Oid distributedTableOid, const char* distributedTableNewName);
 extern void renamePartitionedTable(Oid partitionedTableOid, const char* partitionedTableNewName);
 extern void renamePartition(RenameStmt* stmt);
 extern void renamePartitionIndex(RenameStmt* stmt);
@@ -130,6 +131,8 @@ extern void clearAttrInitDefVal(Oid relid);
 
 extern void AlterDfsCreateTables(Oid relOid, Datum toast_options, CreateStmt* mainTblStmt);
 extern void ATMatviewGroup(List* stmts, Oid mvid, LOCKMODE lockmode);
+extern void AlterCreateChainTables(Oid relOid, Datum reloptions, CreateStmt *mainTblStmt);
+
 /**
  * @Description: Whether judge the column is partition column.
  * @in rel, A relation.
@@ -143,4 +146,8 @@ extern void ATExecEnableDisableRls(Relation rel, RelationRlsStatus changeType, L
 extern bool isQueryUsingTempRelation(Query *query);
 extern void addToastTableForNewPartition(Relation relation, Oid newPartId);
 extern void fastDropPartition(Relation rel, Oid partOid, const char* stmt, Oid intervalPartOid = InvalidOid);
+extern void ExecutePurge(PurgeStmt* stmt);
+extern void ExecuteTimeCapsule(TimeCapsuleStmt* stmt);
+extern void truncate_check_rel(Relation rel);
+extern void CheckDropViewValidity(ObjectType stmtType, char relKind, const char* relname);
 #endif /* TABLECMDS_H */

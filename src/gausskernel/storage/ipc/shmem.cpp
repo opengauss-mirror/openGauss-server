@@ -11,7 +11,7 @@
  * IDENTIFICATION
  *	  src/gausskernel/storage/ipc/shmem.cpp
  *
- * POSTGRES processes share one or more regions of shared memory.
+ * openGauss processes share one or more regions of shared memory.
  * The shared memory is created by a postmaster and is inherited
  * by each backend via fork() (or, in some ports, via other OS-specific
  * methods).  The routines in this file are used for allocating and
@@ -19,7 +19,7 @@
  *
  * NOTES:
  *		(a) There are three kinds of shared memory data structures
- *	available to POSTGRES: fixed-size structures, queues and hash
+ *	available to openGauss: fixed-size structures, queues and hash
  *	tables.  Fixed-size structures contain things like global variables
  *	for a module and should never be allocated after the shared memory
  *	initialization phase.  Hash tables have a fixed maximum size, but

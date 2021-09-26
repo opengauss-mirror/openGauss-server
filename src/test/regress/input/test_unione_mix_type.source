@@ -1,0 +1,211 @@
+create schema test_unione_mix_tables_1;
+set current_schema='test_unione_mix_tables_1';
+create type composite_type as (c1 int, c2 boolean, c3 money, c4 text, c5 date);
+
+create table t1
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+
+create table t2
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+create table t3
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+
+-- create table for post data insertion verification
+drop table if exists t1_v;
+drop table if exists t2_v;
+drop table if exists t3_v;
+
+create table t1_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+create table t2_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+create table t3_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+-- copy data
+\COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|' csv header;
+\COPY t1_v FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data1.data' delimiter '|' csv header;
+
+insert into t2 select * from t1 where c6=false;
+insert into t2_v select * from t1_v where c6=false;
+create view view1 as (select * from t1 except select * from t1_v);
+select * from view1;
+
+with del1 as (delete from t2 where c6=(select c6 from t1 where c3=100)), up1 as (update t1 set c1=sub.c1 from (select c1 from t3 where c2=100) as sub) insert into t3 select * from t1;
+with del1 as (delete from t2_v where c6=(select c6 from t1_v where c3=100)), up1 as (update t1_v set c1=sub.c1 from (select c1 from t3_v where c2=100) as sub) insert into t3_v select * from t1_v;
+create view view2 as (select * from t2 except select * from t2_v);
+select * from view2;
+
+create view view3 as (select * from t1 except select * from t1_v);
+select * from view3;
+
+create view view4 as (select * from t3 except select * from t3_v);
+select * from view4;
+
+with del1 as (delete from t2 where c1=8 returning c1), del2 as (delete from t3 where c1=1 returning c1) delete from t1 where c1=300;
+with del1 as (delete from t2_v where c1=8 returning c1), del2 as (delete from t3_v where c1=1 returning c1) delete from t1_v where c1=300;
+
+create view view5 as (select * from t2 except select * from t2_v);
+select * from view5;
+
+create view view6 as (select * from t1 except select * from t1_v);
+select * from view6;
+
+create view view7 as (select * from t3 except select * from t3_v);
+select * from view7;
+
+with up1 as (update t1 set c1=8 from (select * from t2) as sub where t1.c15<sub.c15), up2 as (update t2 set c6=false from (select * from t3) as sub where t2.c1=sub.c1) update t3 set c15='2020-11-11' from (select * from t2) as sub where t3.c2>sub.c3;
+with up1 as (update t1_v set c1=8 from (select * from t2_v) as sub where t1_v.c15<sub.c15), up2 as (update t2_v set c6=false from (select * from t3_v) as sub where t2_v.c1=sub.c1) update t3_v set c15='2020-11-11' from (select * from t2_v) as sub where t3_v.c2>sub.c3;
+
+create view view8 as (select * from t1 except select * from t1_v);
+select * from view8;
+
+create view view9 as (select * from t2 except select * from t2_v);
+select * from view9;
+
+create view view10 as (select * from t3 except select * from t3_v);
+select * from view10;
+
+
+
+drop view view1;
+drop view view2;
+drop view view3;
+drop view view4;
+drop view view5;
+drop view view6;
+drop view view7;
+drop view view8;
+drop view view9;
+drop view view10;
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t1_v;
+drop table t2_v;
+drop table t3_v;
+drop type composite_type;

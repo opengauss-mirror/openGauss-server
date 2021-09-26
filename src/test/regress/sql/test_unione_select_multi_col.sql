@@ -1,0 +1,576 @@
+set enable_default_ustore_table = on;
+
+create schema test_unione_select_multi_col;
+set current_schema='test_unione_select_multi_col';
+
+-- create composite type
+create type composite_type as (col_int integer, col_decimal decimal, col_bool boolean, col_money money, col_text text, col_date date, col_geo point, col_net cidr, col_circle circle);
+
+-- create tables
+create table integer_table (
+  c1 tinyint,
+  c2 smallint,
+  c3 integer not null,
+  c4 bigint,
+  c5 int1,
+  c6 int2,
+  c7 int4,
+  c8 int8,
+  c9 int,
+  c10 binary_integer
+) with (storage_type=USTORE);
+
+create table decimal_table (
+  c1 decimal,
+  c2 decimal(38),
+  c3 decimal(38,7),
+  c4 numeric,
+  c5 numeric(38),
+  c6 numeric(38,7),
+  c7 number,
+  c8 number(38),
+  c9 number(38,7),
+  c10 dec,
+  c11 dec(38),
+  c12 dec(38,7)
+) with (storage_type=USTORE);
+
+create table numeric_table (
+  c1 real,
+  c2 double precision,
+  c3 smallserial,
+  c4 serial,
+  c5 bigserial,
+  c6 float,
+  c7 float4,
+  c8 float8,
+  c9 binary_double
+) with (storage_type=USTORE);
+
+create table mix_table (
+  c1 money,
+  c2 boolean,
+  c3 bytea,
+  c4 Oid
+) with (storage_type=USTORE);
+
+create table time_table (
+  c1 date,
+  c2 time,
+  c3 time(6),
+  c4 time without time zone,
+  c5 time with time zone,
+  c6 time(6) without time zone,
+  c7 time(6) with time zone,
+  c8 timestamp,
+  c9 timestamp(6),
+  c10 timestamp without time zone,
+  c11 timestamp with time zone,
+  c12 timestamp(6) without time zone,
+  c13 timestamp(6) with time zone,
+  c14 smalldatetime,
+  c15 interval,
+  c16 interval day (3) to second (4),
+  c17 interval year,
+  c18 interval second (6),
+  c19 interval hour to second(6),
+  c20 reltime,
+  c21 timetz,
+  c22 tinterval,
+  c23 abstime
+) with (storage_type=USTORE);
+
+create table character_table (
+  c1 char,
+  c2 char(10),
+  c3 character,
+  c4 character(20),
+  c5 nchar,
+  c6 nchar(30),
+  c7 varchar,
+  c8 varchar(40),
+  c9 character varying(200),
+  c10 varchar2(50),
+  c11 nvarchar2(60),
+  c12 clob,
+  c13 text,
+  c14 "char"
+) with (storage_type=USTORE);
+
+create table network_table (
+  c1 cidr not null,
+  c2 inet
+) with (storage_type=USTORE);
+
+create table bit_table (
+  c1 bit,
+  c2 bit varying
+) with (storage_type=USTORE);
+
+create table text_search_table (
+  c1 tsvector,
+  c2 tsquery
+) with (storage_type=USTORE);
+
+create table geometric_table (
+  c1 point,
+  c2 lseg,
+  c3 box,
+  c4 path,
+  c5 path,
+  c6 polygon,
+  c7 circle
+) with (storage_type=USTORE);
+
+create table t1 (
+  c1 int[],
+  c2 int[][],
+  c3 blob,
+  c4 raw,
+  c5 composite_type,
+  c6 box,
+  c7 name,
+  c8 macaddr,
+  c9 uuid
+) with (storage_type=USTORE);
+
+create table decimal (
+  c1 decimal[],
+  c2 decimal[][]
+) with (storage_type=USTORE);
+
+-- create tables for verification
+create table v_integer_table (
+  c1 tinyint,
+  c2 smallint,
+  c3 integer not null,
+  c4 bigint,
+  c5 int1,
+  c6 int2,
+  c7 int4,
+  c8 int8,
+  c9 int,
+  c10 binary_integer
+) with (orientation=row);
+
+create table v_decimal_table (
+  c1 decimal,
+  c2 decimal(38),
+  c3 decimal(38,7),
+  c4 numeric,
+  c5 numeric(38),
+  c6 numeric(38,7),
+  c7 number,
+  c8 number(38),
+  c9 number(38,7),
+  c10 dec,
+  c11 dec(38),
+  c12 dec(38,7)
+) with (orientation=row);
+
+create table v_numeric_table (
+  c1 real,
+  c2 double precision,
+  c3 smallserial,
+  c4 serial,
+  c5 bigserial,
+  c6 float,
+  c7 float4,
+  c8 float8,
+  c9 binary_double
+) with (orientation=row);
+
+create table v_mix_table (
+  c1 money,
+  c2 boolean,
+  c3 bytea,
+  c4 Oid
+) with (orientation=row);
+
+create table v_time_table (
+  c1 date,
+  c2 time,
+  c3 time(6),
+  c4 time without time zone,
+  c5 time with time zone,
+  c6 time(6) without time zone,
+  c7 time(6) with time zone,
+  c8 timestamp,
+  c9 timestamp(6),
+  c10 timestamp without time zone,
+  c11 timestamp with time zone,
+  c12 timestamp(6) without time zone,
+  c13 timestamp(6) with time zone,
+  c14 smalldatetime,
+  c15 interval,
+  c16 interval day (3) to second (4),
+  c17 interval year,
+  c18 interval second (6),
+  c19 interval hour to second(6),
+  c20 reltime,
+  c21 timetz,
+  c22 tinterval,
+  c23 abstime
+) with (orientation=row);
+
+create table v_character_table (
+  c1 char,
+  c2 char(10),
+  c3 character,
+  c4 character(20),
+  c5 nchar,
+  c6 nchar(30),
+  c7 varchar,
+  c8 varchar(40),
+  c9 character varying(200),
+  c10 varchar2(50),
+  c11 nvarchar2(60),
+  c12 clob,
+  c13 text,
+  c14 "char"
+) with (orientation=row);
+
+create table v_network_table (
+  c1 cidr not null,
+  c2 inet
+) with (orientation=row);
+
+create table v_bit_table (
+  c1 bit,
+  c2 bit varying
+) with (orientation=row);
+
+create table v_text_search_table (
+  c1 tsvector,
+  c2 tsquery
+) with (orientation=row);
+
+create table v_geometric_table (
+  c1 point,
+  c2 lseg,
+  c3 box,
+  c4 path,
+  c5 path,
+  c6 polygon,
+  c7 circle
+) with (orientation=row);
+
+create table v_t1 (
+  c1 int[],
+  c2 int[][],
+  c3 blob,
+  c4 raw,
+  c5 composite_type,
+  c6 box,
+  c7 name,
+  c8 macaddr,
+  c9 uuid
+) with (orientation=row);
+
+create table v_decimal (
+  c1 decimal[],
+  c2 decimal[][]
+) with (orientation=row);
+
+-- insert
+insert into integer_table values(1,1,-2147483648,-9223372036854775808,1,1,1,1,1,1);
+insert into v_integer_table values(1,1,-2147483648,-9223372036854775808,1,1,1,1,1,1);
+insert into integer_table values(2,2,-224748364,-9223372036854775808,2,2,2,2,2,2);
+insert into v_integer_table values(2,2,-224748364,-9223372036854775808,2,2,2,2,2,2);
+insert into integer_table values(3,3,-334748364,-933337303685477580,3,3,3,3,3,3);
+insert into v_integer_table values(3,3,-334748364,-933337303685477580,3,3,3,3,3,3);
+
+insert into decimal_table values (123.456789,123.456789,123.456789,123.456789,123.456789,123.456789,246.12345,246.12345,246.12345,246.12345,246.12345,246.12345);
+insert into v_decimal_table values (123.456789,123.456789,123.456789,123.456789,123.456789,123.456789,246.12345,246.12345,246.12345,246.12345,246.12345,246.12345);
+insert into decimal_table values (234.456789,234.456789,234.456789,234.456789,234.456789,234.456789,246.23445,246.23445,246.23445,246.23445,246.23445,246.23445);
+insert into v_decimal_table values (234.456789,234.456789,234.456789,234.456789,234.456789,234.456789,246.23445,246.23445,246.23445,246.23445,246.23445,246.23445);
+insert into decimal_table values (345.456789,345.456789,345.456789,345.456789,345.456789,345.456789,246.34545,246.34545,246.34545,246.34545,246.34545,246.34545);
+insert into v_decimal_table values (345.456789,345.456789,345.456789,345.456789,345.456789,345.456789,246.34545,246.34545,246.34545,246.34545,246.34545,246.34545);
+
+insert into numeric_table values (123.456789,123.456789,123.456789,123.456789,246.12345,246.12345,246.12345,246.12345,246.12345);
+insert into v_numeric_table values (123.456789,123.456789,123.456789,123.456789,246.12345,246.12345,246.12345,246.12345,246.12345);
+insert into numeric_table values (234.456789,234.456789,234.456789,234.456789,246.23445,246.23445,246.23445,246.23445,246.23445);
+insert into v_numeric_table values (234.456789,234.456789,234.456789,234.456789,246.23445,246.23445,246.23445,246.23445,246.23445);
+insert into numeric_table values (345.456789,345.456789,345.456789,345.456789,246.34545,246.34545,246.34545,246.34545,246.34545);
+insert into v_numeric_table values (345.456789,345.456789,345.456789,345.456789,246.34545,246.34545,246.34545,246.34545,246.34545);
+
+insert into mix_table values (144,true,E'\\000',19981122);
+insert into v_mix_table values (144,true,E'\\000',19981122);
+insert into mix_table values (154,true,E'\\110',19981122);
+insert into v_mix_table values (154,true,E'\\110',19981122);
+insert into mix_table values (1444,true,E'\\100',19981122);
+insert into v_mix_table values (1444,true,E'\\100',19981122);
+
+insert into network_table values ('192.168.1','192.168.1.226/24');
+insert into v_network_table values ('192.168.1','192.168.1.226/24');
+insert into network_table values ('192.169.1','192.169.1.226/24');
+insert into v_network_table values ('192.169.1','192.169.1.226/24');
+insert into network_table values ('192.169.1','192.169.1.226/12');
+insert into v_network_table values ('192.169.1','192.169.1.226/12');
+
+insert into bit_table values (B'0',B'00');
+insert into v_bit_table values (B'0',B'00');
+insert into bit_table values (B'0',B'10');
+insert into v_bit_table values (B'0',B'10');
+insert into bit_table values (B'0',B'01');
+insert into v_bit_table values (B'0',B'01');
+
+insert into text_search_table values (' a:1 s:2 d g','1|2|4|5|6');
+insert into v_text_search_table values (' a:1 s:2 d g','1|2|4|5|6');
+insert into text_search_table values (' a:1 s:2 d g','1|2|4|5|7');
+insert into v_text_search_table values (' a:1 s:2 d g','1|2|4|5|7');
+insert into text_search_table values (' a:1 s:2 d g','1|2|4|5|8');
+insert into v_text_search_table values (' a:1 s:2 d g','1|2|4|5|8');
+
+insert into geometric_table values ('(0.0000009,0.0000009)','((0.0000009,0.0000009),(0.0000018,0.0000018))','(0,0,100,100)','((1,1),(2,2),(3,3))','[(0,0),(-10,0),(-10,10)]','(2.0,0.0),(2.0,4.0),(0.0,0.0)','<(500,500),500>');
+insert into v_geometric_table values ('(0.0000009,0.0000009)','((0.0000009,0.0000009),(0.0000018,0.0000018))','(0,0,100,100)','((1,1),(2,2),(3,3))','[(0,0),(-10,0),(-10,10)]','(2.0,0.0),(2.0,4.0),(0.0,0.0)','<(500,500),500>');
+insert into geometric_table values ('(0.0000009,0.0000009)','((0.0000009,0.0000009),(0.0000006,0.0000006))','(0,0,100,100)','((1,1),(2,2),(3,3))','[(0,0),(-10,0),(-10,10)]','(2.0,0.0),(2.0,4.0),(0.0,0.0)','<(500,500),500>');
+insert into v_geometric_table values ('(0.0000009,0.0000009)','((0.0000009,0.0000009),(0.0000006,0.0000006))','(0,0,100,100)','((1,1),(2,2),(3,3))','[(0,0),(-10,0),(-10,10)]','(2.0,0.0),(2.0,4.0),(0.0,0.0)','<(500,500),500>');
+insert into geometric_table values ('(0.0000009,0.0000009)','((0.0000009,0.0000009),(0.0000006,0.0000006))','(0,0,100,100)','((1,1),(2,2),(3,3))','[(0,0),(-10,0),(-10,10)]','(2.0,0.0),(2.0,4.0),(0.0,0.0)','<(250,250),250>');
+insert into v_geometric_table values ('(0.0000009,0.0000009)','((0.0000009,0.0000009),(0.0000006,0.0000006))','(0,0,100,100)','((1,1),(2,2),(3,3))','[(0,0),(-10,0),(-10,10)]','(2.0,0.0),(2.0,4.0),(0.0,0.0)','<(250,250),250>');
+
+insert into time_table values ('2020-09-04','00:00:01','21:21:21','21:21:21', '21:21:21 pst','04:05:06','04:05:06 PST','2010-12-12','2010-12-12','2010-12-12','2010-12-12 pst','2010-12-12','2010-12-12 pst','2003-04-12 04:05:06','2 day 13:24:56',INTERVAL '3' DAY,interval '2' year,INTERVAL '2333' second,INTERVAL '5:23:35.5555' hour to second,'3 days','1984-2-6 01:00:30+8','["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]','Aug 15 14:23:19 1983');
+insert into v_time_table values ('2020-09-04','00:00:01','21:21:21','21:21:21', '21:21:21 pst','04:05:06','04:05:06 PST','2010-12-12','2010-12-12','2010-12-12','2010-12-12 pst','2010-12-12','2010-12-12 pst','2003-04-12 04:05:06','2 day 13:24:56',INTERVAL '3' DAY,interval '2' year,INTERVAL '2333' second,INTERVAL '5:23:35.5555' hour to second,'3 days','1984-2-6 01:00:30+8','["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]','Aug 15 14:23:19 1983');
+insert into time_table values ('2020-09-04','00:00:01','21:21:21','21:21:21', '21:21:21 pst','04:05:06','04:05:06 PST','2010-12-12','2010-12-12','2010-12-12','2010-12-12 pst','2010-12-12','2010-12-12 pst','2003-04-12 04:05:06','2 day 13:24:56',INTERVAL '3' DAY,interval '2' year,INTERVAL '2333' second,INTERVAL '5:23:35.5555' hour to second,'3 days','1984-2-6 01:00:30+8','["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]','Aug 15 14:23:19 1998');
+insert into v_time_table values ('2020-09-04','00:00:01','21:21:21','21:21:21', '21:21:21 pst','04:05:06','04:05:06 PST','2010-12-12','2010-12-12','2010-12-12','2010-12-12 pst','2010-12-12','2010-12-12 pst','2003-04-12 04:05:06','2 day 13:24:56',INTERVAL '3' DAY,interval '2' year,INTERVAL '2333' second,INTERVAL '5:23:35.5555' hour to second,'3 days','1984-2-6 01:00:30+8','["Feb 10, 1947 23:59:12" "Jan 14, 1973 03:14:21"]','Aug 15 14:23:19 1998');
+insert into time_table values ('2020-09-04','00:00:01','21:21:21','21:21:21', '21:21:21 pst','04:05:06','04:05:06 PST','2010-12-12','2010-12-12','2010-12-12','2010-12-12 pst','2010-12-12','2010-12-12 pst','2003-04-12 04:05:06','2 day 13:24:56',INTERVAL '3' DAY,interval '2' year,INTERVAL '2333' second,INTERVAL '5:23:35.5555' hour to second,'3 days','1984-2-6 01:00:30+8','["Feb 10, 1947 23:59:12" "Jan 14, 2019 03:14:21"]','Mar 15 14:23:19 1998');
+insert into v_time_table values ('2020-09-04','00:00:01','21:21:21','21:21:21', '21:21:21 pst','04:05:06','04:05:06 PST','2010-12-12','2010-12-12','2010-12-12','2010-12-12 pst','2010-12-12','2010-12-12 pst','2003-04-12 04:05:06','2 day 13:24:56',INTERVAL '3' DAY,interval '2' year,INTERVAL '2333' second,INTERVAL '5:23:35.5555' hour to second,'3 days','1984-2-6 01:00:30+8','["Feb 10, 1947 23:59:12" "Jan 14, 2019 03:14:21"]','Mar 15 14:23:19 1998');
+
+insert into character_table values ('a','hello','a','hello','a','hello','a','hello','99991231','99991231','99991231','clob','hello how are you','HIHIHI');
+insert into v_character_table values ('a','hello','a','hello','a','hello','a','hello','99991231','99991231','99991231','clob','hello how are you','HIHIHI');
+insert into character_table values ('b','hello','b','hello','b','hello','b','hello','99991231','99991231','99991231','clob','hello how are you','HIHIHI');
+insert into v_character_table values ('b','hello','b','hello','b','hello','b','hello','99991231','99991231','99991231','clob','hello how are you','HIHIHI');
+insert into character_table values ('c','hello','c','hello','c','hello','c','hello','99991231','99991231','99991231','clob','hello how are you','HIHIHI');
+insert into v_character_table values ('c','hello','c','hello','c','hello','c','hello','99991231','99991231','99991231','clob','hello how are you','HIHIHI');
+
+insert into t1 values('{1,2,3}','{{1},{2}}','aaaaaaaaaaa','DEADBEEF',row(214748,12345.122,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'),'(0,0,100,100)','AAAAAA','08:00:2b:01:02:03','A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+insert into v_t1 values('{1,2,3}','{{1},{2}}','aaaaaaaaaaa','DEADBEEF',row(214748,12345.122,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'),'(0,0,100,100)','AAAAAA','08:00:2b:01:02:03','A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+insert into t1 values('{1,2,3}','{{1},{2}}','aaaaaaaaaaa','DEADBEEF',row(214748,135.2468,true,2000,'helloo','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(500,500),500>'),'(0,0,100,100)','BBBBBB','08:00:2b:01:02:03','A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+insert into v_t1 values('{1,2,3}','{{1},{2}}','aaaaaaaaaaa','DEADBEEF',row(214748,135.2468,true,2000,'helloo','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(500,500),500>'),'(0,0,100,100)','BBBBBB','08:00:2b:01:02:03','A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+
+insert into decimal values ('{1.0,2.0,3.0}','{{1.0},{2.0}}');
+insert into v_decimal values ('{1.0,2.0,3.0}','{{1.0},{2.0}}');
+
+create view view_select_1 as (select min(c1) from integer_table except select min(c1) from v_integer_table);
+create view view_select_2 as (select distinct c1 from integer_table except select distinct c1 from v_integer_table);
+create view view_select_3 as (select max(c2) from decimal_table except select max(c2) from v_decimal_table);
+create view view_select_4 as (select distinct c2 from decimal_table except select distinct c2 from v_decimal_table);
+create view view_select_5 as (select avg(c3) from numeric_table except select avg(c3) from v_numeric_table);
+create view view_select_6 as (select distinct c3 from numeric_table except select distinct c3 from v_numeric_table);
+create view view_select_7 as (select sum(c1) from mix_table except select sum(c1) from v_mix_table);
+create view view_select_8 as (select distinct c1 from mix_table except select distinct c1 from v_mix_table);
+create view view_select_9 as (select c2 from network_table except select c2 from v_network_table);
+create view view_select_10 as (select distinct c2 from network_table except select distinct c2 from v_network_table);
+create view view_select_11 as (select c1 from bit_table except select c1 from v_bit_table);
+create view view_select_12 as (select distinct c1 from bit_table except select distinct c1 from v_bit_table);
+create view view_select_13 as (select c1 from text_search_table except select c1 from v_text_search_table);
+create view view_select_14 as (select distinct c1 from text_search_table except select distinct c1 from v_text_search_table);
+create view view_select_17 as (select c3 from time_table except select c3 from v_time_table);
+create view view_select_18 as (select distinct c3 from time_table except select distinct c3 from v_time_table);
+create view view_select_19 as (select c5 from character_table except select c5 from v_character_table);
+create view view_select_20 as (select distinct c5 from character_table except select distinct c5 from v_character_table);
+create view view_select_22 as (select distinct c1 from t1 except select distinct c1 from v_t1);
+create view view_select_23 as (select count(c1) from integer_table where c1=1 and c2=1 except select count(c1) from v_integer_table where c1=1 and c2=1);
+create view view_select_24 as (select * from decimal_table where c1<200 except select * from v_decimal_table where c1<200);
+create view view_select_25 as (select * from numeric_table where c1>200 except select * from v_numeric_table where c1>200);
+create view view_select_26 as (select * from mix_table where c2=true except select * from v_mix_table where c2=true);
+create view view_select_28 as (select * from bit_table where c2=B'00' except select * from v_bit_table where c2=B'00');
+create view view_select_29 as (select * from text_search_table where c2='1|2|4|5|6' except select * from v_text_search_table where c2='1|2|4|5|6');
+create view view_select_31 as (select * from time_table where c3>'00:00:02' except select * from v_time_table where c3>'00:00:02');
+create view view_select_32 as (select * from character_table where c1 <> 'a' except select * from v_character_table where c1 <> 'a');
+
+create view view_type_conversion_1 as (select c1::text from text_search_table except select c1::text from v_text_search_table);
+create view view_type_conversion_2 as (select c2::text from text_search_table except select c2::text from v_text_search_table);
+create view view_type_conversion_3 as (select substr(c1::text,3) from text_search_table except select substr(c1::text,3) from v_text_search_table);
+create view view_type_conversion_4 as (select substr(c2::text,6) from text_search_table except select substr(c2::text,6) from v_text_search_table);
+create view view_type_conversion_5 as (select c1::character(15) from geometric_table except select c1::character(15) from v_geometric_table);
+create view view_type_conversion_6 as (select c2::varchar(15) from geometric_table except select c2::varchar(15) from v_geometric_table);
+create view view_type_conversion_7 as (select c3::nchar(15) from geometric_table except select c3::nchar(15) from v_geometric_table);
+create view view_type_conversion_8 as (select c4::varchar2(15) from geometric_table except select c4::varchar2(15) from v_geometric_table);
+create view view_type_conversion_9 as (select c5::nvarchar2(15) from geometric_table except select c5::nvarchar2(15) from v_geometric_table);
+create view view_type_conversion_10 as (select c6::char(15) from geometric_table except select c6::char(15) from v_geometric_table);
+create view view_type_conversion_11 as (select c7::clob from geometric_table except select c7::clob from v_geometric_table);
+create view view_type_conversion_12 as (select substr(c1::clob,8) from geometric_table except select substr(c1::clob,8) from v_geometric_table);
+create view view_type_conversion_13 as (select substr(c2::character varying (30),15) from geometric_table except select substr(c2::character varying (30),15) from v_geometric_table);
+create view view_type_conversion_14 as (select substr(c3::char(30),10) from geometric_table except select substr(c3::char(30),10) from v_geometric_table);
+create view view_type_conversion_15 as (select substr(c4::varchar2(30),10) from geometric_table except select substr(c4::varchar2(30),10) from v_geometric_table);
+create view view_type_conversion_16 as (select substr(c5::nvarchar2(30),10) from geometric_table except select substr(c5::nvarchar2(30),10) from v_geometric_table);
+create view view_type_conversion_17 as (select substr(c6::nchar(30),10) from geometric_table except select substr(c6::nchar(30),10) from v_geometric_table);
+create view view_type_conversion_18 as (select substr(c7::varchar(30),10) from geometric_table except select substr(c7::varchar(30),10) from v_geometric_table);
+create view view_type_conversion_19 as (select c1::decimal[] from t1 except select c1::decimal[] from v_t1);
+create view view_type_conversion_20 as (select c1::decimal[][] from t1 except select c1::decimal[][] from v_t1);
+create view view_type_conversion_21 as (select substr(c1::char(20),3) from t1 except select substr(c1::char(20),3) from v_t1);
+create view view_type_conversion_22 as (select substr(c2::nchar(20),3) from t1 except select substr(c2::nchar(20),3) from v_t1);
+create view view_type_conversion_23 as (select substr(c3::text,4) from t1 except select substr(c3::text,4) from v_t1);
+create view view_type_conversion_24 as (select substr(c4::character(10),5) from t1 except select substr(c4::character(10),5) from v_t1);
+create view view_type_conversion_25 as (select substr(c5::clob,10) from t1 except select substr(c5::clob,10) from v_t1);
+create view view_type_conversion_26 as (select substr(c6::varchar2(20),4) from t1 except select substr(c6::varchar2(20),4) from v_t1);
+create view view_type_conversion_27 as (select substr(c7::raw,3) from t1 except select substr(c7::raw,3) from v_t1);
+create view view_type_conversion_28 as (select substr(c8::name,0) from t1 except select substr(c8::name,0) from v_t1);
+create view view_type_conversion_29 as (select substr(c9::clob,0) from t1 except select substr(c9::clob,0) from v_t1);
+create view view_type_conversion_30 as (select 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11'::uuid from t1 except select 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11'::uuid from v_t1);
+create view view_type_conversion_31 as (select '08:00:2b:01:02:03'::macaddr from t1 except select '08:00:2b:01:02:03'::macaddr from v_t1);
+create view view_type_conversion_32 as (select c7::blob from t1 except select c7::blob from v_t1);
+create view view_type_conversion_33 as (select c1::int[] from decimal except select c1::int[] from v_decimal);
+create view view_type_conversion_34 as (select c2::int[][] from decimal except select c2::int[][] from v_decimal);
+create view view_type_conversion_35 as (select ' a:1 s:2 d g'::tsvector from t1 except select ' a:1 s:2 d g'::tsvector from v_t1);
+create view view_type_conversion_36 as (select '1|2|4|5|6'::tsquery from t1 except select '1|2|4|5|6'::tsquery from v_t1);
+
+select * from view_select_1;
+select * from view_select_2;
+select * from view_select_3;
+select * from view_select_4;
+select * from view_select_5;
+select * from view_select_6;
+select * from view_select_7;
+select * from view_select_8;
+select * from view_select_9;
+select * from view_select_10;
+select * from view_select_11;
+select * from view_select_12;
+select * from view_select_13;
+select * from view_select_14;
+select * from view_select_17;
+select * from view_select_18;
+select * from view_select_19;
+select * from view_select_20;
+select * from view_select_22;
+select * from view_select_23;
+select * from view_select_24;
+select * from view_select_25;
+select * from view_select_26;
+select * from view_select_28;
+select * from view_select_29;
+select * from view_select_31;
+select * from view_select_32;
+
+select * from view_type_conversion_1;
+select * from view_type_conversion_2;
+select * from view_type_conversion_3;
+select * from view_type_conversion_4;
+select * from view_type_conversion_5;
+select * from view_type_conversion_6;
+select * from view_type_conversion_7;
+select * from view_type_conversion_8;
+select * from view_type_conversion_9;
+select * from view_type_conversion_10;
+select * from view_type_conversion_11;
+select * from view_type_conversion_12;
+select * from view_type_conversion_13;
+select * from view_type_conversion_14;
+select * from view_type_conversion_15;
+select * from view_type_conversion_16;
+select * from view_type_conversion_17;
+select * from view_type_conversion_18;
+select * from view_type_conversion_19;
+select * from view_type_conversion_20;
+select * from view_type_conversion_21;
+select * from view_type_conversion_22;
+select * from view_type_conversion_23;
+select * from view_type_conversion_24;
+select * from view_type_conversion_25;
+select * from view_type_conversion_26;
+select * from view_type_conversion_27;
+select * from view_type_conversion_28;
+select * from view_type_conversion_29;
+select * from view_type_conversion_30;
+select * from view_type_conversion_31;
+select * from view_type_conversion_32;
+select * from view_type_conversion_33;
+select * from view_type_conversion_34;
+select * from view_type_conversion_35;
+select * from view_type_conversion_36;
+
+-- drop table, type and view
+drop view view_select_1 cascade;
+drop view view_select_2 cascade;
+drop view view_select_3 cascade;
+drop view view_select_4 cascade;
+drop view view_select_5 cascade;
+drop view view_select_6 cascade;
+drop view view_select_7 cascade;
+drop view view_select_8 cascade;
+drop view view_select_9 cascade;
+drop view view_select_10 cascade;
+drop view view_select_11 cascade;
+drop view view_select_12 cascade;
+drop view view_select_13 cascade;
+drop view view_select_14 cascade;
+drop view view_select_17 cascade;
+drop view view_select_18 cascade;
+drop view view_select_19 cascade;
+drop view view_select_20 cascade;
+drop view view_select_22 cascade;
+drop view view_select_23 cascade;
+drop view view_select_24 cascade;
+drop view view_select_25 cascade;
+drop view view_select_26 cascade;
+drop view view_select_28 cascade;
+drop view view_select_29 cascade;
+drop view view_select_31 cascade;
+drop view view_select_32 cascade;
+
+drop view view_type_conversion_1;
+drop view view_type_conversion_2;
+drop view view_type_conversion_3;
+drop view view_type_conversion_4;
+drop view view_type_conversion_5;
+drop view view_type_conversion_6;
+drop view view_type_conversion_7;
+drop view view_type_conversion_8;
+drop view view_type_conversion_9;
+drop view view_type_conversion_10;
+drop view view_type_conversion_11;
+drop view view_type_conversion_12;
+drop view view_type_conversion_13;
+drop view view_type_conversion_14;
+drop view view_type_conversion_15;
+drop view view_type_conversion_16;
+drop view view_type_conversion_17;
+drop view view_type_conversion_18;
+drop view view_type_conversion_19;
+drop view view_type_conversion_20;
+drop view view_type_conversion_21;
+drop view view_type_conversion_22;
+drop view view_type_conversion_23;
+drop view view_type_conversion_24;
+drop view view_type_conversion_25;
+drop view view_type_conversion_26;
+drop view view_type_conversion_27;
+drop view view_type_conversion_28;
+drop view view_type_conversion_29;
+drop view view_type_conversion_30;
+drop view view_type_conversion_31;
+drop view view_type_conversion_32;
+drop view view_type_conversion_33;
+drop view view_type_conversion_34;
+drop view view_type_conversion_35;
+drop view view_type_conversion_36;
+
+drop table v_integer_table;
+drop table v_decimal_table;
+drop table v_numeric_table;
+drop table v_mix_table;
+drop table v_network_table;
+drop table v_bit_table;
+drop table v_text_search_table;
+drop table v_geometric_table;
+drop table v_time_table;
+drop table v_character_table;
+drop table v_t1;
+drop table v_decimal;
+
+drop table integer_table;
+drop table decimal_table;
+drop table numeric_table;
+drop table mix_table;
+drop table network_table;
+drop table bit_table;
+drop table text_search_table;
+drop table geometric_table;
+drop table time_table;
+drop table character_table;
+drop table t1;
+drop table decimal;
+
+drop type composite_type cascade;

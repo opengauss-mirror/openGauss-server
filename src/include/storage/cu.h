@@ -424,6 +424,7 @@ public:
     uint32 init_field_mem(const int reserved_cu_byte);
     uint32 init_time_mem(const int reserved_cu_byte);
     void check_cu_consistence(const CUDesc* cudesc) const;
+    int GetCurScanPos(int rowCursorInCU);
 
 private:
     template <bool char_type>

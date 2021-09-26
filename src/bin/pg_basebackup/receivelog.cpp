@@ -283,7 +283,8 @@ static bool close_walfile(int walfile, const char* basedir, char* walname, bool 
     off_t currpos = lseek(walfile, 0, SEEK_CUR);
 
     if (currpos == -1) {
-        pg_log(PG_PRINT, _("%s: could not get current position in file \"%s/%s\": %s\n"), progname, basedir, walname, strerror(errno));
+        pg_log(PG_PRINT, _("%s: could not get current position in file \"%s/%s\": %s\n"), progname, basedir, walname,
+            strerror(errno));
         return false;
     }
 
@@ -311,7 +312,8 @@ static bool close_walfile(int walfile, const char* basedir, char* walname, bool 
         nRet = snprintf_s(newfn, sizeof(newfn), sizeof(newfn) - 1, "%s/%s", basedir, walname);
         securec_check_ss_c(nRet, "", "");
         if (rename(oldfn, newfn) != 0) {
-            pg_log(PG_PRINT, _("%s: could not rename file \"%s/%s\": %s\n"), progname, basedir, walname, strerror(errno));
+            pg_log(PG_PRINT, _("%s: could not rename file \"%s/%s\": %s\n"), progname, basedir, walname,
+                strerror(errno));
             return false;
         }
     } else {
@@ -870,7 +872,7 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
     PQclear(res);
 
     if (walfile != -1 && close(walfile) != 0)
-        pg_log(PG_WARNING, _(" could not close file \"%s\": %s.\n"), current_walfile_name, strerror(errno));
+        pg_log(PG_WARNING, _(" could not close file \"%s/%s\": %s.\n"), basedir, current_walfile_name, strerror(errno));
     walfile = -1;
 
     closeHearBeatTimer();
@@ -885,7 +887,7 @@ error:
         copybuf = NULL;
     }
     if (walfile != -1 && close(walfile) != 0)
-        pg_log(PG_WARNING, _(" could not close file \"%s\": %s.\n"), current_walfile_name, strerror(errno));
+        pg_log(PG_WARNING, _(" could not close file \"%s/%s\": %s.\n"), basedir, current_walfile_name, strerror(errno));
     walfile = -1;
     return false;
 }

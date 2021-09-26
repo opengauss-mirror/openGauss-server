@@ -32,11 +32,11 @@
 #include "pgstat.h"
 #include "postmaster/bgwriter.h"
 #include "storage/buf/bufmgr.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -100,7 +100,8 @@ void CBMWriterMain(void)
      * Create a resource owner to keep track of our resources (not clear that
      * we need this, but may as well have one).
      */
-    cbmwriter_resourceOwner = ResourceOwnerCreate(NULL, "CBM Writer", MEMORY_CONTEXT_STORAGE);
+    cbmwriter_resourceOwner = ResourceOwnerCreate(NULL, "CBM Writer",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     t_thrd.utils_cxt.CurrentResourceOwner = cbmwriter_resourceOwner;
 
     /*

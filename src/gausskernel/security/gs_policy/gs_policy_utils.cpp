@@ -51,6 +51,10 @@
 #include "pgaudit.h"
 #include "commands/dbcommands.h"
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 GsSaveManagementEvent gs_save_mng_event_hook = NULL;
 GsSendManagementEvent gs_send_mng_event_hook = NULL;
 
@@ -236,48 +240,6 @@ bool scan_to_delete_from_relation(long long row_id, Relation relation, unsigned 
     systable_endscan(tgscan);
 
     return true;
-}
-
-bool remove_filters(const filters_set filters_to_remove, Relation relation, filters_set *existing_filters,
-                    unsigned int index_id, gs_stl::gs_string *err_msg)
-{
-    bool ret = false;
-    for (filters_set::const_iterator it = filters_to_remove.begin(); it != filters_to_remove.end(); ++it) {
-        /* first validate that this filter exists */
-        filters_set::const_iterator i_it = existing_filters->find(*it);
-        if (i_it != existing_filters->end()) {
-            if (!scan_to_delete_from_relation(i_it->m_id, relation, index_id)) {
-                *err_msg = "System error - failed to delete filter";
-                ret = false;
-                break;
-            }
-            (void)existing_filters->erase(i_it);
-            ret = true;
-        } else {
-            *err_msg = "No such filter can be found";
-            ret = false;
-        }
-    }
-    return ret;
-}
-
-bool remove_filters(const filters_set filters_to_remove, unsigned int relation_id, unsigned int index_id,
-                    gs_stl::gs_string *err_msg)
-{
-    bool ret = false;
-    Relation relation = heap_open(relation_id, RowExclusiveLock);
-    if (relation) {
-        for (filters_set::const_iterator it = filters_to_remove.begin(); it != filters_to_remove.end(); ++it) {
-            if (!scan_to_delete_from_relation(it->m_id, relation, index_id)) {
-                *err_msg = "System error - failed to delete filter";
-                ret = false;
-                break;
-            }
-            ret = true;
-        }
-        heap_close(relation, RowExclusiveLock);
-    }
-    return ret;
 }
 
 void construct_resource_name(const RangeVar *rel, gs_stl::gs_string *target_name_s)
@@ -496,37 +458,6 @@ bool validate_logical_expression(const gs_stl::gs_string logical_expr_str, int *
     return false;
 }
 
-bool get_ip_address(gs_stl::gs_string *ipaddress)
-{
-    struct ifaddrs *if_addr_struct = NULL;
-    struct ifaddrs *ifa = NULL;
-    void *tmp_addr_ptr = NULL;
-
-    if (getifaddrs(&if_addr_struct) != 0) {
-        return false;
-    }
-
-    for (ifa = if_addr_struct; ifa != NULL; ifa = ifa->ifa_next) {
-        if (ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET) {
-            continue;
-        }
-
-        /* is a valid IP4 Address */
-        tmp_addr_ptr = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;
-
-        char buff[128] = { 0 }; /* 128 is the max length of ipaddress */
-        (void)inet_ntop(AF_INET, tmp_addr_ptr, buff, sizeof(buff));
-        if (!strncasecmp(buff, "127.0.0", strlen("127.0.0"))) {
-            continue;
-        }
-        *ipaddress = buff;
-    }
-    if (if_addr_struct != NULL) {
-        freeifaddrs(if_addr_struct);
-    }
-    return true;
-}
-
 void get_session_ip(char *session_ip, int len)
 {
     if (len < MAX_IP_LEN) {
@@ -571,7 +502,7 @@ bool is_database_valid(const char* dbname)
 ResourceOwnerData* create_temp_resourceowner() 
 {
     ResourceOwner tmpOwner =  ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner,
-        "CheckUserOid", MEMORY_CONTEXT_SECURITY);
+        "CheckUserOid", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY));
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
     return currentOwner;

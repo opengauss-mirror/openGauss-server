@@ -1,0 +1,15 @@
+test: ustore_decode
+test: binary
+test: ddl
+test: decoding_in_xact
+test: rewrite
+test: spill
+test: xact
+test: toast
+test: replication_origin
+test: ustore_ddl
+test: ustore_decoding_in_xact
+test: ustore_rewrite
+test: ustore_spill
+test: ustore_xact
+test: ustore_replication_origin

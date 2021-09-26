@@ -1,7 +1,7 @@
 /*
  * xlog_internal.h
  *
- * PostgreSQL transaction log internal declarations
+ * openGauss transaction log internal declarations
  *
  * NOTE: this file is intended to contain declarations useful for
  * manipulating the XLOG files directly, but it is not supposed to be
@@ -20,11 +20,12 @@
 #include "access/xlogdefs.h"
 #include "access/xlogreader.h"
 #include "access/xlog_basic.h"
+#include "access/ustore/knl_undorequest.h"
 #include "datatype/timestamp.h"
 #include "fmgr.h"
 #include "pgtime.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "storage/buf/buf.h"
 
 /*
@@ -218,6 +219,10 @@ typedef struct RmgrData {
     void (*rm_startup)(void);
     void (*rm_cleanup)(void);
     bool (*rm_safe_restartpoint)(void);
+    bool (*rm_undo)(URecVector *urecvector, int startIdx, int endIdx,
+                    TransactionId xid, Oid reloid, Oid partitionoid,
+                    BlockNumber blkno, bool isFullChain);
+    void (*rm_undo_desc) (StringInfo buf, UndoRecord *record);
 } RmgrData;
 
 /*
@@ -257,6 +262,7 @@ extern Datum gs_roach_switch_xlog(PG_FUNCTION_ARGS);
 extern Datum pg_create_restore_point(PG_FUNCTION_ARGS);
 extern Datum pg_current_xlog_location(PG_FUNCTION_ARGS);
 extern Datum pg_current_xlog_insert_location(PG_FUNCTION_ARGS);
+extern Datum gs_current_xlog_insert_end_location(PG_FUNCTION_ARGS);
 extern Datum pg_last_xlog_receive_location(PG_FUNCTION_ARGS);
 extern Datum pg_last_xlog_replay_location(PG_FUNCTION_ARGS);
 extern Datum pg_last_xact_replay_timestamp(PG_FUNCTION_ARGS);

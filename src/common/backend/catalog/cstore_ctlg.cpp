@@ -58,10 +58,6 @@
 #include "access/tupdesc.h"
 
 extern char* get_namespace_name(Oid nspid);
-extern List* ChooseIndexColumnNames(const List* indexElems);
-extern void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
-    int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId,
-    bool amcanorder, bool isconstraint);
 
 static bool createCUDescTableForPartitionedTable(Relation rel, Datum reloptions);
 static bool createDeltaTableForPartitionedTable(Relation rel, Datum reloptions, CreateStmt* mainTblStmt);
@@ -298,7 +294,6 @@ bool CreateDeltaTable(Relation rel, Datum reloptions, bool isPartition, CreateSt
         NULL,
         REL_CMPRS_NOT_SUPPORT,
         NULL,
-        NULL,
         false);
     Assert(delta_relid != InvalidOid);
 
@@ -474,7 +469,6 @@ bool CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition)
         NULL,
         REL_CMPRS_NOT_SUPPORT,
         NULL,
-        NULL,
         false);
 
     Assert(cudesc_relid != InvalidOid);
@@ -501,6 +495,7 @@ bool CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition)
     indexInfo->ii_ReadyForInserts = true;
     indexInfo->ii_Concurrent = false;
     indexInfo->ii_BrokenHotChain = false;
+    indexInfo->ii_ParallelWorkers = 0;
     indexInfo->ii_PgClassAttrId = Anum_pg_class_relcudescidx;
 
     collationObjectId[0] = InvalidOid;
@@ -539,7 +534,8 @@ bool CreateCUDescTable(Relation rel, Datum reloptions, bool isPartition)
         true,
         false,
         false,
-        &extra);
+        &extra,
+        false);
 
     Assert(OidIsValid(indexOid));
 

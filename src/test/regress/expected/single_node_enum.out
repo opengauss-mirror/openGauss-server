@@ -377,20 +377,11 @@ RESET enable_bitmapscan;
 --
 -- Domains over enums
 --
-CREATE DOMAIN rgb AS rainbow CHECK (VALUE IN ('red', 'green', 'blue'));
-SELECT 'red'::rgb;
- rgb 
------
- red
-(1 row)
-
-SELECT 'purple'::rgb;
-ERROR:  value for domain rgb violates check constraint "rgb_check"
-CONTEXT:  referenced column: rgb
-SELECT 'purple'::rainbow::rgb;
-ERROR:  value for domain rgb violates check constraint "rgb_check"
-CONTEXT:  referenced column: rgb
-DROP DOMAIN rgb;
+--CREATE DOMAIN rgb AS rainbow CHECK (VALUE IN ('red', 'green', 'blue'));
+--SELECT 'red'::rgb;
+--SELECT 'purple'::rgb;
+--SELECT 'purple'::rainbow::rgb;
+--DROP DOMAIN rgb;
 --
 -- Arrays
 --

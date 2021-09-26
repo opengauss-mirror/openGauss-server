@@ -23,14 +23,17 @@ SET SESSION AUTHORIZATION selinto_user PASSWORD 'ttest@123';
 SELECT * INTO TABLE selinto_schema.tmp1
 	  FROM pg_class WHERE relname like '%a%';	-- Error
 ERROR:  permission denied for relation tmp1
+DETAIL:  N/A
 SELECT oid AS clsoid, relname, relnatts + 10 AS x
 	  INTO selinto_schema.tmp2
 	  FROM pg_class WHERE relname like '%b%';	-- Error
 ERROR:  permission denied for relation tmp2
+DETAIL:  N/A
 CREATE TABLE selinto_schema.tmp3 (a,b,c)
 	   AS SELECT oid,relname,relacl FROM pg_class
 	   WHERE relname like '%c%';	-- Error
 ERROR:  permission denied for relation tmp3
+DETAIL:  N/A
 RESET SESSION AUTHORIZATION;
 ALTER DEFAULT PRIVILEGES FOR ROLE selinto_user
 	  GRANT INSERT ON TABLES TO selinto_user;

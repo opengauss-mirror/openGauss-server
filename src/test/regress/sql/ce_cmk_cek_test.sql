@@ -2,6 +2,7 @@
 \! gs_ktool -g
 \! gs_ktool -g
 \! gs_ktool -g
+\! gs_ktool -g
 
 select  count(*), 'count' from gs_client_global_keys;
 select  count(*), 'count' from gs_column_keys;
@@ -65,5 +66,25 @@ select  count(*), 'count' from gs_column_keys;
 CREATE TABLE account(user_id INT, username VARCHAR (50)  ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = ImgCEK3, ENCRYPTION_TYPE = DETERMINISTIC)
 );
 DROP CLIENT MASTER KEY ImgCMK CASCADE;
+
+--failed
+CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM3);
+
+CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM2);
+
+--success
+CREATE CLIENT MASTER KEY test_sm2_cmk WITH (KEY_STORE = gs_ktool, KEY_PATH = "gs_ktool/4" , ALGORITHM = SM4);
+
+CREATE COLUMN ENCRYPTION KEY sm4_cek WITH VALUES (CLIENT_MASTER_KEY = test_sm2_cmk, ALGORITHM  = sm4_sm34);
+
+CREATE COLUMN ENCRYPTION KEY sm4_cek WITH VALUES (CLIENT_MASTER_KEY = test_sm2_cmk, ALGORITHM  = AEAD_AES_256_CBC_HMAC_SHA256);
+
+CREATE COLUMN ENCRYPTION KEY sm4_cek WITH VALUES (CLIENT_MASTER_KEY = test_sm2_cmk, ALGORITHM  = sm4_sm3);
+
+select  count(*), 'count' from gs_client_global_keys;
+
+select  count(*), 'count' from gs_column_keys;
+
+DROP CLIENT MASTER KEY test_sm2_cmk CASCADE;
 
 \! gs_ktool -d all

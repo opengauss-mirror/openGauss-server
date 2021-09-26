@@ -26,28 +26,8 @@
 #include "bulkload/dist_fdw.h"
 #include "utils/bloom_filter.h"
 
-#define MAX_SPECIAL_BUCKETMAP_NUM 2
-#define BUCKETMAP_DEFAULT_INDEX -1
-
-/*
- * Determines if query has to be launched
- * on Coordinators only (SEQUENCE DDL),
- * on Datanodes (normal Remote Queries),
- * or on all Postgres-XC nodes (Utilities and DDL).
- */
-typedef enum
-{
-    EXEC_ON_DATANODES,
-    EXEC_ON_COORDS,
-    EXEC_ON_ALL_NODES,
-    EXEC_ON_NONE
-} RemoteQueryExecType;
-
-#define EXEC_CONTAIN_COORDINATOR(exec_type) \
-    ((exec_type) == EXEC_ON_ALL_NODES || (exec_type) == EXEC_ON_COORDS)
-
-#define EXEC_CONTAIN_DATANODE(exec_type) \
-    ((exec_type) == EXEC_ON_ALL_NODES || (exec_type) == EXEC_ON_DATANODES)
+#define MAX_SPECIAL_BUCKETMAP_NUM    20
+#define BUCKETMAP_DEFAULT_INDEX_BIT (1 << 31)
 
 /*
  * Determines the position where the RemoteQuery node will run.
@@ -164,6 +144,8 @@ typedef struct PlannedStmt {
 
     uint2* bucketMap[MAX_SPECIAL_BUCKETMAP_NUM]; /* the map information need to be get */
 
+    int    bucketCnt[MAX_SPECIAL_BUCKETMAP_NUM]; /* the map bucket count */
+
     char* query_string; /* convey the query string to backend/stream thread of DataNode for debug purpose */
 
     List* subplan_ids; /* in which plan id subplan should be inited */
@@ -209,6 +191,7 @@ typedef struct PlannedStmt {
 typedef struct NodeGroupInfoContext {
     Oid groupOids[MAX_SPECIAL_BUCKETMAP_NUM];
     uint2* bucketMap[MAX_SPECIAL_BUCKETMAP_NUM];
+    int    bucketCnt[MAX_SPECIAL_BUCKETMAP_NUM];
     int num_bucketmaps;
 } NodeGroupInfoContext;
 
@@ -361,6 +344,9 @@ typedef struct Plan {
     int ng_num;
     double innerdistinct; /* join inner rel distinct estimation value */
     double outerdistinct; /* join outer rel distinct estimation value */
+
+    /* used for ustore partial seq scan */
+    List* flatList = NULL; /* flattened targetlist representing columns in query */
 } Plan;
 
 /* ----------------
@@ -501,6 +487,7 @@ typedef struct RecursiveUnion {
 typedef struct BitmapAnd {
     Plan plan;
     List* bitmapplans;
+    bool is_ustore;
 } BitmapAnd;
 
 /* ----------------
@@ -514,6 +501,7 @@ typedef struct BitmapAnd {
 typedef struct BitmapOr {
     Plan plan;
     List* bitmapplans;
+    bool is_ustore;
 } BitmapOr;
 
 /*
@@ -543,11 +531,9 @@ typedef struct Scan {
     /* use struct pointer to avoid including parsenodes.h here */
     TableSampleClause* tablesample;
 
-    /* Memory info for scan node, now it just used on indexscan, indexonlyscan, bitmapscan, dfsindexscan */
+    /*  Memory info for scan node, now it just used on indexscan, indexonlyscan, bitmapscan, dfsindexscan */
     OpMemInfo mem_info;
-
-    /* use vector engine to execute this scan */
-    bool executeBatch;
+    bool is_inplace;
 } Scan;
 
 /* ----------------
@@ -650,6 +636,7 @@ typedef struct IndexScan {
     List* cstorequal;            /* quals that can be pushdown to cstore base table */
     List* targetlist;            /* Hack for column store index, target list to be computed at this node */
     bool index_only_scan;
+    bool is_ustore;
 } IndexScan;
 
 /* ----------------
@@ -701,6 +688,7 @@ typedef struct BitmapIndexScan {
     char* indexname;     /*	name of index to scan */
     List* indexqual;     /* list of index quals (OpExprs) */
     List* indexqualorig; /* the same in original form */
+    bool is_ustore;
 } BitmapIndexScan;
 
 /* ----------------

@@ -568,11 +568,15 @@ PGconn* pgut_connect(const char *host, const char *port,
     /* Start the connection. Loop until we have a password if requested by backend. */
     for (;;)
     {
+        errno_t err = EOK;
+        size_t size = (argcount + 1) * sizeof(*values);
         conn = PQconnectdbParams(keywords, values, true);
 
         if (PQstatus(conn) == CONNECTION_OK)
         {
             pgut_atexit_push(pgut_disconnect_callback, conn);
+            err = memset_s(values, size, 0, size);
+            securec_check_c(err, "\0", "\0");
             pfree(values);
             pfree(keywords);
             return conn;
@@ -596,6 +600,8 @@ PGconn* pgut_connect(const char *host, const char *port,
              dbname, PQerrorMessage(conn));
 
         PQfinish(conn);
+        err = memset_s(values, size, 0, size);
+        securec_check_c(err, "\0", "\0");
         pfree(values);
         pfree(keywords);
         return NULL;

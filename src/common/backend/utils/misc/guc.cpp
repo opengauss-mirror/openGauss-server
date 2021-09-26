@@ -38,12 +38,17 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/dfs/dfs_insert.h"
+#ifdef ENABLE_WHITEBOX
+#include "access/ustore/knl_whitebox_test.h"
+#endif
 #include "gs_bbox.h"
 #include "catalog/namespace.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/storage_gtt.h"
 #include "commands/async.h"
+#ifdef ENABLE_MULTIPLE_NODES
 #include "commands/copy.h"
+#endif
 #include "commands/prepare.h"
 #include "commands/vacuum.h"
 #include "commands/variable.h"
@@ -89,10 +94,9 @@
 #include "access/multi_redo_settings.h"
 #include "catalog/pg_authid.h"
 #include "commands/user.h"
-#include "commands/user.h"
 #include "flock.h"
 #include "gaussdb_version.h"
-#include "hll.h"
+#include "utils/hll.h"
 #include "libcomm/libcomm.h"
 #include "libpq/libpq-be.h"
 #include "libpq/md5.h"
@@ -107,6 +111,7 @@
 #include "postmaster/syslogger.h"
 #include "postmaster/twophasecleaner.h"
 #include "postmaster/walwriter.h"
+#include "postmaster/bgworker.h"
 #include "replication/dataqueue.h"
 #include "replication/datareceiver.h"
 #include "replication/reorderbuffer.h"
@@ -117,7 +122,7 @@
 #include "replication/walsender.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/cucache_mgr.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/predicate.h"
 #include "storage/procarray.h"
 #include "storage/standby.h"
@@ -125,6 +130,9 @@
 #include "tcop/tcopprot.h"
 #include "threadpool/threadpool.h"
 #include "tsearch/ts_cache.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "tsdb/utils/constant_def.h"
+#endif
 #include "utils/acl.h"
 #include "utils/anls_opt.h"
 #include "utils/atomic.h"
@@ -132,6 +140,7 @@
 #include "utils/builtins.h"
 #include "utils/bytea.h"
 #include "utils/distribute_test.h"
+#include "utils/segment_test.h"
 #include "utils/guc_tables.h"
 #include "utils/memtrack.h"
 #include "utils/memutils.h"
@@ -146,9 +155,14 @@
 #include "access/heapam.h"
 #include "utils/tzparser.h"
 #include "utils/xml.h"
-#include "utils/guc_mn.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
+#include "utils/guc_sql.h"
+#include "utils/guc_storage.h"
+#include "utils/guc_security.h"
+#include "utils/guc_memory.h"
+#include "utils/guc_network.h"
+#include "utils/guc_resource.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -168,14 +182,11 @@
 #define MAX_PARAM_LEN 1024
 #define WRITE_CONFIG_LOCK_LEN (1024 * 1024)
 #define CONFIG_BAK_FILENAME "postgresql.conf.bak"
-#define NO_LIMIT_SIZE -1
 
 #ifdef EXEC_BACKEND
 #define CONFIG_EXEC_PARAMS "global/config_exec_params"
 #define CONFIG_EXEC_PARAMS_NEW "global/config_exec_params.new"
 #endif
-
-#define DEFAULT_CLEAN_RATIO 0.1
 
 /* upper limit for GUC variables measured in kilobytes of memory */
 /* note that various places assume the byte size fits in a "long" variable */
@@ -203,27 +214,16 @@
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
 
-/* max reuse time interval and times */
-#define MAX_PASSWORD_REUSE_TIME 3650
-#define MAX_PASSWORD_REUSE_MAX 1000
-#define MAX_ACCOUNT_LOCK_TIME 365
-#define MAX_FAILED_LOGIN_ATTAMPTS 1000
-#define MAX_PASSWORD_EFFECTIVE_TIME 999
-#define MAX_PASSWORD_NOTICE_TIME 999
-/* max num of assign character in password */
-#define MAX_PASSWORD_ASSIGNED_CHARACTER 999
-/* max length of password */
-#define MAX_PASSWORD_LENGTH 999
-
 extern volatile int synchronous_commit;
 extern volatile bool most_available_sync;
 extern void SetThreadLocalGUC(knl_session_context* session);
 THR_LOCAL int comm_ackchk_time;
 
-static THR_LOCAL GucContext currentGucContext;
+THR_LOCAL GucContext currentGucContext;
 
 const char* sync_guc_variable_namelist[] = {"work_mem",
     "query_mem",
+    "ustore_attr",
     "ssl_renegotiation_limit",
     "temp_buffers",
     "maintenance_work_mem",
@@ -326,7 +326,6 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
 #ifdef ENABLE_MULTIPLE_NODES
     "gtm_backup_barrier",
 #endif
-    "enforce_two_phase_commit",
     "xc_maintenance_mode",
     "enable_hdfs_predicate_pushdown",
     "enable_hadoop_env",
@@ -368,7 +367,6 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "ngram_punctuation_ignore",
     "ngram_grapsymbol_ignore",
     "ngram_gram_size",
-    "enable_parallel_ddl",
     "enable_orc_cache",
 #ifdef ENABLE_MULTIPLE_NODES
     "enable_cluster_resize",
@@ -379,10 +377,16 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "trace_sort",
     "ignore_checksum_failure",
     "wal_log_hints",
+#ifdef ENABLE_MULTIPLE_NODES
+    "enable_parallel_ddl",
     "max_cn_temp_file_size",
+#endif
     "cn_send_buffer_size",
     "enable_compress_hll",
     "hll_default_log2m",
+    "hll_default_log2explicit",
+    "hll_default_log2sparse",
+    "hll_duplicate_check",
     "hll_default_regwidth",
     "hll_default_sparseon",
     "hll_default_expthresh",
@@ -408,8 +412,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "sql_beta_feature",
     "track_stmt_session_slot",
     "track_stmt_stat_level",
-    "track_stmt_details_size",
-    "basebackup_timeout"};
+    "track_stmt_details_size"};
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
 static bool call_bool_check_hook(struct config_bool* conf, bool* newval, void** extra, GucSource source, int elevel);
@@ -422,42 +425,20 @@ static bool call_enum_check_hook(struct config_enum* conf, int* newval, void** e
 static bool check_log_destination(char** newval, void** extra, GucSource source);
 static void assign_log_destination(const char* newval, void* extra);
 
-void free_memory_context_list(memory_context_list* head_node);
-memory_context_list* split_string_into_list(const char* source);
-static bool check_uncontrolled_memory_context(char** newval, void** extra, GucSource source);
-static void assign_uncontrolled_memory_context(const char* newval, void* extra);
-static const char* show_uncontrolled_memory_context(void);
-// end of GUC variables for uncontrolled_memory_context
-
 static void assign_syslog_facility(int newval, void* extra);
 static void assign_syslog_ident(const char* newval, void* extra);
 static void assign_session_replication_role(int newval, void* extra);
 static bool check_client_min_messages(int* newval, void** extra, GucSource source);
-static bool check_temp_buffers(int* newval, void** extra, GucSource source);
-static bool check_fencedUDFMemoryLimit(int* newval, void** extra, GucSource source);
-static bool check_udf_memory_limit(int* newval, void** extra, GucSource source);
-static bool check_phony_autocommit(bool* newval, void** extra, GucSource source);
 static bool check_debug_assertions(bool* newval, void** extra, GucSource source);
 #ifdef USE_BONJOUR
 static bool check_bonjour(bool* newval, void** extra, GucSource source);
 #endif
 
 static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource source);
-static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource source);
-
-static bool check_ssl(bool* newval, void** extra, GucSource source);
 static bool check_stage_log_stats(bool* newval, void** extra, GucSource source);
 static bool check_log_stats(bool* newval, void** extra, GucSource source);
-#ifdef PGXC
+static void assign_thread_working_version_num(int newval, void* extra);
 static bool check_pgxc_maintenance_mode(bool* newval, void** extra, GucSource source);
-static bool check_pooler_maximum_idle_time(int* newval, void** extra, GucSource source);
-static bool check_sctp_support(bool* newval, void** extra, GucSource source);
-static void assign_comm_debug_mode(bool newval, void* extra);
-static void assign_comm_stat_mode(bool newval, void* extra);
-static void assign_comm_timer_mode(bool newval, void* extra);
-static void assign_comm_no_delay(bool newval, void* extra);
-static void assign_comm_ackchk_time(int newval, void* extra);
-#endif
 
 #ifdef LIBCOMM_SPEED_TEST_ENABLE
 static void assign_comm_test_thread_num(int newval, void* extra);
@@ -471,49 +452,18 @@ static void assign_comm_test_recv_once(int newval, void* extra);
 static void assign_comm_fault_injection(int newval, void* extra);
 #endif
 
-static bool check_adio_debug_guc(bool* newval, void** extra, GucSource source);
-static bool check_adio_function_guc(bool* newval, void** extra, GucSource source);
-static const char* show_enable_memory_limit(void);
-static bool check_use_workload_manager(bool* newval, void** extra, GucSource source);
-static bool check_canonical_path(char** newval, void** extra, GucSource source);
-static bool check_directory(char** newval, void** extra, GucSource source);
+bool check_canonical_path(char** newval, void** extra, GucSource source);
+bool check_directory(char** newval, void** extra, GucSource source);
 static bool check_log_filename(char** newval, void** extra, GucSource source);
 static bool check_perf_log(char** newval, void** extra, GucSource source);
 static bool check_timezone_abbreviations(char** newval, void** extra, GucSource source);
 static void assign_timezone_abbreviations(const char* newval, void* extra);
 static void pg_timezone_abbrev_initialize(void);
-static const char* show_archive_command(void);
-static bool check_maxconnections(int* newval, void** extra, GucSource source);
-static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource source);
-static bool parse_query_dop(int* newval, void** extra, GucSource source);
-static bool check_statistics_memory_limit(int* newval, void** extra, GucSource source);
-static void assign_statistics_memory(int newval, void* extra);
-static void assign_history_memory(int newval, void* extra);
-static bool check_history_memory_limit(int* newval, void** extra, GucSource source);
-static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source);
-static bool check_job_max_workers(int* newval, void** extra, GucSource source);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
 static void assign_pgstat_temp_directory(const char* newval, void* extra);
-static bool check_ssl_ciphers(char** newval, void** extra, GucSource source);
 static bool check_application_name(char** newval, void** extra, GucSource source);
 static void assign_application_name(const char* newval, void* extra);
-static void assign_connection_info(const char* newval, void* extra);
-static bool check_application_type(int* newval, void** extra, GucSource source);
-static bool check_cgroup_name(char** newval, void** extra, GucSource source);
-static void assign_cgroup_name(const char* newval, void* extra);
-static const char* show_cgroup_name(void);
-static bool check_query_band_name(char** newval, void** extra, GucSource source);
-static bool check_session_respool(char** newval, void** extra, GucSource source);
-static void assign_session_respool(const char* newval, void* extra);
-static const char* show_session_respool(void);
-static bool check_memory_detail_tracking(char** newval, void** extra, GucSource source);
-static void assign_memory_detail_tracking(const char* newval, void* extra);
-static const char* show_memory_detail_tracking(void);
-static void assign_collect_timer(int newval, void* extra);
-static bool check_statement_mem(int* newval, void** extra, GucSource source);
-static bool check_statement_max_mem(int* newval, void** extra, GucSource source);
-static const char* show_unix_socket_permissions(void);
 static const char* show_log_file_mode(void);
 static char* config_enum_get_options(
     struct config_enum* record, const char* prefix, const char* suffix, const char* separator);
@@ -521,58 +471,27 @@ static bool validate_conf_option(struct config_generic* record, const char *name
     GucSource source, int elevel, bool freemem, void *newval, void **newextra);
 
 /* Database Security: Support password complexity */
-static bool check_int_parameter(int* newval, void** extra, GucSource source);
-static bool check_double_parameter(double* newval, void** extra, GucSource source);
+bool check_double_parameter(double* newval, void** extra, GucSource source);
 static void check_setrole_permission(const char* rolename, char* passwd, bool IsSetRole);
 static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSetRole);
-static bool CheckReplChannel(const char* ChannelInfo);
-static int GetLengthAndCheckReplConn(const char* ConnInfoList);
-static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength);
-static bool check_replconninfo(char** newval, void** extra, GucSource source);
-static void assign_replconninfo1(const char* newval, void* extra);
-static void assign_replconninfo2(const char* newval, void* extra);
-static void assign_replconninfo3(const char* newval, void* extra);
-static void assign_replconninfo4(const char* newval, void* extra);
-static void assign_replconninfo5(const char* newval, void* extra);
-static void assign_replconninfo6(const char* newval, void* extra);
-static void assign_replconninfo7(const char* newval, void* extra);
-#ifndef ENABLE_MULTIPLE_NODES
-static void assign_replconninfo8(const char* newval, void* extra);
-#endif
-static bool check_inlist2joininfo(char** newval, void** extra, GucSource source);
-static void assign_inlist2joininfo(const char* newval, void* extra);
-static bool check_replication_type(int* newval, void** extra, GucSource source);
+bool CheckReplChannel(const char* ChannelInfo);
 static bool isOptLineCommented(char* optLine);
 static bool isMatchOptionName(char* optLine, const char* paraName,
     int paraLength, int* paraOffset, int* valueLength, int* valueOffset, bool ignore_case);
 
-static const char* logging_module_guc_show(void);
-static bool logging_module_check(char** newval, void** extra, GucSource source);
-static void logging_module_guc_assign(const char* newval, void* extra);
-static void plog_merge_age_assign(int newval, void* extra);
-
-#ifndef ENABLE_MULTIPLE_NODES
-static bool CheckUniqueSqlCleanRatio(double* newval, void** extra, GucSource source);
-#endif
+bool logging_module_check(char** newval, void** extra, GucSource source);
+void logging_module_guc_assign(const char* newval, void* extra);
 
 /* Inplace Upgrade GUC hooks */
 static bool check_is_upgrade(bool* newval, void** extra, GucSource source);
 static void assign_is_inplace_upgrade(const bool newval, void* extra);
-static bool check_inplace_upgrade_next_oids(char** newval, void** extra, GucSource source);
-static bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source);
+bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source);
+
 /* SQL DFx Options : Support different sql dfx option */
 static const char* analysis_options_guc_show(void);
 static bool analysis_options_check(char** newval, void** extra, GucSource source);
 static void analysis_options_guc_assign(const char* newval, void* extra);
-
-static bool check_behavior_compat_options(char** newval, void** extra, GucSource source);
-static void assign_behavior_compat_options(const char* newval, void* extra);
-static void assign_use_workload_manager(const bool newval, void* extra);
-static void assign_convert_string_to_digit(bool newval, void* extra);
-static bool check_enable_data_replicate(bool* newval, void** extra, GucSource source);
-static void AssignQueryDop(int newval, void* extra);
 static void assign_instr_unique_sql_count(int newval, void* extra);
-static bool check_auto_explain_level(int* newval, void** extra, GucSource source);
 static bool validate_conf_bool(struct config_generic *record, const char *name, const char *value, GucSource source,
                           int elevel, bool freemem, void *newvalue, void **newextra);
 static bool validate_conf_int(struct config_generic *record, const char *name, const char *value, GucSource source,
@@ -602,6 +521,31 @@ inline void scape_space(char **pp)
         (*pp)++;
     }
 }
+
+#ifdef ENABLE_MULTIPLE_NODES
+static void assign_gtm_rw_timeout(int newval, void* extra);
+static bool check_gtmhostconninfo(char** newval, void** extra, GucSource source);
+static GTM_HOST_IP* ParseGtmHostConnInfo(const char* ConnInfoList, int* InfoLength);
+static void assign_gtmhostconninfo0(const char* newval, void* extra);
+static void assign_gtmhostconninfo1(const char* newval, void* extra);
+static void assign_gtmhostconninfo2(const char* newval, void* extra);
+static void assign_gtmhostconninfo3(const char* newval, void* extra);
+static void assign_gtmhostconninfo4(const char* newval, void* extra);
+static void assign_gtmhostconninfo5(const char* newval, void* extra);
+static void assign_gtmhostconninfo6(const char* newval, void* extra);
+static void assign_gtmhostconninfo7(const char* newval, void* extra);
+static bool check_compaciton_strategy(char** newval, void** extra, GucSource source);
+static bool ts_compaction_guc_filter(const char* ptoken, const int min_num, const int max_num);
+#endif
+
+static void count_variables_num(GucNodeType nodetype,
+    int &num_single_vars_out, int &num_both_vars_out, int &num_distribute_vars_out);
+static void InitConfigureNamesBool();
+static void InitConfigureNamesInt();
+static void InitConfigureNamesInt64();
+static void InitConfigureNamesReal();
+static void InitConfigureNamesString();
+static void InitConfigureNamesEnum();
 
 /*
  * isMatchOptionName - Check wether the option name is in the configure file.
@@ -788,13 +732,6 @@ static const struct config_enum_entry isolation_level_options[] = {{"serializabl
     {"read uncommitted", XACT_READ_UNCOMMITTED, false},
     {NULL, 0}};
 
-static const struct config_enum_entry application_type_options[] =
-{
-    {"not_perfect_sharding_type", NOT_PERFECT_SHARDING_TYPE, false},
-    {"perfect_sharding_type", PERFECT_SHARDING_TYPE, false},
-    {NULL, 0, false}
-};
-
 static const struct config_enum_entry session_replication_role_options[] = {
     {"origin", SESSION_REPLICATION_ROLE_ORIGIN, false},
     {"replica", SESSION_REPLICATION_ROLE_REPLICA, false},
@@ -816,12 +753,6 @@ static const struct config_enum_entry syslog_facility_options[] = {
 #endif
     {NULL, 0}};
 
-static const struct config_enum_entry io_priority_level_options[] = {{"None", IOPRIORITY_NONE, false},
-    {"Low", IOPRIORITY_LOW, false},
-    {"Medium", IOPRIORITY_MEDIUM, false},
-    {"High", IOPRIORITY_HIGH, false},
-    {NULL, 0, false}};
-
 static const struct config_enum_entry track_function_options[] = {
     {"none", TRACK_FUNC_OFF, false}, {"pl", TRACK_FUNC_PL, false}, {"all", TRACK_FUNC_ALL, false}, {NULL, 0, false}};
 
@@ -831,73 +762,6 @@ static const struct config_enum_entry xmlbinary_options[] = {
 static const struct config_enum_entry xmloption_options[] = {
     {"content", XMLOPTION_CONTENT, false}, {"document", XMLOPTION_DOCUMENT, false}, {NULL, 0, false}};
 
-/*change the char * sql_compatibility to enum*/
-static const struct config_enum_entry adapt_database[] = {{g_dbCompatArray[DB_CMPT_A].name, A_FORMAT, false},
-    {g_dbCompatArray[DB_CMPT_C].name, C_FORMAT, false},
-    {g_dbCompatArray[DB_CMPT_B].name, B_FORMAT, false},
-    {g_dbCompatArray[DB_CMPT_PG].name, PG_FORMAT, false},
-    {NULL, 0, false}};
-
-/*change the char * enable_performance_data to enum*/
-static const struct config_enum_entry explain_option[] = {{"normal", EXPLAIN_NORMAL, false},
-    {"pretty", EXPLAIN_PRETTY, false},
-    {"summary", EXPLAIN_SUMMARY, false},
-    {"run", EXPLAIN_RUN, false},
-    {NULL, 0, false}};
-
-/*change the char * skew options to enum*/
-static const struct config_enum_entry skew_strategy_option[] = {
-    {"off", SKEW_OPT_OFF, false}, {"normal", SKEW_OPT_NORMAL, false}, {"lazy", SKEW_OPT_LAZY, false}, {NULL, 0, false}};
-
-/*change the char * codegen_strategy to enum */
-static const struct config_enum_entry codegen_strategy_option[] = {
-    {"partial", CODEGEN_PARTIAL, false}, {"pure", CODEGEN_PURE, false}, {NULL, 0, false}};
-/*change the char * memory_tracking_mode to enum*/
-static const struct config_enum_entry memory_tracking_option[] = {{"none", MEMORY_TRACKING_NONE, false},
-    {"peak", MEMORY_TRACKING_PEAKMEMORY, false},
-    {"normal", MEMORY_TRACKING_NORMAL, false},
-    {"executor", MEMORY_TRACKING_EXECUTOR, false},
-    {"fullexec", MEMORY_TRACKING_FULLEXEC, false},
-    {NULL, 0, false}};
-
-static const struct config_enum_entry resource_track_option[] = {{"none", RESOURCE_TRACK_NONE, false},
-    {"query", RESOURCE_TRACK_QUERY, false},
-    {"operator", RESOURCE_TRACK_OPERATOR, false},
-    {NULL, 0, false}};
-
-/*
- * Although only "on", "off", and "safe_encoding" are documented, we
- * accept all the likely variants of "on" and "off".
- */
-static const struct config_enum_entry backslash_quote_options[] = {
-    {"safe_encoding", BACKSLASH_QUOTE_SAFE_ENCODING, false},
-    {"on", BACKSLASH_QUOTE_ON, false},
-    {"off", BACKSLASH_QUOTE_OFF, false},
-    {"true", BACKSLASH_QUOTE_ON, true},
-    {"false", BACKSLASH_QUOTE_OFF, true},
-    {"yes", BACKSLASH_QUOTE_ON, true},
-    {"no", BACKSLASH_QUOTE_OFF, true},
-    {"1", BACKSLASH_QUOTE_ON, true},
-    {"0", BACKSLASH_QUOTE_OFF, true},
-    {NULL, 0, false}};
-
-/*
- * Although only "on", "off", and "partition" are documented, we
- * accept all the likely variants of "on" and "off".
- */
-static const struct config_enum_entry constraint_exclusion_options[] = {
-    {"partition", CONSTRAINT_EXCLUSION_PARTITION, false},
-    {"on", CONSTRAINT_EXCLUSION_ON, false},
-    {"off", CONSTRAINT_EXCLUSION_OFF, false},
-    {"true", CONSTRAINT_EXCLUSION_ON, true},
-    {"false", CONSTRAINT_EXCLUSION_OFF, true},
-    {"yes", CONSTRAINT_EXCLUSION_ON, true},
-    {"no", CONSTRAINT_EXCLUSION_OFF, true},
-    {"1", CONSTRAINT_EXCLUSION_ON, true},
-    {"0", CONSTRAINT_EXCLUSION_OFF, true},
-    {NULL, 0, false}};
-
-#ifdef PGXC
 /*
  * Define remote connection types for PGXC
  */
@@ -910,98 +774,8 @@ static const struct config_enum_entry pgxc_conn_types[] = {{"application", REMOT
     {"gtmtool", REMOTE_CONN_GTM_TOOL, false},
     {NULL, 0, false}};
 
-/* autovac mode */
-static const struct config_enum_entry autovacuum_mode_options[] = {{"analyze", AUTOVACUUM_DO_ANALYZE, false},
-    {"vacuum", AUTOVACUUM_DO_VACUUM, false},
-    {"mix", AUTOVACUUM_DO_ANALYZE_VACUUM, false},
-    {"none", AUTOVACUUM_DO_NONE, false},
-    {NULL, 0, false}};
-
-#endif
-
-/*
- * Although only "on", "off", "remote_write", and "local" are documented, we
- * accept all the likely variants of "on" and "off".
- */
-static const struct config_enum_entry synchronous_commit_options[] = {{"local", SYNCHRONOUS_COMMIT_LOCAL_FLUSH, false},
-    {"remote_receive", SYNCHRONOUS_COMMIT_REMOTE_RECEIVE, false},
-    {"remote_write", SYNCHRONOUS_COMMIT_REMOTE_WRITE, false},
-    {"remote_apply", SYNCHRONOUS_COMMIT_REMOTE_APPLY, false},
-    {"on", SYNCHRONOUS_COMMIT_ON, false},
-    {"off", SYNCHRONOUS_COMMIT_OFF, false},
-    {"true", SYNCHRONOUS_COMMIT_ON, true},
-    {"false", SYNCHRONOUS_COMMIT_OFF, true},
-    {"yes", SYNCHRONOUS_COMMIT_ON, true},
-    {"no", SYNCHRONOUS_COMMIT_OFF, true},
-    {"1", SYNCHRONOUS_COMMIT_ON, true},
-    {"0", SYNCHRONOUS_COMMIT_OFF, true},
-    {"2", SYNCHRONOUS_COMMIT_REMOTE_APPLY, true},
-    {NULL, 0, false}};
-
-static const struct config_enum_entry plan_cache_mode_options[] = {
-	{"auto", PLAN_CACHE_MODE_AUTO, false},
-	{"force_generic_plan", PLAN_CACHE_MODE_FORCE_GENERIC_PLAN, false},
-	{"force_custom_plan", PLAN_CACHE_MODE_FORCE_CUSTOM_PLAN, false},
-	{NULL, 0, false}
-};
-
-/*
- * define insert mode for dfs_insert
- */
-static const struct config_enum_entry cstore_insert_mode_options[] = {
-    {"auto", TO_AUTO, true}, {"main", TO_MAIN, true}, {"delta", TO_DELTA, true}, {NULL, 0, false}};
-
-static const struct config_enum_entry rewrite_options[] = {
-    {"none", NO_REWRITE, false},
-    {"lazyagg", LAZY_AGG, false},
-    {"magicset", MAGIC_SET, false},
-    {"partialpush", PARTIAL_PUSH, false},
-    {"uniquecheck", SUBLINK_PULLUP_WITH_UNIQUE_CHECK, false},
-    {"disablerep", SUBLINK_PULLUP_DISABLE_REPLICATED, false},
-    {"intargetlist", SUBLINK_PULLUP_IN_TARGETLIST, false},
-    {"predpush", PRED_PUSH, false},
-    {"predpushnormal", PRED_PUSH_NORMAL, false},
-    {"predpushforce", PRED_PUSH_FORCE, false},
-    {NULL, 0, false}};
-
-static const struct config_enum_entry remote_read_options[] = {{"off", REMOTE_READ_OFF, false},
-    {"non_authentication", REMOTE_READ_NON_AUTH, false},
-    {"authentication", REMOTE_READ_AUTH, false},
-    {NULL, 0, false}};
-
-static const struct config_enum_entry resource_track_log_options[] = {
-    {"summary", SUMMARY, false}, {"detail", DETAIL, false}, {NULL, 0, false}};
-
-static const struct config_enum_entry opfusion_debug_level_options[] = {
-    {"off", BYPASS_OFF, false}, {"log", BYPASS_LOG, false}, {NULL, 0, false}};
-
 static const struct config_enum_entry unique_sql_track_option[] = {
     {"top", UNIQUE_SQL_TRACK_TOP, false}, {"all", UNIQUE_SQL_TRACK_ALL, true}, {NULL, 0, false}};
-
-static const struct config_enum_entry auto_explain_level_options[] =
-{
-    {"log", LOG, false},
-    {"notice", NOTICE, false},
-    {NULL, 0, false}
-
-};
-
-static const struct config_enum_entry sql_beta_options[] = {
-    {"none", NO_BETA_FEATURE, false},
-    {"sel_semi_poisson", SEL_SEMI_POISSON, false},
-    {"sel_expr_instr", SEL_EXPR_INSTR, false},
-    {"param_path_gen", PARAM_PATH_GEN, false},
-    {"rand_cost_opt", RAND_COST_OPT, false},
-    {"page_est_opt", PAGE_EST_OPT, false},
-    {"param_path_opt", PARAM_PATH_OPT, false},
-    {NULL, 0, false}
-};
-
-/*
- * Options for enum values stored in other modules
- */
-extern struct config_enum_entry wal_level_options[];
-extern struct config_enum_entry sync_method_options[];
 
 #ifndef ENABLE_MULTIPLE_NODES
 /*
@@ -1110,6 +884,8 @@ const char* const config_group_names[] = {
     gettext_noop("Replication / Master Server"),
     /* REPLICATION_STANDBY */
     gettext_noop("Replication / Standby Servers"),
+    /* REPLICATION_PAXOS */
+    gettext_noop("Replication / Paxos"),
     /* QUERY_TUNING */
     gettext_noop("Query Tuning"),
     /* QUERY_TUNING_METHOD */
@@ -1130,6 +906,8 @@ const char* const config_group_names[] = {
     gettext_noop("Reporting and Logging / What to Log"),
     /* AUDIT_OPTIONS */
     gettext_noop("Audit Options"),
+    /* TRANSPARENT_DATA_ENCRYPTION */
+    gettext_noop("Transparent Data Encryption group"),
     /* STATS */
     gettext_noop("Statistics"),
     /* STATS_MONITORING */
@@ -1155,7 +933,7 @@ const char* const config_group_names[] = {
     /* COMPAT_OPTIONS */
     gettext_noop("Version and Platform Compatibility"),
     /* COMPAT_OPTIONS_PREVIOUS */
-    gettext_noop("Version and Platform Compatibility / Previous PostgreSQL Versions"),
+    gettext_noop("Version and Platform Compatibility / Previous openGauss Versions"),
     /* COMPAT_OPTIONS_CLIENT */
     gettext_noop("Version and Platform Compatibility / Other Platforms and Clients"),
     /* ERROR_HANDLING */
@@ -1217,8 +995,9 @@ const char* const config_type_names[] = {
  *
  * 4. Add a record below.
  *
- * 5. Add it to src/backend/utils/misc/postgresql.conf.sample, if
- *	  appropriate.
+ * 5. Add it to src/backend/utils/misc/postgresql_single.conf.sample or
+ *	  src/backend/utils/misc/postgresql_distribute.conf.sample or both,
+ *	  if appropriate.
  *
  * 6. Don't forget to document the option (at least in config.sgml).
  *
@@ -1228,33 +1007,39 @@ const char* const config_type_names[] = {
 
 /******** option records follow ********/
 
+static void InitUStoreAttr();
+
+static void InitCommonConfigureNames()
+{
+    InitConfigureNamesBool();
+    InitConfigureNamesInt();
+    InitConfigureNamesInt64();
+    InitConfigureNamesReal();
+    InitConfigureNamesString();
+    InitConfigureNamesEnum();
+
+    return;
+}
 static void InitConfigureNamesBool()
 {
-    struct config_bool localConfigureNamesBool[] = {{{"raise_errors_if_no_files",
-                                                         PGC_SUSET,
-                                                         LOGGING_WHAT,
-                                                         gettext_noop("raise errors if no files to be imported."),
-                                                         NULL},
-                                                        &u_sess->attr.attr_storage.raise_errors_if_no_files,
-                                                        false,
-                                                        NULL,
-                                                        NULL,
-                                                        NULL},
-        {{"enable_fast_numeric", PGC_SUSET, QUERY_TUNING_METHOD, gettext_noop("Enable numeric optimize."), NULL},
-            &u_sess->attr.attr_sql.enable_fast_numeric,
-            true,
-            NULL,
-            NULL,
+    struct config_bool localConfigureNamesBool[] = {
+        {{"enable_wdr_snapshot",
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Enable wdr snapshot"),
             NULL},
-
-        {{"enable_wdr_snapshot", PGC_SIGHUP, INSTRUMENTS_OPTIONS, gettext_noop("Enable wdr snapshot"), NULL},
             &u_sess->attr.attr_common.enable_wdr_snapshot,
             false,
             NULL,
             NULL,
             NULL},
-
-        {{"enable_asp", PGC_SIGHUP, INSTRUMENTS_OPTIONS, gettext_noop("Enable active session profile"), NULL},
+        {{"enable_asp",
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Enable active session profile"),
+            NULL},
             &u_sess->attr.attr_common.enable_asp,
             true,
             NULL,
@@ -1263,6 +1048,7 @@ static void InitConfigureNamesBool()
 
         {{"enable_stmt_track",
             PGC_SIGHUP,
+            NODE_ALL,
             INSTRUMENTS_OPTIONS,
             gettext_noop("Enable full/slow sql feature"), NULL},
             &u_sess->attr.attr_common.enable_stmt_track,
@@ -1270,9 +1056,9 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-
         {{"track_stmt_parameter",
             PGC_SIGHUP,
+            NODE_ALL,
             INSTRUMENTS_OPTIONS,
             gettext_noop("Enable to track the parameter of statements"), NULL},
             &u_sess->attr.attr_common.track_stmt_parameter,
@@ -1280,414 +1066,47 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-
-        {{"enable_global_stats",
-             PGC_SUSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enable global stats for analyze."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_global_stats,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_hypo_index",
-             PGC_USERSET,                                                    
-             QUERY_TUNING_METHOD,                                            
-             gettext_noop("Enable hypothetical index for explain."),         
-             NULL},                                                                
-            &u_sess->attr.attr_sql.enable_hypo_index,                           
-            false,                                                              
-            NULL,                                                               
-            NULL,                                                               
-            NULL},
-        {{"enable_hdfs_predicate_pushdown",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enable hdfs predicate pushdown."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_hdfs_predicate_pushdown,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_absolute_tablespace",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop(" Enable tablespace using absolute location."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_absolute_tablespace,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_hadoop_env", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop(" Enable hadoop enviroment."), NULL},
-            &u_sess->attr.attr_sql.enable_hadoop_env,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_valuepartition_pruning",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop(
-                 "Enable optimization for partitioned DFS table to be staticly/dynamically-pruned when possible."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_valuepartition_pruning,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_constraint_optimization",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enable optimize query by using informational constraint."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_constraint_optimization,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_bloom_filter", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enable bloom filter check"), NULL},
-            &u_sess->attr.attr_sql.enable_bloom_filter,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_codegen", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enable llvm for executor."), NULL},
-            &u_sess->attr.attr_sql.enable_codegen,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_delta_store", PGC_POSTMASTER, QUERY_TUNING, gettext_noop("Enable delta for column store."), NULL},
-            &g_instance.attr.attr_storage.enable_delta_store,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "enable_incremental_catchup",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Enable incremental searching bcm files when catchup."),
-         },
-            &u_sess->attr.attr_storage.enable_incremental_catchup,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_codegen_print",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enable dump() for llvm function."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_codegen_print,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_sonic_optspill",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enable Sonic optimized spill."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_sonic_optspill,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_sonic_hashjoin", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enable Sonic hashjoin."), NULL},
-            &u_sess->attr.attr_sql.enable_sonic_hashjoin,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_sonic_hashagg", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enable Sonic hashagg."), NULL},
-            &u_sess->attr.attr_sql.enable_sonic_hashagg,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_csqual_pushdown", PGC_SUSET, LOGGING_WHAT, gettext_noop("Enables colstore qual push down."), NULL},
-            &u_sess->attr.attr_sql.enable_csqual_pushdown,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_change_hjcost", PGC_SUSET, LOGGING_WHAT, gettext_noop("Enable change hash join cost"), NULL},
-            &u_sess->attr.attr_sql.enable_change_hjcost,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_seqscan",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of sequential-scan plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_seqscan,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_indexscan",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of index-scan plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_indexscan,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_indexonlyscan",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of index-only-scan plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_indexonlyscan,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_bitmapscan",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of bitmap-scan plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_bitmapscan,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"force_bitmapand",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Force the planner's use of bitmap-and plans."),
-             NULL},
-            &u_sess->attr.attr_sql.force_bitmapand,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_parallel_ddl",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Allow user to implement DDL parallel without dead lock."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_parallel_ddl,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_tidscan",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of TID-scan plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_tidscan,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_sort",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of explicit sort steps."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_sort,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_compress_spill", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enables spilling compress."), NULL},
-            &u_sess->attr.attr_sql.enable_compress_spill,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_hashagg",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of hashed aggregation plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_hashagg,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_material",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of materialization."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_material,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_nestloop",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of nested-loop join plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_nestloop,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_mergejoin",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of merge join plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_mergejoin,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_hashjoin",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of hash join plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_hashjoin,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_index_nestloop",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of index-nested join plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_index_nestloop,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_nodegroup_debug",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's node group debug mode."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_nodegroup_debug,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_partitionwise",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of partitionwise join plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_partitionwise,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_dngather",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of dngather plans."),
-            NULL},
-            &u_sess->attr.attr_sql.enable_dngather,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_compress_hll",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables hll use less memory on datanode."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_compress_hll,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_vector_engine", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enables the vector engine."), NULL},
-            &u_sess->attr.attr_sql.enable_vector_engine,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_force_vector_engine",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Forces to enable the vector engine."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_force_vector_engine,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
         {{"support_extended_features",
-             PGC_POSTMASTER,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Enables unofficial supported extended features."),
-             NULL},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Enables unofficial supported extended features."),
+            NULL},
             &g_instance.attr.attr_common.support_extended_features,
             false,
             NULL,
             NULL,
             NULL},
         {{"lastval_supported",
-             PGC_POSTMASTER,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Enable functionality of lastval() function."),
-             NULL},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Enable functionality of lastval() function."),
+            NULL},
             &g_instance.attr.attr_common.lastval_supported,
             false,
             NULL,
             NULL,
             NULL},
         {{"enable_beta_features",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Enable features that ever supported in former version ."),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Enable features that ever supported in former version ."),
+            NULL},
             &u_sess->attr.attr_common.enable_beta_features,
             false,
             NULL,
             NULL,
             NULL},
-        {{"string_hash_compatible",
-             PGC_POSTMASTER,
-             QUERY_TUNING,
-             gettext_noop("Enables the hash compatibility of char() and varchar() datatype"),
-             NULL},
-            &g_instance.attr.attr_sql.string_hash_compatible,
-            false,
+        /* Not for general use --- used by SET SESSION AUTHORIZATION */
+        {{"is_sysadmin",
+            PGC_INTERNAL,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Shows whether the current user is a system admin."),
             NULL,
-            NULL,
-            NULL},
-
-        {{"geqo",
-             PGC_USERSET,
-             QUERY_TUNING_GEQO,
-             gettext_noop("Enables genetic query optimization."),
-             gettext_noop("This algorithm attempts to do planning without "
-                          "exhaustive searching.")},
-            &u_sess->attr.attr_sql.enable_geqo,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {/* Not for general use --- used by SET SESSION AUTHORIZATION */
-            {"is_sysadmin",
-                PGC_INTERNAL,
-                UNGROUPED,
-                gettext_noop("Shows whether the current user is a system admin."),
-                NULL,
-                GUC_REPORT | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            GUC_REPORT | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_common.session_auth_is_superuser,
             false,
             NULL,
@@ -1695,125 +1114,63 @@ static void InitConfigureNamesBool()
             NULL},
 #ifdef USE_BONJOUR
         {{"bonjour",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Enables advertising the server via Bonjour."),
-             NULL},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SETTINGS,
+            gettext_noop("Enables advertising the server via Bonjour."),
+            NULL},
             &g_instance.attr.attr_common.enable_bonjour,
             false,
             check_bonjour,
             NULL,
             NULL},
 #endif
-        {{"ssl", PGC_POSTMASTER, CONN_AUTH_SECURITY, gettext_noop("Enables SSL connections."), NULL},
-            &g_instance.attr.attr_security.EnableSSL,
-            false,
-            check_ssl,
-            NULL,
-            NULL},
-        {{"require_ssl", PGC_SIGHUP, CONN_AUTH_SECURITY, gettext_noop("Requires SSL connections."), NULL},
-            &u_sess->attr.attr_security.RequireSSL,
-            false,
-            check_ssl,
-            NULL,
-            NULL},
-        {{"fsync",
-             PGC_SIGHUP,
-             WAL_SETTINGS,
-             gettext_noop("Forces synchronization of updates to disk."),
-             gettext_noop("The server will use the fsync() system call in several places to make "
-                          "sure that updates are physically written to disk. This insures "
-                          "that a database cluster will recover to a consistent state after "
-                          "an operating system or hardware crashes.")},
-            &u_sess->attr.attr_storage.enableFsync,
-            true,
-            NULL,
-            NULL,
-            NULL},
         {{"ignore_checksum_failure",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Continues processing after a checksum failure."),
-             gettext_noop("Detection of a checksum failure normally causes PostgreSQL to "
-                          "report an error, aborting the current transaction. Setting "
-                          "ignore_checksum_failure to true causes the system to ignore the failure "
-                          "(but still report a warning), and continue processing. This "
-                          "behavior could cause crashes or other serious problems. Only "
-                          "has an effect if checksums are enabled."),
-             GUC_NOT_IN_SAMPLE},
+            PGC_SUSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Continues processing after a checksum failure."),
+            gettext_noop("Detection of a checksum failure normally causes openGauss to "
+                         "report an error, aborting the current transaction. Setting "
+                         "ignore_checksum_failure to true causes the system to ignore the failure "
+                         "(but still report a warning), and continue processing. This "
+                         "behavior could cause crashes or other serious problems. Only "
+                         "has an effect if checksums are enabled."),
+            GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_common.ignore_checksum_failure,
             false,
             NULL,
             NULL,
             NULL},
-        {{"zero_damaged_pages",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Continues processing past damaged page headers."),
-             gettext_noop("Detection of a damaged page header normally causes PostgreSQL to "
-                          "report an error, aborting the current transaction. Setting "
-                          "zero_damaged_pages true causes the system to instead report a "
-                          "warning, zero out the damaged page, and continue processing. This "
-                          "behavior will destroy data, namely all the rows on the damaged page."),
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_security.zero_damaged_pages,
-            false,
-            NULL,
-            NULL,
+        {{"log_checkpoints",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Logs each checkpoint."),
             NULL},
-        {{"full_page_writes",
-             PGC_SIGHUP,
-             WAL_SETTINGS,
-             gettext_noop("Writes full pages to WAL when first modified after a checkpoint."),
-             gettext_noop("A page write in process during an operating system crash might be "
-                          "only partially written to disk.  During recovery, the row changes "
-                          "stored in WAL are not enough to recover.  This option writes "
-                          "pages when first modified after a checkpoint to WAL so full recovery "
-                          "is possible.")},
-            &u_sess->attr.attr_storage.fullPageWrites,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"wal_log_hints",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Writes full pages to WAL when first modified after a checkpoint, even for a non-critical "
-                          "modifications."),
-             NULL},
-            &g_instance.attr.attr_storage.wal_log_hints,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"log_checkpoints", PGC_SIGHUP, LOGGING_WHAT, gettext_noop("Logs each checkpoint."), NULL},
             &u_sess->attr.attr_common.log_checkpoints,
             false,
             NULL,
             NULL,
             NULL},
-        {{"log_connections", PGC_BACKEND, LOGGING_WHAT, gettext_noop("Logs each successful connection."), NULL},
-            &u_sess->attr.attr_storage.Log_connections,
-            false,
-            NULL,
-            NULL,
-            NULL},
         {{"log_disconnections",
-             PGC_BACKEND,
-             LOGGING_WHAT,
-             gettext_noop("Logs end of a session, including duration."),
-             NULL},
+            PGC_BACKEND,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Logs end of a session, including duration."),
+            NULL},
             &u_sess->attr.attr_common.Log_disconnections,
             false,
             NULL,
             NULL,
             NULL},
         {{"debug_assertions",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Turns on various assertion checks."),
-             gettext_noop("This is a debugging aid."),
-             GUC_NOT_IN_SAMPLE},
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Turns on various assertion checks."),
+            gettext_noop("This is a debugging aid."),
+            GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_common.assert_enabled,
 #ifdef USE_ASSERT_CHECKING
             true,
@@ -1823,269 +1180,161 @@ static void InitConfigureNamesBool()
             check_debug_assertions,
             NULL,
             NULL},
-
-        {/*
-          * security requirements: ordinary users can not set this parameter,  promoting the setting level to PGC_SUSET.
-          */
-            {"exit_on_error",
-                PGC_SUSET,
-                ERROR_HANDLING_OPTIONS,
-                gettext_noop("Terminates session on any error."),
-                NULL},
+        /*
+         * security requirements: ordinary users can not set this parameter,  promoting the setting level to PGC_SUSET.
+         */
+        {{"exit_on_error",
+            PGC_SUSET,
+            NODE_ALL,
+            ERROR_HANDLING_OPTIONS,
+            gettext_noop("Terminates session on any error."),
+            NULL},
             &u_sess->attr.attr_common.ExitOnAnyError,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"restart_after_crash",
-             PGC_SIGHUP,
-             ERROR_HANDLING_OPTIONS,
-             gettext_noop("Reinitializes server after backend crashes."),
-             NULL},
-            &u_sess->attr.attr_sql.restart_after_crash,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        // variable to enable memory pool
-        {{"memorypool_enable", PGC_POSTMASTER, RESOURCES_MEM, gettext_noop("Using memory pool."), NULL},
-            &g_instance.attr.attr_memory.memorypool_enable,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        // variable to enable memory protect
-        {{"enable_memory_limit", PGC_POSTMASTER, RESOURCES_MEM, gettext_noop("Using memory protect feature."), NULL},
-            &g_instance.attr.attr_memory.enable_memory_limit,
-            true,
-            NULL,
-            NULL,
-            show_enable_memory_limit},
-
-        {{"enable_memory_context_control",
-             PGC_SIGHUP,
-             RESOURCES_MEM,
-             gettext_noop("check the max space size of memory context."),
-             NULL},
-            &u_sess->attr.attr_memory.enable_memory_context_control,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        // variable to enable early free policy
-        {{"disable_memory_protect",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("disable memory protect for query execution."),
-             NULL},
-            &u_sess->attr.attr_memory.disable_memory_protect,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        // variable to enable early free policy
-        {{"enable_early_free", PGC_USERSET, RESOURCES_MEM, gettext_noop("Using memory early free policy."), NULL},
-            &u_sess->attr.attr_sql.enable_early_free,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        // support to kill a working query when drop a user
-        {/*
-          * security requirements: ordinary users can not set this parameter,  promoting the setting level to PGC_SUSET.
-          */
-            {"enable_kill_query",
-                PGC_SUSET,
-                QUERY_TUNING_METHOD,
-                gettext_noop("Enables cancelling a query that locks some relations owned by a user "
-                             "when the user is dropped."),
-                NULL},
-            &u_sess->attr.attr_sql.enable_kill_query,
             false,
             NULL,
             NULL,
             NULL},
         // omit untranslatable char error
         {{"omit_encoding_error",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Omits encoding convert error."),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Omits encoding convert error."),
+            NULL},
             &u_sess->attr.attr_common.omit_encoding_error,
             false,
             NULL,
             NULL,
             NULL},
-        {{"log_duration",
-             PGC_SUSET,
-             LOGGING_WHAT,
-             gettext_noop("Logs the duration of each completed SQL statement."),
-             NULL},
-            &u_sess->attr.attr_sql.log_duration,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"debug_print_parse", PGC_SIGHUP, LOGGING_WHAT, gettext_noop("Logs each query's parse tree."), NULL},
-            &u_sess->attr.attr_sql.Debug_print_parse,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"debug_print_rewritten",
-             PGC_SIGHUP,
-             LOGGING_WHAT,
-             gettext_noop("Logs each query's rewritten parse tree."),
-             NULL},
-            &u_sess->attr.attr_sql.Debug_print_rewritten,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"debug_print_plan", PGC_SIGHUP, LOGGING_WHAT, gettext_noop("Logs each query's execution plan."), NULL},
-            &u_sess->attr.attr_sql.Debug_print_plan,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"debug_pretty_print", PGC_USERSET, LOGGING_WHAT, gettext_noop("Indents parse and plan tree displays."), NULL},
-            &u_sess->attr.attr_sql.Debug_pretty_print,
-            true,
-            NULL,
-            NULL,
-            NULL},
         {{"log_parser_stats",
-             PGC_SUSET,
-             STATS_MONITORING,
-             gettext_noop("Writes parser performance statistics to the server log."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_MONITORING,
+            gettext_noop("Writes parser performance statistics to the server log."),
+            NULL},
             &u_sess->attr.attr_common.log_parser_stats,
             false,
             check_stage_log_stats,
             NULL,
             NULL},
         {{"log_planner_stats",
-             PGC_SUSET,
-             STATS_MONITORING,
-             gettext_noop("Writes planner performance statistics to the server log."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_MONITORING,
+            gettext_noop("Writes planner performance statistics to the server log."),
+            NULL},
             &u_sess->attr.attr_common.log_planner_stats,
             false,
             check_stage_log_stats,
             NULL,
             NULL},
         {{"log_executor_stats",
-             PGC_SUSET,
-             STATS_MONITORING,
-             gettext_noop("Writes executor performance statistics to the server log."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_MONITORING,
+            gettext_noop("Writes executor performance statistics to the server log."),
+            NULL},
             &u_sess->attr.attr_common.log_executor_stats,
             false,
             check_stage_log_stats,
             NULL,
             NULL},
         {{"log_statement_stats",
-             PGC_SUSET,
-             STATS_MONITORING,
-             gettext_noop("Writes cumulative performance statistics to the server log."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_MONITORING,
+            gettext_noop("Writes cumulative performance statistics to the server log."),
+            NULL},
             &u_sess->attr.attr_common.log_statement_stats,
             false,
             check_log_stats,
             NULL,
             NULL},
-#ifdef BTREE_BUILD_STATS
-        {{"log_btree_build_stats",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Logs system resource usage statistics on various B-tree operations."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_resource.log_btree_build_stats,
-            false,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
         {{"track_activities",
-             PGC_SUSET,
-             STATS_COLLECTOR,
-             gettext_noop("Collects information about executing commands."),
-             gettext_noop("Enables the collection of information on the current "
-                          "executing command of each session, along with "
-                          "the time at which that command began execution.")},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Collects information about executing commands."),
+            gettext_noop("Enables the collection of information on the current "
+                         "executing command of each session, along with "
+                         "the time at which that command began execution.")},
             &u_sess->attr.attr_common.pgstat_track_activities,
             true,
             NULL,
             NULL,
             NULL},
         {{"enable_instr_track_wait",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Collects information about wait status."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Collects information about wait status."),
+            NULL},
             &u_sess->attr.attr_common.enable_instr_track_wait,
             true,
             NULL,
             NULL,
             NULL},
         {{"enable_slow_query_log",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Write slow query log."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Write slow query log."),
+            NULL},
             &u_sess->attr.attr_common.enable_slow_query_log,
             true,
             NULL,
             NULL,
             NULL},
         {{"enable_instr_rt_percentile",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Calculate percentile info of sql responstime."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Calculate percentile info of sql responstime."),
+            NULL},
             &u_sess->attr.attr_common.enable_instr_rt_percentile,
             true,
             NULL,
             NULL,
             NULL},
         {{"enable_instr_cpu_timer",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Enables instruments cpu timer functionality."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Enables instruments cpu timer functionality."),
+            NULL},
             &u_sess->attr.attr_common.enable_instr_cpu_timer,
             true,
             NULL,
             NULL,
             NULL},
-        {{"track_counts", PGC_SUSET, STATS_COLLECTOR, gettext_noop("Collects statistics on database activity."), NULL},
+        {{"track_counts",
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Collects statistics on database activity."),
+            NULL},
             &u_sess->attr.attr_common.pgstat_track_counts,
             true,
             NULL,
             NULL,
             NULL},
         {{"track_sql_count",
-             PGC_SUSET,
-             STATS_COLLECTOR,
-             gettext_noop("Collects query info on database activity."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Collects query info on database activity."),
+            NULL},
             &u_sess->attr.attr_common.pgstat_track_sql_count,
             true,
             NULL,
             NULL,
             NULL},
         {{"track_io_timing",
-             PGC_SUSET,
-             STATS_COLLECTOR,
-             gettext_noop("Collects timing statistics for database I/O activity."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Collects timing statistics for database I/O activity."),
+            NULL},
             &u_sess->attr.attr_common.track_io_timing,
             false,
             NULL,
@@ -2093,47 +1342,23 @@ static void InitConfigureNamesBool()
             NULL},
 
         {{"update_process_title",
-             PGC_INTERNAL,
-             STATS_COLLECTOR,
-             gettext_noop("Updates the process title to show the active SQL command."),
-             gettext_noop(
-                 "Enables updating of the process title every time a new SQL command is received by the server.")},
+            PGC_INTERNAL,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Updates the process title to show the active SQL command."),
+            gettext_noop(
+                "Enables updating of the process title every time a new SQL command is received by the server.")},
             &u_sess->attr.attr_common.update_process_title,
             false,
             NULL,
             NULL,
             NULL},
-
-        {{"autovacuum", PGC_SIGHUP, AUTOVACUUM, gettext_noop("Starts the autovacuum subprocess."), NULL},
-            &u_sess->attr.attr_storage.autovacuum_start_daemon,
-            true,
-            NULL,
-            NULL,
+        {{"cache_connection",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES,
+            gettext_noop("pooler cache connection"),
             NULL},
-
-        {{"enable_analyze_check",
-             PGC_SUSET,
-             STATS,
-             gettext_noop("Enable check if table is analyzed when querying."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_analyze_check,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"autoanalyze",
-             PGC_SUSET,
-             STATS,
-             gettext_noop("Enable auto-analyze when querying tables with no statistic."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_autoanalyze,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"cache_connection", PGC_SIGHUP, RESOURCES, gettext_noop("pooler cache connection"), NULL},
             &u_sess->attr.attr_common.pooler_cache_connection,
             true,
             NULL,
@@ -2141,218 +1366,60 @@ static void InitConfigureNamesBool()
             NULL},
 
         {{"trace_notify",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Generates debugging output for LISTEN and NOTIFY."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Generates debugging output for LISTEN and NOTIFY."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_common.Trace_notify,
             false,
             NULL,
             NULL,
             NULL},
-
-#ifdef LOCK_DEBUG
-        {{"trace_locks",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("No description available."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.Trace_locks,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"trace_userlocks",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("No description available."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.Trace_userlocks,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"trace_lwlocks",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("No description available."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.Trace_lwlocks,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"debug_deadlocks",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("No description available."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.Debug_deadlocks,
-            false,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
-        {{"log_lock_waits", PGC_SUSET, LOGGING_WHAT, gettext_noop("Logs long lock waits."), NULL},
-            &u_sess->attr.attr_storage.log_lock_waits,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
         {{"log_hostname",
-             PGC_SIGHUP,
-             LOGGING_WHAT,
-             gettext_noop("Logs the host name in the connection logs."),
-             gettext_noop("By default, connection logs only show the IP address "
-                          "of the connecting host. If you want them to show the host name you "
-                          "can turn this on, but depending on your host name resolution "
-                          "setup it might impose a non-negligible performance penalty.")},
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Logs the host name in the connection logs."),
+            gettext_noop("By default, connection logs only show the IP address "
+                         "of the connecting host. If you want them to show the host name you "
+                         "can turn this on, but depending on your host name resolution "
+                         "setup it might impose a non-negligible performance penalty.")},
             &u_sess->attr.attr_common.log_hostname,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"sql_inheritance",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Causes subtables to be included by default in various commands."),
-             NULL},
-            &u_sess->attr.attr_sql.SQL_inheritance,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"transform_null_equals",
-             PGC_USERSET,
-             COMPAT_OPTIONS_CLIENT,
-             gettext_noop("Treats \"expr=NULL\" as \"expr IS NULL\"."),
-             gettext_noop("When turned on, expressions of the form expr = NULL "
-                          "(or NULL = expr) are treated as expr IS NULL, that is, they "
-                          "return true if expr evaluates to the null value, and false "
-                          "otherwise. The correct behavior of expr = NULL is to always "
-                          "return null (unknown).")},
-            &u_sess->attr.attr_sql.Transform_null_equals,
             false,
             NULL,
-            NULL,
-            NULL},
-        {/* only here for backwards compatibility */
-            {"autocommit",
-                PGC_USERSET,
-                CLIENT_CONN_STATEMENT,
-                gettext_noop("This parameter doesn't do anything."),
-                gettext_noop("It's just here so that we won't choke on SET AUTOCOMMIT TO ON from 7.3-vintage clients."),
-                GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.phony_autocommit,
-            true,
-            check_phony_autocommit,
-            NULL,
-            NULL},
-        {/*
-          * security requirements: system/ordinary users can not set current transaction to read-only,
-          * promoting the setting level to database level.
-          */
-            {"default_transaction_read_only",
-#ifdef ENABLE_MULTIPLE_NODES
-                PGC_SIGHUP,
-#else
-                PGC_USERSET,
-#endif
-                CLIENT_CONN_STATEMENT,
-                gettext_noop("Sets the default read-only status of new transactions."),
-                NULL},
-            &u_sess->attr.attr_storage.DefaultXactReadOnly,
-            false,
-            check_default_transaction_read_only,
             NULL,
             NULL},
         {{"transaction_read_only",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the current transaction's read-only status."),
-             NULL,
-             GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the current transaction's read-only status."),
+            NULL,
+            GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_common.XactReadOnly,
             false,
             check_transaction_read_only,
             NULL,
             NULL},
-        {{"default_transaction_deferrable",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the default deferrable status of new transactions."),
-             NULL},
-            &u_sess->attr.attr_storage.DefaultXactDeferrable,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"transaction_deferrable",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Whether to defer a read-only serializable transaction until it can be executed with no "
-                          "possible serialization failures."),
-             NULL,
-             GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_storage.XactDeferrable,
-            false,
-            check_transaction_deferrable,
-            NULL,
-            NULL},
-        {{"check_function_bodies",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Checks function bodies during CREATE FUNCTION."),
-             NULL},
-            &u_sess->attr.attr_sql.check_function_bodies,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"array_nulls",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Enables input of NULL elements in arrays."),
-             gettext_noop("When turned on, unquoted NULL in an array input "
-                          "value means a null value; "
-                          "otherwise it is taken literally.")},
-            &u_sess->attr.attr_sql.Array_nulls,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"default_with_oids",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Creates new tables with OIDs by default."),
-             NULL},
-            &u_sess->attr.attr_sql.default_with_oids,
-            false,
-            NULL,
-            NULL,
-            NULL},
         {{"logging_collector",
-             PGC_POSTMASTER,
-             LOGGING_WHERE,
-             gettext_noop("Starts a subprocess to capture stderr output and/or csvlogs into log files."),
-             NULL},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Starts a subprocess to capture stderr output and/or csvlogs into log files."),
+            NULL},
             &g_instance.attr.attr_common.Logging_collector,
             false,
             NULL,
             NULL,
             NULL},
         {{"log_truncate_on_rotation",
-             PGC_SIGHUP,
-             LOGGING_WHERE,
-             gettext_noop("Truncates existing log files of same name during log rotation."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Truncates existing log files of same name during log rotation."),
+            NULL},
             &u_sess->attr.attr_common.Log_truncate_on_rotation,
             false,
             NULL,
@@ -2361,68 +1428,25 @@ static void InitConfigureNamesBool()
 
 #ifdef TRACE_SORT
         {{"trace_sort",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Emits information about resource usage in sorting."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Emits information about resource usage in sorting."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_common.trace_sort,
             false,
             NULL,
             NULL,
             NULL},
 #endif
-
-#ifdef TRACE_SYNCSCAN
-        /* this is undocumented because not exposed in a standard build */
-        {{"trace_syncscan",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Generates debugging output for synchronized scanning."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_resource.trace_syncscan,
-            false,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
-#ifdef DEBUG_BOUNDED_SORT
-        /* this is undocumented because not exposed in a standard build */
-        {{"optimize_bounded_sort",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables bounded sorting using heap sort."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_sql.optimize_bounded_sort,
-            true,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
-#ifdef WAL_DEBUG
-        {{"wal_debug",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Emits WAL-related debugging output."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.XLOG_DEBUG,
-            false,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
         {{"integer_datetimes",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Datetimes are integer based."),
-             NULL,
-             GUC_REPORT | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            PGC_INTERNAL,
+            NODE_ALL,
+            PRESET_OPTIONS,
+            gettext_noop("Datetimes are integer based."),
+            NULL,
+            GUC_REPORT | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_common.integer_datetimes,
 #ifdef HAVE_INT64_TIMESTAMP
             true,
@@ -2432,134 +1456,35 @@ static void InitConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-
-        {{"krb_caseins_users",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("Sets whether Kerberos and GSSAPI user names should be treated as case-insensitive."),
-             NULL},
-            &u_sess->attr.attr_security.pg_krb_caseins_users,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"escape_string_warning",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Warn about backslash escapes in ordinary string literals."),
-             NULL},
-            &u_sess->attr.attr_sql.escape_string_warning,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"standard_conforming_strings",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Causes '...' strings to treat backslashes literally."),
-             NULL,
-             GUC_REPORT},
-            &u_sess->attr.attr_sql.standard_conforming_strings,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"synchronize_seqscans",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Enables synchronized sequential scans."),
-             NULL},
-            &u_sess->attr.attr_storage.synchronize_seqscans,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
         {{"archive_mode",
-             PGC_SIGHUP,
-             WAL_ARCHIVING,
-             gettext_noop("Allows archiving of WAL files using archive_command."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            WAL_ARCHIVING,
+            gettext_noop("Allows archiving of WAL files using archive_command."),
+            NULL},
             &u_sess->attr.attr_common.XLogArchiveMode,
             false,
             NULL,
             NULL,
             NULL},
-
-        {{"hot_standby",
-             PGC_POSTMASTER,
-             REPLICATION_STANDBY,
-             gettext_noop("Allows connections and queries during recovery."),
-             NULL},
-            &g_instance.attr.attr_storage.EnableHotStandby,
-            false,
-            NULL,
-            NULL,
+        {{"enable_alarm",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Enables alarm or not."),
             NULL},
-
-        {{"enable_data_replicate", PGC_USERSET, REPLICATION_STANDBY, gettext_noop("Allows data replicate."), NULL},
-            &u_sess->attr.attr_storage.enable_data_replicate,
-            true,
-            check_enable_data_replicate,
-            NULL,
-            NULL},
-
-        {{"enable_mix_replication",
-             PGC_POSTMASTER,
-             REPLICATION,
-             gettext_noop("All the replication log sent by the wal streaming."),
-             NULL},
-            &g_instance.attr.attr_storage.enable_mix_replication,
-            false,
-            check_mix_replication_param,
-            NULL,
-            NULL},
-
-        {{"ha_module_debug", PGC_USERSET, DEVELOPER_OPTIONS, gettext_noop("debug ha module."), NULL},
-            &u_sess->attr.attr_storage.HaModuleDebug,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_alarm", PGC_POSTMASTER, UNGROUPED, gettext_noop("Enables alarm or not."), NULL},
             &g_instance.attr.attr_common.enable_alarm,
             false,
             NULL,
             NULL,
             NULL},
-
-        {{"hot_standby_feedback",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Allows feedback from a hot standby to the primary that will avoid query conflicts."),
-             NULL},
-            &u_sess->attr.attr_storage.hot_standby_feedback,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_stream_replication",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Allows stream replication to standby or secondary."),
-             NULL},
-            &u_sess->attr.attr_storage.enable_stream_replication,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
         {{"allow_system_table_mods",
-             PGC_POSTMASTER,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Allows modifications of the structure of system tables."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Allows modifications of the structure of system tables."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
             &g_instance.attr.attr_common.allowSystemTableMods,
             false,
             NULL,
@@ -2567,35 +1492,24 @@ static void InitConfigureNamesBool()
             NULL},
 
         {{"IsInplaceUpgrade",
-             PGC_SUSET,
-             UPGRADE_OPTIONS,
-             gettext_noop("Enable/disable inplace upgrade mode."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_SUPERUSER_ONLY},
+            PGC_SUSET,
+            NODE_ALL,
+            UPGRADE_OPTIONS,
+            gettext_noop("Enable/disable inplace upgrade mode."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_SUPERUSER_ONLY},
             &u_sess->attr.attr_common.IsInplaceUpgrade,
             false,
             check_is_upgrade,
             assign_is_inplace_upgrade,
             NULL},
-
-        {{"enable_roach_standby_cluster",
-             PGC_POSTMASTER,
-             REPLICATION,
-             gettext_noop("True if current instance is in ROACH standby cluster."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_SUPERUSER_ONLY},
-            &g_instance.attr.attr_storage.IsRoachStandbyCluster,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
         {{"allow_concurrent_tuple_update",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Allows concurrent tuple update."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Allows concurrent tuple update."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_common.allow_concurrent_tuple_update,
             true,
             NULL,
@@ -2603,221 +1517,46 @@ static void InitConfigureNamesBool()
             NULL},
 
         {{"ignore_system_indexes",
-             PGC_BACKEND,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Disables reading from system indexes."),
-             gettext_noop("It does not prevent updating the indexes, so it is safe "
-                          "to use.  The worst consequence is slowness."),
-             GUC_NOT_IN_SAMPLE},
+            PGC_BACKEND,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Disables reading from system indexes."),
+            gettext_noop("It does not prevent updating the indexes, so it is safe "
+                         "to use.  The worst consequence is slowness."),
+            GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_common.IgnoreSystemIndexes,
             false,
             NULL,
             NULL,
             NULL},
-
-        {{"enable_stateless_pooler_reuse",
-             PGC_POSTMASTER,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Pooler stateless reuse mode."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &g_instance.attr.attr_network.PoolerStatelessReuse,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enforce_two_phase_commit",
-             PGC_SUSET,
-             XC_HOUSEKEEPING_OPTIONS,
-             gettext_noop("Enforces the use of two-phase commit on transactions that"
-                          "made use of temporary objects."),
-             NULL},
-            &u_sess->attr.attr_storage.EnforceTwoPhaseCommit,
-            true,
-            NULL,
-            NULL,
-            NULL},
         {{"xc_maintenance_mode",
-             PGC_SUSET,
-             XC_HOUSEKEEPING_OPTIONS,
-             gettext_noop("Turns on XC maintenance mode."),
-             gettext_noop("Can set ON by SET command by system admin.")},
+            PGC_SUSET,
+            NODE_ALL,
+            XC_HOUSEKEEPING_OPTIONS,
+            gettext_noop("Turns on XC maintenance mode."),
+            gettext_noop("Can set ON by SET command by system admin.")},
             &u_sess->attr.attr_common.xc_maintenance_mode,
             false,
             check_pgxc_maintenance_mode,
             NULL,
             NULL},
-
-        {{"enable_twophase_commit",
-             PGC_USERSET,
-             XC_HOUSEKEEPING_OPTIONS,
-             gettext_noop("Enable two phase commit when gtm free is on."),
-             NULL},
-            &u_sess->attr.attr_storage.enable_twophase_commit,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_light_proxy",
-             PGC_SUSET,
-             XC_HOUSEKEEPING_OPTIONS,
-             gettext_noop("Turns on light proxy on coordinator."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_light_proxy,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_pbe_optimization",
-             PGC_SUSET,
-             XC_HOUSEKEEPING_OPTIONS,
-             gettext_noop("Turns on pbe optimization: force to reuse generic plan."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_pbe_optimization,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"lo_compat_privileges",
-             PGC_SUSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Enables backward compatibility mode for privilege checks on large objects."),
-             gettext_noop("Skips privilege checks when reading or modifying large objects, "
-                          "for compatibility with PostgreSQL releases prior to 9.0.")},
-            &u_sess->attr.attr_sql.lo_compat_privileges,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{
-             "quote_all_identifiers",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("When generating SQL fragments, quotes all identifiers."),
-             NULL,
-         },
-            &u_sess->attr.attr_sql.quote_all_identifiers,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enforce_a_behavior",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("GUC parameter of enforcing adapting to A db."),
-             NULL},
-            &u_sess->attr.attr_sql.enforce_a_behavior,
-            true,
-            NULL,
-            NULL},
         {{"support_batch_bind",
-             PGC_SIGHUP,
-             CLIENT_CONN_LOCALE,
-             gettext_noop("Sets to use batch bind-execute for PBE."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets to use batch bind-execute for PBE."),
+            NULL},
             &u_sess->attr.attr_common.support_batch_bind,
             true,
             NULL,
             NULL,
             NULL},
-        {{"enableSeparationOfDuty",
-             PGC_POSTMASTER,
-             CONN_AUTH_SECURITY,
-             gettext_noop("Enables the user's separation of privileges."),
-             NULL},
-            &g_instance.attr.attr_security.enablePrivilegesSeparate,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_nonsysadmin_execute_direct",
-             PGC_POSTMASTER,
-             UNGROUPED,
-             gettext_noop("Enables non-sysadmin users execute direct on CN/DN."),
-             NULL},
-            &g_instance.attr.attr_security.enable_nonsysadmin_execute_direct,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"operation_mode",
-             PGC_SIGHUP,
-             UNGROUPED,
-             gettext_noop("Sets the operation mode."),
-             NULL},
-            &u_sess->attr.attr_security.operation_mode,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"use_workload_manager",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Enables workload manager in the system. "),
-             NULL},
-            &u_sess->attr.attr_resource.use_workload_manager,
-            true,
-            check_use_workload_manager,
-            assign_use_workload_manager,
-            NULL},
-        {{"use_elastic_search",
-            PGC_POSTMASTER,
-            AUDIT_OPTIONS,
-            gettext_noop("Enables elastic search in the system. "),
-            NULL},
-            &g_instance.attr.attr_security.use_elastic_search,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_security_policy",
-            PGC_SIGHUP,
-            QUERY_TUNING_METHOD,
-            gettext_noop("enable security policy features."),
-            NULL},
-            &u_sess->attr.attr_security.Enable_Security_Policy,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_slot_log", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enables create slot log"), NULL},
-            &u_sess->attr.attr_sql.enable_slot_log,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_resource_track",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("enable resources tracking and recording functionality in the system. "),
-             NULL},
-            &u_sess->attr.attr_resource.enable_resource_track,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_resource_record",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("enable insert the session info into the user table. "),
-             NULL},
-            &u_sess->attr.attr_resource.enable_resource_record,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
         {{"enable_bbox_dump",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Enables bbox_handler to create core dump. "),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_WORKLOAD,
+            gettext_noop("Enables bbox_handler to create core dump. "),
+            NULL},
             &u_sess->attr.attr_common.enable_bbox_dump,
             true,
             NULL,
@@ -2826,6 +1565,7 @@ static void InitConfigureNamesBool()
 
         {{"enable_ffic_log",
             PGC_POSTMASTER,
+            NODE_ALL,
             RESOURCES_WORKLOAD,
             gettext_noop("Enables First Failure Info Capture. "),
             NULL},
@@ -2835,590 +1575,186 @@ static void InitConfigureNamesBool()
             NULL,
             NULL},
 
-        {{"enable_thread_pool", PGC_POSTMASTER, CLIENT_CONN, gettext_noop("enable to use thread pool. "), NULL},
+        {{"enable_thread_pool",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("enable to use thread pool. "),
+            NULL},
             &g_instance.attr.attr_common.enable_thread_pool,
             false,
             NULL,
             NULL,
             NULL},
 
-        {{"enable_global_plancache", PGC_POSTMASTER, CLIENT_CONN, gettext_noop("enable to use global plan cache. "), NULL},
+        {{"enable_global_plancache",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("enable to use global plan cache. "),
+            NULL},
             &g_instance.attr.attr_common.enable_global_plancache,
             false,
             check_gpc_syscache_threshold,
             NULL,
             NULL},
 
-        {{"enable_router", PGC_SIGHUP, CLIENT_CONN, gettext_noop("enable to use router."),
-             NULL},
+        {{"enable_router",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            CLIENT_CONN,
+            gettext_noop("enable to use router."),
+            NULL},
             &u_sess->attr.attr_common.enable_router,
             false,
             NULL,
             NULL,
             NULL},
-
-        /* Database Security: Support database audit */
-        /* add guc option about audit */
-        {{"audit_enabled",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("Starts a subprocess to capture audit output into audit files."),
-             NULL},
-            &u_sess->attr.attr_security.Audit_enabled,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        /* Database Security: Support database audit */
-        /* add guc option about audit */
-        {{"audit_resource_policy",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("the policy is used to determine how to cleanup the audit files;"
-                          " True means to cleanup the audit files based on space limitation and"
-                          " False means to cleanup the audit files when the remained time is arriving."),
-             NULL},
-            &u_sess->attr.attr_security.Audit_CleanupPolicy,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"modify_initial_password",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("modify the initial password of the initial user."),
-             NULL},
-            &u_sess->attr.attr_security.Modify_initial_password,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{
-             "most_available_sync",
-             PGC_SIGHUP,
-             REPLICATION_MASTER,
-             gettext_noop("Enables master to continue when sync standbys failure."),
-             NULL,
-         },
-            &u_sess->attr.attr_storage.guc_most_available_sync,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "convert_string_to_digit",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Convert string to digit when comparing string and digit"),
-             NULL,
-         },
-            &u_sess->attr.attr_sql.convert_string_to_digit,
-            true,
-            NULL,
-            assign_convert_string_to_digit,
-            NULL},
-        // Stream communication
-        //
-        {{
-             "comm_tcp_mode",
-             PGC_POSTMASTER,
-             CLIENT_CONN,
-             gettext_noop("Whether use tcp commucation mode for stream"),
-             NULL,
-         },
-            &g_instance.attr.attr_network.comm_tcp_mode,
-            true,
-            check_sctp_support,
-            NULL,
-            NULL},
-        {{
-             "comm_debug_mode",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Whether use libcomm debug mode for print debug information"),
-             NULL,
-         },
-            &u_sess->attr.attr_network.comm_debug_mode,
-#ifdef ENABLE_LLT
-            true,
-#else
-            false,
-#endif
-            NULL,
-            assign_comm_debug_mode,
-            NULL},
-        {{
-             "comm_stat_mode",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Whether use libcomm stat mode for print stat data"),
-             NULL,
-         },
-            &u_sess->attr.attr_network.comm_stat_mode,
-#ifdef ENABLE_LLT
-            true,
-#else
-            false,
-#endif
-            NULL,
-            assign_comm_stat_mode,
-            NULL},
-        {{
-             "comm_timer_mode",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Whether use libcomm timer debug mode for print timer data"),
-             NULL,
-         },
-            &u_sess->attr.attr_network.comm_timer_mode,
-#ifdef ENABLE_LLT
-            true,
-#else
-            false,
-#endif
-            NULL,
-            assign_comm_timer_mode,
-            NULL},
-        {{
-             "comm_no_delay",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Whether set NO_DELAY option for libcomm socket"),
-             NULL,
-         },
-            &u_sess->attr.attr_network.comm_no_delay,
-            false,
-            NULL,
-            assign_comm_no_delay,
-            NULL},
-
-        {{
-             "enable_show_any_tuples",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("This parameter is just valid when it's a read-only transction, just for analyse."
-                          "The default_transaction_read_only and transaction_read_only should be true."
-                          "You'd better keep enable_indexscan and enable_bitmapscan  be false to keep seqscan occurs."
-                          "When enable_show_any_tuples is true, all versions of the tuples are visible, including "
-                          "dirty versions."),
-             NULL,
-         },
-            &u_sess->attr.attr_storage.enable_show_any_tuples,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_broadcast",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables the planner's use of broadcast stream plans."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_broadcast,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "enable_debug_vacuum",
-             PGC_SIGHUP,
-             DEVELOPER_OPTIONS,
-             gettext_noop("This parameter is just used for logging some vacuum info."),
-             NULL,
-         },
-            &u_sess->attr.attr_storage.enable_debug_vacuum,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "ngram_punctuation_ignore",
-             PGC_USERSET,
-             TEXT_SEARCH,
-             gettext_noop("Enables N-gram ignore punctuation."),
-             NULL,
-         },
-            &u_sess->attr.attr_sql.ngram_punctuation_ignore,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "ngram_grapsymbol_ignore",
-             PGC_USERSET,
-             TEXT_SEARCH,
-             gettext_noop("Enables N-gram ignore grapsymbol."),
-             NULL,
-         },
-            &u_sess->attr.attr_sql.ngram_grapsymbol_ignore,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "enable_fast_allocate",
-             PGC_SUSET,
-             UNGROUPED,
-             gettext_noop(
-                 "enable fallocate to improve file extend performance, make sure filesystem support it, ep:XFS"),
-             NULL,
-         },
-            &u_sess->attr.attr_sql.enable_fast_allocate,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_adio_debug", PGC_SUSET, DEVELOPER_OPTIONS, gettext_noop("Enable log debug adio function."), NULL},
-            &u_sess->attr.attr_storage.enable_adio_debug,
-            false,
-            check_adio_debug_guc,
-            NULL,
-            NULL},
-        /* This is a beta feature, set it to PGC_INTERNAL, so user can't configure it */
-        {{"enable_adio_function", PGC_INTERNAL, DEVELOPER_OPTIONS, gettext_noop("Enable adio function."), NULL},
-            &g_instance.attr.attr_storage.enable_adio_function,
-            false,
-            check_adio_function_guc,
-            NULL,
-            NULL},
-
-        {{"td_compatible_truncation",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("Enable string automatically truncated during insertion."),
-             NULL},
-            &u_sess->attr.attr_sql.td_compatible_truncation,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"gds_debug_mod", PGC_USERSET, LOGGING_WHEN, gettext_noop("Enable GDS-related troubleshoot-logging."), NULL},
-            &u_sess->attr.attr_storage.gds_debug_mod,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_upgrade_merge_lock_mode",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("If true, use Exclusive Lock mode for deltamerge."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_upgrade_merge_lock_mode,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_orc_cache", PGC_POSTMASTER, QUERY_TUNING_METHOD, gettext_noop("Enable orc metadata cache."), NULL},
-            &g_instance.attr.attr_sql.enable_orc_cache,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_default_cfunc_libpath", PGC_POSTMASTER, FILE_LOCATIONS, gettext_noop("Enable check for c function lib path."), NULL},
-            &g_instance.attr.attr_sql.enable_default_cfunc_libpath,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"acceleration_with_compute_pool",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("If true, agg/scan may run in compute pool."),
-             NULL},
-            &u_sess->attr.attr_sql.acceleration_with_compute_pool,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_extrapolation_stats",
-             PGC_SUSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enable extrapolation stats for date datatype."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_extrapolation_stats,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{
-             "data_sync_retry",
-             PGC_POSTMASTER,
-             ERROR_HANDLING_OPTIONS,
-             gettext_noop("Whether to continue running after a failure to sync data files."),
-         },
+        {{"data_sync_retry",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            ERROR_HANDLING_OPTIONS,
+            gettext_noop("Whether to continue running after a failure to sync data files."),
+            },
             &g_instance.attr.attr_common.data_sync_retry,
             false,
             NULL,
             NULL,
             NULL},
-
-        {{"enable_trigger_shipping",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Ship a trigger to DN if possible."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_trigger_shipping,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_save_datachanged_timestamp",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("If true, save the timestamp when the data of the table changes."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_save_datachanged_timestamp,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_online_ddl_waitlock",
-             PGC_SIGHUP,
-             UNGROUPED,
-             gettext_noop("Enable ddl wait advisory lock in online expansion."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_online_ddl_waitlock,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"show_acce_estimate_detail",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("If true, show details whether plan is pushed down to the compute pool."),
-             NULL},
-            &u_sess->attr.attr_sql.show_acce_estimate_detail,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_cbm_tracking", PGC_SIGHUP, WAL, gettext_noop("Turn on cbm tracking function. "), NULL},
-            &u_sess->attr.attr_storage.enable_cbm_tracking,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_copy_server_files",
-             PGC_SIGHUP,
-             UNGROUPED,
-             gettext_noop("enable sysadmin to copy from/to file"),
-             NULL},
-            &u_sess->attr.attr_storage.enable_copy_server_files,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_user_metric_persistent",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("enable user resource info persistent function."),
-             NULL},
-            &u_sess->attr.attr_resource.enable_user_metric_persistent,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_instance_metric_persistent",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("enable instance resource info persistent function."),
-             NULL},
-            &u_sess->attr.attr_resource.enable_instance_metric_persistent,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_logical_io_statistics",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("enable logical io statistics function."),
-             NULL},
-            &u_sess->attr.attr_resource.enable_logical_io_statistics,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_access_server_directory",
-             PGC_SIGHUP,
-             UNGROUPED,
-             gettext_noop("enable sysadmin to create directory"),
-             NULL},
-            &g_instance.attr.attr_storage.enable_access_server_directory,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_opfusion", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("Enables opfusion."), NULL},
-            &u_sess->attr.attr_sql.enable_opfusion,
-            true,
-            NULL,
-            NULL,
-            NULL},
-
-#ifndef ENABLE_MULTIPLE_NODES
-        {{"enable_beta_opfusion",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Enables beta opfusion features."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_beta_opfusion,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_auto_clean_unique_sql",
-             PGC_POSTMASTER,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Enable auto clean unique sql entry when the UniquesQl hash table is full."),
-             NULL},
-            &g_instance.attr.attr_common.enable_auto_clean_unique_sql,
-            false,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_custom_parser",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Enables custom parser"),
-             NULL},
-            &u_sess->attr.attr_sql.enable_custom_parser,
-            false,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
-        {{"enable_partition_opfusion", PGC_USERSET, QUERY_TUNING_METHOD,
-            gettext_noop("Enables partition opfusion features."),
-            NULL},
-            &u_sess->attr.attr_sql.enable_partition_opfusion,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"enable_prevent_job_task_startup",
-             PGC_SIGHUP,
-             JOB,
-             gettext_noop("enable control whether the job task thread can be started."),
-             NULL},
-            &u_sess->attr.attr_sql.enable_prevent_job_task_startup,
-            false,
-            NULL,
-            NULL,
-            NULL},
-
         {{"check_implicit_conversions",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("check whether there is an implicit conversion on index column"),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("check whether there is an implicit conversion on index column"),
+            NULL},
             &u_sess->attr.attr_common.check_implicit_conversions_for_indexcol,
             false,
             NULL,
             NULL,
             NULL},
-
-        {{
-             "enable_incremental_checkpoint",
-             PGC_POSTMASTER,
-             WAL_CHECKPOINTS,
-             gettext_noop("Enable master incremental checkpoint."),
-             NULL,
-         },
-            &g_instance.attr.attr_storage.enableIncrementalCheckpoint,
-            true,
+        {{"persistent_datanode_connections",
+            PGC_BACKEND,
+            NODE_DISTRIBUTE,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Session never releases acquired connections."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
+            &u_sess->attr.attr_common.PersistentConnections,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        {{"enable_redistribute",
+            PGC_SUSET,
+            NODE_DISTRIBUTE,
+            XC_HOUSEKEEPING_OPTIONS,
+            gettext_noop("Enables redistribute at nodes mis-match."),
+            NULL},
+            &u_sess->attr.attr_common.enable_redistribute,
+            false,
+            NULL,
+            NULL,
+            NULL},
+        {{"enable_tsdb", 
+            PGC_POSTMASTER, 
+            NODE_DISTRIBUTE,
+            TSDB, 
+            gettext_noop("Enables control tsdb feature."), 
+            NULL},
+            &g_instance.attr.attr_common.enable_tsdb,
+            false,
             NULL,
             NULL,
             NULL},
 
-        {{
-             "enable_double_write",
-             PGC_POSTMASTER,
-             WAL_CHECKPOINTS,
-             gettext_noop("Enable master double write."),
-             NULL,
-         },
-            &g_instance.attr.attr_storage.enable_double_write,
-            true,
+        {{"enable_ts_compaction", 
+            PGC_SIGHUP, 
+            NODE_DISTRIBUTE,
+            TSDB, 
+            gettext_noop("Enables timeseries compaction feature."), 
+            NULL},
+            &u_sess->attr.attr_common.enable_ts_compaction,
+            false,
             NULL,
             NULL,
             NULL},
-
-        {{"log_pagewriter", PGC_SIGHUP, LOGGING_WHAT, gettext_noop("Logs pagewriter thread."), NULL},
-            &u_sess->attr.attr_storage.log_pagewriter,
+        {{"enable_ts_kvmerge",
+            PGC_SIGHUP,
+	        NODE_DISTRIBUTE,
+	        TSDB,
+	        gettext_noop("Enables timeseries kvmerge feature."),
+	        NULL},
+            &u_sess->attr.attr_common.enable_ts_kvmerge,
+	        false,
+	        NULL,
+	        NULL,
+	        NULL},
+        {{"enable_ts_outorder",
+            PGC_SIGHUP,
+	        NODE_DISTRIBUTE,
+	        TSDB,
+	        gettext_noop("Enables timeseries ourorder feature."),
+	        NULL},
+            &u_sess->attr.attr_common.enable_ts_outorder,
+	        false,
+	        NULL,
+	        NULL,
+	        NULL},        
+        {{"ts_adaptive_threads",
+            PGC_SIGHUP, 
+            NODE_DISTRIBUTE,
+            TSDB, 
+            gettext_noop("Enables compaction give a adaptive number of consumers."), 
+            NULL},
+            &u_sess->attr.attr_common.ts_adaptive_threads,
             false,
             NULL,
             NULL,
             NULL},
         {{
-             "enable_page_lsn_check",
-             PGC_POSTMASTER,
-             WAL,
-             gettext_noop("Enable check page lsn when redo"),
-             NULL,
-         },
-            &g_instance.attr.attr_storage.enableWalLsnCheck,
-            true,
-            NULL,
-            NULL,
-            NULL},
-        {{"enable_xlog_prune",
-             PGC_SIGHUP,
-             WAL,
-             gettext_noop("Enable xlog prune when not all standys connected and xlog size is largger than max_xlog_size"),
-             NULL},
-            &u_sess->attr.attr_storage.enable_xlog_prune,
-            true,
-            NULL,
-            NULL,
-            NULL},
-       {{"enable_auto_explain",
+            "reserve_space_for_nullable_atts",
             PGC_USERSET,
-            RESOURCES_WORKLOAD,
-            gettext_noop("enable auto explain plans. "),
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable reserve space for nullable attributes, only applicable to ustore."),
+            NULL
+            },
+            &u_sess->attr.attr_storage.reserve_space_for_nullable_atts,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
+        {{"enable_default_ustore_table",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Creates all user-defined tables with orientation inplace"),
             NULL},
-            &u_sess->attr.attr_resource.enable_auto_explain,
+            &u_sess->attr.attr_sql.enable_default_ustore_table,
             false,
             NULL,
             NULL,
-            NULL},
+            NULL
+        },
         /* End-of-list marker */
-        {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, false, NULL, NULL, NULL}};
-
-    int num_of_bool_option = sizeof(localConfigureNamesBool) / sizeof(config_bool);
-    for (int i = 0; i < num_of_bool_option - 1; i++) {
-        if (strcasecmp(localConfigureNamesBool[i].gen.name, "enable_save_datachanged_timestamp") == 0 &&
-            get_product_version() == PRODUCT_VERSION_GAUSSDB300) {
-            localConfigureNamesBool[i].boot_val = false;
-            break;
-        }
-    }
+        {{NULL,
+            (GucContext)0,
+            (GucNodeType)0,
+            (config_group)0,
+            NULL,
+            NULL},
+            NULL,
+            false,
+            NULL,
+            NULL,
+            NULL}
+    };
 
     Size bytes = sizeof(localConfigureNamesBool);
-    u_sess->utils_cxt.ConfigureNamesBool[SINGLE_GUC] =
+    u_sess->utils_cxt.ConfigureNamesBool[GUC_ATTR_COMMON] =
         (struct config_bool*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
-    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesBool[SINGLE_GUC], bytes, localConfigureNamesBool, bytes);
+    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesBool[GUC_ATTR_COMMON], bytes, localConfigureNamesBool, bytes);
     securec_check_ss(rc, "\0", "\0");
 }
 
@@ -3471,37 +1807,14 @@ void set_qunit_case_number_hook(int newval, void* extra)
 static void InitConfigureNamesInt()
 {
     struct config_int localConfigureNamesInt[] = {
-        {{"max_active_global_temporary_table",
-            PGC_USERSET,
-            UNGROUPED,
-            gettext_noop("max active global temporary table."),
-            NULL},
-            &u_sess->attr.attr_storage.max_active_gtt,
-            1000,
-            0,
-            1000000,
-            NULL,
-            NULL,
-            NULL},
-        {{"vacuum_gtt_defer_check_age", 
-            PGC_USERSET, 
-            CLIENT_CONN_STATEMENT,
-            gettext_noop("The defer check age of GTT, used to check expired data after vacuum."),
-            NULL},
-            &u_sess->attr.attr_storage.vacuum_gtt_defer_check_age,
-            10000,
-            0,
-            1000000,
-            NULL,
-            NULL,
-            NULL},
         {{"archive_timeout",
-             PGC_SIGHUP,
-             WAL_ARCHIVING,
-             gettext_noop("Forces a switch to the next xlog file if a "
-                          "new file has not been started within N seconds."),
-             NULL,
-             GUC_UNIT_S},
+            PGC_SIGHUP,
+            NODE_ALL,
+            WAL_ARCHIVING,
+            gettext_noop("Forces a switch to the next xlog file if a "
+                         "new file has not been started within N seconds."),
+            NULL,
+            GUC_UNIT_S},
             &u_sess->attr.attr_common.XLogArchiveTimeout,
             0,
             0,
@@ -3509,453 +1822,12 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"post_auth_delay",
-             PGC_BACKEND,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Waits N seconds on connection startup after authentication."),
-             gettext_noop("This allows attaching a debugger to the process."),
-             GUC_NOT_IN_SAMPLE | GUC_UNIT_S},
-            &u_sess->attr.attr_security.PostAuthDelay,
-            0,
-            0,
-            INT_MAX / 1000000,
-            NULL,
-            NULL,
-            NULL},
-        {{"default_statistics_target",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("Sets the default statistics target."),
-             gettext_noop("This applies to table columns that have not had a "
-                          "column-specific target set via ALTER TABLE SET STATISTICS."
-                          "default_statistics_target < 0 means using percent to set statistics.")},
-            &u_sess->attr.attr_sql.default_statistics_target,
-            100,
-            -100,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-            
-        {{"from_collapse_limit",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("Sets the FROM-list size beyond which subqueries "
-                          "are not collapsed."),
-             gettext_noop("The planner will merge subqueries into upper "
-                          "queries if the resulting FROM list would have no more than "
-                          "this many items.")},
-            &u_sess->attr.attr_sql.from_collapse_limit,
-            8,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"join_collapse_limit",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("Sets the FROM-list size beyond which JOIN "
-                          "constructs are not flattened."),
-             gettext_noop("The planner will flatten explicit JOIN "
-                          "constructs into lists of FROM items whenever a "
-                          "list of no more than this many items would result.")},
-            &u_sess->attr.attr_sql.join_collapse_limit,
-            8,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"geqo_threshold",
-             PGC_USERSET,
-             QUERY_TUNING_GEQO,
-             gettext_noop("Sets the threshold of FROM items beyond which GEQO is used."),
-             NULL},
-            &u_sess->attr.attr_sql.geqo_threshold,
-            12,
-            2,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"geqo_effort",
-             PGC_USERSET,
-             QUERY_TUNING_GEQO,
-             gettext_noop("GEQO: effort is used to set the default for other GEQO parameters."),
-             NULL},
-            &u_sess->attr.attr_sql.Geqo_effort,
-            DEFAULT_GEQO_EFFORT,
-            MIN_GEQO_EFFORT,
-            MAX_GEQO_EFFORT,
-            NULL,
-            NULL,
-            NULL},
-        {{"geqo_pool_size",
-             PGC_USERSET,
-             QUERY_TUNING_GEQO,
-             gettext_noop("GEQO: number of individuals in the population."),
-             gettext_noop("Zero selects a suitable default value.")},
-            &u_sess->attr.attr_sql.Geqo_pool_size,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"geqo_generations",
-             PGC_USERSET,
-             QUERY_TUNING_GEQO,
-             gettext_noop("GEQO: number of iterations of the algorithm."),
-             gettext_noop("Zero selects a suitable default value.")},
-            &u_sess->attr.attr_sql.Geqo_generations,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"hll_default_log2m",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Set parameter log2m in hll."),
-             gettext_noop("It's related to numbers of register and relative error.")},
-            &u_sess->attr.attr_sql.g_default_log2m,
-            DEFAULT_LOG2M,
-            HLL_MIN_LOG2M,
-            HLL_MAX_LOG2M,
-            NULL,
-            NULL,
-            NULL},
-        {{"hll_default_regwidth",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Set parameter regwidth in hll."),
-             gettext_noop("It's related to number of bits used per register, max cardinality and memory of hll.")},
-            &u_sess->attr.attr_sql.g_default_regwidth,
-            DEFAULT_REGWIDTH,
-            HLL_MIN_REGWIDTH,
-            HLL_MAX_REGWIDTH,
-            NULL,
-            NULL,
-            NULL},
-        {{"hll_default_sparseon",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Set parameter sparseon for hll."),
-             gettext_noop("hll use sparseon mode or not.")},
-            &u_sess->attr.attr_sql.g_default_sparseon,
-            DEFAULT_SPARSEON,
-            HLL_MIN_SPARSEON,
-            HLL_MAX_SPARSEON,
-            NULL,
-            NULL,
-            NULL},
-        {{"hll_max_sparse", PGC_USERSET, UNGROUPED, gettext_noop("Set parameter max_sparse for hll"), NULL},
-            &u_sess->attr.attr_sql.g_max_sparse,
-            MAX_SPARSE,
-            HLL_MIN_MAX_SPARSE,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"cost_param",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("Bitmap controls the use of alternative cost model."),
-             NULL},
-            &u_sess->attr.attr_sql.cost_param,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"wait_dummy_time",
-             PGC_SIGHUP,
-             CUSTOM_OPTIONS,
-             gettext_noop("Wait for dummy starts or bcm file list received when catchup."),
-         },
-            &u_sess->attr.attr_storage.wait_dummy_time,
-            300,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"catchup2normal_wait_time",
-             PGC_POSTMASTER,
-             REPLICATION_STANDBY,
-             gettext_noop("The maximal allowed duration for waiting from catchup to normal state."),
-             NULL,
-             GUC_UNIT_MS
-         },
-            &g_instance.attr.attr_storage.catchup2normal_wait_time,
-            -1,
-            -1,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-        {{"max_recursive_times",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("max recursive times when execute query with recursive-clause."),
-             NULL},
-            &u_sess->attr.attr_sql.max_recursive_times,
-            200,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"schedule_splits_threshold",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("The Max count of splits which can be scheduled in memory."),
-             NULL},
-            &u_sess->attr.attr_sql.schedule_splits_threshold,
-            60000,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {/* This is PGC_SUSET to prevent hiding from log_lock_waits. */
-            {"deadlock_timeout",
-                PGC_SUSET,
-                LOCK_MANAGEMENT,
-                gettext_noop("Sets the time to wait on a lock before checking for deadlock."),
-                NULL,
-                GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.DeadlockTimeout,
-            1000,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {/* This is PGC_SUSET to prevent hiding from log_lock_waits. */
-            {"lockwait_timeout",
-                PGC_SUSET,
-                LOCK_MANAGEMENT,
-                gettext_noop("Sets the max time to wait on a lock acquire."),
-                NULL,
-                GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.LockWaitTimeout,
-            3000,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {/* This is PGC_SUSET to prevent hiding from log_lock_waits. */
-            {"update_lockwait_timeout",
-                PGC_SUSET,
-                LOCK_MANAGEMENT,
-                gettext_noop("Sets the max time to wait on a lock acquire when concurrently update same tuple."),
-                NULL,
-                GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.LockWaitUpdateTimeout,
-            120000,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"max_standby_archive_delay",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Sets the maximum delay before canceling queries when a hot standby server is processing "
-                          "archived WAL data."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.max_standby_archive_delay,
-            3 * 1000,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"max_standby_streaming_delay",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Sets the maximum delay before canceling queries when a hot standby server is processing "
-                          "streamed WAL data."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.max_standby_streaming_delay,
-            3 * 1000,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-#ifndef ENABLE_MULTIPLE_NODES
-        {{"recovery_min_apply_delay",
-            PGC_SIGHUP,
-            REPLICATION_STANDBY,
-        	gettext_noop("Sets the minimum delay for applying changes during recovery."),
-        	NULL,
-        	GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.recovery_min_apply_delay,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
-        {{"wal_receiver_status_interval",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Sets the maximum interval between WAL receiver status reports to the primary."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.wal_receiver_status_interval,
-            5,
-            0,
-            INT_MAX / 1000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_receiver_timeout",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Sets the maximum wait time to receive data from master."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.wal_receiver_timeout,
-            6 * 1000,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL
-        },
-        {
-            {
-                "basebackup_timeout",
-                PGC_USERSET,
-                WAL_SETTINGS,
-                gettext_noop("Sets the timeout in seconds for a reponse from gs_basebackup."),
-                NULL,
-                GUC_UNIT_S
-            },
-            &u_sess->attr.attr_storage.basebackup_timeout,
-            60 * 10,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL
-        },
-        {{"wal_receiver_connect_timeout",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Sets the maximum wait time to connect master."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.wal_receiver_connect_timeout,
-            2,
-            0,
-            INT_MAX / 1000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_receiver_connect_retries",
-             PGC_SIGHUP,
-             REPLICATION_STANDBY,
-             gettext_noop("Sets the maximum retries to connect master."),
-             NULL},
-            &u_sess->attr.attr_storage.wal_receiver_connect_retries,
-            1,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_receiver_buffer_size",
-             PGC_POSTMASTER,
-             REPLICATION_STANDBY,
-             gettext_noop("Sets the buffer size to receive data from master."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_storage.WalReceiverBufSize,
-            64 * 1024,
-            4 * 1024,
-            1023 * 1024,
-            NULL,
-            NULL,
-            NULL},
-        {{"data_replicate_buffer_size",
-             PGC_POSTMASTER,
-             REPLICATION_SENDING,
-             gettext_noop("Sets the buffer size of data replication."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_storage.DataQueueBufSize,
-            16 * 1024,
-            4 * 1024,
-            1023 * 1024 * 1024,
-            NULL,
-            NULL,
-            NULL},
-        {
-            {
-                "max_connections",
-                PGC_POSTMASTER,
-                CONN_AUTH_SETTINGS,
-                gettext_noop("Sets the maximum number of concurrent connections for clients."),
-                NULL
-            },
-            &g_instance.attr.attr_network.MaxConnections,
-            200,
-            10,
-            MAX_BACKENDS,
-            check_maxconnections,
-            NULL,
-            NULL
-        },
-        {
-            {
-                "max_inner_tool_connections",
-                PGC_POSTMASTER,
-                CONN_AUTH_SETTINGS,
-                gettext_noop("Sets the maximum number of concurrent connections for inner tools."),
-                NULL
-            },
-            &g_instance.attr.attr_network.maxInnerToolConnections,
-            50,
-            1,
-            MAX_BACKENDS,
-            CheckMaxInnerToolConnections,
-            NULL,
-            NULL
-        },
-        {{"sysadmin_reserved_connections",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the number of connection slots reserved for system admin."),
-             NULL},
-            &g_instance.attr.attr_network.ReservedBackends,
-            3,
-            0,
-            MAX_BACKENDS,
-            NULL,
-            NULL,
-            NULL},
         {{"alarm_report_interval",
-             PGC_SIGHUP,
-             UNGROUPED,
-             gettext_noop("Sets the interval time between two alarm report."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Sets the interval time between two alarm report."),
+            NULL},
             &u_sess->attr.attr_common.AlarmReportInterval,
             10,
             0,
@@ -3963,197 +1835,16 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        /*
-         * We sometimes multiply the number of shared buffers by two without
-         * checking for overflow, so we mustn't allow more than INT_MAX / 2.
-         */
-        {{"shared_buffers",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the number of shared memory buffers used by the server."),
-             NULL,
-             GUC_UNIT_BLOCKS},
-            &g_instance.attr.attr_storage.NBuffers,
-            1024,
-            16,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"hashagg_table_size",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("Sets the number of slot in the hash table."),
-             NULL},
-            &u_sess->attr.attr_sql.hashagg_table_size,
-            0,
-            0,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"memorypool_size",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the number of memory pool used by the server."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_memory.memorypool_size,
-            1024 * 512,
-            128 * 1024,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"max_process_memory",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum number of memory used by the process."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_memory.max_process_memory,
-            12 * 1024 * 1024,
-            2 * 1024 * 1024,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"local_syscache_threshold",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum threshold for cleaning cache."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_memory.local_syscache_threshold,
-            256 * 1024,
-            1 * 1024,
-            512 * 1024,
-            check_syscache_threshold_gpc,
-            NULL,
-            NULL},
-
-        {{"session_statistics_memory",
-             PGC_SIGHUP,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum number of session statistics memory used by the process."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_resource.session_statistics_memory,
-            5 * 1024,
-            5 * 1024,
-            INT_MAX,
-            check_statistics_memory_limit,
-            assign_statistics_memory,
-            NULL},
-
-        {{"session_history_memory",
-             PGC_SIGHUP,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum number of session history memory used by the process."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_resource.session_history_memory,
-            10 * 1024,
-            10 * 1024,
-            INT_MAX,
-            check_history_memory_limit,
-            assign_history_memory,
-            NULL},
-
-        {{"udf_memory_limit",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum number of memory used by UDF Master and UDF Workers."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_sql.udf_memory_limit,
-            200 * 1024,
-            200 * 1024,
-            INT_MAX,
-            check_udf_memory_limit,
-            NULL,
-            NULL},
-
-        {{"cstore_buffers",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the number of CStore buffers used by the server."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_storage.cstore_buffers,
-            131072,
-            16384,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"max_loaded_cudesc",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the number of loaded cudesc per column."),
-             NULL},
-            &u_sess->attr.attr_storage.max_loaded_cudesc,
-            1024,
-            100,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"temp_buffers",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum number of temporary buffers used by each session."),
-             NULL,
-             GUC_UNIT_BLOCKS},
-            &u_sess->attr.attr_storage.num_temp_buffers,
-            128,
-            100,
-            INT_MAX / 2,
-            check_temp_buffers,
-            NULL,
-            NULL},
-        {{"port", PGC_POSTMASTER, CONN_AUTH_SETTINGS, gettext_noop("Sets the TCP port the server listens on."), NULL},
-            &g_instance.attr.attr_network.PostPortNumber,
-            DEF_PGPORT,
-            1,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-        {{"unix_socket_permissions",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the access permissions of the Unix-domain socket."),
-             gettext_noop("Unix-domain sockets use the usual Unix file system "
-                          "permission set. The parameter value is expected "
-                          "to be a numeric mode specification in the form "
-                          "accepted by the chmod and umask system calls. "
-                          "(To use the customary octal format the number must "
-                          "start with a 0 (zero).)")},
-            &g_instance.attr.attr_network.Unix_socket_permissions,
-            0777,
-            0000,
-            0777,
-            NULL,
-            NULL,
-            show_unix_socket_permissions},
-
         {{"log_file_mode",
-             PGC_SIGHUP,
-             LOGGING_WHERE,
-             gettext_noop("Sets the file permissions for log files."),
-             gettext_noop("The parameter value is expected "
-                          "to be a numeric mode specification in the form "
-                          "accepted by the chmod and umask system calls. "
-                          "(To use the customary octal format the number must "
-                          "start with a 0 (zero).)")},
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the file permissions for log files."),
+            gettext_noop("The parameter value is expected "
+                         "to be a numeric mode specification in the form "
+                         "accepted by the chmod and umask system calls. "
+                         "(To use the customary octal format the number must "
+                         "start with a 0 (zero).)")},
             &u_sess->attr.attr_common.Log_file_mode,
             0600,
             0000,
@@ -4161,360 +1852,17 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             show_log_file_mode},
-
-        {{
-             "resource_track_cost",
-             PGC_USERSET,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets the minimum cost to do resource track."),
-             gettext_noop("This value is set to 1000000 as default."),
-         },
-            &u_sess->attr.attr_resource.resource_track_cost,
-            100000,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "topsql_retention_time",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("the retention time of TopSql"),
-             gettext_noop("This value is set to 7 as default. "),
-         },
-            &u_sess->attr.attr_resource.topsql_retention_time,
-            0,
-            0,
-            3650,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "unique_sql_retention_time",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("the retention time of unique sql text"),
-             gettext_noop("This value is set to 30 min as default. "),
-             GUC_UNIT_MIN
-         },
-            &u_sess->attr.attr_resource.unique_sql_retention_time,
-            30,
-            1,
-            3650,
-            NULL,
-            NULL,
-            NULL},
-        {{"resource_track_duration",
-             PGC_USERSET,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets the minimum duration to record history session info."),
-             gettext_noop("This value is set to 60 secs as default."),
-             GUC_UNIT_S},
-            &u_sess->attr.attr_resource.resource_track_duration,
-            60,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{
-             "user_metric_retention_time",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("the user resource info retention time."),
-             gettext_noop("This value is set to 7 as default. "),
-         },
-            &u_sess->attr.attr_resource.user_metric_retention_time,
-            7,
-            0,
-            3650,
-            NULL,
-            NULL,
-            NULL},
-
-        {{
-             "instance_metric_retention_time",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("the instance resource info retention time."),
-             gettext_noop("This value is set to 7 as default. "),
-         },
-            &u_sess->attr.attr_resource.instance_metric_retention_time,
-            7,
-            0,
-            3650,
-            NULL,
-            NULL,
-            NULL},
-
-        {{
-             "cpu_collect_timer",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets the maximum cpu collect time."),
-             gettext_noop("This value is set to 30 secs as default."),
-         },
-            &u_sess->attr.attr_resource.cpu_collect_timer,
-            30,
-            1,
-            INT_MAX,
-            NULL,
-            assign_collect_timer,
-            NULL},
-
-        {{"work_mem",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum memory to be used for query workspaces."),
-             gettext_noop("This much memory can be used by each internal "
-                          "sort operation and hash table before switching to "
-                          "temporary disk files."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_memory.work_mem,
-            64 * 1024,
-            64,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-        {{"UDFWorkerMemHardLimit",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the hard memory limit to be used for fenced UDF."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_sql.UDFWorkerMemHardLimit,
-            1 * 1024 * 1024,
-            0,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"FencedUDFMemoryLimit",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum memory to be used for fenced UDF by user."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_sql.FencedUDFMemoryLimit,
-            0,
-            0,
-            MAX_KILOBYTES,
-            check_fencedUDFMemoryLimit,
-            NULL,
-            NULL},
-
-        {{"query_mem",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the memory to be reserved for a statement."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_sql.statement_mem,
-            0,
-            0,
-            MAX_KILOBYTES,
-            check_statement_mem,
-            NULL,
-            NULL},
-
-        {{"query_max_mem",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the max memory to be reserved for a statement."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_sql.statement_max_mem,
-            0,
-            0,
-            MAX_KILOBYTES,
-            check_statement_max_mem,
-            NULL,
-            NULL},
-
-        {{
-             "bbox_dump_count",
-             PGC_USERSET,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets the maximum number of core dump created by bbox_handler."),
-             gettext_noop("This value is set to 8 as default. "),
-         },
+        {{"bbox_dump_count",
+            PGC_USERSET,
+            NODE_ALL,
+            RESOURCES_WORKLOAD,
+            gettext_noop("Sets the maximum number of core dump created by bbox_handler."),
+            gettext_noop("This value is set to 8 as default. "),
+            },
             &u_sess->attr.attr_common.bbox_dump_count,
             8,
             1,
             20,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "io_limits",
-             PGC_USERSET,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets io_limit  for each query."),
-             gettext_noop("This value is set to 0 as default. "),
-         },
-            &u_sess->attr.attr_resource.iops_limits,
-            0,
-            0,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-        {{
-            "parctl_min_cost",
-            PGC_SIGHUP,
-            RESOURCES_WORKLOAD,
-            gettext_noop("Sets the minimum cost to do parallel control."),
-            gettext_noop("This value is set to 1000000 as default. "),
-            },
-            &u_sess->attr.attr_resource.parctl_min_cost,
-            100000,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "io_control_unit",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets the io control unit for reading or writing row tuple."),
-             gettext_noop("This value is set to 6000 as default. "),
-         },
-            &u_sess->attr.attr_resource.io_control_unit,
-            IOCONTROL_UNIT,
-            1000,
-            1000000,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "autovacuum_io_limits",
-             PGC_SIGHUP,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets io_limit for autovacum."),
-             gettext_noop("This value is set to 0 as default. "),
-         },
-            &u_sess->attr.attr_resource.autovac_iops_limits,
-            -1,
-            -1,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-        {{
-             "transaction_pending_time",
-             PGC_USERSET,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Sets pend_time for transaction or Stored Procedure."),
-             gettext_noop("This value is set to 60 as default. "),
-         },
-            &u_sess->attr.attr_resource.transaction_pending_time,
-            0,
-            -1,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-        {{"psort_work_mem",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum memory to be used for partial sort."),
-             gettext_noop("This much memory can be used by each internal "
-                          "partial sort operation before switching to "
-                          "temporary disk files."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.psort_work_mem,
-            512 * 1024,
-            64,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"maintenance_work_mem",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum memory to be used for maintenance operations."),
-             gettext_noop("This includes operations such as VACUUM and CREATE INDEX."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_memory.maintenance_work_mem,
-            16384,
-            1024,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-        {{"bulk_write_ring_size",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Size of bulk write buffer ring."),
-             gettext_noop("size of bulk write buffer ring, default values is "
-                          "16M."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.bulk_write_ring_size,
-            16384,
-            16384,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-        {{"bulk_read_ring_size",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Size of bulk read buffer ring."),
-             gettext_noop("size of bulk read buffer ring, default values is "
-                          "256K."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.bulk_read_ring_size,
-            16384,
-            256,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-        {{"partition_mem_batch",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Number of partition in-memory batch"),
-             gettext_noop("number of partition in-memory batch, default values is "
-                          "256.")},
-            &u_sess->attr.attr_storage.partition_mem_batch,
-            256,
-            1,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-        {{"partition_max_cache_size",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("The max partition cache size for cstore when do insert"),
-             gettext_noop("the max partition cache size for cstore when do insert, default values is "
-                          "2097152KB."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.partition_max_cache_size,
-            2097152,
-            4096,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"walsender_max_send_size",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Size of walsender max send size."),
-             gettext_noop("size of walsender max send size, default values is "
-                          "8M."),
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_storage.MaxSendSize,
-            8192,
-            8,
-            MAX_KILOBYTES,
             NULL,
             NULL,
             NULL},
@@ -4524,11 +1872,12 @@ static void InitConfigureNamesInt()
          * possible, depending on the actual platform-specific stack limit.
          */
         {{"max_stack_depth",
-             PGC_SUSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum stack depth, in kilobytes."),
-             NULL,
-             GUC_UNIT_KB},
+            PGC_SUSET,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the maximum stack depth, in kilobytes."),
+            NULL,
+            GUC_UNIT_KB},
             &u_sess->attr.attr_common.max_stack_depth,
             100,
             100,
@@ -4536,132 +1885,12 @@ static void InitConfigureNamesInt()
             check_max_stack_depth,
             assign_max_stack_depth,
             NULL},
-
-        {{"temp_file_limit",
-             PGC_SUSET,
-             RESOURCES_DISK,
-             gettext_noop("Limits the total size of all temporary files used by each session."),
-             gettext_noop("-1 means no limit."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_sql.temp_file_limit,
-            -1,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"sql_use_spacelimit",
-             PGC_USERSET,
-             RESOURCES_DISK,
-             gettext_noop("Limit the single sql used space on a single DN."),
-             gettext_noop("-1 means no limit."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_resource.sqlUseSpaceLimit,
-            NO_LIMIT_SIZE,
-            NO_LIMIT_SIZE,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"vacuum_cost_page_hit",
-             PGC_USERSET,
-             RESOURCES_VACUUM_DELAY,
-             gettext_noop("Vacuum cost for a page found in the buffer cache."),
-             NULL},
-            &u_sess->attr.attr_storage.VacuumCostPageHit,
-            1,
-            0,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"vacuum_cost_page_miss",
-             PGC_USERSET,
-             RESOURCES_VACUUM_DELAY,
-             gettext_noop("Vacuum cost for a page not found in the buffer cache."),
-             NULL},
-            &u_sess->attr.attr_storage.VacuumCostPageMiss,
-            10,
-            0,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"vacuum_cost_page_dirty",
-             PGC_USERSET,
-             RESOURCES_VACUUM_DELAY,
-             gettext_noop("Vacuum cost for a page dirtied by vacuum."),
-             NULL},
-            &u_sess->attr.attr_storage.VacuumCostPageDirty,
-            20,
-            0,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"vacuum_cost_limit",
-             PGC_USERSET,
-             RESOURCES_VACUUM_DELAY,
-             gettext_noop("Vacuum cost amount available before napping."),
-             NULL},
-            &u_sess->attr.attr_storage.VacuumCostLimit,
-            200,
-            1,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"vacuum_cost_delay",
-             PGC_USERSET,
-             RESOURCES_VACUUM_DELAY,
-             gettext_noop("Vacuum cost delay in milliseconds."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.VacuumCostDelay,
-            0,
-            0,
-            100,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"autovacuum_vacuum_cost_delay",
-             PGC_SIGHUP,
-             AUTOVACUUM,
-             gettext_noop("Vacuum cost delay in milliseconds, for autovacuum."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.autovacuum_vac_cost_delay,
-            20,
-            -1,
-            100,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"autovacuum_vacuum_cost_limit",
-             PGC_SIGHUP,
-             AUTOVACUUM,
-             gettext_noop("Vacuum cost amount available before napping, for autovacuum."),
-             NULL},
-            &u_sess->attr.attr_storage.autovacuum_vac_cost_limit,
-            -1,
-            -1,
-            10000,
-            NULL,
-            NULL,
-            NULL},
         {{"max_files_per_process",
-             PGC_POSTMASTER,
-             RESOURCES_KERNEL,
-             gettext_noop("Sets the maximum number of simultaneously open files for each server process."),
-             NULL},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_KERNEL,
+            gettext_noop("Sets the maximum number of simultaneously open files for each server process."),
+            NULL},
             &g_instance.attr.attr_common.max_files_per_process,
             1000,
             25,
@@ -4669,67 +1898,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        /*
-         * See also CheckRequiredParameterValues() if this parameter changes
-         */
-        {{"max_prepared_transactions",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the maximum number of simultaneously prepared transactions."),
-             NULL},
-            &g_instance.attr.attr_storage.max_prepared_xacts,
-#ifdef PGXC
-            10,
-            0,
-            INT_MAX / 4,
-            NULL,
-            NULL,
-            NULL
-#else
-            0,
-            0,
-            MAX_BACKENDS,
-            NULL,
-            NULL,
-            NULL
-#endif
-        },
-#ifdef LOCK_DEBUG
-        {{"trace_lock_oidmin",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("No description available."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.Trace_lock_oidmin,
-            FirstNormalObjectId,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"trace_lock_table",
-             PGC_SUSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("No description available."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.Trace_lock_table,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-#endif
-
         {{"max_query_retry_times",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the maximum sql retry times."),
-             gettext_noop("A value of 0 turns off the retry."),
-             GUC_NOT_IN_SAMPLE},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the maximum sql retry times."),
+            gettext_noop("A value of 0 turns off the retry."),
+            GUC_NOT_IN_SAMPLE},
             &u_sess->attr.attr_common.max_query_retry_times,
             0,
             0,
@@ -4737,22 +1912,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"RepOriginId", PGC_USERSET, REPLICATION_STANDBY, gettext_noop("RepOriginId."), NULL, GUC_NOT_IN_SAMPLE},
-            &u_sess->attr.attr_storage.replorigin_sesssion_origin,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
         {{"statement_timeout",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the maximum allowed duration of any statement."),
-             gettext_noop("A value of 0 turns off the timeout."),
-             GUC_UNIT_MS},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the maximum allowed duration of any statement."),
+            gettext_noop("A value of 0 turns off the timeout."),
+            GUC_UNIT_MS},
             &u_sess->attr.attr_common.StatementTimeout,
             0,
             0,
@@ -4762,11 +1928,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"session_timeout",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Set the maximum allowed duration of any unused session."),
-             gettext_noop("A value of 0 turns off the timeout."),
-             GUC_UNIT_S},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Set the maximum allowed duration of any unused session."),
+            gettext_noop("A value of 0 turns off the timeout."),
+            GUC_UNIT_S},
             &u_sess->attr.attr_common.SessionTimeout,
             600,
             0,
@@ -4774,371 +1941,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        /*
-         * See also CheckRequiredParameterValues() if this parameter changes
-         */
-        {{"max_locks_per_transaction",
-             PGC_POSTMASTER,
-             LOCK_MANAGEMENT,
-             gettext_noop("Sets the maximum number of locks per transaction."),
-             gettext_noop("The shared lock table is sized on the assumption that "
-                          "at most max_locks_per_transaction * max_connections distinct "
-                          "objects will need to be locked at any one time.")},
-            &g_instance.attr.attr_storage.max_locks_per_xact,
-            256,
-            10,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"max_pred_locks_per_transaction",
-             PGC_POSTMASTER,
-             LOCK_MANAGEMENT,
-             gettext_noop("Sets the maximum number of predicate locks per transaction."),
-             gettext_noop("The shared predicate lock table is sized on the assumption that "
-                          "at most max_pred_locks_per_transaction * max_connections distinct "
-                          "objects will need to be locked at any one time.")},
-            &g_instance.attr.attr_storage.max_predicate_locks_per_xact,
-            64,
-            10,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"authentication_timeout",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("Sets the maximum allowed time to complete client authentication."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_security.AuthenticationTimeout,
-            60,
-            1,
-            600,
-            NULL,
-            NULL,
-            NULL},
-
-        {/* Not for general use */
-            {"pre_auth_delay",
-                PGC_SIGHUP,
-                DEVELOPER_OPTIONS,
-                gettext_noop("Waits N seconds on connection startup before authentication."),
-                gettext_noop("This allows attaching a debugger to the process."),
-                GUC_NOT_IN_SAMPLE | GUC_UNIT_S},
-            &u_sess->attr.attr_security.PreAuthDelay,
-            0,
-            0,
-            60,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_keep_segments",
-             PGC_SIGHUP,
-             REPLICATION_SENDING,
-             gettext_noop("Sets the number of WAL files held for standby servers."),
-             NULL},
-            &u_sess->attr.attr_storage.wal_keep_segments,
-            16,
-            2,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"checkpoint_segments",
-             PGC_SIGHUP,
-             WAL_CHECKPOINTS,
-             gettext_noop("Sets the maximum distance in log segments between automatic WAL checkpoints."),
-             NULL},
-            &u_sess->attr.attr_storage.CheckPointSegments,
-            64,
-            1,
-            INT_MAX - 1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"checkpoint_timeout",
-             PGC_SIGHUP,
-             WAL_CHECKPOINTS,
-             gettext_noop("Sets the maximum time between automatic WAL checkpoints."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.fullCheckPointTimeout,
-            900,
-            30,
-            3600,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"checkpoint_warning",
-             PGC_SIGHUP,
-             WAL_CHECKPOINTS,
-             gettext_noop("Enables warnings if checkpoint segments are filled more "
-                          "frequently than this."),
-             gettext_noop("Writes a message to the server log if checkpoints "
-                          "caused by the filling of checkpoint segment files happens more "
-                          "frequently than this number of seconds. Zero turns off the warning."),
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.CheckPointWarning,
-            300,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"checkpoint_flush_after",
-             PGC_SIGHUP,
-             WAL_CHECKPOINTS,
-             gettext_noop("Number of pages after which previously performed writes are flushed to disk."),
-             NULL,
-             GUC_UNIT_BLOCKS},
-            &u_sess->attr.attr_storage.checkpoint_flush_after,
-            DEFAULT_CHECKPOINT_FLUSH_AFTER,
-            0,
-            WRITEBACK_MAX_PENDING_FLUSHES,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"xloginsert_locks",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Sets the number of locks used for concurrent xlog insertions."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &g_instance.attr.attr_storage.num_xloginsert_locks,
-            8,
-            1,
-            1000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_writer_cpu",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Sets the binding CPU number for the WAL writer thread."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &g_instance.attr.attr_storage.wal_writer_cpu,
-            -1,
-            -1,
-            1023,
-            NULL,
-            NULL,
-            NULL
-        },
-
-        {{"wal_file_init_num",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Sets the number of xlog segment files that WAL writer auxiliary thread "
-                          "creates at one time."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &g_instance.attr.attr_storage.wal_file_init_num,
-            10,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL
-        },
-
-        {{"advance_xlog_file_num",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Sets the number of xlog files to be initialized in advance."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &g_instance.attr.attr_storage.advance_xlog_file_num,
-            0,
-            0,
-            100,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"checkpoint_wait_timeout",
-             PGC_SIGHUP,
-             WAL_CHECKPOINTS,
-             gettext_noop("Sets the maximum wait timeout for checkpointer to start."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.CheckPointWaitTimeOut,
-            60,
-            2,
-            3600,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_buffers",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Sets the number of disk-page buffers in shared memory for WAL."),
-             NULL,
-             GUC_UNIT_XBLOCKS},
-            &g_instance.attr.attr_storage.XLOGbuffers,
-            2048,
-            -1,
-            (INT_MAX / XLOG_BLCKSZ)+1,
-            check_wal_buffers,
-            NULL,
-            NULL},
-
-        {{"wal_insert_status_entries",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Sets the size of wal insert status array for WAL."),
-             NULL,
-            },
-            &g_instance.attr.attr_storage.wal_insert_status_entries,
-            4194304,
-            131072,
-            4194304,
-            check_wal_insert_status_entries,
-            NULL,
-            NULL},
-
-        {{"wal_writer_delay",
-             PGC_SIGHUP,
-             WAL_SETTINGS,
-             gettext_noop("WAL writer sleep time between WAL flushes."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.WalWriterDelay,
-            200,
-            1,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-
-        {/* see max_connections */
-            {"max_wal_senders",
-                PGC_POSTMASTER,
-                REPLICATION_SENDING,
-                gettext_noop("Sets the maximum number of simultaneously running WAL sender processes."),
-                NULL},
-            &g_instance.attr.attr_storage.max_wal_senders,
-#ifdef ENABLE_MULTIPLE_NODES
-            4,
-#else
-            16,
-#endif
-            0,
-            MAX_BACKENDS,
-            NULL,
-            NULL,
-            NULL},
-        {/* see max_connections */
-            {"max_replication_slots",
-                PGC_POSTMASTER,
-                REPLICATION_SENDING,
-                gettext_noop("Sets the maximum number of simultaneously defined replication slots."),
-                NULL},
-            &g_instance.attr.attr_storage.max_replication_slots,
-            8,
-            0,
-            MAX_BACKENDS /* XXX?*/,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"recovery_time_target",
-             PGC_SIGHUP,
-             REPLICATION_SENDING,
-             gettext_noop("The target redo time in seconds for recovery"),
-             NULL},
-            &u_sess->attr.attr_storage.target_rto,
-            0,
-            0,
-            3600,
-            NULL,
-            NULL,
-            NULL},
-        {{"time_to_target_rpo",
-             PGC_SIGHUP,
-             REPLICATION_SENDING,
-             gettext_noop("The time to the target recovery point in seconds"),
-             NULL},
-            &u_sess->attr.attr_storage.time_to_target_rpo,
-            0,
-            0,
-            3600,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_sender_timeout",
-             PGC_SIGHUP,
-             REPLICATION_SENDING,
-             gettext_noop("Sets the maximum time to wait for WAL replication."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.wal_sender_timeout,
-            6 * 1000,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"replication_type", PGC_POSTMASTER, WAL_SETTINGS, gettext_noop("Sets the dn's HA mode."), NULL},
-            &g_instance.attr.attr_storage.replication_type,
-#ifdef ENABLE_MULTIPLE_NODES
-            RT_WITH_DUMMY_STANDBY,
-#else
-            RT_WITH_MULTI_STANDBY,
-#endif
-            RT_WITH_DUMMY_STANDBY,
-            RT_NUM,
-            check_replication_type,
-            NULL,
-            NULL},
-
-        {{"commit_delay",
-             PGC_USERSET,
-             WAL_SETTINGS,
-             gettext_noop("Sets the delay in microseconds between transaction commit and "
-                          "flushing WAL to disk."),
-             NULL},
-            &u_sess->attr.attr_storage.CommitDelay,
-            0,
-            0,
-            100000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"partition_lock_upgrade_timeout",
-             PGC_USERSET,
-             LOCK_MANAGEMENT,
-             gettext_noop("Sets the timeout for partition lock upgrade, in seconds"),
-             NULL},
-            &u_sess->attr.attr_storage.partition_lock_upgrade_timeout,
-            1800,
-            -1,
-            3000,
-            NULL,
-            NULL,
-            NULL},
-
         {{"track_thread_wait_status_interval",
-             PGC_SUSET,
-             STATS_COLLECTOR,
-             gettext_noop("Sets the interval for collecting thread status in pgstat thread, in minute"),
-             NULL,
-             GUC_UNIT_MIN},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Sets the interval for collecting thread status in pgstat thread, in minute"),
+            NULL,
+            GUC_UNIT_MIN},
             &u_sess->attr.attr_common.pgstat_collect_thread_status_interval,
             30,
             0,
@@ -5148,11 +1957,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"instr_rt_percentile_interval",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the interval for calculating percentile in pgstat thread, in seconds"),
-             NULL,
-             GUC_UNIT_S},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the interval for calculating percentile in pgstat thread, in seconds"),
+            NULL,
+            GUC_UNIT_S},
             &u_sess->attr.attr_common.instr_rt_percentile_interval,
             10,
             0,
@@ -5162,11 +1972,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"wdr_snapshot_interval",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the interval for wdr snapshot in snapshot thread, in min"),
-             NULL,
-             GUC_UNIT_MIN},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the interval for wdr snapshot in snapshot thread, in min"),
+            NULL,
+            GUC_UNIT_MIN},
             &u_sess->attr.attr_common.wdr_snapshot_interval,
             60,
             10,
@@ -5176,10 +1987,11 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"wdr_snapshot_retention_days",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the max time span for wdr snapshot, in seconds"),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the max time span for wdr snapshot, in seconds"),
+            NULL},
             &u_sess->attr.attr_common.wdr_snapshot_retention_days,
             8,
             1,
@@ -5189,11 +2001,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"wdr_snapshot_query_timeout",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the timeout for wdr snapshot query, in seconds"),
-             NULL,
-             GUC_UNIT_S},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the timeout for wdr snapshot query, in seconds"),
+            NULL,
+            GUC_UNIT_S},
             &u_sess->attr.attr_common.wdr_snapshot_query_timeout,
             100,
             100,
@@ -5203,11 +2016,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"asp_sample_num",
-             PGC_POSTMASTER,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the active session profile max sample nums in buff"),
-             NULL,
-             GUC_SUPERUSER_ONLY},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the active session profile max sample nums in buff"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
             &g_instance.attr.attr_common.asp_sample_num,
             100000,
             10000,
@@ -5216,12 +2030,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
-         {{"asp_sample_interval",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the active session profile max sample nums in buff"),
-             NULL,
-             GUC_UNIT_S},
+        {{"asp_sample_interval",
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the active session profile max sample nums in buff"),
+            NULL,
+            GUC_UNIT_S},
             &u_sess->attr.attr_common.asp_sample_interval,
             1,
             1,
@@ -5231,10 +2046,11 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"asp_flush_rate",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("every Nth sample to disk, MOD(sample_id, N) = 0 will flush to dist"),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("every Nth sample to disk, MOD(sample_id, N) = 0 will flush to dist"),
+            NULL},
             &u_sess->attr.attr_common.asp_flush_rate,
             10,
             1,
@@ -5244,10 +2060,11 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"asp_retention_days",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("set max retention days for pg_asp"),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("set max retention days for pg_asp"),
+            NULL},
             &u_sess->attr.attr_common.asp_retention_days,
             2,
             1,
@@ -5255,28 +2072,14 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"commit_siblings",
-             PGC_USERSET,
-             WAL_SETTINGS,
-             gettext_noop("Sets the minimum concurrent open transactions before performing "
-                          "commit_delay."),
-             NULL},
-            &u_sess->attr.attr_storage.CommitSiblings,
-            5,
-            0,
-            1000,
-            NULL,
-            NULL,
-            NULL},
-
         {{"extra_float_digits",
-             PGC_USERSET,
-             CLIENT_CONN_LOCALE,
-             gettext_noop("Sets the number of digits displayed for floating-point values."),
-             gettext_noop("This affects real, double precision, and geometric data types. "
-                          "The parameter value is added to the standard number of digits "
-                          "(FLT_DIG or DBL_DIG as appropriate).")},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the number of digits displayed for floating-point values."),
+            gettext_noop("This affects real, double precision, and geometric data types. "
+                         "The parameter value is added to the standard number of digits "
+                         "(FLT_DIG or DBL_DIG as appropriate).")},
             &u_sess->attr.attr_common.extra_float_digits,
             0,
             -15,
@@ -5284,87 +2087,16 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"log_min_duration_statement",
-             PGC_SUSET,
-             LOGGING_WHEN,
-             gettext_noop("Sets the minimum execution time above which "
-                          "statements will be logged."),
-             gettext_noop("Zero prints all queries. -1 turns this feature off."),
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.log_min_duration_statement,
-            -1,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"log_autovacuum_min_duration",
-             PGC_SIGHUP,
-             LOGGING_WHAT,
-             gettext_noop("Sets the minimum execution time above which "
-                          "autovacuum actions will be logged."),
-             gettext_noop("Zero prints all actions. -1 turns autovacuum logging off."),
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.Log_autovacuum_min_duration,
-            -1,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"bgwriter_delay",
-             PGC_SIGHUP,
-             RESOURCES_BGWRITER,
-             gettext_noop("Background writer sleep time between rounds."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.BgWriterDelay,
-            2000,
-            10,
-            10000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"bgwriter_lru_maxpages",
-             PGC_SIGHUP,
-             RESOURCES_BGWRITER,
-             gettext_noop("Background writer maximum number of LRU pages to flush per round."),
-             NULL},
-            &u_sess->attr.attr_storage.bgwriter_lru_maxpages,
-            100,
-            0,
-            1000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"bgwriter_flush_after",
-             PGC_SIGHUP,
-             RESOURCES_BGWRITER,
-             gettext_noop("Number of pages after which previously performed writes are flushed to disk."),
-             NULL,
-             GUC_UNIT_BLOCKS},
-            &u_sess->attr.attr_storage.bgwriter_flush_after,
-            DEFAULT_BGWRITER_FLUSH_AFTER,
-            0,
-            WRITEBACK_MAX_PENDING_FLUSHES,
-            NULL,
-            NULL,
-            NULL},
-
         {{"effective_io_concurrency",
 #ifdef USE_PREFETCH
-             PGC_USERSET,
+            PGC_USERSET,
 #else
-             PGC_INTERNAL,
+            PGC_INTERNAL,
 #endif
-             RESOURCES_ASYNCHRONOUS,
-             gettext_noop("Number of simultaneous requests that can be handled efficiently by the disk subsystem."),
-             gettext_noop("For RAID arrays, this should be approximately the number of drive spindles in the array.")},
+            NODE_ALL,
+            RESOURCES_ASYNCHRONOUS,
+            gettext_noop("Number of simultaneous requests that can be handled efficiently by the disk subsystem."),
+            gettext_noop("For RAID arrays, this should be approximately the number of drive spindles in the array.")},
             &u_sess->attr.attr_common.effective_io_concurrency,
 #ifdef USE_PREFETCH
             1,
@@ -5380,11 +2112,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"backend_flush_after",
-             PGC_USERSET,
-             RESOURCES_ASYNCHRONOUS,
-             gettext_noop("Number of pages after which previously performed writes are flushed to disk."),
-             NULL,
-             GUC_UNIT_BLOCKS},
+            PGC_USERSET,
+            NODE_ALL,
+            RESOURCES_ASYNCHRONOUS,
+            gettext_noop("Number of pages after which previously performed writes are flushed to disk."),
+            NULL,
+            GUC_UNIT_BLOCKS},
             &u_sess->attr.attr_common.backend_flush_after,
             DEFAULT_BACKEND_FLUSH_AFTER,
             0,
@@ -5394,11 +2127,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"log_rotation_age",
-             PGC_SIGHUP,
-             LOGGING_WHERE,
-             gettext_noop("Automatic log file rotation will occur after N minutes."),
-             NULL,
-             GUC_UNIT_MIN},
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Automatic log file rotation will occur after N minutes."),
+            NULL,
+            GUC_UNIT_MIN},
             &u_sess->attr.attr_common.Log_RotationAge,
             HOURS_PER_DAY * MINS_PER_HOUR,
             0,
@@ -5408,11 +2142,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"log_rotation_size",
-             PGC_SIGHUP,
-             LOGGING_WHERE,
-             gettext_noop("Automatic log file rotation will occur after N kilobytes."),
-             NULL,
-             GUC_UNIT_KB},
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Automatic log file rotation will occur after N kilobytes."),
+            NULL,
+            GUC_UNIT_KB},
             &u_sess->attr.attr_common.Log_RotationSize,
             10 * 1024,
             0,
@@ -5422,11 +2157,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"max_function_args",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Shows the maximum number of function arguments."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            PGC_INTERNAL,
+            NODE_ALL,
+            PRESET_OPTIONS,
+            gettext_noop("Shows the maximum number of function arguments."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_common.max_function_args,
             FUNC_MAX_ARGS,
             FUNC_MAX_ARGS,
@@ -5434,39 +2170,12 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"max_index_keys",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Shows the maximum number of index keys."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_storage.max_index_keys,
-            INDEX_MAX_KEYS,
-            INDEX_MAX_KEYS,
-            INDEX_MAX_KEYS,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"max_identifier_length",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Shows the maximum identifier length."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_storage.max_identifier_length,
-            NAMEDATALEN - 1,
-            NAMEDATALEN - 1,
-            NAMEDATALEN - 1,
-            NULL,
-            NULL,
-            NULL},
         {{"max_user_defined_exception",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("GUC parameter of max_user_defined_exception."),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("GUC parameter of max_user_defined_exception."),
+            NULL},
             &u_sess->attr.attr_common.max_user_defined_exception,
             1000,
             1000,
@@ -5474,143 +2183,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"block_size",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Shows the size of a disk block."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_storage.block_size,
-            BLCKSZ,
-            BLCKSZ,
-            BLCKSZ,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"segment_size",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Shows the number of pages per disk file."),
-             NULL,
-             GUC_UNIT_BLOCKS | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_storage.segment_size,
-            RELSEG_SIZE,
-            RELSEG_SIZE,
-            RELSEG_SIZE,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_block_size",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Shows the block size in the write ahead log."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_storage.wal_block_size,
-            XLOG_BLCKSZ,
-            XLOG_BLCKSZ,
-            XLOG_BLCKSZ,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_segment_size",
-             PGC_INTERNAL,
-             PRESET_OPTIONS,
-             gettext_noop("Shows the number of pages per write ahead log segment."),
-             NULL,
-             GUC_UNIT_XBLOCKS | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_storage.wal_segment_size,
-            (XLOG_SEG_SIZE / XLOG_BLCKSZ),
-            (XLOG_SEG_SIZE / XLOG_BLCKSZ),
-            (XLOG_SEG_SIZE / XLOG_BLCKSZ),
-            NULL,
-            NULL,
-            NULL},
-
-        {{"autovacuum_naptime",
-             PGC_SIGHUP,
-             AUTOVACUUM,
-             gettext_noop("Time to sleep between autovacuum runs."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.autovacuum_naptime,
-            600,
-            1,
-            INT_MAX / 1000,
-            NULL,
-            NULL,
-            NULL},
-        {{"autoanalyze_timeout",
-             PGC_SIGHUP,
-             AUTOVACUUM,
-             gettext_noop("Sets the timeout for auto-analyze action."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.autoanalyze_timeout,
-            300,
-            0,
-            INT_MAX / 1000,
-            NULL,
-            NULL,
-            NULL},
-        {{"autovacuum_vacuum_threshold",
-             PGC_SIGHUP,
-             AUTOVACUUM,
-             gettext_noop("Minimum number of tuple updates or deletes prior to vacuum."),
-             NULL},
-            &u_sess->attr.attr_storage.autovacuum_vac_thresh,
-            50,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"autovacuum_analyze_threshold",
-             PGC_SIGHUP,
-             AUTOVACUUM,
-             gettext_noop("Minimum number of tuple inserts, updates, or deletes prior to analyze."),
-             NULL},
-            &u_sess->attr.attr_storage.autovacuum_anl_thresh,
-            50,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {/* see max_connections */
-            {"autovacuum_max_workers",
-                PGC_POSTMASTER,
-                AUTOVACUUM,
-                gettext_noop("Sets the maximum number of simultaneously running autovacuum worker processes."),
-                NULL},
-            &g_instance.attr.attr_storage.autovacuum_max_workers,
-            3,
-            0,
-            MAX_BACKENDS,
-            check_autovacuum_max_workers,
-            NULL,
-            NULL},
-        {{"job_queue_processes",
-             PGC_POSTMASTER,
-             JOB,
-             gettext_noop("Number of concurrent jobs, optional: [1...1000], default: 10."),
-             NULL},
-            &g_instance.attr.attr_sql.job_queue_processes,
-            DEFAULT_JOB_QUEUE_PROCESSES,
-            MIN_JOB_QUEUE_PROCESSES,
-            MAX_JOB_QUEUE_PROCESSES,
-            check_job_max_workers,
-            NULL,
-            NULL},
         {{"tcp_keepalives_idle",
-             PGC_USERSET,
-             CLIENT_CONN_OTHER,
-             gettext_noop("Time between issuing TCP keepalives."),
-             gettext_noop("A value of 0 uses the system default."),
-             GUC_UNIT_S},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_OTHER,
+            gettext_noop("Time between issuing TCP keepalives."),
+            gettext_noop("A value of 0 uses the system default."),
+            GUC_UNIT_S},
             &u_sess->attr.attr_common.tcp_keepalives_idle,
             60,
             0,
@@ -5620,11 +2199,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"tcp_keepalives_interval",
-             PGC_USERSET,
-             CLIENT_CONN_OTHER,
-             gettext_noop("Time between TCP keepalive retransmits."),
-             gettext_noop("A value of 0 uses the system default."),
-             GUC_UNIT_S},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_OTHER,
+            gettext_noop("Time between TCP keepalive retransmits."),
+            gettext_noop("A value of 0 uses the system default."),
+            GUC_UNIT_S},
             &u_sess->attr.attr_common.tcp_keepalives_interval,
             30,
             0,
@@ -5632,43 +2212,15 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"ssl_renegotiation_limit",
-             PGC_USERSET,
-             CONN_AUTH_SECURITY,
-             gettext_noop("SSL renegotiation is no longer supported, no matter what value is set."),
-             NULL,
-             GUC_UNIT_KB,
-         },
-            &u_sess->attr.attr_security.ssl_renegotiation_limit,
-            0,
-            0,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-        {{"ssl_cert_notify_time",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("Alarm days before ssl cert expires."),
-         },
-            &u_sess->attr.attr_security.ssl_cert_notify_time,
-            90,
-            7,
-            180,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{
-             "tcp_keepalives_count",
-             PGC_USERSET,
-             CLIENT_CONN_OTHER,
-             gettext_noop("Maximum number of TCP keepalive retransmits."),
-             gettext_noop("This controls the number of consecutive keepalive retransmits that can be "
-                          "lost before a connection is considered dead. A value of 0 uses the "
-                          "system default."),
-         },
+        {{"tcp_keepalives_count",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_OTHER,
+            gettext_noop("Maximum number of TCP keepalive retransmits."),
+            gettext_noop("This controls the number of consecutive keepalive retransmits that can be "
+                         "lost before a connection is considered dead. A value of 0 uses the "
+                         "system default."),
+            },
             &u_sess->attr.attr_common.tcp_keepalives_count,
             20,
             0,
@@ -5676,45 +2228,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{
-             "password_policy",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("The password complexity-policy of the database system."),
-             gettext_noop("This controls the complexity-policy of database system. "
-                          "A value of 1 uses the system default."),
-         },
-            &u_sess->attr.attr_security.Password_policy,
-            1,
-            0,
-            1,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{
-             "password_encryption_type",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("The encryption method of password."),
-             gettext_noop("This controls the encryption type of the password. "
-                          "A value of 2 uses the system default."),
-         },
-            &u_sess->attr.attr_security.Password_encryption_type,
-            2,
-            0,
-            3,
-            check_int_parameter,
-            NULL,
-            NULL},
-
         {{"gin_fuzzy_search_limit",
-             PGC_USERSET,
-             CLIENT_CONN_OTHER,
-             gettext_noop("Sets the maximum allowed result for exact search by GIN."),
-             NULL,
-             0},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_OTHER,
+            gettext_noop("Sets the maximum allowed result for exact search by GIN."),
+            NULL,
+            0},
             &u_sess->attr.attr_common.GinFuzzySearchLimit,
             0,
             0,
@@ -5722,32 +2242,14 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{
-             "effective_cache_size",
-             PGC_USERSET,
-             QUERY_TUNING_COST,
-             gettext_noop("Sets the planner's assumption about the size of the disk cache."),
-             gettext_noop("That is, the portion of the kernel's disk cache that "
-                          "will be used for PostgreSQL data files. This is measured in disk "
-                          "pages, which are normally 8 kB each."),
-             GUC_UNIT_BLOCKS,
-         },
-            &u_sess->attr.attr_sql.effective_cache_size,
-            DEFAULT_EFFECTIVE_CACHE_SIZE,
-            1,
-            INT_MAX,
+        /* Can't be set in postgresql.conf */
+        {{"server_version_num",
+            PGC_INTERNAL,
+            NODE_ALL,
+            PRESET_OPTIONS,
+            gettext_noop("Shows the server version as an integer."),
             NULL,
-            NULL,
-            NULL},
-
-        {/* Can't be set in postgresql.conf */
-            {"server_version_num",
-                PGC_INTERNAL,
-                PRESET_OPTIONS,
-                gettext_noop("Shows the server version as an integer."),
-                NULL,
-                GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
             &u_sess->attr.attr_common.server_version_num,
             PG_VERSION_NUM,
             PG_VERSION_NUM,
@@ -5756,12 +2258,29 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
+        /* Can't be set in postgresql.conf */
+        {{"backend_version",
+            PGC_USERSET,
+            NODE_ALL,
+            PRESET_OPTIONS,
+            gettext_noop("Set and show the backend version as an integer."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            &u_sess->attr.attr_common.backend_version,
+            0,
+            0,
+            100000,
+            NULL,
+            assign_thread_working_version_num,
+            NULL},
+
         {{"log_temp_files",
-             PGC_SUSET,
-             LOGGING_WHAT,
-             gettext_noop("Logs the use of temporary files larger than this number of kilobytes."),
-             gettext_noop("Zero logs all files. The default is -1 (turning this feature off)."),
-             GUC_UNIT_KB},
+            PGC_SUSET,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Logs the use of temporary files larger than this number of kilobytes."),
+            gettext_noop("Zero logs all files. The default is -1 (turning this feature off)."),
+            GUC_UNIT_KB},
             &u_sess->attr.attr_common.log_temp_files,
             -1,
             -1,
@@ -5770,13 +2289,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL},
 
-        {{
-             "track_activity_query_size",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("Sets the size reserved for pg_stat_activity.query, in bytes."),
-             NULL,
-         },
+        {{"track_activity_query_size",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_MEM,
+            gettext_noop("Sets the size reserved for pg_stat_activity.query, in bytes."),
+            NULL,
+            },
             &g_instance.attr.attr_common.pgstat_track_activity_query_size,
             1024,
             100,
@@ -5784,604 +2303,12 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"password_reuse_max",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("max times password can reuse."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Password_reuse_max,
-            0,
-            0,
-            MAX_PASSWORD_REUSE_MAX,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"failed_login_attempts",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("max number of login attempts."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Failed_login_attempts,
-            10,
-            0,
-            MAX_FAILED_LOGIN_ATTAMPTS,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"password_min_uppercase",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("min number of upper character in password."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Password_min_upper,
-            0,
-            0,
-            MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"password_min_lowercase",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("min number of lower character in password."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Password_min_lower,
-            0,
-            0,
-            MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"password_min_digital",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("min number of digital character in password."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Password_min_digital,
-            0,
-            0,
-            MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"password_min_special",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("min number of special character in password."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Password_min_special,
-            0,
-            0,
-            MAX_PASSWORD_ASSIGNED_CHARACTER,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"password_min_length",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("min length of password."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Password_min_length,
-            8,
-            6,
-            MAX_PASSWORD_LENGTH,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"password_max_length",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("max length of password."),
-             NULL,
-             GUC_SUPERUSER_ONLY},
-            &u_sess->attr.attr_security.Password_max_length,
-            32,
-            6,
-            MAX_PASSWORD_LENGTH,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        {{"password_notify_time", PGC_SIGHUP, CONN_AUTH_SECURITY, gettext_noop("password deadline notice time."), NULL},
-            &u_sess->attr.attr_security.Password_notify_time,
-            7,
-            0,
-            MAX_PASSWORD_NOTICE_TIME,
-            check_int_parameter,
-            NULL,
-            NULL},
-
-        /* Database Security: Support database audit */
-        /* add guc option about audit */
-        {{"audit_rotation_interval",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("Automatic audit file rotation will occur after N minutes."),
-             NULL,
-             GUC_UNIT_MIN},
-            &u_sess->attr.attr_security.Audit_RotationAge,
-            HOURS_PER_DAY * MINS_PER_HOUR,
-            1,
-            INT_MAX / MINS_PER_HOUR,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_rotation_size",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("Automatic audit file rotation will occur after N kilobytes."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_security.Audit_RotationSize,
-            10 * 1024,
-            1024,
-            1024 * 1024,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_space_limit",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("audit data space limit in MB unit"),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_security.Audit_SpaceLimit,
-            1024 * 1024,
-            1024,
-            1024 * 1024 * 1024,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_file_remain_time",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("the days of the audit files can be remained"),
-             NULL,
-             0},
-            &u_sess->attr.attr_security.Audit_RemainAge,
-            90,
-            0,
-            730,
-            NULL,
-            NULL,
-            NULL},
-
-        /*
-         * Audit_file_remain_threshold is a parameter which is no need and shouldn't be changed for these reason:
-         * 1. If customer want to control audit log space, use audit_space_limit is enough.
-         * 2. Two limit with audit_space_limit and audit_file_remain_time will serious conflict with this parameter
-         *    and always set audit_file_remain_threshold will cause these parameters very difficult to use.
-         */
-        {{"audit_file_remain_threshold",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("audit file remain threshold."),
-             NULL,
-             0},
-            &u_sess->attr.attr_security.Audit_RemainThreshold,
-            1024 * 1024,
-            1,
-            1024 * 1024,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_login_logout", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit user login logout."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_Session,
-            7,
-            0,
-            7,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_database_process",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("audit database start, stop, recover and switchover."),
-             NULL,
-             0},
-            &u_sess->attr.attr_security.Audit_ServerAction,
-            1,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_user_locked", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit lock and unlock user."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_LockUser,
-            1,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_user_violation", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit user violation."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_UserViolation,
-            0,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_grant_revoke", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit grant and revoke privilege."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_PrivilegeAdmin,
-            1,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_system_object",
-             PGC_SIGHUP,
-             AUDIT_OPTIONS,
-             gettext_noop("audit DDL operation on system object."),
-             NULL,
-             0},
-            &u_sess->attr.attr_security.Audit_DDL,
-            12295,
-            0,
-            2097151,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_dml_state", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit DML operation."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_DML,
-            0,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_dml_state_select", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit DML select operation."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_DML_SELECT,
-            0,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_function_exec", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit function execution."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_Exec,
-            0,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_copy_exec", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit copy execution."), NULL, 0},
-            &u_sess->attr.attr_security.Audit_Copy,
-            1,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"audit_set_parameter", PGC_SIGHUP, AUDIT_OPTIONS, gettext_noop("audit set operation."), NULL},
-            &u_sess->attr.attr_security.Audit_Set,
-            1,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-#ifdef PGXC
-        {{"pooler_maximum_idle_time",
+        {{"ngram_gram_size",
             PGC_USERSET,
-            DATA_NODES,
-            gettext_noop("Maximum idle time of the pooler links."),
-            NULL,
-            GUC_UNIT_S},
-            &u_sess->attr.attr_network.PoolerMaxIdleTime,
-            600,
-            0,
-            INT_MAX,
-            check_pooler_maximum_idle_time,
-            NULL,
+            NODE_ALL,
+            TEXT_SEARCH,
+            gettext_noop("N-value for N-gram parser"),
             NULL},
-
-        {{"minimum_pool_size",
-            PGC_USERSET,
-            DATA_NODES,
-            gettext_noop("Initial pool size."),
-            gettext_noop("If number of active connections decreased below this value, "
-                "new connections are established")},
-            &u_sess->attr.attr_network.MinPoolSize,
-            50,
-            1,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-
-        /* This is PGC_SIGHUP to set the interval time to push cut_off_csn_num. 0 means never do cleanup */
-        {{"defer_csn_cleanup_time",
-             PGC_SIGHUP, DATA_NODES,
-             gettext_noop("Sets the interval time to push cut off csn num."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.defer_csn_cleanup_time,
-            5000,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-#endif
-        // user defind max_compile_functions
-        {{"max_compile_functions",
-             PGC_POSTMASTER,
-             RESOURCES_MEM,
-             gettext_noop("max compile results in postmaster"),
-             gettext_noop("max compile results in postmaster, default values is "
-                          "1000, min is 1"),
-             0},
-            &g_instance.attr.attr_sql.max_compile_functions,
-            1000,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        // Stream communication
-        //
-        {{"comm_sctp_port",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the STCP port the server listens on."),
-             NULL},
-            &g_instance.attr.attr_network.comm_sctp_port,
-            7000,
-            0,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"comm_control_port",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the stream control port the server listens on."),
-             NULL},
-            &g_instance.attr.attr_network.comm_control_port,
-            7001,
-            0,
-            65535,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"comm_quota_size",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the stream quota size in kB."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_network.comm_quota_size,
-            1024,
-            0,
-            2048000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"comm_usable_memory",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the total usable memory for communication(in kB)."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_network.comm_usable_memory,
-            4000 * 1024,
-            100 * 1024,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"comm_memory_pool",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the memory pool size for communication(in kB)."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_network.comm_memory_pool,
-            2000 * 1024,
-            100 * 1024,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"comm_memory_pool_percent",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Sets the percent of comm_memory_pool for dynamic workload."),
-             NULL},
-            &g_instance.attr.attr_network.comm_memory_pool_percent,
-            0,
-            0,
-            100,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"comm_ackchk_time",
-             PGC_USERSET,
-             QUERY_TUNING,
-             gettext_noop("Send ack check package to stream sender periodically."),
-             NULL,
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_network.comm_ackchk_time,
-            2000, 
-            0,    
-            20000,
-            NULL, 
-            assign_comm_ackchk_time,
-            NULL},
-
-#ifdef LIBCOMM_SPEED_TEST_ENABLE
-        {{"comm_test_thread_num",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Libcomm performance testing framework thread number of streams."),
-             NULL},
-            &u_sess->attr.attr_network.comm_test_thread_num,
-            0,
-            0,
-            65535,
-            NULL,
-            assign_comm_test_thread_num,
-            NULL},
-        {{"comm_test_msg_len",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Libcomm performance testing framework message len."),
-             NULL},
-            &u_sess->attr.attr_network.comm_test_msg_len,
-            8192,
-            1,
-            65535,
-            NULL,
-            assign_comm_test_msg_len,
-            NULL},
-        {{"comm_test_send_sleep",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Libcomm performance testing framework producer thread sleep time."),
-             NULL},
-            &u_sess->attr.attr_network.comm_test_send_sleep,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            assign_comm_test_send_sleep,
-            NULL},
-        {{"comm_test_send_once",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Libcomm performance testing framework producer thread send message size once time."),
-             NULL},
-            &u_sess->attr.attr_network.comm_test_send_once,
-            8192,
-            1,
-            INT_MAX,
-            NULL,
-            assign_comm_test_send_once,
-            NULL},
-        {{"comm_test_recv_sleep",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Libcomm performance testing framework consumer thread sleep time."),
-             NULL},
-            &u_sess->attr.attr_network.comm_test_recv_sleep,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            assign_comm_test_recv_sleep,
-            NULL},
-        {{"comm_test_rcv_once",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Libcomm performance testing framework consumer thread recv message size once time."),
-             NULL},
-            &u_sess->attr.attr_network.comm_test_recv_once,
-            8192,
-            1,
-            INT_MAX,
-            NULL,
-            assign_comm_test_recv_once,
-            NULL},
-#endif
-
-#ifdef LIBCOMM_FAULT_INJECTION_ENABLE
-        {{"comm_fault_injection",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Libcomm fault injection framework."),
-             NULL},
-            &u_sess->attr.attr_network.comm_fault_injection,
-            0,
-            -10,
-            INT_MAX,
-            NULL,
-            assign_comm_fault_injection,
-            NULL},
-#endif
-
-        {{"query_dop", PGC_USERSET, QUERY_TUNING, gettext_noop("User-defined degree of parallelism."), NULL},
-            &u_sess->attr.attr_sql.query_dop_tmp,
-#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-            1,
-            MIN_QUERY_DOP,
-            INT_MAX,
-#else
-            1,
-#ifdef ENABLE_MULTIPLE_NODES
-            MIN_QUERY_DOP,
-#else
-            1,
-#endif
-            MAX_QUERY_DOP,
-#endif
-            parse_query_dop,
-            AssignQueryDop,
-            NULL},
-        {{"comm_max_receiver",
-             PGC_POSTMASTER,
-             CONN_AUTH_SETTINGS,
-             gettext_noop("Maximum number of internal receiver threads."),
-             NULL},
-            &g_instance.attr.attr_network.comm_max_receiver,
-            4,
-            1,
-            50,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"plan_mode_seed",
-             PGC_USERSET,
-             QUERY_TUNING_METHOD,
-             gettext_noop("Specify which plan mode and seed the optimizer generation used."),
-             NULL},
-            &u_sess->attr.attr_sql.plan_mode_seed,
-            0,
-            -1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"ngram_gram_size", PGC_USERSET, TEXT_SEARCH, gettext_noop("N-value for N-gram parser"), NULL},
             &u_sess->attr.attr_common.ngram_gram_size,
             2,
             1,
@@ -6389,171 +2316,13 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"prefetch_quantity",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the IO quantity of prefetch buffers used by async dirct IO interface."),
-             NULL,
-             GUC_UNIT_BLOCKS},
-            &u_sess->attr.attr_storage.prefetch_quantity,
-            4096,
-            128,
-            131072,
+        {{"fault_mon_timeout",
+            PGC_SIGHUP,
+            NODE_ALL,
+            STATS_MONITORING,
+            gettext_noop("how many miniutes to monitor lwlock. 0 will disable that"),
             NULL,
-            NULL,
-            NULL},
-
-        {{"backwrite_quantity",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the IO quantity of backwrite buffers used by async dirct IO interface."),
-             NULL,
-             GUC_UNIT_BLOCKS},
-            &u_sess->attr.attr_storage.backwrite_quantity,
-            1024,
-            128,
-            131072,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"cstore_prefetch_quantity",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Sets the IO quantity of prefetch CUs used by async dirct IO interface for column store."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.cstore_prefetch_quantity,
-            32768,
-            1024,
-            1048576,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"cstore_backwrite_max_threshold",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Cu cache threshold for cstore when do insert by async dirct IO"),
-             gettext_noop("Cu cache threshold for cstore when do insert by async dirct IO , default values is "
-                          "2097152KB."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.cstore_backwrite_max_threshold,
-            2097152,
-            4096,
-            INT_MAX / 2,
-            NULL,
-            NULL,
-            NULL},
-        {{"cstore_backwrite_quantity",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Each column write threshold for cstore when do insert by async dirct IO"),
-             gettext_noop("Each column write threshold for cstore when do insert by async dirct IO , default values is "
-                          "8192KB."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.cstore_backwrite_quantity,
-            8192,
-            1024,
-            1048576,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"fast_extend_file_size",
-             PGC_SUSET,
-             RESOURCES_MEM,
-             gettext_noop("Set fast extend file size used by async dirct IO interface for row store."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.fast_extend_file_size,
-            8192,
-            1024,
-            1048576,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"gin_pending_list_limit",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the maximum size of the pending list for GIN index."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.gin_pending_list_limit,
-            4096,
-            64,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-        /*
-         * set threshold to check if codegen is allowed or not, codegen_cost_threshold
-         * represents the number of rows. This will be changed in future.
-         */
-        {{"codegen_cost_threshold",
-             PGC_USERSET,
-             QUERY_TUNING_COST,
-             gettext_noop("Decided to use LLVM optimization or not."),
-             NULL},
-            &u_sess->attr.attr_sql.codegen_cost_threshold,
-            10000,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"dfs_partition_directory_length",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("The max length of the value partition directory."),
-             NULL},
-            &u_sess->attr.attr_storage.dfs_max_parsig_length,
-            512,
-            92,
-            7999, /* 7999 is the max value of dfs.namenode.fs-limits.max-component-length in HDFS of FI */
-            NULL,
-            NULL,
-            NULL},
-
-        /* profile log GUC */
-        {{"plog_merge_age",
-             PGC_USERSET,
-             LOGGING_WHEN,
-             gettext_noop("how long to aggregate profile logs."),
-             gettext_noop("0 disable logging. suggest setting value is 1000 times."),
-             GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.plog_merge_age,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            plog_merge_age_assign,
-            NULL},
-
-        {{"auth_iteration_count",
-             PGC_SIGHUP,
-             CONN_AUTH_SECURITY,
-             gettext_noop("The iteration count used in RFC5802 authenication."),
-             NULL},
-            &u_sess->attr.attr_security.auth_iteration_count,
-            10000,
-            2048,
-            134217728, /* 134217728 is the max iteration count supported. */
-            NULL,
-            NULL,
-            NULL},
-
-        {{
-             "fault_mon_timeout",
-             PGC_SIGHUP,
-             STATS_MONITORING,
-             gettext_noop("how many miniutes to monitor lwlock. 0 will disable that"),
-             NULL,
-             GUC_UNIT_MIN /* minute */
-         },
+            GUC_UNIT_MIN}, /* minute */
             &u_sess->attr.attr_common.fault_mon_timeout,
             5,
             0,
@@ -6561,68 +2330,12 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{
-             "max_resource_package",
-             PGC_POSTMASTER,
-             UNGROUPED,
-             gettext_noop("The maximum number of the resource package(RP) for DN in the compute pool."),
-             gettext_noop("0 means that the cluster is NOT as the compute pool."),
-         },
-            &g_instance.attr.attr_sql.max_resource_package,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"acce_min_datasize_per_thread",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Used to estimate whether pushdown the plan to the compute pool."),
-             gettext_noop("0 means that plan always runs in the compute pool."),
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_sql.acce_min_datasize_per_thread,
-            500000,
-            0,
-            MAX_KILOBYTES,
-            NULL,
-            NULL,
-            NULL},
-        {{"max_cn_temp_file_size",
-             PGC_SIGHUP,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the maximum tempfile size used in CN, unit in MB."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_sql.max_cn_temp_file_size,
-            5 * 1024 * 1024,
-            0,
-            10 * 1024 * 1024,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"cn_send_buffer_size",
-             PGC_POSTMASTER,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the send buffer size used in CN, unit in KB."),
-             NULL,
-             GUC_UNIT_KB},
-            &g_instance.attr.attr_network.cn_send_buffer_size,
-            8,
-            8,
-            128,
-            NULL,
-            NULL,
-            NULL},
-
         {{"max_changes_in_memory",
-             PGC_POSTMASTER,
-             UNGROUPED,
-             gettext_noop("how many memory a transaction can use in reorderbuffer."),
-             NULL},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("how many memory a transaction can use in reorderbuffer."),
+            NULL},
             &g_instance.attr.attr_common.max_changes_in_memory,
             4096,
             1,
@@ -6632,10 +2345,11 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"max_cached_tuplebufs",
-             PGC_POSTMASTER,
-             UNGROUPED,
-             gettext_noop("how many memory reorderbuffer can use."),
-             NULL},
+            PGC_POSTMASTER,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("how many memory reorderbuffer can use."),
+            NULL},
             &g_instance.attr.attr_common.max_cached_tuplebufs,
             8192,
             1,
@@ -6643,118 +2357,14 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-
-        {{"table_skewness_warning_rows",
-             PGC_USERSET,
-             STATS,
-             gettext_noop("Sets the number of rows returned by DN to enable warning of table skewness."),
-             NULL},
-            &u_sess->attr.attr_sql.table_skewness_warning_rows,
-            100000,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"recovery_max_workers",
-             PGC_POSTMASTER,
-             RESOURCES_RECOVERY,
-             gettext_noop("The max number of recovery threads allowed to run in parallel."),
-             gettext_noop("Zero lets the system determine this value.")},
-            &g_instance.attr.attr_storage.max_recovery_parallelism,
-            1,
-            0,
-            MOST_FAST_RECOVERY_LIMIT,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"recovery_parallelism",
-             PGC_POSTMASTER,
-             RESOURCES_RECOVERY,
-             gettext_noop("The actual number of recovery threads running in parallel."),
-             NULL},
-            &g_instance.attr.attr_storage.real_recovery_parallelism,
-            1,
-            1,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-
-#ifdef ENABLE_QUNIT
-        {{"qunit_case_number",
-             PGC_USERSET,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Sets the qunit_case_number."),
-             gettext_noop("Only QUnit framework uses this guc parameter.")},
-            &u_sess->utils_cxt.qunit_case_number,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            set_qunit_case_number_hook,
-            NULL},
-#endif
-
-        {{"incremental_checkpoint_timeout",
-             PGC_SIGHUP,
-             WAL_CHECKPOINTS,
-             gettext_noop("Sets the maximum time between automatic WAL checkpoints."),
-             NULL,
-             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.incrCheckPointTimeout,
-            60,
-            1,
-            3600,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"pagewriter_sleep", PGC_SIGHUP, WAL_CHECKPOINTS, gettext_noop("PageWriter sleep time."), NULL, GUC_UNIT_MS},
-            &u_sess->attr.attr_storage.pageWriterSleep,
-            2000,
-            0,
-            3600 * 1000,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"pagewriter_thread_num",
-             PGC_POSTMASTER,
-             WAL_CHECKPOINTS,
-             gettext_noop("Sets the number of page writer threads."),
-             NULL,
-             0},
-            &g_instance.attr.attr_storage.pagewriter_thread_num,
-            2,
-            1,
-            8,
-            NULL,
-            NULL,
-            NULL},
-        {{"bgwriter_thread_num",
-            PGC_POSTMASTER,
-            WAL_CHECKPOINTS,
-            gettext_noop("Sets the number of background writer threads with incremental checkpoint on."),
-            NULL,
-            0},
-            &g_instance.attr.attr_storage.bgwriter_thread_num,
-            2,
-            0,
-            8,
-            NULL,
-            NULL,
-            NULL},
-
         {{"datanode_heartbeat_interval",
-             PGC_SIGHUP,
-             WAL_CHECKPOINTS,
-             gettext_noop("Sets the heartbeat interval of the standby nodes."),
-             gettext_noop(
-                 "The value is best configured less than half of the wal_receiver_timeout and wal_sender_timeout."),
-             GUC_UNIT_MS},
+            PGC_SIGHUP,
+            NODE_ALL,
+            WAL_CHECKPOINTS,
+            gettext_noop("Sets the heartbeat interval of the standby nodes."),
+            gettext_noop(
+                "The value is best configured less than half of the wal_receiver_timeout and wal_sender_timeout."),
+            GUC_UNIT_MS},
             &u_sess->attr.attr_common.dn_heartbeat_interval,
             1000,
             1000,
@@ -6764,11 +2374,12 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"upgrade_mode",
-             PGC_SIGHUP,
-             UPGRADE_OPTIONS,
-             gettext_noop("Indicate the upgrade mode: inplace upgrade mode, grey upgrade mode or not in upgrade."),
-             NULL,
-             0},
+            PGC_SIGHUP,
+            NODE_ALL,
+            UPGRADE_OPTIONS,
+            gettext_noop("Indicate the upgrade mode: inplace upgrade mode, grey upgrade mode or not in upgrade."),
+            NULL,
+            0},
             &u_sess->attr.attr_common.upgrade_mode,
             0,
             0,
@@ -6778,10 +2389,11 @@ static void InitConfigureNamesInt()
             NULL},
 
         {{"instr_unique_sql_count",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the number of entries collected in gs_instr_unique_sql."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the number of entries collected in gs_instr_unique_sql."),
+            NULL},
             &u_sess->attr.attr_common.instr_unique_sql_count,
             100,
             0,
@@ -6790,10 +2402,11 @@ static void InitConfigureNamesInt()
             assign_instr_unique_sql_count,
             NULL},
         {{"track_stmt_session_slot",
-             PGC_SIGHUP,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("Sets the number of entries collected for full sql/slow sql in each session."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the number of entries collected for full sql/slow sql in each session."),
+            NULL},
             &u_sess->attr.attr_common.track_stmt_session_slot,
             1000,
             0,
@@ -6801,639 +2414,366 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
-        {{"recovery_parse_workers",
-             PGC_POSTMASTER,
-             RESOURCES_RECOVERY,
-             gettext_noop("The number of recovery threads to do xlog parse."),
-             gettext_noop("Zero lets the system determine this value.")},
-             &g_instance.attr.attr_storage.recovery_parse_workers,
-             1,
-             1,
-             MAX_PARSE_WORKERS,
-             NULL,
-             NULL,
-             NULL},
-        {{"recovery_redo_workers",
-             PGC_POSTMASTER,
-             RESOURCES_RECOVERY,
-             gettext_noop("The number belonging to one parse worker to do xlog redo."),
-             gettext_noop("Zero lets the system determine this value.")},
-             &g_instance.attr.attr_storage.recovery_redo_workers_per_paser_worker,
-             1,
-             1,
-             MAX_REDO_WORKERS_PER_PARSE,
-             NULL,
-             NULL,
-             NULL},
-
-        {{"force_promote",
-            PGC_POSTMASTER,
-            WAL,
-            gettext_noop("Enable master update min recovery point."),
-            NULL,
-            0},
-            &g_instance.attr.attr_storage.enable_update_max_page_flush_lsn,
-            0,
-            0,
-            1,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"max_keep_log_seg",
-             PGC_SUSET,
-             WAL,
-             gettext_noop("Sets the threshold for implementing logical replication flow control."),
-             NULL},
-            &g_instance.attr.attr_storage.max_keep_log_seg,
+#ifdef ENABLE_QUNIT
+        {{"qunit_case_number",
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Sets the qunit_case_number."),
+            gettext_noop("Only QUnit framework uses this guc parameter.")},
+            &u_sess->utils_cxt.qunit_case_number,
             0,
             0,
             INT_MAX,
             NULL,
-            NULL,
-            NULL},
-
-        {{"comm_sender_buffer_size",
-             PGC_POSTMASTER,
-             DEVELOPER_OPTIONS,
-             gettext_noop("The libcomm sender's buffer size in every interaction between DN and CN, or DN and DN, unit(KB)"),
-             NULL},
-            &g_instance.comm_cxt.commutil_cxt.g_comm_sender_buffer_size,
-            8,
-            1,
-            1024,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"max_size_for_xlog_prune",
-             PGC_SIGHUP,
-             WAL,
-             gettext_noop("This param set by user is used for xlog to be recycled when not all are connected and the param enable_xlog_prune is on."),
-             NULL,
-             GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.max_size_for_xlog_prune,
-            INT_MAX,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-#ifdef EXTREME_RTO_DEBUG_AB
-        {{"rto_ab_pos",
-             PGC_POSTMASTER,
-             RESOURCES_RECOVERY,
-             gettext_noop("for extreme rto debug."),
-             gettext_noop("for extreme rto debug")},
-            &g_instance.attr.attr_storage.extreme_rto_ab_pos,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"rto_ab_type",
-             PGC_POSTMASTER,
-             RESOURCES_RECOVERY,
-             gettext_noop("for extreme rto debug."),
-             gettext_noop("for extreme rto debug")},
-            &g_instance.attr.attr_storage.extreme_rto_ab_type,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
-        {{"rto_ab_count",
-             PGC_POSTMASTER,
-             RESOURCES_RECOVERY,
-             gettext_noop("for extreme rto debug."),
-             gettext_noop("for extreme rto debug")},
-            &g_instance.attr.attr_storage.extreme_rto_ab_count,
-            0,
-            0,
-            INT_MAX,
-            NULL,
-            NULL,
+            set_qunit_case_number_hook,
             NULL},
 #endif
-        /* max_size_for_xlog_prune for xlog recycle size limit, max_redo_log_size for redo log limit */
-        {{"max_redo_log_size",
-            PGC_SIGHUP,
-            WAL,
-            gettext_noop("max redo log size."),
-            NULL,
-            GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.max_redo_log_size,
-            1048576,    /* 1GB */
-            163840,    /* 160MB */
-            INT_MAX,
-            NULL,
-            NULL,
-            NULL},
 
-        /* The I/O upper limit of batch flush dirty page every second */
-        {{"max_io_capacity",
-            PGC_SIGHUP,
-            WAL,
-            gettext_noop("The I/O upper limit of batch flush dirty page every second."),
-            NULL,
-            GUC_UNIT_KB},
-            &u_sess->attr.attr_storage.max_io_capacity,
-            512000,    /* 500MB */
-            30720,    /* 30MB */
-            10485760,  /* 10 GB */
-            NULL,
-            NULL,
-            NULL},
-#ifndef ENABLE_MULTIPLE_NODES
-        {{"max_concurrent_autonomous_transactions",
-            PGC_POSTMASTER,
-            RESOURCES_WORKLOAD,
-            gettext_noop("Maximum number of concurrent autonomous transactions processes."),
-            NULL},
-            &g_instance.attr.attr_storage.max_concurrent_autonomous_transactions,
-            8,
-            0,
-            MAX_BACKENDS,
-            NULL,
-            NULL,
-            NULL},
-#endif
-		/* The I/O upper limit of batch flush dirty page every second */
         {{"gpc_clean_timeout",
             PGC_SIGHUP,
+            NODE_ALL,
             CLIENT_CONN,
             gettext_noop("Set the maximum allowed duration of any unused global plancache."),
             NULL,
             GUC_UNIT_S},
             &u_sess->attr.attr_common.gpc_clean_timeout,
-            30 * 60,    /* 30min */
-            5 * 60,    /* 5min */
-            24 * 60 * 60,    /* 24h */
+            30 * 60,      /* 30min */
+            5 * 60,       /* 5min */
+            24 * 60 * 60, /* 24h */
             NULL,
             NULL,
             NULL},
 
-        {{"gs_clean_timeout",
-            PGC_SIGHUP,
+        {{"transaction_sync_naptime",
+            PGC_USERSET,
+            NODE_DISTRIBUTE,
             STATS_MONITORING,
-            gettext_noop("Sets the timeout to call gs_clean."),
+            gettext_noop("Sets the timeout to call gs_clean when sync transaction with GTM."),
             gettext_noop("A value of 0 turns off the timeout."),
             GUC_UNIT_S},
-            &u_sess->attr.attr_storage.gs_clean_timeout,
-            60,
+            &u_sess->attr.attr_common.transaction_sync_naptime,
+            30,
             0,
             INT_MAX / 1000,
             NULL,
             NULL,
             NULL},
+        {{"transaction_sync_timeout",
+            PGC_USERSET,
+            NODE_DISTRIBUTE,
+            STATS_MONITORING,
+            gettext_noop("Sets the timeout when sync every transaction with GTM to avoid deadlock sync."),
+            gettext_noop("A value of 0 turns off the timeout. Please make sure it larger than gs_clean_timeout."),
+            GUC_UNIT_S},
+            &u_sess->attr.attr_common.transaction_sync_timeout,
+            600,
+            0,
+            INT_MAX / 1000,
+            NULL,
+            NULL,
+            NULL},
+        {{"gtm_port",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[0],
+            6666,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
 
+        {{"gtm_port1",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[1],
+            6665,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"gtm_port2",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[2],
+            6666,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"gtm_port3",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[3],
+            6666,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"gtm_port4",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[4],
+            6666,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"gtm_port5",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[5],
+            6666,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"gtm_port6",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[6],
+            6666,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"gtm_port7",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Port of GTM."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.GtmHostPortArray[7],
+            6666,
+            1,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+        {{"max_datanodes",
+            PGC_POSTMASTER,
+            NODE_DISTRIBUTE,
+            DATA_NODES,
+            gettext_noop("Maximum number of Datanodes in the cluster."),
+            gettext_noop("It is not possible to create more Datanodes in the cluster than "
+                         "this maximum number.")},
+            &g_instance.attr.attr_common.MaxDataNodes,
+            64,
+            2,
+            65535,
+            NULL,
+            NULL,
+            NULL},
+        {{"session_sequence_cache",
+            PGC_USERSET,
+            NODE_DISTRIBUTE,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets current session sequence cache."),
+            NULL},
+            &u_sess->attr.attr_common.session_sequence_cache,
+            10,
+            1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"gtm_connect_timeout",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Sets the max wait time in seconds to connect GTM."),
+            NULL,
+            GUC_UNIT_S},
+            &u_sess->attr.attr_common.gtm_connect_timeout,
+            2,
+            1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+#ifdef ENABLE_MULTIPLE_NODES
+        {{"gtm_rw_timeout",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Sets the max time in seconds to wait for a reponse from GTM."),
+            NULL,
+            GUC_UNIT_S},
+            &u_sess->attr.attr_common.gtm_rw_timeout,
+            60,
+            1,
+            INT_MAX,
+            NULL,
+            assign_gtm_rw_timeout,
+            NULL},
+#endif
+        {{"max_datanode_for_plan",
+            PGC_USERSET,
+            NODE_DISTRIBUTE,
+            UNGROUPED,
+            gettext_noop("The max number of DN datanodes to show plan, 0 means just CN plan."),
+            NULL},
+            &u_sess->attr.attr_common.max_datanode_for_plan,
+            0,
+            0,
+            MAX_DN_NODE_NUM,
+            NULL,
+            NULL,
+            NULL},
+        {{"ts_consumer_workers", 
+            PGC_SIGHUP, 
+            NODE_DISTRIBUTE,
+            TSDB, 
+            gettext_noop("Enables compaction consumers feature."), 
+            NULL},
+            &u_sess->attr.attr_common.ts_consumer_workers,
+            3,
+            1,
+            100,
+            NULL,
+            NULL,
+            NULL},
+        {{"ts_valid_partition",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            TSDB,
+            gettext_noop("Number of partition producer and delete search."),
+            NULL},
+            &u_sess->attr.attr_common.ts_valid_partition,
+            2,
+            1,
+            30,
+            NULL,
+            NULL,
+            NULL},
+        {{"ts_cudesc_threshold", 
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            TSDB,
+            gettext_noop("If the number of cudesc tuples is larger than "\
+            "ts_cudesc_threshold, cudesc index will be created by compaction threads."),
+            NULL},
+            &u_sess->attr.attr_common.ts_cudesc_threshold,
+            0,
+            0,
+            10000000,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
-        {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL}};
+        {{NULL,
+            (GucContext)0,
+            (GucNodeType)0,
+            (config_group)0,
+            NULL,
+            NULL},
+            NULL,
+            0,
+            0,
+            0,
+            NULL,
+            NULL,
+            NULL}
+    };
 
     Size bytes = sizeof(localConfigureNamesInt);
-    u_sess->utils_cxt.ConfigureNamesInt[SINGLE_GUC] =
+    u_sess->utils_cxt.ConfigureNamesInt[GUC_ATTR_COMMON] =
         (struct config_int*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
-    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesInt[SINGLE_GUC], bytes, localConfigureNamesInt, bytes);
+    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesInt[GUC_ATTR_COMMON], bytes, localConfigureNamesInt, bytes);
     securec_check_ss(rc, "\0", "\0");
 }
 
 static void InitConfigureNamesReal()
 {
-    struct config_real localConfigureNamesReal[] =
-
-        {
-#ifndef ENABLE_MULTIPLE_NODES
-            {{"unique_sql_clean_ratio",
+    struct config_real localConfigureNamesReal[] = {
+        {{"connection_alarm_rate",
             PGC_SIGHUP,
-            INSTRUMENTS_OPTIONS,
-            gettext_noop("The percentage of the UniquesQl hash table that will be "
-                         "automatically eliminated when the UniquesQl hash table "
-                         "is full."),
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Reports alarm if connection rate overload."),
             NULL},
-            &u_sess->attr.attr_common.unique_sql_clean_ratio,
-            DEFAULT_CLEAN_RATIO,
-            0,
-            0.2,
-            CheckUniqueSqlCleanRatio,
+            &u_sess->attr.attr_common.ConnectionAlarmRate,
+            0.9,
+            0.0,
+            1.0,
+            NULL,
             NULL,
             NULL},
-#endif
-            {{"seq_page_cost",
-              PGC_USERSET,
-              QUERY_TUNING_COST,
-              gettext_noop("Sets the planner's estimate of the cost of a "
-                           "sequentially fetched disk page."),
-              NULL},
-             &u_sess->attr.attr_sql.seq_page_cost,
-             DEFAULT_SEQ_PAGE_COST,
-             0,
-             DBL_MAX,
-             NULL,
-             NULL,
-             NULL},
-            {{"random_page_cost",
-                 PGC_USERSET,
-                 QUERY_TUNING_COST,
-                 gettext_noop("Sets the planner's estimate of the cost of a "
-                              "nonsequentially fetched disk page."),
-                 NULL},
-                &u_sess->attr.attr_sql.random_page_cost,
-                DEFAULT_RANDOM_PAGE_COST,
-                0,
-                DBL_MAX,
-                NULL,
-                NULL,
-                NULL},
-            {{"cpu_tuple_cost",
-                 PGC_USERSET,
-                 QUERY_TUNING_COST,
-                 gettext_noop("Sets the planner's estimate of the cost of "
-                              "processing each tuple (row)."),
-                 NULL},
-                &u_sess->attr.attr_sql.cpu_tuple_cost,
-                DEFAULT_CPU_TUPLE_COST,
-                0,
-                DBL_MAX,
-                NULL,
-                NULL,
-                NULL},
-            {{"allocate_mem_cost",
-                 PGC_USERSET,
-                 QUERY_TUNING_COST,
-                 gettext_noop("Sets the planner's estimate of the cost of "
-                              "allocate memory."),
-                 NULL},
-                &u_sess->attr.attr_sql.allocate_mem_cost,
-                DEFAULT_ALLOCATE_MEM_COST,
-                0,
-                DBL_MAX,
-                NULL,
-                NULL,
-                NULL},
-            {{"cpu_index_tuple_cost",
-                 PGC_USERSET,
-                 QUERY_TUNING_COST,
-                 gettext_noop("Sets the planner's estimate of the cost of "
-                              "processing each index entry during an index scan."),
-                 NULL},
-                &u_sess->attr.attr_sql.cpu_index_tuple_cost,
-                DEFAULT_CPU_INDEX_TUPLE_COST,
-                0,
-                DBL_MAX,
-                NULL,
-                NULL,
-                NULL},
-            {{"cpu_operator_cost",
-                 PGC_USERSET,
-                 QUERY_TUNING_COST,
-                 gettext_noop("Sets the planner's estimate of the cost of "
-                              "processing each operator or function call."),
-                 NULL},
-                &u_sess->attr.attr_sql.cpu_operator_cost,
-                DEFAULT_CPU_OPERATOR_COST,
-                0,
-                DBL_MAX,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"dngather_min_rows",
-                 PGC_USERSET,
-                 QUERY_TUNING_COST,
-                 gettext_noop("minimum rows worth do dn gather, 0 meas always, -1 means disable"),
-                 NULL},
-                &u_sess->attr.attr_sql.dngather_min_rows,
-                500.0,
-                -1,
-                DBL_MAX,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"cursor_tuple_fraction",
-                 PGC_USERSET,
-                 QUERY_TUNING_OTHER,
-                 gettext_noop("Sets the planner's estimate of the fraction of "
-                              "a cursor's rows that will be retrieved."),
-                 NULL},
-                &u_sess->attr.attr_sql.cursor_tuple_fraction,
-                DEFAULT_CURSOR_TUPLE_FRACTION,
-                0.0,
-                1.0,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"connection_alarm_rate",
-                 PGC_SIGHUP,
-                 UNGROUPED,
-                 gettext_noop("Reports alarm if connection rate overload."),
-                 NULL},
-                &u_sess->attr.attr_common.ConnectionAlarmRate,
-                0.9,
-                0.0,
-                1.0,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"geqo_selection_bias",
-                 PGC_USERSET,
-                 QUERY_TUNING_GEQO,
-                 gettext_noop("GEQO: selective pressure within the population."),
-                 NULL},
-                &u_sess->attr.attr_sql.Geqo_selection_bias,
-                DEFAULT_GEQO_SELECTION_BIAS,
-                MIN_GEQO_SELECTION_BIAS,
-                MAX_GEQO_SELECTION_BIAS,
-                NULL,
-                NULL,
-                NULL},
-            {{"geqo_seed", PGC_USERSET, QUERY_TUNING_GEQO, gettext_noop("GEQO: seed for random path selection."), NULL},
-                &u_sess->attr.attr_sql.Geqo_seed,
-                0.0,
-                0.0,
-                1.0,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"bgwriter_lru_multiplier",
-                 PGC_SIGHUP,
-                 RESOURCES_BGWRITER,
-                 gettext_noop("Multiple of the average buffer usage to free per round."),
-                 NULL},
-                &u_sess->attr.attr_storage.bgwriter_lru_multiplier,
-                2.0,
-                0.0,
-                10.0,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"standby_shared_buffers_fraction",
-                 PGC_SIGHUP,
-                 RESOURCES_MEM,
-                 gettext_noop("The max fraction of shared_buffers usage to standby."),
-                 NULL},
-                &u_sess->attr.attr_storage.shared_buffers_fraction,
-                0.3,
-                0.1,
-                1.0,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"seed",
-                 PGC_USERSET,
-                 UNGROUPED,
-                 gettext_noop("Sets the seed for random-number generation."),
-                 NULL,
-                 GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-                &u_sess->attr.attr_sql.phony_random_seed,
-                0.0,
-                -1.0,
-                1.0,
-                check_random_seed,
-                assign_random_seed,
-                show_random_seed},
-
-            {{"autovacuum_vacuum_scale_factor",
-                 PGC_SIGHUP,
-                 AUTOVACUUM,
-                 gettext_noop("Number of tuple updates or deletes prior to vacuum as a fraction of reltuples."),
-                 NULL},
-                &u_sess->attr.attr_storage.autovacuum_vac_scale,
-                0.2,
-                0.0,
-                100.0,
-                NULL,
-                NULL,
-                NULL},
-            {{"autovacuum_analyze_scale_factor",
-                 PGC_SIGHUP,
-                 AUTOVACUUM,
-                 gettext_noop(
-                     "Number of tuple inserts, updates, or deletes prior to analyze as a fraction of reltuples."),
-                 NULL},
-                &u_sess->attr.attr_storage.autovacuum_anl_scale,
-                0.1,
-                0.0,
-                100.0,
-                NULL,
-                NULL,
-                NULL},
-            {{"candidate_buf_percent_target",
-                 PGC_SIGHUP,
-                 RESOURCES_KERNEL,
-                 gettext_noop(
-                     "Sets the candidate buffers percent."),
-                 NULL},
-                &u_sess->attr.attr_storage.candidate_buf_percent_target,
-                0.3,
-                0.01,
-                0.9,
-                NULL,
-                NULL,
-                NULL},
-            {{"dirty_page_percent_max",
-                 PGC_SIGHUP,
-                 RESOURCES_KERNEL,
-                 gettext_noop(
-                     "Sets the dirty buffers percent."),
-                 NULL},
-                &u_sess->attr.attr_storage.dirty_page_percent_max,
-                0.9,
-                0.1,
-                1,
-                NULL,
-                NULL,
-                NULL},
-            {{"checkpoint_completion_target",
-                 PGC_SIGHUP,
-                 WAL_CHECKPOINTS,
-                 gettext_noop(
-                     "Time spent flushing dirty buffers during checkpoint, as fraction of checkpoint interval."),
-                 NULL},
-                &u_sess->attr.attr_storage.CheckPointCompletionTarget,
-                0.5,
-                0.0,
-                1.0,
-                NULL,
-                NULL,
-                NULL},
-            /* defalut values is 60 days */
-            {{"password_reuse_time",
-                 PGC_SIGHUP,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("max days password can reuse."),
-                 NULL},
-                &u_sess->attr.attr_security.Password_reuse_time,
-                60.0,
-                0.0,
-                MAX_PASSWORD_REUSE_TIME,
-                check_double_parameter,
-                NULL,
-                NULL},
-
-            {{"password_effect_time", PGC_SIGHUP, CONN_AUTH_SECURITY, gettext_noop("password effective time."), NULL},
-                &u_sess->attr.attr_security.Password_effect_time,
-                90.0,
-                0.0,
-                MAX_PASSWORD_EFFECTIVE_TIME,
-                check_double_parameter,
-                NULL,
-                NULL},
-
-            {{"password_lock_time",
-                PGC_SIGHUP,
-                CONN_AUTH_SECURITY,
-                gettext_noop("password lock time"),
-                NULL,
-                GUC_UNIT_DAY},
-                &u_sess->attr.attr_security.Password_lock_time,
-                1.0,
-                0.0,
-                MAX_ACCOUNT_LOCK_TIME,
-                check_double_parameter,
-                NULL,
-                NULL},
-
-            {{"table_skewness_warning_threshold", PGC_USERSET, STATS, gettext_noop("table skewness threthold"), NULL},
-                &u_sess->attr.attr_sql.table_skewness_warning_threshold,
-                1.0,
-                0.0,
-                1.0,
-                check_double_parameter,
-                NULL,
-                NULL},
-            {{"cost_weight_index", PGC_USERSET, QUERY_TUNING_COST, gettext_noop(
-                "Sets the planner's discount when evaluating index cost."), NULL},
-                &u_sess->attr.attr_sql.cost_weight_index,
-                1,
-                1e-10,
-                1e10,
-                NULL,
-                NULL,
-                NULL,
-                0,
-                NULL},
-            {{"default_limit_rows", PGC_USERSET, QUERY_TUNING_COST, gettext_noop(
-                    "Sets the planner's default estimation when limit rows is unknown."
-                    "Negative value means using percentage of the left tree rows, whereas positive value "
-                    "sets the estimation directly."), 
-                NULL},
-                &u_sess->attr.attr_sql.default_limit_rows,
-                -10,
-                -100,
-                DBL_MAX,
-                NULL,
-                NULL,
-                NULL,
-                0,
-                NULL},
-            /* End-of-list marker */
-            {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0.0, 0.0, 0.0, NULL, NULL, NULL}};
+        /* End-of-list marker */
+        {{NULL,
+            (GucContext)0,
+            (GucNodeType)0,
+            (config_group)0,
+            NULL,
+            NULL},
+            NULL,
+            0.0,
+            0.0,
+            0.0,
+            NULL,
+            NULL,
+            NULL}
+    };
 
     Size bytes = sizeof(localConfigureNamesReal);
-    u_sess->utils_cxt.ConfigureNamesReal[SINGLE_GUC] =
+    u_sess->utils_cxt.ConfigureNamesReal[GUC_ATTR_COMMON] =
         (struct config_real*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
-    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesReal[SINGLE_GUC], bytes, localConfigureNamesReal, bytes);
+    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesReal[GUC_ATTR_COMMON], bytes, localConfigureNamesReal, bytes);
     securec_check_ss(rc, "\0", "\0");
 }
 
 static void InitConfigureNamesInt64()
 {
     struct config_int64 localConfigureNamesInt64[] = {
-        {{"vacuum_freeze_min_age",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Minimum age at which VACUUM should freeze a table row."),
-             NULL},
-            &u_sess->attr.attr_storage.vacuum_freeze_min_age,
-            INT64CONST(2000000000),
-            INT64CONST(0),
-            INT64CONST(0x7FFFFFFFFFFFFFF),
-            NULL,
-            NULL,
-            NULL},
-
-        {{"hll_default_expthresh",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Set parameter expthresh in hll."),
-             gettext_noop("It could change promotion hierarchy for hll.")},
-            &u_sess->attr.attr_sql.g_default_expthresh,
-            DEFAULT_EXPTHRESH,
-            HLL_MIN_EXPTHRESH,
-            HLL_MAX_EXPTHRESH,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"vacuum_freeze_table_age",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Age at which VACUUM should scan whole table to freeze tuples."),
-             NULL},
-            &u_sess->attr.attr_storage.vacuum_freeze_table_age,
-            INT64CONST(4000000000),
-            INT64CONST(0),
-            INT64CONST(0x7FFFFFFFFFFFFFF),
-            NULL,
-            NULL,
-            NULL},
-
-        {{"vacuum_defer_cleanup_age",
-             PGC_SIGHUP,
-             REPLICATION_MASTER,
-             gettext_noop("Number of transactions by which VACUUM and HOT cleanup should be deferred, if any."),
-             NULL},
-            &u_sess->attr.attr_storage.vacuum_defer_cleanup_age,
-            INT64CONST(0),
-            INT64CONST(0),
-            INT64CONST(1000000),
-            NULL,
-            NULL,
-            NULL},
-
-        {/* see varsup.c for why this is PGC_POSTMASTER not PGC_SIGHUP */
-            {"autovacuum_freeze_max_age",
-                PGC_POSTMASTER,
-                AUTOVACUUM,
-                gettext_noop("Age at which to autovacuum a table."),
-                NULL},
-            &g_instance.attr.attr_storage.autovacuum_freeze_max_age,
-            /* see pg_resetxlog if you change the upper-limit value */
-            INT64CONST(4000000000),
-            INT64CONST(100000),
-            INT64CONST(0x7FFFFFFFFFFFFFF),
-            NULL,
-            NULL,
-            NULL},
-
-        {{"xlog_idle_flushes_before_sleep",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Number of idle xlog flushes before xlog flusher goes to sleep."),
-             NULL,
-             GUC_NOT_IN_SAMPLE},
-            &g_instance.attr.attr_storage.xlog_idle_flushes_before_sleep,
-            INT64CONST(500),
-            INT64CONST(0),
-            INT64CONST(0x7FFFFFFFFFFFFFF),
-            NULL,
-            NULL,
-            NULL
-        },
-
         {{"track_stmt_details_size",
-             PGC_USERSET,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("the maximum bytes of statement details to be gathered."),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("the maximum bytes of statement details to be gathered."),
+            NULL},
             &u_sess->attr.attr_common.track_stmt_details_size,
             INT64CONST(4096),
             INT64CONST(0),
@@ -7441,1295 +2781,942 @@ static void InitConfigureNamesInt64()
             NULL,
             NULL,
             NULL},
-
         /* End-of-list marker */
-        {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0, 0, 0, NULL, NULL, NULL}};
+        {{NULL,
+            (GucContext)0,
+            (GucNodeType)0,
+            (config_group)0,
+            NULL,
+            NULL},
+            NULL,
+            0,
+            0,
+            0,
+            NULL,
+            NULL,
+            NULL}
+    };
 
     Size bytes = sizeof(localConfigureNamesInt64);
-    u_sess->utils_cxt.ConfigureNamesInt64 =
+    u_sess->utils_cxt.ConfigureNamesInt64[GUC_ATTR_COMMON] =
         (struct config_int64*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
-    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesInt64, bytes, localConfigureNamesInt64, bytes);
+    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesInt64[GUC_ATTR_COMMON], bytes,
+        localConfigureNamesInt64, bytes);
     securec_check_ss(rc, "\0", "\0");
-};
+}
 
 static void InitConfigureNamesString()
 {
-    struct config_string localConfigureNamesString[] =
-
-        {{{"archive_command",
-              PGC_SIGHUP,
-              WAL_ARCHIVING,
-              gettext_noop("Sets the shell command that will be called to archive a WAL file."),
-              NULL},
-             &u_sess->attr.attr_storage.XLogArchiveCommand,
-             "",
-             NULL,
-             NULL,
-             show_archive_command},
-
-            {{"archive_dest",
-                PGC_SIGHUP,
-                WAL_ARCHIVING,
-                gettext_noop("Sets the path that will be used to archive a WAL file."),
-                NULL},
-                &u_sess->attr.attr_storage.XLogArchiveDest,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"client_encoding",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets the client's character set encoding."),
-                 NULL,
-                 GUC_IS_NAME | GUC_REPORT},
-                &u_sess->attr.attr_common.client_encoding_string,
-                "SQL_ASCII",
-                check_client_encoding,
-                assign_client_encoding,
-                NULL},
-
-            {{"log_line_prefix",
-                 PGC_SIGHUP,
-                 LOGGING_WHAT,
-                 gettext_noop("Controls information prefixed to each log line."),
-                 gettext_noop("If blank, no prefix is used.")},
-                &u_sess->attr.attr_common.Log_line_prefix,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"elastic_search_ip_addr",
-                PGC_POSTMASTER,
-                AUDIT_OPTIONS,
-                gettext_noop("Controls elastic search IP address in the system. "),
-                NULL},
-                &g_instance.attr.attr_security.elastic_search_ip_addr,
-                "https://127.0.0.1",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"log_timezone",
-                 PGC_SIGHUP,
-                 LOGGING_WHAT,
-                 gettext_noop("Sets the time zone to use in log messages."),
-                 NULL},
-                &u_sess->attr.attr_common.log_timezone_string,
-                "GMT",
-                check_log_timezone,
-                assign_log_timezone,
-                show_log_timezone},
-
-            {{"DateStyle",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets the display format for date and time values."),
-                 gettext_noop("Also controls interpretation of ambiguous "
-                              "date inputs."),
-                 GUC_LIST_INPUT | GUC_REPORT},
-                &u_sess->attr.attr_common.datestyle_string,
-                "ISO, MDY",
-                check_datestyle,
-                assign_datestyle,
-                NULL},
-
-            {{"default_tablespace",
-                 PGC_USERSET,
-                 CLIENT_CONN_STATEMENT,
-                 gettext_noop("Sets the default tablespace to create tables and indexes in."),
-                 gettext_noop("An empty string selects the database's default tablespace."),
-                 GUC_IS_NAME},
-                &u_sess->attr.attr_storage.default_tablespace,
-                "",
-                check_default_tablespace,
-                NULL,
-                NULL},
-
-            {{"temp_tablespaces",
-                 PGC_USERSET,
-                 CLIENT_CONN_STATEMENT,
-                 gettext_noop("Sets the tablespace(s) to use for temporary tables and sort files."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE},
-                &u_sess->attr.attr_storage.temp_tablespaces,
-                "",
-                check_temp_tablespaces,
-                assign_temp_tablespaces,
-                NULL},
-
-            {{"dynamic_library_path",
-                 PGC_SUSET,
-                 CLIENT_CONN_OTHER,
-                 gettext_noop("Sets the path for dynamically loadable modules."),
-                 gettext_noop("If a dynamically loadable module needs to be opened and "
-                              "the specified name does not have a directory component (i.e., the "
-                              "name does not contain a slash), the system will search this path for "
-                              "the specified file."),
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.Dynamic_library_path,
-                "$libdir",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"krb_server_keyfile",
-                 PGC_SIGHUP,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("Sets the location of the Kerberos server key file."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_security.pg_krb_server_keyfile,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"krb_srvname",
-                 PGC_SIGHUP,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("Sets the name of the Kerberos service."),
-                 NULL},
-                &u_sess->attr.attr_security.pg_krb_srvnam,
-                PG_KRB_SRVNAM,
-                NULL,
-                NULL,
-                NULL},
-#ifdef USE_BONJOUR
-            {{"bonjour_name", PGC_POSTMASTER, CONN_AUTH_SETTINGS, gettext_noop("Sets the Bonjour service name."), NULL},
-                &g_instance.attr.attr_common.bonjour_name,
-                "",
-                NULL,
-                NULL,
-                NULL},
-#endif
-            /* See main.c about why defaults for LC_foo are not all alike */
-
-            {{"lc_collate",
-                 PGC_INTERNAL,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Shows the collation order locale."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-                &u_sess->attr.attr_common.locale_collate,
-                "C",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"lc_ctype",
-                 PGC_INTERNAL,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Shows the character classification and case conversion locale."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-                &u_sess->attr.attr_common.locale_ctype,
-                "C",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"lc_messages",
-                 PGC_SUSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets the language in which messages are displayed."),
-                 NULL},
-                &u_sess->attr.attr_common.locale_messages,
-                "",
-                check_locale_messages,
-                assign_locale_messages,
-                NULL},
-
-            {{"lc_monetary",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets the locale for formatting monetary amounts."),
-                 NULL},
-                &u_sess->attr.attr_common.locale_monetary,
-                "C",
-                check_locale_monetary,
-                assign_locale_monetary,
-                NULL},
-
-            {{"lc_numeric",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets the locale for formatting numbers."),
-                 NULL},
-                &u_sess->attr.attr_common.locale_numeric,
-                "C",
-                check_locale_numeric,
-                assign_locale_numeric,
-                NULL},
-
-            {{"lc_time",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets the locale for formatting date and time values."),
-                 NULL},
-                &u_sess->attr.attr_common.locale_time,
-                "C",
-                check_locale_time,
-                assign_locale_time,
-                NULL},
-
-            {{"shared_preload_libraries",
-                 PGC_POSTMASTER,
-                 RESOURCES_KERNEL,
-                 gettext_noop("Lists shared libraries to preload into server."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.shared_preload_libraries_string,
-                "security_plugin",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"thread_pool_attr",
-                 PGC_POSTMASTER,
-                 CLIENT_CONN,
-                 gettext_noop("Spare Cpu that can not be used in thread pool."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.thread_pool_attr,
-                "16, 2, (nobind)",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"track_stmt_retention_time",
-                 PGC_SIGHUP,
-                 CLIENT_CONN,
-                 gettext_noop("The longest retention time of full SQL and slow query in statement_ history"),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.track_stmt_retention_time,
-                "3600,604800",
-                check_statement_retention_time,
-                assign_statement_retention_time,
-                NULL},
-
-            {{"router",
-                 PGC_USERSET,
-                 CLIENT_CONN,
-                 gettext_noop("set send node router for sql before unrouter."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_common.router_att,
-                "",
-                check_router_attr,
-                assign_router_attr,
-                NULL},
-
-            {{"local_preload_libraries",
-                 PGC_BACKEND,
-                 CLIENT_CONN_OTHER,
-                 gettext_noop("Lists shared libraries to preload into each backend."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE},
-                &u_sess->attr.attr_common.local_preload_libraries_string,
-                "",
-                NULL,
-                NULL,
-                NULL},
-            {{
-                 "expected_computing_nodegroup",
-                 PGC_USERSET,
-                 QUERY_TUNING_METHOD,
-                 gettext_noop("Computing node group mode or expected node group for query processing."),
-                 NULL,
-             },
-                &u_sess->attr.attr_sql.expected_computing_nodegroup,
-                CNG_OPTION_QUERY,
-                NULL,
-                NULL,
-                NULL},
-            {{
-                 "default_storage_nodegroup",
-                 PGC_USERSET,
-                 QUERY_TUNING_METHOD,
-                 gettext_noop("Default storage group for create table."),
-                 NULL,
-             },
-                &u_sess->attr.attr_sql.default_storage_nodegroup,
-                INSTALLATION_MODE,
-                NULL,
-                NULL,
-                NULL},
-
-            {/* Can't be set in postgresql.conf */
-                {"current_logic_cluster",
-                    PGC_INTERNAL,
-                    UNGROUPED,
-                    gettext_noop("Shows current logic cluster."),
-                    NULL,
-                    GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-                &u_sess->attr.attr_common.current_logic_cluster_name,
-                NULL,
-                NULL,
-                NULL,
-                show_lcgroup_name},
-
-            {{"search_path",
-                 PGC_USERSET,
-                 CLIENT_CONN_STATEMENT,
-                 gettext_noop("Sets the schema search order for names that are not schema-qualified."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE},
-                &u_sess->attr.attr_common.namespace_search_path,
-                "\"$user\",public",
-                check_search_path,
-                assign_search_path,
-                NULL},
-
-            {{"percentile",
-                 PGC_INTERNAL,
-                 INSTRUMENTS_OPTIONS,
-                 gettext_noop("Sets the percentile of sql responstime that DBA want to know."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE},
-                &u_sess->attr.attr_common.percentile_values,
-                "80,95",
-                check_percentile,
-                NULL,
-                NULL},
-
-            /* for pljava */
-            {{"pljava_vmoptions",
-                 PGC_SUSET,
-                 CUSTOM_OPTIONS,
-                 gettext_noop("Options sent to the JVM when it is created"),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_sql.pljava_vmoptions,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-            {{
-                 "nls_timestamp_format",
-                 PGC_USERSET,
-                 CLIENT_CONN_STATEMENT,
-                 gettext_noop("defines the default timestamp format to use with the TO_TIMESTAMP functions."),
-                 NULL,
-             },
-                &u_sess->attr.attr_common.nls_timestamp_format_string,
-                "DD-Mon-YYYY HH:MI:SS.FF AM",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"current_schema",
-                 PGC_USERSET,
-                 CLIENT_CONN_STATEMENT,
-                 gettext_noop("Sets the schema search order for names that are not schema-qualified."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_LIST_QUOTE},
-                &u_sess->attr.attr_common.namespace_current_schema,
-                "\"$user\",public",
-                check_search_path,
-                assign_search_path,
-                NULL},
-
-            {/* Can't be set in postgresql.conf */
-                {"server_encoding",
-                    PGC_INTERNAL,
-                    CLIENT_CONN_LOCALE,
-                    gettext_noop("Sets the server (database) character set encoding."),
-                    NULL,
-                    GUC_IS_NAME | GUC_REPORT | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-                &u_sess->attr.attr_common.server_encoding_string,
-                "SQL_ASCII",
-                NULL,
-                NULL,
-                NULL},
-
-            {/* Can't be set in postgresql.conf */
-                {"server_version",
-                    PGC_INTERNAL,
-                    PRESET_OPTIONS,
-                    gettext_noop("Shows the server version."),
-                    NULL,
-                    GUC_REPORT | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-                &u_sess->attr.attr_common.server_version_string,
-                PG_VERSION,
-                NULL,
-                NULL,
-                NULL},
-
-            {/* Not for general use --- used by SET ROLE */
-                {"role",
-                    PGC_USERSET,
-                    UNGROUPED,
-                    gettext_noop("Sets the current role."),
-                    NULL,
-                    GUC_IS_NAME | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE |
-                        GUC_NOT_WHILE_SEC_REST},
-                &u_sess->attr.attr_common.role_string,
-                "none",
-                check_role,
-                assign_role,
-                show_role},
-
-            {/* Not for general use --- used by SET SESSION AUTHORIZATION */
-                {"session_authorization",
-                    PGC_USERSET,
-                    UNGROUPED,
-                    gettext_noop("Sets the session user name."),
-                    NULL,
-                    GUC_IS_NAME | GUC_REPORT | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE |
-                        GUC_DISALLOW_IN_FILE | GUC_NOT_WHILE_SEC_REST},
-                &u_sess->attr.attr_common.session_authorization_string,
-                NULL,
-                check_session_authorization,
-                assign_session_authorization,
-                NULL},
-
-            {{"log_destination",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the destination for server log output."),
-                 gettext_noop("Valid values are combinations of \"stderr\", "
-                              "\"syslog\", \"csvlog\", and \"eventlog\", "
-                              "depending on the platform."),
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_common.log_destination_string,
-                "stderr",
-                check_log_destination,
-                assign_log_destination,
-                NULL},
-            {{"log_directory",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the destination directory for log files."),
-                 gettext_noop("Can be specified as relative to the data directory "
-                              "or as absolute path."),
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.Log_directory,
-                "pg_log",
-                check_directory,
-                NULL,
-                NULL},
-            {{"asp_log_directory",
-                 PGC_POSTMASTER,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the destination directory for asp log files."),
-                 gettext_noop("Can be specified as relative to the data directory "
-                              "or as absolute path."),
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.asp_log_directory,
-                NULL,
-                check_directory,
-                NULL,
-                NULL},
-            {{"query_log_directory",
-                 PGC_POSTMASTER,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the destination directory for slow query log files."),
-                 gettext_noop("Can be specified as relative to the data directory "
-                              "or as absolute path."),
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.query_log_directory,
-                NULL,
-                check_directory,
-                NULL,
-                NULL},
-            {{"perf_directory",
-                 PGC_POSTMASTER,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the destination directory for perf json files."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.Perf_directory,
-                NULL,
-                check_directory,
-                NULL,
-                NULL},
-            {{"explain_dna_file",
-                 PGC_USERSET,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the destination file for explain performance data."),
-                 gettext_noop("Must be specified as an absolute directory + .csv filename."),
-                 GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_common.Perf_log,
-                NULL,
-                check_perf_log,
-                NULL,
-                NULL},
-            {{"log_filename",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the file name pattern for log files."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.Log_filename,
-                "postgresql-%Y-%m-%d_%H%M%S.log",
-                check_log_filename,
-                NULL,
-                NULL},
-            {{"query_log_file",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the file name pattern for slow query log files."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.query_log_file,
-                "slow_query_log-%Y-%m-%d_%H%M%S.log",
-                NULL,
-                NULL,
-                NULL},
-
-             {{"asp_flush_mode",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the active session profile flush mode:file/table/all."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.asp_flush_mode,
-                "table",
-                check_asp_flush_mode,
-                NULL,
-                NULL},
-
-             {{"asp_log_filename",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the file name pattern for asp data files."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.asp_log_filename,
-                "asp-%Y-%m-%d_%H%M%S.log",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"bbox_dump_path",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the path of core dump created by bbox_handler."),
-                 NULL},
-                &u_sess->attr.attr_common.bbox_dump_path,
-                "",
-                check_bbox_corepath,
-                assign_bbox_corepath,
-                show_bbox_dump_path},
-
-            {{"alarm_component",
-                 PGC_POSTMASTER,
-                 UNGROUPED,
-                 gettext_noop("Sets the component for alarm function."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.Alarm_component,
-                "/opt/snas/bin/snas_cm_cmd",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"syslog_ident",
-                 PGC_SIGHUP,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the program name used to identify PostgreSQL "
-                              "messages in syslog."),
-                 NULL},
-                &u_sess->attr.attr_common.syslog_ident_str,
-                "postgres",
-                NULL,
-                assign_syslog_ident,
-                NULL},
-
-            {{"event_source",
-                 PGC_POSTMASTER,
-                 LOGGING_WHERE,
-                 gettext_noop("Sets the application name used to identify "
-                              "PostgreSQL messages in the event log."),
-                 NULL},
-                &g_instance.attr.attr_common.event_source,
-                "PostgreSQL",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"TimeZone",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets the time zone for displaying and interpreting time stamps."),
-                 NULL,
-                 GUC_REPORT},
-                &u_sess->attr.attr_common.timezone_string,
-                "GMT",
-                check_timezone,
-                assign_timezone,
-                show_timezone},
-            {{"timezone_abbreviations",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Selects a file of time zone abbreviations."),
-                 NULL},
-                &u_sess->attr.attr_common.timezone_abbreviations_string,
-                NULL,
-                check_timezone_abbreviations,
-                assign_timezone_abbreviations,
-                NULL},
-
-            {{"transaction_isolation",
-                 PGC_USERSET,
-                 CLIENT_CONN_STATEMENT,
-                 gettext_noop("Sets the current transaction's isolation level."),
-                 NULL,
-                 GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-                &u_sess->attr.attr_storage.XactIsoLevel_string,
-                "default",
-                check_XactIsoLevel,
-                assign_XactIsoLevel,
-                show_XactIsoLevel},
-
-            {{"unix_socket_group",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SETTINGS,
-                 gettext_noop("Sets the owning group of the Unix-domain socket."),
-                 gettext_noop("The owning user of the socket is always the user "
-                              "that starts the server.")},
-                &g_instance.attr.attr_network.Unix_socket_group,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"unix_socket_directory",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SETTINGS,
-                 gettext_noop("Sets the directory where the Unix-domain socket will be created."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_network.UnixSocketDir,
-                "",
-                check_canonical_path,
-                NULL,
-                NULL},
-
-            {{"listen_addresses",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SETTINGS,
-                 gettext_noop("Sets the host name or IP address(es) to listen to."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &g_instance.attr.attr_network.ListenAddresses,
-                "localhost",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"local_bind_address",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SETTINGS,
-                 gettext_noop("Sets the host name or IP address(es) to connect to for sctp."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &g_instance.attr.attr_network.tcp_link_addr,
-                "0.0.0.0",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"data_directory",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Sets the server's data directory."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.data_directory,
-                NULL,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"config_file",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Sets the server's main configuration file."),
-                 NULL,
-                 GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.ConfigFileName,
-                NULL,
-                NULL,
-                NULL,
-                NULL},
-
-#ifdef ENABLE_MOT
-            {{"mot_config_file",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Sets mot main configuration file."),
-                 NULL,
-                 GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.MOTConfigFileName,
-                NULL,
-                NULL,
-                NULL,
-                NULL},
-#endif
-
-            {{"hba_file",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Sets the server's \"hba\" configuration file."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.HbaFileName,
-                NULL,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"ident_file",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Sets the server's \"ident\" configuration file."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.IdentFileName,
-                NULL,
-                NULL,
-                NULL,
-                NULL},
-
-            {{"external_pid_file",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Writes the postmaster PID to the specified file."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_common.external_pid_file,
-                NULL,
-                check_canonical_path,
-                NULL,
-                NULL},
-
-            {{"ssl_cert_file",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("Location of the SSL server certificate file."),
-                 NULL},
-                &g_instance.attr.attr_security.ssl_cert_file,
-                "server.crt",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"ssl_key_file",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("Location of the SSL server private key file."),
-                 NULL},
-                &g_instance.attr.attr_security.ssl_key_file,
-                "server.key",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"ssl_ca_file",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("Location of the SSL certificate authority file."),
-                 NULL},
-                &g_instance.attr.attr_security.ssl_ca_file,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"ssl_crl_file",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("Location of the SSL certificate revocation list file."),
-                 NULL},
-                &g_instance.attr.attr_security.ssl_crl_file,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-            {{"stats_temp_directory",
-                 PGC_SIGHUP,
-                 STATS_COLLECTOR,
-                 gettext_noop("Writes temporary statistics files to the specified directory."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &u_sess->attr.attr_common.pgstat_temp_directory,
-                "pg_stat_tmp",
-                check_canonical_path,
-                assign_pgstat_temp_directory,
-                NULL},
-
-            {{"synchronous_standby_names",
-                 PGC_SIGHUP,
-                 REPLICATION_MASTER,
-                 gettext_noop("List of names of potential synchronous standbys."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.SyncRepStandbyNames,
-                "*",
-                check_synchronous_standby_names,
-                assign_synchronous_standby_names,
-                NULL},
-
-            {{"default_text_search_config",
-                 PGC_USERSET,
-                 CLIENT_CONN_LOCALE,
-                 gettext_noop("Sets default text search configuration."),
-                 NULL},
-                &u_sess->attr.attr_common.TSCurrentConfig,
-                "pg_catalog.simple",
-                check_TSCurrentConfig,
-                assign_TSCurrentConfig,
-                NULL},
-
-#ifdef PGXC
-            {{"qrw_inlist2join_optmode",
-                 PGC_USERSET,
-                 QUERY_TUNING_METHOD,
-                 gettext_noop("Specify inlist2join opimitzation mode."),
-                 NULL},
-                &u_sess->attr.attr_sql.inlist2join_optmode,
-                "cost_base",
-                check_inlist2joininfo,
-                assign_inlist2joininfo,
-                NULL},
-
-
-            {{"behavior_compat_options",
-                 PGC_USERSET,
-                 COMPAT_OPTIONS,
-                 gettext_noop("compatibility options"),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_REPORT},
-                &u_sess->attr.attr_sql.behavior_compat_string,
-                "",
-                check_behavior_compat_options,
-                assign_behavior_compat_options,
-                NULL},
-
-            {{"pgxc_node_name",
-                 PGC_POSTMASTER,
-                 GTM,
-                 gettext_noop("The Coordinator or Datanode name."),
-                 NULL,
-                 GUC_NO_RESET_ALL | GUC_IS_NAME},
-                &g_instance.attr.attr_common.PGXCNodeName,
-                "",
-                NULL,
-                NULL,
-                NULL},
-
-#ifdef ENABLE_DISTRIBUTE_TEST
-            {{"distribute_test_param",
-                 PGC_USERSET,
-                 DEVELOPER_OPTIONS,
-                 gettext_noop("Sets the parameters of distributed test framework."),
-                 NULL,
-                 GUC_LIST_INPUT | GUC_REPORT | GUC_NO_SHOW_ALL},
-                &u_sess->attr.attr_common.test_param_str,
-                "-1, default, default",
-                check_distribute_test_param,
-                assign_distribute_test_param,
-                NULL},
-#endif
-#endif
-            {{"ssl_ciphers",
-                 PGC_POSTMASTER,
-                 CONN_AUTH_SECURITY,
-                 gettext_noop("Sets the list of allowed SSL ciphers."),
-                 NULL,
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_security.SSLCipherSuites,
-#ifdef USE_SSL
-                "ALL",
-#else
-                "none",
-#endif
-                check_ssl_ciphers,
-                NULL,
-                NULL},
-
-            {{"application_name",
-                 PGC_USERSET,
-                 LOGGING_WHAT,
-                 gettext_noop("Sets the application name to be reported in statistics and logs."),
-                 NULL,
-                 GUC_IS_NAME | GUC_REPORT | GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_common.application_name,
-                "",
-                check_application_name,
-                assign_application_name,
-                NULL},
-
-            {{"connection_info",
-                 PGC_USERSET,
-                 LOGGING_WHAT,
-                 gettext_noop("Sets the connection info to be reported in statistics and logs."),
-                 NULL,
-                 GUC_REPORT | GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_sql.connection_info,
-                "",
-                NULL,
-                assign_connection_info,
-                NULL},
-
-            {{"cgroup_name",
-                 PGC_USERSET,
-                 RESOURCES_WORKLOAD,
-                 gettext_noop("Sets the cgroup name to control the queries resource."),
-                 NULL,
-                 GUC_IS_NAME | GUC_REPORT | GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_resource.cgroup_name,
-                "",
-                check_cgroup_name,
-                assign_cgroup_name,
-                show_cgroup_name},
-
-            {{"query_band",
-                 PGC_USERSET,
-                 RESOURCES_WORKLOAD,
-                 gettext_noop("Sets query band."),
-                 NULL,
-                 GUC_REPORT | GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_resource.query_band,
-                "",
-                check_query_band_name,
-                NULL,
-                NULL},
-
-            {{"session_respool",
-                 PGC_USERSET,
-                 RESOURCES_WORKLOAD,
-                 gettext_noop("Sets the session resource pool to control the queries resource."),
-                 NULL,
-                 GUC_IS_NAME | GUC_REPORT | GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_resource.session_resource_pool,
-                "invalid_pool",
-                check_session_respool,
-                assign_session_respool,
-                show_session_respool},
-
-            {{"memory_detail_tracking",
-                 PGC_USERSET,
-                 RESOURCES_MEM,
-                 gettext_noop("Sets the operator name and peak size for triggering the memory logging in that time."),
-                 NULL,
-                 GUC_IS_NAME | GUC_REPORT | GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_memory.memory_detail_tracking,
-                "",
-                check_memory_detail_tracking,
-                assign_memory_detail_tracking,
-                show_memory_detail_tracking},
-
-            /* Database Security: Support database audit */
-            {{"audit_directory",
-                 PGC_POSTMASTER,
-                 AUDIT_OPTIONS,
-                 gettext_noop("Sets the destination directory for audit files."),
-                 gettext_noop("Can be specified as relative to the data directory "
-                              "or as absolute path."),
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_security.Audit_directory,
-                "pg_audit",
-                check_directory,
-                NULL,
-                NULL},
-            {{"audit_data_format",
-                 PGC_POSTMASTER,
-                 AUDIT_OPTIONS,
-                 gettext_noop("Sets the data format for audit files."),
-                 gettext_noop("Currently can be specified as binary only."),
-                 GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_security.Audit_data_format,
-                "binary",
-                NULL,
-                NULL,
-                NULL},
-	
-#ifndef ENABLE_MULTIPLE_NODES			
-            /* availablezone of current instance, currently, it is only used in cascade standby */	
-            {{
-                "available_zone",
-                PGC_POSTMASTER,
-                AUDIT_OPTIONS,
-                gettext_noop("Sets the available zone of current instance."),
-                gettext_noop("The available zone is only used in cascade standby scenes"),
-                GUC_SUPERUSER_ONLY | GUC_IS_NAME},
-               &g_instance.attr.attr_storage.available_zone,
-               "",
-               NULL,
-               NULL,
-               NULL},
-#endif
-		
-            /* Get the ReplConnInfo1 from postgresql.conf and assign to ReplConnArray1. */
-            {{"replconninfo1",
-                 PGC_SIGHUP,
-                 REPLICATION_SENDING,
-                 gettext_noop("Sets the replconninfo1 of the HA to listen and authenticate."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.ReplConnInfoArr[1],
-                "",
-                check_replconninfo,
-                assign_replconninfo1,
-                NULL},
-
-            /* Get the ReplConnInfo2 from postgresql.conf and assign to ReplConnArray2. */
-            {{"replconninfo2",
-                 PGC_SIGHUP,
-                 REPLICATION_SENDING,
-                 gettext_noop("Sets the replconninfo2 of the HA to listen and authenticate."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.ReplConnInfoArr[2],
-                "",
-                check_replconninfo,
-                assign_replconninfo2,
-                NULL},
-            /* Get the ReplConnInfo3 from postgresql.conf and assign to ReplConnArray3. */
-            {{"replconninfo3",
-                 PGC_SIGHUP,
-                 REPLICATION_SENDING,
-                 gettext_noop("Sets the replconninfo3 of the HA to listen and authenticate."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.ReplConnInfoArr[3],
-                "",
-                check_replconninfo,
-                assign_replconninfo3,
-                NULL},
-            /* Get the ReplConnInfo4 from postgresql.conf and assign to ReplConnArray4. */
-            {{"replconninfo4",
-                 PGC_SIGHUP,
-                 REPLICATION_SENDING,
-                 gettext_noop("Sets the replconninfo4 of the HA to listen and authenticate."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.ReplConnInfoArr[4],
-                "",
-                check_replconninfo,
-                assign_replconninfo4,
-                NULL},
-            /* Get the ReplConnInfo5 from postgresql.conf and assign to ReplConnArray5. */
-            {{"replconninfo5",
-                 PGC_SIGHUP,
-                 REPLICATION_SENDING,
-                 gettext_noop("Sets the replconninfo5 of the HA to listen and authenticate."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.ReplConnInfoArr[5],
-                "",
-                check_replconninfo,
-                assign_replconninfo5,
-                NULL},
-            /* Get the ReplConnInfo6 from postgresql.conf and assign to ReplConnArray6. */
-            {{"replconninfo6",
-                 PGC_SIGHUP,
-                 REPLICATION_SENDING,
-                 gettext_noop("Sets the replconninfo6 of the HA to listen and authenticate."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.ReplConnInfoArr[6],
-                "",
-                check_replconninfo,
-                assign_replconninfo6,
-                NULL},
-            /* Get the ReplConnInfo7 from postgresql.conf and assign to ReplConnArray7. */
-            {{"replconninfo7",
-                 PGC_SIGHUP,
-                 REPLICATION_SENDING,
-                 gettext_noop("Sets the replconninfo7 of the HA to listen and authenticate."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.ReplConnInfoArr[7],
-                "",
-                check_replconninfo,
-                assign_replconninfo7,
-                NULL},
-#ifndef ENABLE_MULTIPLE_NODES
-             /* Get the ReplConnInfo8 from postgresql.conf and assign to ReplConnArray8. */
-            {{
-                "replconninfo8",
-                PGC_SIGHUP,
-                REPLICATION_SENDING,
-                gettext_noop("Sets the replconninfo8 of the HA to listen and authenticate."),
-                NULL,
-                GUC_LIST_INPUT},
-            &u_sess->attr.attr_storage.ReplConnInfoArr[8],
+    struct config_string localConfigureNamesString[] = {
+        {{"client_encoding",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the client's character set encoding."),
+            NULL,
+            GUC_IS_NAME | GUC_REPORT},
+            &u_sess->attr.attr_common.client_encoding_string,
+            "SQL_ASCII",
+            check_client_encoding,
+            assign_client_encoding,
+            NULL},
+        {{"log_line_prefix",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Controls information prefixed to each log line."),
+            gettext_noop("If blank, no prefix is used.")},
+            &u_sess->attr.attr_common.Log_line_prefix,
             "",
-            check_replconninfo,
-            assign_replconninfo8,
+            NULL,
+            NULL,
+            NULL},
+        {{"log_timezone",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Sets the time zone to use in log messages."),
+            NULL},
+            &u_sess->attr.attr_common.log_timezone_string,
+            "GMT",
+            check_log_timezone,
+            assign_log_timezone,
+            show_log_timezone},
+
+        {{"DateStyle",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the display format for date and time values."),
+            gettext_noop("Also controls interpretation of ambiguous "
+                        "date inputs."),
+            GUC_LIST_INPUT | GUC_REPORT},
+            &u_sess->attr.attr_common.datestyle_string,
+            "ISO, MDY",
+            check_datestyle,
+            assign_datestyle,
+            NULL},
+        {{"dynamic_library_path",
+            PGC_SUSET,
+            NODE_ALL,
+            CLIENT_CONN_OTHER,
+            gettext_noop("Sets the path for dynamically loadable modules."),
+            gettext_noop("If a dynamically loadable module needs to be opened and "
+                        "the specified name does not have a directory component (i.e., the "
+                        "name does not contain a slash), the system will search this path for "
+                        "the specified file."),
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.Dynamic_library_path,
+            "$libdir",
+            NULL,
+            NULL,
+            NULL},
+#ifdef USE_BONJOUR
+        {{"bonjour_name",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CONN_AUTH_SETTINGS,
+            gettext_noop("Sets the Bonjour service name."),
+            NULL},
+            &g_instance.attr.attr_common.bonjour_name,
+            "",
+            NULL,
+            NULL,
             NULL},
 #endif
-            {{"primary_slotname",
-                 PGC_SIGHUP,
-                 REPLICATION_STANDBY,
-                 gettext_noop("Set the primary slot name."),
-                 NULL,
-                 GUC_NO_RESET_ALL | GUC_IS_NAME},
-                &u_sess->attr.attr_storage.PrimarySlotName,
-                NULL,
-                NULL,
-                NULL,
-                NULL},
-            /* control for logging backend modules */
-            {{"logging_module",
-                 PGC_USERSET,
-                 LOGGING_WHAT,
-                 gettext_noop("enable/disable module logging."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_storage.logging_module,
-                "off(ALL)",
-                logging_module_check,
-                logging_module_guc_assign,
-                logging_module_guc_show},
+        /* See main.c about why defaults for LC_foo are not all alike */
+        {{"lc_collate",
+            PGC_INTERNAL,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Shows the collation order locale."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            &u_sess->attr.attr_common.locale_collate,
+            "C",
+            NULL,
+            NULL,
+            NULL},
 
-            {{"inplace_upgrade_next_system_object_oids",
-                 PGC_SUSET,
-                 UPGRADE_OPTIONS,
-                 gettext_noop("Sets oids for the system object to be added next during inplace upgrade."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_SUPERUSER_ONLY | GUC_LIST_INPUT},
-                &u_sess->attr.attr_storage.Inplace_upgrade_next_system_object_oids,
-                NULL,
-                check_inplace_upgrade_next_oids,
-                NULL,
-                NULL},
+        {{"lc_ctype",
+            PGC_INTERNAL,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Shows the character classification and case conversion locale."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            &u_sess->attr.attr_common.locale_ctype,
+            "C",
+            NULL,
+            NULL,
+            NULL},
 
-           {{"num_internal_lock_partitions",
-                PGC_POSTMASTER,
-                LOCK_MANAGEMENT,
-                gettext_noop("num of csnlog clog and locktable lwlock partitions."),
-                NULL,
-                GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
-                &g_instance.attr.attr_storage.num_internal_lock_partitions_str,
-                "CLOG_PART=256,CSNLOG_PART=512,LOG2_LOCKTABLE_PART=4,TWOPHASE_PART=1",
-                NULL,
-                NULL,
-                NULL}, 
+        {{"lc_messages",
+            PGC_SUSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the language in which messages are displayed."),
+            NULL},
+            &u_sess->attr.attr_common.locale_messages,
+            "",
+            check_locale_messages,
+            assign_locale_messages,
+            NULL},
 
-            /* analysis options for dfx */
-            {{"analysis_options",
-                 PGC_USERSET,
-                 CLIENT_CONN_STATEMENT,
-                 gettext_noop("enable/disable sql dfx option."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_common.analysis_options,
-                "off(ALL)",
-                analysis_options_check,
-                analysis_options_guc_assign,
-                analysis_options_guc_show},
-            /* End-of-list marker */
-            {{"transparent_encrypted_string",
-                 PGC_POSTMASTER,
-                 UNGROUPED,
-                 gettext_noop("The encrypted string to test the transparent encryption key."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE | GUC_NO_RESET_ALL},
-                &g_instance.attr.attr_security.transparent_encrypted_string,
-                NULL,
-                NULL,
-                NULL,
-                NULL},
+        {{"lc_monetary",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the locale for formatting monetary amounts."),
+            NULL},
+            &u_sess->attr.attr_common.locale_monetary,
+            "C",
+            check_locale_monetary,
+            assign_locale_monetary,
+            NULL},
 
-            {{"transparent_encrypt_kms_url",
-                 PGC_POSTMASTER,
-                 UNGROUPED,
-                 gettext_noop("The URL to get transparent encryption key."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE | GUC_NO_RESET_ALL},
-                &g_instance.attr.attr_common.transparent_encrypt_kms_url,
-                "",
-                transparent_encrypt_kms_url_region_check,
-                NULL,
-                NULL},
+        {{"lc_numeric",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the locale for formatting numbers."),
+            NULL},
+            &u_sess->attr.attr_common.locale_numeric,
+            "C",
+            check_locale_numeric,
+            assign_locale_numeric,
+            NULL},
 
-            {{"transparent_encrypt_kms_region",
-                 PGC_POSTMASTER,
-                 UNGROUPED,
-                 gettext_noop("The region to get transparent encryption key."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE | GUC_NO_RESET_ALL},
-                &g_instance.attr.attr_security.transparent_encrypt_kms_region,
-                "",
-                transparent_encrypt_kms_url_region_check,
-                NULL,
-                NULL},
+        {{"lc_time",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the locale for formatting date and time values."),
+            NULL},
+            &u_sess->attr.attr_common.locale_time,
+            "C",
+            check_locale_time,
+            assign_locale_time,
+            NULL},
 
-            /* uncontrolled_memory_context is a white list of MemoryContext allocation. */
-            {{"uncontrolled_memory_context",
-                 PGC_USERSET,
-                 RESOURCES_MEM,
-                 gettext_noop("Sets the white list of MemoryContext allocation."),
-                 NULL},
-                &u_sess->attr.attr_memory.uncontrolled_memory_context,
-                "",
-                check_uncontrolled_memory_context,
-                assign_uncontrolled_memory_context,
-                show_uncontrolled_memory_context},
-            {{"retry_ecode_list",
-                 PGC_USERSET,
-                 COORDINATORS,
-                 gettext_noop("Set error code list for CN Retry."),
-                 NULL,
-                 GUC_NOT_IN_SAMPLE},
-                &u_sess->attr.attr_sql.retry_errcode_list,
-                "YY001 YY002 YY003 YY004 YY005 YY006 YY007 YY008 YY009 YY010 YY011 YY012 YY013 YY014 YY015 53200 08006 "
-                "08000 57P01 XX003 XX009 YY016",
-                check_errcode_list,
-                NULL,
-                NULL},
+        {{"shared_preload_libraries",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_KERNEL,
+            gettext_noop("Lists shared libraries to preload into server."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.shared_preload_libraries_string,
+            "security_plugin",
+            NULL,
+            NULL,
+            NULL},
 
-            {{"numa_distribute_mode",
-                 PGC_POSTMASTER,
-                 RESOURCES,
-                 gettext_noop("Sets the NUMA node distribution mode."),
-                 NULL},
-                &g_instance.attr.attr_common.numa_distribute_mode,
-                "none",
-                check_numa_distribute_mode,
-                NULL,
-                NULL},
+        {{"thread_pool_attr",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("Spare Cpu that can not be used in thread pool."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.thread_pool_attr,
+            "16, 2, (nobind)",
+            NULL,
+            NULL,
+            NULL},
 
-            {{"bbox_blanklist_items",
-                 PGC_POSTMASTER,
-                 RESOURCES_WORKLOAD,
-                 gettext_noop("List of names of bbox blanklist items."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &g_instance.attr.attr_common.bbox_blacklist_items,
-                "",
-                check_bbox_blacklist,
-                assign_bbox_blacklist,
-                show_bbox_blacklist},
+        {{"comm_proxy_attr",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            CLIENT_CONN,
+            gettext_noop("Sets comm_proxy attribute in comm_proxy mode."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.comm_proxy_attr,
+            "none",
+            NULL,
+            NULL,
+            NULL},
 
-            {{"track_stmt_stat_level",
-                 PGC_USERSET,
-                 INSTRUMENTS_OPTIONS,
-                 gettext_noop("specify which level statement's statistics to be gathered."),
-                 NULL,
-                 GUC_LIST_INPUT},
-                &u_sess->attr.attr_common.track_stmt_stat_level,
-                "OFF,L0",
-                check_statement_stat_level,
-                assign_statement_stat_level,
-                NULL},
+        {{"track_stmt_retention_time",
+            PGC_SIGHUP,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("The longest retention time of full SQL and slow query in statement_ history"),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE | GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.track_stmt_retention_time,
+            "3600,604800",
+            check_statement_retention_time,
+            assign_statement_retention_time,
+            NULL},
 
-            {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, NULL, NULL, NULL, NULL}};
+        {{"router",
+            PGC_USERSET,
+            NODE_DISTRIBUTE,
+            CLIENT_CONN,
+            gettext_noop("set send node router for sql before unrouter."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_common.router_att,
+            "",
+            check_router_attr,
+            assign_router_attr,
+            NULL},
+
+        {{"local_preload_libraries",
+            PGC_BACKEND,
+            NODE_ALL,
+            CLIENT_CONN_OTHER,
+            gettext_noop("Lists shared libraries to preload into each backend."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE},
+            &u_sess->attr.attr_common.local_preload_libraries_string,
+            "",
+            NULL,
+            NULL,
+            NULL},
+        /* Can't be set in postgresql.conf */
+        {{"current_logic_cluster",
+            PGC_INTERNAL,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Shows current logic cluster."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            &u_sess->attr.attr_common.current_logic_cluster_name,
+            NULL,
+            NULL,
+            NULL,
+            show_lcgroup_name},
+        {{"search_path",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the schema search order for names that are not schema-qualified."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE},
+            &u_sess->attr.attr_common.namespace_search_path,
+            "\"$user\",public",
+            check_search_path,
+            assign_search_path,
+            NULL},
+
+        {{"percentile",
+            PGC_INTERNAL,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Sets the percentile of sql responstime that DBA want to know."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE},
+            &u_sess->attr.attr_common.percentile_values,
+            "80,95",
+            check_percentile,
+            NULL,
+            NULL},
+        {{"nls_timestamp_format",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("defines the default timestamp format to use with the TO_TIMESTAMP functions."),
+            NULL,
+            },
+            &u_sess->attr.attr_common.nls_timestamp_format_string,
+            "DD-Mon-YYYY HH:MI:SS.FF AM",
+            NULL,
+            NULL,
+            NULL},
+
+        {{"current_schema",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the schema search order for names that are not schema-qualified."),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE},
+            &u_sess->attr.attr_common.namespace_current_schema,
+            "\"$user\",public",
+            check_search_path,
+            assign_search_path,
+            NULL},
+        /* Can't be set in postgresql.conf */
+        {{"server_encoding",
+            PGC_INTERNAL,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the server (database) character set encoding."),
+            NULL,
+            GUC_IS_NAME | GUC_REPORT | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            &u_sess->attr.attr_common.server_encoding_string,
+            "SQL_ASCII",
+            NULL,
+            NULL,
+            NULL},
+        /* Can't be set in postgresql.conf */
+        {{"server_version",
+            PGC_INTERNAL,
+            NODE_ALL,
+            PRESET_OPTIONS,
+            gettext_noop("Shows the server version."),
+            NULL,
+            GUC_REPORT | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            &u_sess->attr.attr_common.server_version_string,
+            PG_VERSION,
+            NULL,
+            NULL,
+            NULL},
+        /* Not for general use --- used by SET ROLE */
+        {{"role",
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Sets the current role."),
+            NULL,
+            GUC_IS_NAME | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE |
+                GUC_NOT_WHILE_SEC_REST},
+            &u_sess->attr.attr_common.role_string,
+            "none",
+            check_role,
+            assign_role,
+            show_role},
+        /* Not for general use --- used by SET SESSION AUTHORIZATION */
+        {{"session_authorization",
+            PGC_USERSET,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Sets the session user name."),
+            NULL,
+            GUC_IS_NAME | GUC_REPORT | GUC_NO_SHOW_ALL | GUC_NO_RESET_ALL | GUC_NOT_IN_SAMPLE |
+                GUC_DISALLOW_IN_FILE | GUC_NOT_WHILE_SEC_REST},
+            &u_sess->attr.attr_common.session_authorization_string,
+            NULL,
+            check_session_authorization,
+            assign_session_authorization,
+            NULL},
+
+        {{"log_destination",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the destination for server log output."),
+            gettext_noop("Valid values are combinations of \"stderr\", "
+                        "\"syslog\", \"csvlog\", and \"eventlog\", "
+                        "depending on the platform."),
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_common.log_destination_string,
+            "stderr",
+            check_log_destination,
+            assign_log_destination,
+            NULL},
+        {{"log_directory",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the destination directory for log files."),
+            gettext_noop("Can be specified as relative to the data directory "
+                        "or as absolute path."),
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.Log_directory,
+            "pg_log",
+            check_directory,
+            NULL,
+            NULL},
+        {{"asp_log_directory",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the destination directory for asp log files."),
+            gettext_noop("Can be specified as relative to the data directory "
+                        "or as absolute path."),
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.asp_log_directory,
+            NULL,
+            check_directory,
+            NULL,
+            NULL},
+        {{"query_log_directory",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the destination directory for slow query log files."),
+            gettext_noop("Can be specified as relative to the data directory "
+                        "or as absolute path."),
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.query_log_directory,
+            NULL,
+            check_directory,
+            NULL,
+            NULL},
+        {{"perf_directory",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the destination directory for perf json files."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.Perf_directory,
+            NULL,
+            check_directory,
+            NULL,
+            NULL},
+        {{"explain_dna_file",
+            PGC_USERSET,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the destination file for explain performance data."),
+            gettext_noop("Must be specified as an absolute directory + .csv filename."),
+            GUC_NOT_IN_SAMPLE},
+            &u_sess->attr.attr_common.Perf_log,
+            NULL,
+            check_perf_log,
+            NULL,
+            NULL},
+        {{"log_filename",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the file name pattern for log files."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.Log_filename,
+            "postgresql-%Y-%m-%d_%H%M%S.log",
+            check_log_filename,
+            NULL,
+            NULL},
+        {{"query_log_file",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the file name pattern for slow query log files."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.query_log_file,
+            "slow_query_log-%Y-%m-%d_%H%M%S.log",
+            NULL,
+            NULL,
+            NULL},
+
+        {{"asp_flush_mode",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the active session profile flush mode:file/table/all."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.asp_flush_mode,
+            "table",
+            check_asp_flush_mode,
+            NULL,
+            NULL},
+
+        {{"asp_log_filename",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the file name pattern for asp data files."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.asp_log_filename,
+            "asp-%Y-%m-%d_%H%M%S.log",
+            NULL,
+            NULL,
+            NULL},
+
+        {{"bbox_dump_path",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the path of core dump created by bbox_handler."),
+            NULL},
+            &u_sess->attr.attr_common.bbox_dump_path,
+            "",
+            check_bbox_corepath,
+            assign_bbox_corepath,
+            show_bbox_dump_path},
+
+        {{"alarm_component",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("Sets the component for alarm function."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.Alarm_component,
+            "/opt/snas/bin/snas_cm_cmd",
+            NULL,
+            NULL,
+            NULL},
+
+        {{"syslog_ident",
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the program name used to identify openGauss "
+                        "messages in syslog."),
+            NULL},
+            &u_sess->attr.attr_common.syslog_ident_str,
+            "postgres",
+            NULL,
+            assign_syslog_ident,
+            NULL},
+
+        {{"event_source",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the application name used to identify "
+                        "openGauss messages in the event log."),
+            NULL},
+            &g_instance.attr.attr_common.event_source,
+            "PostgreSQL",
+            NULL,
+            NULL,
+            NULL},
+
+        {{"TimeZone",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the time zone for displaying and interpreting time stamps."),
+            NULL,
+            GUC_REPORT},
+            &u_sess->attr.attr_common.timezone_string,
+            "GMT",
+            check_timezone,
+            assign_timezone,
+            show_timezone},
+        {{"timezone_abbreviations",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Selects a file of time zone abbreviations."),
+            NULL},
+            &u_sess->attr.attr_common.timezone_abbreviations_string,
+            NULL,
+            check_timezone_abbreviations,
+            assign_timezone_abbreviations,
+            NULL},
+        {{"data_directory",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            FILE_LOCATIONS,
+            gettext_noop("Sets the server's data directory."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.data_directory,
+            NULL,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"config_file",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            FILE_LOCATIONS,
+            gettext_noop("Sets the server's main configuration file."),
+            NULL,
+            GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.ConfigFileName,
+            NULL,
+            NULL,
+            NULL,
+            NULL},
+
+#ifdef ENABLE_MOT
+        {{"mot_config_file",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            FILE_LOCATIONS,
+            gettext_noop("Sets mot main configuration file."),
+            NULL,
+            GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.MOTConfigFileName,
+            NULL,
+            NULL,
+            NULL,
+            NULL},
+#endif
+
+        {{"hba_file",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            FILE_LOCATIONS,
+            gettext_noop("Sets the server's \"hba\" configuration file."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.HbaFileName,
+            NULL,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"ident_file",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            FILE_LOCATIONS,
+            gettext_noop("Sets the server's \"ident\" configuration file."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.IdentFileName,
+            NULL,
+            NULL,
+            NULL,
+            NULL},
+
+        {{"external_pid_file",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            FILE_LOCATIONS,
+            gettext_noop("Writes the postmaster PID to the specified file."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_common.external_pid_file,
+            NULL,
+            check_canonical_path,
+            NULL,
+            NULL},
+        {{"stats_temp_directory",
+            PGC_SIGHUP,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Writes temporary statistics files to the specified directory."),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.pgstat_temp_directory,
+            "pg_stat_tmp",
+            check_canonical_path,
+            assign_pgstat_temp_directory,
+            NULL},
+        {{"default_text_search_config",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets default text search configuration."),
+            NULL},
+            &u_sess->attr.attr_common.TSCurrentConfig,
+            "pg_catalog.simple",
+            check_TSCurrentConfig,
+            assign_TSCurrentConfig,
+            NULL},
+        {{"pgxc_node_name",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            GTM,
+            gettext_noop("The Coordinator or Datanode name."),
+            NULL,
+            GUC_NO_RESET_ALL | GUC_IS_NAME},
+            &g_instance.attr.attr_common.PGXCNodeName,
+            "",
+            NULL,
+            NULL,
+            NULL},
+#ifdef ENABLE_DISTRIBUTE_TEST
+        {{"distribute_test_param",
+            PGC_USERSET,
+            NODE_DISTRIBUTE,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Sets the parameters of distributed test framework."),
+            NULL,
+            GUC_LIST_INPUT | GUC_REPORT | GUC_NO_SHOW_ALL},
+            &u_sess->attr.attr_common.test_param_str,
+            "-1, default, default",
+            check_distribute_test_param,
+            assign_distribute_test_param,
+            NULL},
+#endif
+#ifdef ENABLE_SEGMENT_TEST
+        {{"segment_test_param",
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Sets the parameters of segment test framework."),
+            NULL,
+            GUC_LIST_INPUT | GUC_REPORT | GUC_NO_SHOW_ALL},
+            &u_sess->attr.attr_common.seg_test_param_str,
+            "-1, default, default",
+            check_segment_test_param,
+            assign_segment_test_param,
+            NULL},
+#endif
+        {{"application_name",
+            PGC_USERSET,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Sets the application name to be reported in statistics and logs."),
+            NULL,
+            GUC_IS_NAME | GUC_REPORT | GUC_NOT_IN_SAMPLE},
+            &u_sess->attr.attr_common.application_name,
+            "",
+            check_application_name,
+            assign_application_name,
+            NULL},
+        /* analysis options for dfx */
+        {{"analysis_options",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("enable/disable sql dfx option."),
+            NULL,
+            GUC_NOT_IN_SAMPLE},
+            &u_sess->attr.attr_common.analysis_options,
+            "off(ALL)",
+            analysis_options_check,
+            analysis_options_guc_assign,
+            analysis_options_guc_show},
+        {{"transparent_encrypt_kms_url",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            UNGROUPED,
+            gettext_noop("The URL to get transparent encryption key."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_NO_RESET_ALL},
+            &g_instance.attr.attr_common.transparent_encrypt_kms_url,
+            "",
+            transparent_encrypt_kms_url_region_check,
+            NULL,
+            NULL},
+        {{"numa_distribute_mode",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES,
+            gettext_noop("Sets the NUMA node distribution mode."),
+            NULL},
+            &g_instance.attr.attr_common.numa_distribute_mode,
+            "none",
+            check_numa_distribute_mode,
+            NULL,
+            NULL},
+
+        {{"bbox_blanklist_items",
+            PGC_POSTMASTER,
+            NODE_ALL,
+            RESOURCES_WORKLOAD,
+            gettext_noop("List of names of bbox blanklist items."),
+            NULL,
+            GUC_LIST_INPUT},
+            &g_instance.attr.attr_common.bbox_blacklist_items,
+            "",
+            check_bbox_blacklist,
+            assign_bbox_blacklist,
+            show_bbox_blacklist},
+
+        {{"track_stmt_stat_level",
+            PGC_USERSET,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("specify which level statement's statistics to be gathered."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_common.track_stmt_stat_level,
+            "OFF,L0",
+            check_statement_stat_level,
+            assign_statement_stat_level,
+            NULL},
+#ifdef ENABLE_MULTIPLE_NODES
+        /* Can't be set in postgresql.conf */
+        {{"node_group_mode",
+            PGC_INTERNAL,
+            NODE_DISTRIBUTE,
+            UNGROUPED,
+            gettext_noop("Shows node group mode."),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
+            &u_sess->attr.attr_common.node_group_mode,
+            "node group",
+            NULL,
+            NULL,
+            show_nodegroup_mode},
+        {{"gtm_host",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[0],
+            "localhost",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo0,
+            NULL},
+        {{"gtm_host1",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[1],
+            "localhost",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo1,
+            NULL},
+
+        {{"gtm_host2",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[2],
+            "",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo2,
+            NULL},
+
+        {{"gtm_host3",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[3],
+            "",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo3,
+            NULL},
+
+        {{"gtm_host4",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[4],
+            "",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo4,
+            NULL},
+
+        {{"gtm_host5",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[5],
+            "",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo5,
+            NULL},
+        {{"gtm_host6",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[6],
+            "",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo6,
+            NULL},
+
+        {{"gtm_host7",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            GTM,
+            gettext_noop("Host name or address of GTM"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &u_sess->attr.attr_common.GtmHostInfoStringArray[7],
+            "",
+            check_gtmhostconninfo,
+            assign_gtmhostconninfo7,
+            NULL},
+        {{"ts_compaction_strategy",
+            PGC_SIGHUP,
+            NODE_DISTRIBUTE,
+            TSDB,
+            gettext_noop("TSDB producer's Strategy for sending task"),
+            NULL,
+            GUC_LIST_INPUT | GUC_LIST_QUOTE},
+            &u_sess->attr.attr_common.ts_compaction_strategy,
+            "3,6,6,12,0", 
+            check_compaciton_strategy,
+            NULL},
+#endif
+        {{NULL,
+            (GucContext)0,
+            (GucNodeType)0,
+            (config_group)0,
+            NULL,
+            NULL},
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL}
+    };
 
     Size bytes = sizeof(localConfigureNamesString);
-    u_sess->utils_cxt.ConfigureNamesString[SINGLE_GUC] =
+    u_sess->utils_cxt.ConfigureNamesString[GUC_ATTR_COMMON] =
         (struct config_string*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
-    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesString[SINGLE_GUC], bytes, localConfigureNamesString, bytes);
+    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesString[GUC_ATTR_COMMON], bytes,
+        localConfigureNamesString, bytes);
     securec_check_ss(rc, "\0", "\0");
 }
 
@@ -8739,6 +3726,7 @@ static void InitConfigureNamesEnum()
 #ifndef ENABLE_MULTIPLE_NODES
         {{"sync_config_strategy",
             PGC_POSTMASTER,
+            NODE_SINGLENODE,
             WAL_SETTINGS,
             gettext_noop("Synchronization strategy for configuration files between host and standby."),
             NULL},
@@ -8748,21 +3736,13 @@ static void InitConfigureNamesEnum()
             NULL,
             NULL,
             NULL},
-
 #endif
-        {{"backslash_quote",
-             PGC_USERSET,
-             COMPAT_OPTIONS_PREVIOUS,
-             gettext_noop("Sets whether \"\\'\" is allowed in string literals."),
-             NULL},
-            &u_sess->attr.attr_sql.backslash_quote,
-            BACKSLASH_QUOTE_SAFE_ENCODING,
-            backslash_quote_options,
-            NULL,
-            NULL,
+        {{"bytea_output",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the output format for bytea."),
             NULL},
-
-        {{"bytea_output", PGC_USERSET, CLIENT_CONN_STATEMENT, gettext_noop("Sets the output format for bytea."), NULL},
             &u_sess->attr.attr_common.bytea_output,
             BYTEA_OUTPUT_HEX,
             bytea_output_options,
@@ -8771,36 +3751,24 @@ static void InitConfigureNamesEnum()
             NULL},
 
         {{"client_min_messages",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the message levels that are sent to the client."),
-             gettext_noop("Each level includes all the levels that follow it. The later"
-                          " the level, the fewer messages are sent.")},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the message levels that are sent to the client."),
+            gettext_noop("Each level includes all the levels that follow it. The later"
+                         " the level, the fewer messages are sent.")},
             &u_sess->attr.attr_common.client_min_messages,
             NOTICE,
             client_message_level_options,
             check_client_min_messages,
             NULL,
             NULL},
-
-        {{"constraint_exclusion",
-             PGC_USERSET,
-             QUERY_TUNING_OTHER,
-             gettext_noop("Enables the planner to use constraints to optimize queries."),
-             gettext_noop("Table scans will be skipped if their constraints"
-                          " guarantee that no rows match the query.")},
-            &u_sess->attr.attr_sql.constraint_exclusion,
-            CONSTRAINT_EXCLUSION_PARTITION,
-            constraint_exclusion_options,
-            NULL,
-            NULL,
-            NULL},
-
         {{"default_transaction_isolation",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the transaction isolation level of each new transaction."),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the transaction isolation level of each new transaction."),
+            NULL},
             &u_sess->attr.attr_common.DefaultXactIsoLevel,
             XACT_READ_COMMITTED,
             isolation_level_options,
@@ -8809,19 +3777,24 @@ static void InitConfigureNamesEnum()
             NULL},
 
         {{"IntervalStyle",
-             PGC_USERSET,
-             CLIENT_CONN_LOCALE,
-             gettext_noop("Sets the display format for interval values."),
-             NULL,
-             GUC_REPORT},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_LOCALE,
+            gettext_noop("Sets the display format for interval values."),
+            NULL,
+            GUC_REPORT},
             &u_sess->attr.attr_common.IntervalStyle,
             INTSTYLE_POSTGRES,
             intervalstyle_options,
             NULL,
             NULL,
             NULL},
-
-        {{"log_error_verbosity", PGC_SUSET, LOGGING_WHAT, gettext_noop("Sets the verbosity of logged messages."), NULL},
+        {{"log_error_verbosity",
+            PGC_SUSET,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Sets the verbosity of logged messages."),
+            NULL},
             &u_sess->attr.attr_common.Log_error_verbosity,
             PGERROR_DEFAULT,
             log_error_verbosity_options,
@@ -8830,11 +3803,12 @@ static void InitConfigureNamesEnum()
             NULL},
 
         {{"log_min_messages",
-             PGC_SUSET,
-             LOGGING_WHEN,
-             gettext_noop("Sets the message levels that are logged."),
-             gettext_noop("Each level includes all the levels that follow it. The later"
-                          " the level, the fewer messages are sent.")},
+            PGC_SUSET,
+            NODE_ALL,
+            LOGGING_WHEN,
+            gettext_noop("Sets the message levels that are logged."),
+            gettext_noop("Each level includes all the levels that follow it. The later"
+                         " the level, the fewer messages are sent.")},
             &u_sess->attr.attr_common.log_min_messages,
             WARNING,
             server_message_level_options,
@@ -8843,65 +3817,54 @@ static void InitConfigureNamesEnum()
             NULL},
 
         {{"backtrace_min_messages",
-             PGC_SUSET,
-             LOGGING_WHEN,
-             gettext_noop("Sets the message levels for print backtrace that are logged."),
-             gettext_noop("Each level includes all the levels that follow it. The later"
-                          " the level, the fewer messages are sent.")},
+            PGC_SUSET,
+            NODE_ALL,
+            LOGGING_WHEN,
+            gettext_noop("Sets the message levels for print backtrace that are logged."),
+            gettext_noop("Each level includes all the levels that follow it. The later"
+                         " the level, the fewer messages are sent.")},
             &u_sess->attr.attr_common.backtrace_min_messages,
+#ifdef USE_ASSERT_CHECKING
+            ERROR,
+#else
             PANIC,
+#endif
             server_message_level_options,
             NULL,
             NULL,
             NULL},
 
         {{"log_min_error_statement",
-             PGC_SUSET,
-             LOGGING_WHEN,
-             gettext_noop("Causes all statements generating error at or above this level to be logged."),
-             gettext_noop("Each level includes all the levels that follow it. The later"
-                          " the level, the fewer messages are sent.")},
+            PGC_SUSET,
+            NODE_ALL,
+            LOGGING_WHEN,
+            gettext_noop("Causes all statements generating error at or above this level to be logged."),
+            gettext_noop("Each level includes all the levels that follow it. The later"
+                         " the level, the fewer messages are sent.")},
             &u_sess->attr.attr_common.log_min_error_statement,
             ERROR,
             server_message_level_options,
             NULL,
             NULL,
             NULL},
-
-        {{"log_statement", PGC_SUSET, LOGGING_WHAT, gettext_noop("Sets the type of statements logged."), NULL},
+        {{"log_statement",
+            PGC_SUSET,
+            NODE_ALL,
+            LOGGING_WHAT,
+            gettext_noop("Sets the type of statements logged."),
+            NULL},
             &u_sess->attr.attr_common.log_statement,
             LOGSTMT_NONE,
             log_statement_options,
             NULL,
             NULL,
             NULL},
-
-        {{"rewrite_rule", PGC_USERSET, QUERY_TUNING, gettext_noop("Sets the rewrite rule."), NULL, GUC_LIST_INPUT},
-            &u_sess->attr.attr_sql.rewrite_rule,
-            MAGIC_SET,
-            rewrite_options,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"resource_track_log",
-             PGC_USERSET,
-             QUERY_TUNING,
-             gettext_noop("Sets resource track log level"),
-             NULL,
-             GUC_LIST_INPUT},
-            &u_sess->attr.attr_storage.resource_track_log,
-            SUMMARY,
-            resource_track_log_options,
-            NULL,
-            NULL,
-            NULL},
-
         {{"syslog_facility",
-             PGC_SIGHUP,
-             LOGGING_WHERE,
-             gettext_noop("Sets the syslog \"facility\" to be used when syslog enabled."),
-             NULL},
+            PGC_SIGHUP,
+            NODE_ALL,
+            LOGGING_WHERE,
+            gettext_noop("Sets the syslog \"facility\" to be used when syslog enabled."),
+            NULL},
             &u_sess->attr.attr_common.syslog_facility,
 #ifdef HAVE_SYSLOG
             LOG_LOCAL0,
@@ -8914,112 +3877,24 @@ static void InitConfigureNamesEnum()
             NULL},
 
         {{"session_replication_role",
-             PGC_SUSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets the session's behavior for triggers and rewrite rules."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets the session's behavior for triggers and rewrite rules."),
+            NULL},
             &u_sess->attr.attr_common.SessionReplicationRole,
             SESSION_REPLICATION_ROLE_ORIGIN,
             session_replication_role_options,
             NULL,
             assign_session_replication_role,
             NULL},
-
-        {{"synchronous_commit",
-             PGC_USERSET,
-             WAL_SETTINGS,
-             gettext_noop("Sets the current transaction's synchronization level."),
-             NULL},
-            &u_sess->attr.attr_storage.guc_synchronous_commit,
-            SYNCHRONOUS_COMMIT_ON,
-            synchronous_commit_options,
-            NULL,
-            assign_synchronous_commit,
-            NULL},
-
-        {{"sql_compatibility",
-             PGC_INTERNAL,
-             UNGROUPED,
-             gettext_noop("Choose which SQL format to adapt."),
-             NULL,
-             GUC_NOT_IN_SAMPLE | GUC_DISALLOW_IN_FILE},
-            &u_sess->attr.attr_sql.sql_compatibility,
-            B_FORMAT,
-            adapt_database,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"explain_perf_mode",
-             PGC_USERSET,
-             UNGROUPED,
-             gettext_noop("Choose which style to print the explain info."),
-             NULL},
-            &u_sess->attr.attr_sql.guc_explain_perf_mode,
-            EXPLAIN_NORMAL,
-            explain_option,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"skew_option", PGC_USERSET, UNGROUPED, gettext_noop("Choose data skew optimization strategy."), NULL},
-            &u_sess->attr.attr_sql.skew_strategy_store,
-            SKEW_OPT_NORMAL,
-            skew_strategy_option,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"resource_track_level",
-             PGC_USERSET,
-             RESOURCES_WORKLOAD,
-             gettext_noop("Choose which level info to be collected. "),
-             NULL},
-            &u_sess->attr.attr_resource.resource_track_level,
-            RESOURCE_TRACK_QUERY,
-            resource_track_option,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"codegen_strategy",
-             PGC_USERSET,
-             QUERY_TUNING,
-             gettext_noop("Choose whether it is allowed to call C-function in codegen."),
-             NULL},
-            &u_sess->attr.attr_sql.codegen_strategy,
-            CODEGEN_PARTIAL,
-            codegen_strategy_option,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"memory_tracking_mode",
-             PGC_USERSET,
-             RESOURCES_MEM,
-             gettext_noop("Choose which style to track the memory usage."),
-             NULL},
-            &u_sess->attr.attr_memory.memory_tracking_mode,
-            MEMORY_TRACKING_NONE,
-            memory_tracking_option,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"io_priority", PGC_USERSET, RESOURCES_WORKLOAD, gettext_noop("Sets the IO priority for queries."), NULL},
-            &u_sess->attr.attr_resource.io_priority,
-            IOPRIORITY_NONE,
-            io_priority_level_options,
-            NULL,
-            NULL,
-            NULL},
-
         {{"trace_recovery_messages",
-             PGC_SIGHUP,
-             DEVELOPER_OPTIONS,
-             gettext_noop("Enables logging of recovery-related debugging information."),
-             gettext_noop("Each level includes all the levels that follow it. The later"
-                          " the level, the fewer messages are sent.")},
+            PGC_SIGHUP,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Enables logging of recovery-related debugging information."),
+            gettext_noop("Each level includes all the levels that follow it. The later"
+                         " the level, the fewer messages are sent.")},
             &u_sess->attr.attr_common.trace_recovery_messages,
 
             /*
@@ -9033,46 +3908,23 @@ static void InitConfigureNamesEnum()
             NULL},
 
         {{"track_functions",
-             PGC_SUSET,
-             STATS_COLLECTOR,
-             gettext_noop("Collects function-level statistics on database activity."),
-             NULL},
+            PGC_SUSET,
+            NODE_ALL,
+            STATS_COLLECTOR,
+            gettext_noop("Collects function-level statistics on database activity."),
+            NULL},
             &u_sess->attr.attr_common.pgstat_track_functions,
             TRACK_FUNC_OFF,
             track_function_options,
             NULL,
             NULL,
             NULL},
-
-        {{"wal_level",
-             PGC_POSTMASTER,
-             WAL_SETTINGS,
-             gettext_noop("Sets the level of information written to the WAL."),
-             NULL},
-            &g_instance.attr.attr_storage.wal_level,
-            WAL_LEVEL_MINIMAL,
-            wal_level_options,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"wal_sync_method",
-             PGC_SIGHUP,
-             WAL_SETTINGS,
-             gettext_noop("Selects the method used for forcing WAL updates to disk."),
-             NULL},
-            &u_sess->attr.attr_storage.sync_method,
-            DEFAULT_SYNC_METHOD,
-            sync_method_options,
-            NULL,
-            assign_xlog_sync_method,
-            NULL},
-
         {{"xmlbinary",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets how binary values are to be encoded in XML."),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets how binary values are to be encoded in XML."),
+            NULL},
             &u_sess->attr.attr_common.xmlbinary,
             XMLBINARY_BASE64,
             xmlbinary_options,
@@ -9081,237 +3933,65 @@ static void InitConfigureNamesEnum()
             NULL},
 
         {{"xmloption",
-             PGC_USERSET,
-             CLIENT_CONN_STATEMENT,
-             gettext_noop("Sets whether XML data in implicit parsing and serialization "
-                          "operations is to be considered as documents or content fragments."),
-             NULL},
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("Sets whether XML data in implicit parsing and serialization "
+                         "operations is to be considered as documents or content fragments."),
+            NULL},
             &u_sess->attr.attr_common.xmloption,
             XMLOPTION_CONTENT,
             xmloption_options,
             NULL,
             NULL,
             NULL},
-
-#ifdef PGXC
-        {{"remotetype", PGC_BACKEND, CONN_AUTH, gettext_noop("Sets the type of Postgres-XC remote connection"), NULL},
+        {{"remotetype",
+            PGC_BACKEND,
+            NODE_ALL,
+            CONN_AUTH,
+            gettext_noop("Sets the type of openGauss remote connection"),
+            NULL},
             &u_sess->attr.attr_common.remoteConnType,
             REMOTE_CONN_APP,
             pgxc_conn_types,
             NULL,
             NULL,
             NULL},
-
-        {{"autovacuum_mode", PGC_SIGHUP, AUTOVACUUM, gettext_noop("Sets the behavior of autovacuum"), NULL},
-            &u_sess->attr.attr_storage.autovacuum_mode,
-            AUTOVACUUM_DO_ANALYZE_VACUUM,
-            autovacuum_mode_options,
-            NULL,
-            NULL,
-            NULL},
-#endif
-        {{"cstore_insert_mode", PGC_USERSET, UNGROUPED, gettext_noop("decide destination of data inserted"), NULL},
-            &u_sess->attr.attr_storage.cstore_insert_mode,
-            TO_AUTO,
-            cstore_insert_mode_options,
-            NULL,
-            NULL,
-            NULL},
-
-        {{"plan_cache_mode", PGC_USERSET, QUERY_TUNING_OTHER,
-            gettext_noop("Controls the planner's selection of custom or generic plan."),
-            gettext_noop("Prepared statements can have custom and generic plans, and the planner "
-                         "will attempt to choose which is better.  This can be set to override "
-                         "the default behavior.")
-            },
-            &u_sess->attr.attr_sql.g_planCacheMode,
-            PLAN_CACHE_MODE_AUTO, plan_cache_mode_options,
-            NULL, NULL, NULL},
-
-        {{"opfusion_debug_mode", PGC_USERSET, QUERY_TUNING_METHOD, gettext_noop("opfusion debug mode."), NULL},
-            &u_sess->attr.attr_sql.opfusion_debug_mode,
-            BYPASS_OFF,
-            opfusion_debug_level_options,
-            NULL,
-            NULL,
-            NULL},
-
         {{"instr_unique_sql_track_type",
-             PGC_INTERNAL,
-             INSTRUMENTS_OPTIONS,
-             gettext_noop("unique sql track type"),
-             NULL},
+            PGC_INTERNAL,
+            NODE_ALL,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("unique sql track type"),
+            NULL},
             &u_sess->attr.attr_common.unique_sql_track_type,
             UNIQUE_SQL_TRACK_TOP,
             unique_sql_track_option,
             NULL,
             NULL,
             NULL},
-
-        {{"remote_read_mode", PGC_POSTMASTER, UNGROUPED, gettext_noop("decide way of remote read"), NULL},
-            &g_instance.attr.attr_storage.remote_read_mode,
-            REMOTE_READ_AUTH,
-            remote_read_options,
-            NULL,
-            NULL,
-            NULL},
-
-        {
-            {
-                "application_type", PGC_USERSET, GTM,
-                gettext_noop("application distribute type(perfect sharding or not) in gtm free mode."),
-                NULL,
-                GUC_REPORT
-            },
-            &u_sess->attr.attr_sql.application_type,
-            NOT_PERFECT_SHARDING_TYPE, application_type_options,
-            check_application_type, NULL, NULL
-        },
-
-        {{"auto_explain_level",
-            PGC_USERSET,
-            RESOURCES_WORKLOAD,
-            gettext_noop("auto_explain_level."),
-            gettext_noop("auto_explain_level")},
-            &u_sess->attr.attr_resource.auto_explain_level,
-            LOG,
-            auto_explain_level_options,
-            check_auto_explain_level,
-            NULL,
-            NULL},
-        {{"sql_beta_feature",
-            PGC_USERSET,
-            QUERY_TUNING,
-            gettext_noop("Sets the beta feature for SQL engine."), NULL, GUC_LIST_INPUT},
-            &u_sess->attr.attr_sql.sql_beta_feature,
-            NO_BETA_FEATURE,
-            sql_beta_options,
-            NULL,
-            NULL,
-            NULL},
         /* End-of-list marker */
-        {{NULL, (GucContext)0, (config_group)0, NULL, NULL}, NULL, 0, NULL, NULL, NULL, NULL}};
+        {{NULL,
+            (GucContext)0,
+            (GucNodeType)0,
+            (config_group)0,
+            NULL,
+            NULL},
+            NULL,
+            0,
+            NULL,
+            NULL,
+            NULL,
+            NULL}
+    };
 
     Size bytes = sizeof(localConfigureNamesEnum);
-    u_sess->utils_cxt.ConfigureNamesEnum =
+    u_sess->utils_cxt.ConfigureNamesEnum[GUC_ATTR_COMMON] =
         (struct config_enum*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), bytes);
-    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesEnum, bytes, localConfigureNamesEnum, bytes);
+    errno_t rc = memcpy_s(u_sess->utils_cxt.ConfigureNamesEnum[GUC_ATTR_COMMON], bytes, localConfigureNamesEnum, bytes);
     securec_check_ss(rc, "\0", "\0");
 }
 
 /******** end of options list ********/
-
-/** start dealing with uncontrolled_memory_context GUC parameter **/
-void free_memory_context_list(memory_context_list* head_node)
-{
-    memory_context_list* last = NULL;
-    while (head_node != NULL) {
-        last = head_node;
-        head_node = head_node->next;
-        pfree(last);
-        last = NULL;
-    }
-}
-
-/* This function splits a string into substrings by character ','.
- * And these substrings will be appended to a memory_context_list.
- * Referenced by GUC uncontrolled_memory_context.
- */
-memory_context_list* split_string_into_list(const char* source)
-{
-    errno_t rc = EOK;
-    int string_length = strlen(source) + 1;
-    int first_ch_length = 0;
-    char* str = (char*)MemoryContextAlloc(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), string_length);
-    rc = strcpy_s(str, string_length, source);
-    securec_check_errno(rc, pfree(str), NULL);
-
-    memory_context_list* head_node = (memory_context_list*)MemoryContextAlloc(
-        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(memory_context_list));
-    memory_context_list* current_node = head_node;
-    current_node->next = NULL;
-    current_node->value = NULL;
-    char* first_ch = str;
-    size_t len = 0;
-
-    for (int i = 0; i < string_length; i++, len++) {
-        if (str[i] == ',' || str[i] == '\0') {
-            if (NULL != current_node->value) {
-                /* append a new node to list */
-                current_node->next = (memory_context_list*)MemoryContextAlloc(
-                    SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), sizeof(memory_context_list));
-                current_node = current_node->next;
-                current_node->next = NULL;
-                current_node->value = NULL;
-            }
-
-            first_ch[len] = '\0';  // replace ',' with '\0'
-            first_ch_length = strlen(first_ch) + 1;
-
-            // 'strlen(first_ch) + 1' means including '\0'.
-            current_node->value = (char*)MemoryContextAlloc(
-                SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), first_ch_length);
-            rc = strcpy_s(current_node->value, first_ch_length, first_ch);
-            securec_check_errno(rc, pfree(str); free_memory_context_list(head_node), NULL);
-
-            /* reset variables so that split next string.
-             * 'i++' and 'first_ch += len + 1' means skipping '\0'
-             */
-            first_ch += len + 1;
-            i++;
-            len = 0;
-        }
-    }
-
-    return head_node;
-}
-
-static bool check_uncontrolled_memory_context(char** newval, void** extra, GucSource source)
-{
-    for (char* p = *newval; *p; p++) {
-        if (*p < 32 || *p > 126) {
-            ereport(ERROR,
-                (errcode(ERRCODE_UNTRANSLATABLE_CHARACTER), errmsg("The text entered contains illegal characters!")));
-            return false;
-        }
-    }
-    return true;
-}
-
-static void assign_uncontrolled_memory_context(const char* newval, void* extra)
-{
-    if (u_sess->utils_cxt.memory_context_limited_white_list) {
-        free_memory_context_list(u_sess->utils_cxt.memory_context_limited_white_list);
-        u_sess->utils_cxt.memory_context_limited_white_list = NULL;
-    }
-    u_sess->utils_cxt.memory_context_limited_white_list = split_string_into_list(newval);
-}
-
-/* show the guc parameter -- uncontrolled_memory_context */
-static const char* show_uncontrolled_memory_context(void)
-{
-    const size_t length = 1024;
-    char* buff = (char*)MemoryContextAllocZero(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB), length);
-    errno_t rc = EOK;
-    size_t len;
-
-    rc = strcpy_s(buff, length, "MemoryContext white list:\n");
-    securec_check_errno(rc, buff[length - 1] = '\0', buff);  // truncate string and return it.
-
-    for (memory_context_list* iter = u_sess->utils_cxt.memory_context_limited_white_list; iter && iter->value;
-         iter = iter->next) {
-        rc = strcat_s(buff, length, iter->value);
-        securec_check_errno(rc, buff[length - 1] = '\0', buff);
-
-        len = strlen(buff);
-        if (len < (length - 1)) {
-            buff[len] = '\n';
-            buff[len + 1] = '\0';  // replace '\0' with '\n\0'
-        }
-    }
-    return buff;
-}
-/** end of dealing with uncontrolled_memory_context GUC parameter **/
 
 /*
  * To allow continued support of obsolete names for GUC variables, we apply
@@ -9330,7 +4010,7 @@ static void ReportGUCOption(struct config_generic* record);
 static void reapply_stacked_values(struct config_generic* variable, struct config_string* pHolder, GucStack* stack,
     const char* curvalue, GucContext curscontext, GucSource cursource);
 static void ShowGUCConfigOption(const char* name, DestReceiver* dest);
-static void ShowAllGUCConfig(const char* likename, DestReceiver* dest);
+static void ShowAllGUCConfig(DestReceiver* dest);
 static char* _ShowOption(struct config_generic* record, bool use_units);
 static bool validate_option_array_item(const char* name, const char* value, bool skipIfNoPermissions);
 #ifndef ENABLE_MULTIPLE_NODES
@@ -9614,6 +4294,12 @@ static void InitSingleNodeUnsupportGuc()
     u_sess->attr.attr_sql.agg_redistribute_enhancement = false;
     u_sess->attr.attr_sql.enable_agg_pushdown_for_cooperation_analysis = true;
     u_sess->attr.attr_common.update_process_title = false;
+    u_sess->attr.attr_sql.enable_parallel_ddl = true;
+    u_sess->attr.attr_sql.enable_nodegroup_debug = false;
+    u_sess->attr.attr_sql.enable_dngather = false;
+    u_sess->attr.attr_sql.enable_light_proxy = true;
+    u_sess->attr.attr_sql.enable_trigger_shipping = true;
+    u_sess->attr.attr_common.enable_router = false;
 
     /* for Int Guc Variables */
     u_sess->attr.attr_common.session_sequence_cache = 10;
@@ -9632,9 +4318,12 @@ static void InitSingleNodeUnsupportGuc()
     u_sess->attr.attr_common.max_datanode_for_plan = 0;
     u_sess->attr.attr_common.transaction_sync_naptime = 30;
     u_sess->attr.attr_common.transaction_sync_timeout = 600;
-    u_sess->attr.attr_storage.twophase_clean_workers = 3;
+    u_sess->attr.attr_storage.default_index_kind = DEFAULT_INDEX_KIND_GLOBAL;
+    u_sess->attr.attr_sql.application_type = NOT_PERFECT_SHARDING_TYPE;
     /* for Double Guc Variables */
     u_sess->attr.attr_sql.stream_multiple = DEFAULT_STREAM_MULTIPLE;
+    u_sess->attr.attr_sql.max_cn_temp_file_size = 5 * 1024 * 1024;
+    u_sess->attr.attr_sql.dngather_min_rows = 500.0;
 
 
     /* for String Guc Variables */
@@ -9647,6 +4336,8 @@ static void InitSingleNodeUnsupportGuc()
     u_sess->attr.attr_common.GtmHostInfoStringArray[5] = (char *)"";
     u_sess->attr.attr_common.GtmHostInfoStringArray[6] = (char *)"";
     u_sess->attr.attr_common.GtmHostInfoStringArray[7] = (char *)"";
+    u_sess->attr.attr_sql.expected_computing_nodegroup = CNG_OPTION_QUERY;
+    u_sess->attr.attr_sql.default_storage_nodegroup = INSTALLATION_MODE;
 
     if (!IsUnderPostmaster) {
         g_instance.attr.attr_network.PoolerStatelessReuse = false;
@@ -9682,105 +4373,163 @@ static void InitSingleNodeUnsupportGuc()
  * re-executed after startup (eg, we could allow loadable modules to
  * add vars, and then we'd need to re-sort).
  */
-void build_guc_get_variables_num(enum guc_choose_strategy stragety, int *num_vars_out)
+void build_guc_get_variables_num(enum guc_attr_strategy stragety,
+    int &num_single_vars_out, int &num_both_vars_out, int &num_distribute_vars_out)
 {
-    int num_vars = 0;
     int i;
 
     /* Bind thread local GUC variables to their names */
-    if (stragety == SINGLE_GUC) {
-        InitConfigureNamesBool();
-        InitConfigureNamesInt();
-        InitConfigureNamesInt64();
-        InitConfigureNamesReal();
-        InitConfigureNamesString();
-        InitConfigureNamesEnum();
-    } else if (stragety == DISTRIBUTE_GUC) {
-#ifdef ENABLE_MULTIPLE_NODES
-        InitConfigureNamesBoolMultipleNode();
-        InitConfigureNamesIntMultipleNode();
-        InitConfigureNamesRealMultipleNode();
-        InitConfigureNamesStringMultipleNode();
-#else
-        return;
-#endif
+    if (stragety == GUC_ATTR_COMMON) {
+        InitCommonConfigureNames();
+    } else if (stragety == GUC_ATTR_SQL) {
+        InitSqlConfigureNames();
+    } else if (stragety == GUC_ATTR_STORAGE) {
+        InitStorageConfigureNames();
+    } else if (stragety == GUC_ATTR_SECURITY) {
+        InitSecurityConfigureNames();
+    } else if (stragety == GUC_ATTR_NETWORK) {
+        InitNetworkConfigureNames();
+    } else if (stragety == GUC_ATTR_MEMORY) {
+        InitMemoryConfigureNames();
+    } else if (stragety == GUC_ATTR_RESOURCE) {
+        InitResourceConfigureNames();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OPERATION), errmsg("unexpected stragety element: %d", stragety)));
     }
+
+    InitUStoreAttr();
 
     for (i = 0; u_sess->utils_cxt.ConfigureNamesBool[stragety][i].gen.name; i++) {
         struct config_bool* conf = &u_sess->utils_cxt.ConfigureNamesBool[stragety][i];
 
         /* Rather than requiring vartype to be filled in by hand, do this: */
         conf->gen.vartype = PGC_BOOL;
-        num_vars++;
+        count_variables_num(conf->gen.nodetype, num_single_vars_out, num_both_vars_out, num_distribute_vars_out);
     }
 
     for (i = 0; u_sess->utils_cxt.ConfigureNamesInt[stragety][i].gen.name; i++) {
         struct config_int* conf = &u_sess->utils_cxt.ConfigureNamesInt[stragety][i];
 
         conf->gen.vartype = PGC_INT;
-        num_vars++;
+        count_variables_num(conf->gen.nodetype, num_single_vars_out, num_both_vars_out, num_distribute_vars_out);
     }
 
     for (i = 0; u_sess->utils_cxt.ConfigureNamesReal[stragety][i].gen.name; i++) {
         struct config_real* conf = &u_sess->utils_cxt.ConfigureNamesReal[stragety][i];
 
         conf->gen.vartype = PGC_REAL;
-        num_vars++;
+        count_variables_num(conf->gen.nodetype, num_single_vars_out, num_both_vars_out, num_distribute_vars_out);
     }
 
     for (i = 0; u_sess->utils_cxt.ConfigureNamesString[stragety][i].gen.name; i++) {
         struct config_string* conf = &u_sess->utils_cxt.ConfigureNamesString[stragety][i];
 
         conf->gen.vartype = PGC_STRING;
-        num_vars++;
+        count_variables_num(conf->gen.nodetype, num_single_vars_out, num_both_vars_out, num_distribute_vars_out);
     }
     
-    if (stragety == SINGLE_GUC) {
-        for (i = 0; u_sess->utils_cxt.ConfigureNamesInt64[i].gen.name; i++) {
-            struct config_int64* conf = &u_sess->utils_cxt.ConfigureNamesInt64[i];
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesInt64[stragety][i].gen.name; i++) {
+        struct config_int64* conf = &u_sess->utils_cxt.ConfigureNamesInt64[stragety][i];
 
-            conf->gen.vartype = PGC_INT64;
-            num_vars++;
-        }
-
-        for (i = 0; u_sess->utils_cxt.ConfigureNamesEnum[i].gen.name; i++) {
-            struct config_enum* conf = &u_sess->utils_cxt.ConfigureNamesEnum[i];
-
-            conf->gen.vartype = PGC_ENUM;
-            num_vars++;
-        }
+        conf->gen.vartype = PGC_INT64;
+        count_variables_num(conf->gen.nodetype, num_single_vars_out, num_both_vars_out, num_distribute_vars_out);
     }
 
-    *num_vars_out = num_vars;
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesEnum[stragety][i].gen.name; i++) {
+        struct config_enum* conf = &u_sess->utils_cxt.ConfigureNamesEnum[stragety][i];
+
+        conf->gen.vartype = PGC_ENUM;
+        count_variables_num(conf->gen.nodetype, num_single_vars_out, num_both_vars_out, num_distribute_vars_out);
+    }
+
     return;
 }
 
-void build_guc_variables_internal(enum guc_choose_strategy stragety, struct config_generic** guc_vars)
+static void count_variables_num(GucNodeType nodetype,
+    int &num_single_vars_out, int &num_both_vars_out, int &num_distribute_vars_out)
+{
+    if (nodetype == NODE_ALL) {
+        num_both_vars_out++;
+    } else if (nodetype == NODE_SINGLENODE) {
+        num_single_vars_out++;
+    } else if (nodetype == NODE_DISTRIBUTE) {
+        num_distribute_vars_out++;
+    } else {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPERATION), errmsg("unexpected node type: %d", nodetype)));
+    }
+
+    return;
+}
+
+void build_guc_variables_internal_bytype(enum guc_attr_strategy stragety, struct config_generic** guc_vars,
+    int &num_vars, GucNodeType specific_type)
 {
     int i;
+
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesBool[stragety][i].gen.name; i++) {
+        struct config_generic* gen = &u_sess->utils_cxt.ConfigureNamesBool[stragety][i].gen;
+        if ((gen->nodetype == NODE_ALL) || (gen->nodetype == specific_type)) {
+            guc_vars[num_vars++] = gen;
+        }
+    }
+
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesInt[stragety][i].gen.name; i++) {
+        struct config_generic* gen = &u_sess->utils_cxt.ConfigureNamesInt[stragety][i].gen;
+        if ((gen->nodetype == NODE_ALL) || (gen->nodetype == specific_type)) {
+            guc_vars[num_vars++] = gen;
+        }
+    }
+
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesReal[stragety][i].gen.name; i++) {
+        struct config_generic* gen = &u_sess->utils_cxt.ConfigureNamesReal[stragety][i].gen;
+        if ((gen->nodetype == NODE_ALL) || (gen->nodetype == specific_type)) {
+            guc_vars[num_vars++] = gen;
+        }
+    }
+
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesString[stragety][i].gen.name; i++) {
+        struct config_generic* gen = &u_sess->utils_cxt.ConfigureNamesString[stragety][i].gen;
+        if ((gen->nodetype == NODE_ALL) || (gen->nodetype == specific_type)) {
+            guc_vars[num_vars++] = gen;
+        }
+    }
+
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesInt64[stragety][i].gen.name; i++) {
+        struct config_generic* gen = &u_sess->utils_cxt.ConfigureNamesInt64[stragety][i].gen;
+        if ((gen->nodetype == NODE_ALL) || (gen->nodetype == specific_type)) {
+            guc_vars[num_vars++] = gen;
+        }
+    }
+
+    for (i = 0; u_sess->utils_cxt.ConfigureNamesEnum[stragety][i].gen.name; i++) {
+        struct config_generic* gen = &u_sess->utils_cxt.ConfigureNamesEnum[stragety][i].gen;
+        if ((gen->nodetype == NODE_ALL) || (gen->nodetype == specific_type)) {
+            guc_vars[num_vars++] = gen;
+        }
+    }
+
+    return;
+}
+
+void build_guc_variables_internal(struct config_generic** guc_vars)
+{
+    int stragety;
+    bool flag = false;
     int num_vars = 0;
 
-    for (i = 0; u_sess->utils_cxt.ConfigureNamesBool[stragety][i].gen.name; i++)
-        guc_vars[num_vars++] = &u_sess->utils_cxt.ConfigureNamesBool[stragety][i].gen;
-
-    for (i = 0; u_sess->utils_cxt.ConfigureNamesInt[stragety][i].gen.name; i++)
-        guc_vars[num_vars++] = &u_sess->utils_cxt.ConfigureNamesInt[stragety][i].gen;
-
-    for (i = 0; u_sess->utils_cxt.ConfigureNamesReal[stragety][i].gen.name; i++)
-        guc_vars[num_vars++] = &u_sess->utils_cxt.ConfigureNamesReal[stragety][i].gen;
-
-    for (i = 0; u_sess->utils_cxt.ConfigureNamesString[stragety][i].gen.name; i++)
-        guc_vars[num_vars++] = &u_sess->utils_cxt.ConfigureNamesString[stragety][i].gen;
-
-    if (stragety == SINGLE_GUC) {
-        for (i = 0; u_sess->utils_cxt.ConfigureNamesInt64[i].gen.name; i++)
-            guc_vars[num_vars++] = &u_sess->utils_cxt.ConfigureNamesInt64[i].gen;
-        
-        for (i = 0; u_sess->utils_cxt.ConfigureNamesEnum[i].gen.name; i++)
-            guc_vars[num_vars++] = &u_sess->utils_cxt.ConfigureNamesEnum[i].gen;
+#ifdef ENABLE_MULTIPLE_NODES
+    flag = true;
+#endif
+    for (stragety = 0; stragety < MAX_GUC_ATTR; stragety++) {
+        GucNodeType nodetype;
+        if (flag) {
+            nodetype = NODE_DISTRIBUTE;
+        } else {
+            nodetype = NODE_SINGLENODE;
+        }
+        build_guc_variables_internal_bytype(guc_attr_strategy(stragety), guc_vars, num_vars, nodetype);
     }
 
     return;
@@ -9793,21 +4542,28 @@ void build_guc_variables(void)
     int multi_vars_num = 0;
     int size_vars = 0;
     int num_vars = 0;
+    int both_vars_num = 0;
 
-    build_guc_get_variables_num(SINGLE_GUC, &single_vars_num);
-    build_guc_get_variables_num(DISTRIBUTE_GUC, &multi_vars_num);
+    build_guc_get_variables_num(GUC_ATTR_SQL, single_vars_num, both_vars_num, multi_vars_num);
+    build_guc_get_variables_num(GUC_ATTR_STORAGE, single_vars_num, both_vars_num, multi_vars_num);
+    build_guc_get_variables_num(GUC_ATTR_SECURITY, single_vars_num, both_vars_num, multi_vars_num);
+    build_guc_get_variables_num(GUC_ATTR_NETWORK, single_vars_num, both_vars_num, multi_vars_num);
+    build_guc_get_variables_num(GUC_ATTR_MEMORY, single_vars_num, both_vars_num, multi_vars_num);
+    build_guc_get_variables_num(GUC_ATTR_RESOURCE, single_vars_num, both_vars_num, multi_vars_num);
+    build_guc_get_variables_num(GUC_ATTR_COMMON, single_vars_num, both_vars_num, multi_vars_num);
 
-    num_vars = single_vars_num + multi_vars_num;
+#ifdef ENABLE_MULTIPLE_NODES
+    num_vars = both_vars_num + multi_vars_num;
+#else
+    num_vars = single_vars_num + both_vars_num;
+#endif
     /*
      * Create table with 20% slack
      */
     size_vars = num_vars + num_vars / 4;
     guc_vars = (struct config_generic**)guc_malloc(FATAL, size_vars * sizeof(struct config_generic*));
-    
-    build_guc_variables_internal(SINGLE_GUC, guc_vars);
-#ifdef ENABLE_MULTIPLE_NODES
-    build_guc_variables_internal(DISTRIBUTE_GUC, (guc_vars + single_vars_num));
-#endif
+
+    build_guc_variables_internal(guc_vars);
 
     if (u_sess->guc_variables)
         pfree(u_sess->guc_variables);
@@ -10008,11 +4764,15 @@ void InitializePostmasterGUC()
     g_instance.attr.attr_network.PoolerPort = g_instance.attr.attr_network.PostPortNumber + 1;
 }
 
-void init_bgwriter_thread_num()
+int get_fixed_bgwriter_thread_num()
 {
-    if (g_instance.attr.attr_storage.bgwriter_thread_num == 0) {
-        g_instance.attr.attr_storage.bgwriter_thread_num = 1;
-    }
+    /*
+     * We launch one extra bgwriter for segment buffers automatically,
+     * so there should be at least two bgworkers one for shared buffers,
+     * the other for segment buffers.
+     */
+    return (g_instance.attr.attr_storage.bgwriter_thread_num > 1) ?
+        (g_instance.attr.attr_storage.bgwriter_thread_num + 1) : 2;
 }
 /*
  * Initialize GUC options during program startup.
@@ -10067,7 +4827,6 @@ void InitializeGUCOptions(void)
      * environment variables.  Process those settings.
      */
     InitializeGUCOptionsFromEnvironment();
-    init_bgwriter_thread_num();
 }
 
 /*
@@ -10428,11 +5187,11 @@ void repair_guc_variables()
                 char* newval = NULL;
                 void* newextra = NULL;
 
-                newval = guc_strdup(FATAL, *source->variable);
-
                 if (strlen(*destination->variable) == strlen(*source->variable) &&
                     0 == strncmp(*destination->variable, *source->variable, strlen(*destination->variable)))
                     break;
+
+                newval = guc_strdup(FATAL, *source->variable);
 
                 if (destination->check_hook) {
                     if (!call_string_check_hook(destination, &newval, &newextra, destination->gen.source, LOG)) {
@@ -10440,6 +5199,7 @@ void repair_guc_variables()
                             (errmsg("Failed to initialize %s to \"%s\" for stream thread",
                                 destination->gen.name,
                                 newval ? newval : "")));
+                        pfree_ext(newval);
                         break;
                     }
                 }
@@ -10576,12 +5336,21 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
             pfree(configdir);
             return false;
         } else {
-            if (rename(TempConfigFileName, g_instance.attr.attr_common.ConfigFileName) != 0) {
-                write_stderr("%s: rename file %s to %s failed, errmsg: %s\n",
-                    progname,
-                    TempConfigFileName,
-                    g_instance.attr.attr_common.ConfigFileName,
-                    gs_strerror(errno));
+            char **optLines = read_guc_file(TempConfigFileName);
+            if (optLines == NULL) {
+                ereport(LOG, (errmsg("the config file has no data,please check it.")));
+                pfree(configdir);
+                return false;
+            }
+            ErrCode ret = write_guc_file(g_instance.attr.attr_common.ConfigFileName, optLines);
+            release_opt_lines(optLines);
+            optLines = NULL;
+            if (ret == CODE_OK) {
+                ereport(LOG,
+                    (errmsg("the config file %s recover success.", g_instance.attr.attr_common.ConfigFileName)));
+            } else {
+                write_stderr("%s: recover file %s to %s failed \n", progname, TempConfigFileName,
+                    g_instance.attr.attr_common.ConfigFileName);
                 pfree(configdir);
                 return false;
             }
@@ -11274,20 +6043,6 @@ void AtEOXact_GUC(bool isCommit, int nestLevel)
      * GUC at prepare or commit. These connections will always be closed.
      */
     if (isCommit && nestLevel == 1 && !u_sess->attr.attr_common.IsInplaceUpgrade) {
-        int rs;
-        char* set_str = get_set_string();
-
-        if (set_str != NULL) {
-            char tmpName[MAX_PARAM_LEN + 1] = {0};
-            char *gucName = GetGucName(set_str, tmpName);
-            rs = PoolManagerSetCommand(POOL_CMD_GLOBAL_SET, set_str, gucName);
-            if (rs < 0) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_CONNECTION_EXCEPTION),
-                        errmsg("Communication failure, failed to send set commands to pool.")));
-            }
-        }
-
         /* reset input_set_message  when current transaction is in top level and isCommit is true.*/
         reset_set_message(isCommit);
     }
@@ -12795,26 +7550,11 @@ int set_config_option(const char* name, const char* value, GucContext context, G
 
             if (value != NULL) {
                 /*
-                 * when \parallel in gsql is on, we use "set search_path to pg_temp_XXX"
-                 * to tell new started parallel postgres which temp namespace should use.
-                 * but we should not clean the temp namespace when parallel postgres
-                 * quiting, so a flag deleteTempOnQuiting is set to prevent clean
-                 * temp namespace when postgres quiting.
+                 * The value passed by the caller could be transient, so we always strdup it.
+                 * At the same time, we need to make sure newval is correctly initialized and ready
+                 * for validation below.
                  */
-                if ((strcasecmp(name, "search_path") == 0 || strcasecmp(name, "current_schema") == 0) &&
-                    (isTempNamespaceName(value) || isTempNamespaceNameWithQuote(value))) {
-
-                    char* schemaNameList = getSchemaNameList(value);
-                    if (schemaNameList == NULL) {
-                        return 1;
-                    } else {
-                        newval = guc_strdup(elevel, schemaNameList);
-                        pfree(schemaNameList);
-                    }
-                } else {
-                    /* The value passed by the caller could be transient, so we always strdup it. */
-                    newval = guc_strdup(elevel, value);
-                }
+                newval = guc_strdup(elevel, value);
 
                 if (newval == NULL) {
                     return 0;
@@ -12823,6 +7563,26 @@ int set_config_option(const char* name, const char* value, GucContext context, G
                 if (!validate_conf_option(record, name, value, source, elevel, false, &newval, &newextra)) {
                     pfree_ext(newval);
                     return 0;
+                }
+
+                /*
+                 * when \parallel in gsql is on, we use "set search_path to pg_temp_XXX"
+                 * to tell new started parallel openGauss which temp namespace should use.
+                 * but we should not clean the temp namespace when parallel openGauss
+                 * quiting, so a flag deleteTempOnQuiting is set to prevent clean
+                 * temp namespace when openGauss quiting.
+                 */
+                if ((strcasecmp(name, "search_path") == 0 || strcasecmp(name, "current_schema") == 0) &&
+                    (isTempNamespaceName(value) || isTempNamespaceNameWithQuote(value))) {
+
+                    char* schemaNameList = getSchemaNameList(value);
+                    pfree_ext(newval);  /* this is guaranteed to be set or freed, we need to make room for strdup */
+                    if (schemaNameList == NULL) {
+                        return 1;
+                    } else {
+                        newval = guc_strdup(elevel, schemaNameList);
+                        pfree(schemaNameList);
+                    }
                 }
             } else if (source == PGC_S_DEFAULT) {
                 /* non-NULL boot_val must always get strdup'd */
@@ -13360,9 +8120,17 @@ static void CheckAlterSystemSetPrivilege(const char* name)
     }
 
     static char* blackList[] = {
-        "modify_initial_password",
-        "enable_access_server_directory",
-        "enable_copy_server_files",
+        "audit_copy_exec", "audit_data_format","audit_database_process", "audit_directory", "audit_dml_state",
+        "audit_dml_state_select", "audit_enabled", "audit_file_remain_threshold", "audit_file_remain_time",
+        "audit_function_exec", "audit_grant_revoke", "audit_login_logout", "audit_resource_policy",
+        "audit_rotation_interval", "audit_rotation_size", "audit_set_parameter", "audit_space_limit",
+        "audit_system_object", "audit_user_locked", "audit_user_violation",
+        "asp_log_directory", "config_file", "data_directory", "enable_access_server_directory",
+        "enable_copy_server_files", "external_pid_file", "hba_file", "ident_file", "log_directory", "perf_directory",
+        "query_log_directory", "ssl_ca_file", "ssl_cert_file", "ssl_crl_file", "ssl_key_file", "stats_temp_directory",
+        "unix_socket_directory", "unix_socket_group", "unix_socket_permissions",
+        "krb_caseins_users", "krb_server_keyfile", "krb_srvname", "allow_system_table_mods", "enableSeparationOfDuty",
+        "modify_initial_password", "password_encryption_type", "password_policy",
         NULL
     };
     for (int i = 0; blackList[i] != NULL; i++) {
@@ -13954,7 +8722,7 @@ Datum set_config_by_name(PG_FUNCTION_ARGS)
 
         // Add retry query error code ERRCODE_SET_QUERY for error "ERROR SET query".
         if (PoolManagerSetCommand(poolcmdType, poolcmd.data) < 0)
-            ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("Postgres-XC: ERROR SET query")));
+            ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("openGauss: ERROR SET query")));
     }
 
 #endif
@@ -14288,13 +9056,12 @@ void EmitWarningsOnPlaceholders(const char* className)
 /*
  * SHOW command
  */
-void GetPGVariable(const char* name, const char* likename, DestReceiver* dest)
+void GetPGVariable(const char* name, DestReceiver* dest)
 {
-    if (guc_name_compare(name, "all") == 0) {
-        ShowAllGUCConfig(likename, dest);
-    } else {
+    if (guc_name_compare(name, "all") == 0)
+        ShowAllGUCConfig(dest);
+    else
         ShowGUCConfigOption(name, dest);
-    }
 }
 
 TupleDesc GetPGVariableResultDesc(const char* name)
@@ -14350,7 +9117,7 @@ static void ShowGUCConfigOption(const char* name, DestReceiver* dest)
 /*
  * SHOW ALL command
  */
-static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
+static void ShowAllGUCConfig(DestReceiver* dest)
 {
     bool am_superuser = superuser();
     int i;
@@ -14374,10 +9141,6 @@ static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
 
         if ((conf->flags & GUC_NO_SHOW_ALL) || ((conf->flags & GUC_SUPERUSER_ONLY) && !am_superuser))
             continue;
-
-        if(NULL != likename && NULL == strstr((char*)conf->name, likename)) {
-            continue;
-        }
 
         /* assign to the values array */
         values[0] = PointerGetDatum(cstring_to_text(conf->name));
@@ -15903,80 +10666,6 @@ static bool call_enum_check_hook(struct config_enum* conf, int* newval, void** e
 }
 
 /*
- * Brief    : Check the value of statistics memory can not bigger than 50 percent of max process memory
- * Description:
- * Notes    :
- */
-static bool check_statistics_memory_limit(int* newval, void** extra, GucSource source)
-{
-    if (*newval * 2 > g_instance.attr.attr_memory.max_process_memory) {
-        GUC_check_errdetail("\"session_statistics_memory\" cannot be greater 50 percent \"max_process_memory\". "
-                            "max_process_memory is %dkB",
-            g_instance.attr.attr_memory.max_process_memory);
-        ereport(WARNING,
-            (errmsg("\"session_history_memory\" cannot be greater 50 percent \"max_process_memory\". "
-                    "max_process_memory is %dkB",
-                g_instance.attr.attr_memory.max_process_memory)));
-        return false;
-    }
-
-    return true;
-}
-
-/*
- * Brief    : Check the value of history memory can not bigger than 50 percent of max process memory
- * Description:
- * Notes    :
- */
-static bool check_history_memory_limit(int* newval, void** extra, GucSource source)
-{
-    if (*newval * 2 > g_instance.attr.attr_memory.max_process_memory) {
-        ereport(WARNING,
-            (errmsg("\"session_history_memory\" cannot be greater 50 percent \"max_process_memory\". "
-                    "max_process_memory is %dkB",
-                g_instance.attr.attr_memory.max_process_memory)));
-        GUC_check_errdetail("\"session_history_memory\" cannot be greater 50 percent \"max_process_memory\". "
-                            "max_process_memory is %dkB",
-            g_instance.attr.attr_memory.max_process_memory);
-        return false;
-    }
-
-    return true;
-}
-
-/*
- * Brief    : assignthe value of statistics memory to g_statManager.max_collectinfo_num
- * Description:
- * Notes    :
- */
-static void assign_statistics_memory(int newval, void* extra)
-{
-    if (currentGucContext == PGC_SIGHUP) {
-        u_sess->attr.attr_resource.session_statistics_memory = newval;
-        if (IS_PGXC_COORDINATOR)
-            g_instance.wlm_cxt->stat_manager.max_collectinfo_num = newval * 1024 / sizeof(WLMDNodeInfo);
-
-        if (IS_PGXC_DATANODE)
-            g_instance.wlm_cxt->stat_manager.max_collectinfo_num = newval * 1024 / sizeof(WLMDNRealTimeInfoDetail);
-
-        g_instance.wlm_cxt->stat_manager.max_iostatinfo_num = newval * 1024 / sizeof(WLMDNodeInfo);
-    }
-}
-
-/*
- * Brief    : assignthe value of history memory to g_statManager.max_detail_num
- * Description:
- * Notes    :
- */
-static void assign_history_memory(int newval, void* extra)
-{
-    if (currentGucContext == PGC_SIGHUP) {
-        u_sess->attr.attr_resource.session_history_memory = newval;
-        g_instance.wlm_cxt->stat_manager.max_detail_num = newval * 1024 / sizeof(WLMStmtDetail);
-    }
-}
-
-/*
  * check_hook, assign_hook and show_hook subroutines
  */
 
@@ -16081,62 +10770,6 @@ static bool check_client_min_messages(int* newval, void** extra, GucSource sourc
     return true;
 }
 
-static bool check_temp_buffers(int* newval, void** extra, GucSource source)
-{
-    /*
-     * Once local buffers have been initialized, it's too late to change this.
-     */
-    if (u_sess->storage_cxt.NLocBuffer && u_sess->storage_cxt.NLocBuffer != *newval) {
-        GUC_check_errdetail(
-            "\"temp_buffers\" cannot be changed after any temporary tables have been accessed in the session.");
-        return false;
-    }
-
-    return true;
-}
-
-static bool check_fencedUDFMemoryLimit(int* newval, void** extra, GucSource source)
-{
-    if (*newval > g_instance.attr.attr_sql.UDFWorkerMemHardLimit) {
-        GUC_check_errdetail("\"FencedUDFMemoryLimit\" cannot be greater than \"UDFWorkerMemHardLimit\".");
-        return false;
-    }
-
-    return true;
-}
-
-static bool check_auto_explain_level(int* newval, void** extra, GucSource source)
-{
-   if (*newval == LOG || *newval == NOTICE) {
-       return true;
-   }
-   GUC_check_errdetail("auto_explain_level should be either 'LOG' or 'NOTICE'");
-   return false;
-}
-
-static bool check_udf_memory_limit(int* newval, void** extra, GucSource source)
-{
-    if (*newval > g_instance.attr.attr_memory.max_process_memory) {
-        GUC_check_errdetail(
-            "\"udf_memory_limit\" cannot be greater than \"max_process_memory\". max_process_memory is %dkB",
-            g_instance.attr.attr_memory.max_process_memory);
-        return false;
-    }
-
-    return true;
-}
-
-static bool check_phony_autocommit(bool* newval, void** extra, GucSource source)
-{
-    if (!*newval) {
-        GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
-        GUC_check_errmsg("SET AUTOCOMMIT TO OFF is no longer supported");
-        return false;
-    }
-
-    return true;
-}
-
 static bool check_debug_assertions(bool* newval, void** extra, GucSource source)
 {
 #ifndef USE_ASSERT_CHECKING
@@ -16179,33 +10812,6 @@ static bool check_gpc_syscache_threshold(bool* newval, void** extra, GucSource s
     return true;
 }
 
-static bool check_syscache_threshold_gpc(int* newval, void** extra, GucSource source)
-{
-    /* in case local_syscache_threshold is too low cause gpc does not take effect, we set local_syscache_threshold
-       at least 16MB if gpc is on. */
-    if (g_instance.attr.attr_common.enable_global_plancache && *newval < 16 * 1024) {
-        ereport(WARNING, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                      errmsg("cannot set local_syscache_threshold to %dMB in case gpc is on but not valid."
-                             "Set local_syscache_threshold to 16MB default.", *newval / 1024)));
-        g_instance.attr.attr_memory.local_syscache_threshold = 16 * 1024;
-    }
-
-    return true;
-}
-
-static bool check_ssl(bool* newval, void** extra, GucSource source)
-{
-#ifndef USE_SSL
-
-    if (*newval) {
-        GUC_check_errmsg("SSL is not supported by this build");
-        return false;
-    }
-
-#endif
-    return true;
-}
-
 static bool check_stage_log_stats(bool* newval, void** extra, GucSource source)
 {
     if (*newval && u_sess->attr.attr_common.log_statement_stats) {
@@ -16223,17 +10829,6 @@ static bool check_log_stats(bool* newval, void** extra, GucSource source)
         GUC_check_errdetail("Cannot enable \"log_statement_stats\" when "
                             "\"log_parser_stats\", \"log_planner_stats\", "
                             "or \"log_executor_stats\" is true.");
-        return false;
-    }
-
-    return true;
-}
-
-#ifdef PGXC
-static bool check_pooler_maximum_idle_time(int* newval, void** extra, GucSource source)
-{
-    if (*newval < 0) {
-        ereport(ERROR, (errmsg("GaussDB can't support idle time less than 0 or more than %d seconds.", INT_MAX)));
         return false;
     }
 
@@ -16279,33 +10874,7 @@ static bool check_pgxc_maintenance_mode(bool* newval, void** extra, GucSource so
     }
 }
 
-static bool check_enable_data_replicate(bool* newval, void** extra, GucSource source)
-{
-    /* Always disable data replication in multi standbys mode*/
-    if (IS_DN_MULTI_STANDYS_MODE()) {
-        *newval = false;
-    }
-    return true;
-}
-
-/*
- * Check if the kernel version greater than suse sp2 (3.0.13)
- * Only a warning is printed to log.
- * Returning false will cause FATAL error and it will not be good.
- */
-static bool check_sctp_support(bool* newval, void** extra, GucSource source)
-{
-    if (*newval == false) {
-        GUC_check_errcode(ERRCODE_FEATURE_NOT_SUPPORTED);
-        GUC_check_errmsg("SET COMM_TCP_MODE TO OFF is no longer supported");
-        *newval = true;
-    }
-
-    return true;
-}
-#endif
-
-static bool check_canonical_path(char** newval, void** extra, GucSource source)
+bool check_canonical_path(char** newval, void** extra, GucSource source)
 {
     /*
      * Since canonicalize_path never enlarges the string, we can just modify
@@ -16318,7 +10887,7 @@ static bool check_canonical_path(char** newval, void** extra, GucSource source)
     return true;
 }
 
-static bool check_directory(char** newval, void** extra, GucSource source)
+bool check_directory(char** newval, void** extra, GucSource source)
 {
     if (*newval != NULL) {
         if (strlen(*newval) == 0) {
@@ -16406,24 +10975,12 @@ static bool check_timezone_abbreviations(char** newval, void** extra, GucSource 
 
     return true;
 }
-static void assign_comm_debug_mode(bool newval, void* extra)
+
+static void assign_thread_working_version_num(int newval, void* extra)
 {
-    gs_set_debug_mode(newval);
-    return;
-}
-static void assign_comm_stat_mode(bool newval, void* extra)
-{
-    gs_set_stat_mode(newval);
-    return;
-}
-static void assign_comm_timer_mode(bool newval, void* extra)
-{
-    gs_set_timer_mode(newval);
-    return;
-}
-static void assign_comm_no_delay(bool newval, void* extra)
-{
-    gs_set_no_delay(newval);
+    if (newval > 0) {
+        gs_set_working_version_num(newval);
+    }
     return;
 }
 
@@ -16468,67 +11025,6 @@ static void assign_comm_fault_injection(int newval, void* extra)
 }
 #endif
 
-static void assign_comm_ackchk_time(int newval, void* extra)
-{
-    gs_set_ackchk_time(newval);
-}
-
-static const char* show_enable_memory_limit(void)
-{
-    char* buf = t_thrd.buf_cxt.show_enable_memory_limit_buf;
-    int size = sizeof(t_thrd.buf_cxt.show_enable_memory_limit_buf);
-    int rcs;
-
-    if (t_thrd.utils_cxt.gs_mp_inited) {
-        rcs = snprintf_s(buf, size, size - 1, "%s", "on");
-        securec_check_ss(rcs, "\0", "\0");
-
-    } else {
-        rcs = snprintf_s(buf, size, size - 1, "%s", "off");
-        securec_check_ss(rcs, "\0", "\0");
-    }
-
-    return buf;
-}
-
-static bool check_adio_debug_guc(bool* newval, void** extra, GucSource source)
-{
-    /* This value is always false no matter how the user sets it.  */
-    if (*newval == true) {
-        *newval = false;
-    }
-
-    return true;
-}
-
-static bool check_adio_function_guc(bool* newval, void** extra, GucSource source)
-{
-    /* This value is always false no matter how the user sets it.  */
-    if (*newval == true) {
-        *newval = false;
-    }
-
-    return true;
-}
-
-static bool check_use_workload_manager(bool* newval, void** extra, GucSource source)
-{
-    /* disable WLM during inplace upgrade */
-    if (u_sess->attr.attr_common.upgrade_mode == 1)
-        *newval = false;
-
-    return true;
-}
-
-static void assign_use_workload_manager(const bool newval, void* extra)
-{
-    if (t_thrd.proc_cxt.MyProcPid != PostmasterPid)
-        return;
-
-    g_instance.wlm_cxt->gscgroup_init_done =
-        newval && u_sess->attr.attr_resource.enable_control_group && g_instance.wlm_cxt->gscgroup_config_parsed;
-}
-
 static void assign_timezone_abbreviations(const char* newval, void* extra)
 {
     /* Do nothing for the boot_val default of NULL */
@@ -16551,66 +11047,6 @@ static void assign_timezone_abbreviations(const char* newval, void* extra)
 static void pg_timezone_abbrev_initialize(void)
 {
     SetConfigOption("timezone_abbreviations", "Default", PGC_POSTMASTER, PGC_S_DYNAMIC_DEFAULT);
-}
-
-static const char* show_archive_command(void)
-{
-    if (XLogArchivingActive())
-        return u_sess->attr.attr_storage.XLogArchiveCommand;
-    else
-        return "(disabled)";
-}
-
-static bool check_maxconnections(int* newval, void** extra, GucSource source)
-{
-#ifdef PGXC
-    if (IS_PGXC_COORDINATOR && *newval > MAX_BACKENDS) {
-        ereport(LOG, (errmsg("PGXC can't support max_connections more than %d.", MAX_BACKENDS)));
-        return false;
-    }
-#endif
-    if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
-            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
-        MAX_BACKENDS) {
-        return false;
-    }
-    return true;
-}
-
-static bool CheckMaxInnerToolConnections(int* newval, void** extra, GucSource source)
-{
-    if (*newval + g_instance.attr.attr_storage.autovacuum_max_workers + g_instance.attr.attr_sql.job_queue_processes +
-            g_instance.attr.attr_network.MaxConnections + AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS > MAX_BACKENDS) {
-        return false;
-    }
-    return true;
-}
-
-static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source)
-{
-    if (g_instance.attr.attr_network.MaxConnections + *newval + g_instance.attr.attr_sql.job_queue_processes +
-            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
-        MAX_BACKENDS) {
-        return false;
-    }
-    return true;
-}
-
-/*
- * Description: Check wheth out of max backends after max job worker threads.
- *
- * Parameters:
- * @in newval: the param of job_queue_processes.
- * Returns: bool
- */
-static bool check_job_max_workers(int* newval, void** extra, GucSource source)
-{
-    if (g_instance.attr.attr_network.MaxConnections + g_instance.attr.attr_storage.autovacuum_max_workers + *newval +
-            AUXILIARY_BACKENDS + AV_LAUNCHER_PROCS + g_instance.attr.attr_network.maxInnerToolConnections >
-        MAX_BACKENDS) {
-        return false;
-    }
-    return true;
 }
 
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source)
@@ -16678,108 +11114,6 @@ static void assign_effective_io_concurrency(int newval, void* extra)
 #endif /* USE_PREFETCH */
 }
 
-/*
- * @Description: parse the input of u_sess->opt_cxt.query_dop to get the u_sess->opt_cxt.parallel_debug_mode
- *
- * @param[IN] newval: new value
- * @param[IN] extra: N/A
- * @param[IN] source: N/A
- * @return: true if value is valid
- */
-static bool parse_query_dop(int* newval, void** extra, GucSource source)
-{
-    int dop_mark = *newval;
-
-#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
-    if ((dop_mark > 2001) && (dop_mark <= (2000 + MAX_QUERY_DOP))) {
-        /*
-         * This mode is for llt, we reduce the parallel threshold to parallelize
-         * as much plan as possible, and do not print parallel plan so there
-         * will not be any fail in fastcheck.
-         */
-        u_sess->opt_cxt.smp_thread_cost = 0;
-        u_sess->opt_cxt.parallel_debug_mode = LLT_MODE;
-        u_sess->opt_cxt.max_query_dop = -1; /* turn off dynamic smp */
-    } else if ((dop_mark > 1001) && (dop_mark <= (1000 + MAX_QUERY_DOP))) {
-        /*
-         * This mode is for function test, we reduce the parallel threshold
-         * to parallelize as much plan as possible, and print parallel plan
-         * so we can analyze the parallel plan.
-         */
-        u_sess->opt_cxt.smp_thread_cost = 0;
-        u_sess->opt_cxt.parallel_debug_mode = DEBUG_MODE;
-        u_sess->opt_cxt.max_query_dop = -1; /* turn off dynamic smp */
-    } else if ((dop_mark > 0) && (dop_mark <= MAX_QUERY_DOP)) {
-        /*
-         * This mode is for performance test and release, we enhance the threshold
-         * to reject low cost parallel groups, so that the performance will not
-         * desend because of SMP.
-         */
-        u_sess->opt_cxt.smp_thread_cost = DEFAULT_SMP_THREAD_COST;
-        u_sess->opt_cxt.parallel_debug_mode = DEFAULT_MODE;
-        u_sess->opt_cxt.max_query_dop = -1; /* turn off dynamic smp */
-    } else if (dop_mark >= MIN_QUERY_DOP && dop_mark <= 0) {
-        u_sess->opt_cxt.max_query_dop = abs(dop_mark);
-        /* turn on debug mode when dynsmp */
-        u_sess->opt_cxt.smp_thread_cost = 0;
-        u_sess->opt_cxt.parallel_debug_mode = DEBUG_MODE;
-    } else {
-        /* should not reach here */
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Current degree of parallelism can only be set within [-64,64]")));
-    }
-
-#else
-    if (dop_mark >= MIN_QUERY_DOP && dop_mark <= MAX_QUERY_DOP) {
-        /*
-         * This mode is for performance test and release, we enhance the threshold
-         * to reject low cost parallel groups, so that the performance will not
-         * desend because of SMP.
-         */
-        u_sess->opt_cxt.smp_thread_cost = DEFAULT_SMP_THREAD_COST;
-        u_sess->opt_cxt.parallel_debug_mode = DEFAULT_MODE;
-    } else {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Current degree of parallelism can only be set within [-64,64]")));
-    }
-#endif
-
-    return true;
-}
-
-/*
- * @Description: assign new value to query_dop.
- *
- * @param[IN] newval: new value
- * @param[IN] extra: N/A
- * @return: void
- */
-static void AssignQueryDop(int newval, void* extra)
-{
-    if (newval > 0) {
-        u_sess->opt_cxt.query_dop = newval % 1000;
-        u_sess->opt_cxt.query_dop_store = u_sess->opt_cxt.query_dop;
-        u_sess->opt_cxt.max_query_dop = -1; /* turn off dynamic smp */
-    } else if (newval <= 0) {
-        if (newval == -1) {
-            /* -1 means not parallel */
-            u_sess->opt_cxt.query_dop = 1;
-            u_sess->opt_cxt.query_dop_store = 1;
-        } else {
-            /*
-             * only set query_dop here to indicate we have
-             * dop turned on. but later we generate optimal dop
-             */
-            u_sess->opt_cxt.query_dop = 2;
-            u_sess->opt_cxt.query_dop_store = 2;
-        }
-
-        u_sess->opt_cxt.max_query_dop = abs(newval);
-    }
-}
-
 static void assign_pgstat_temp_directory(const char* newval, void* extra)
 {
     /* check_canonical_path already canonicalized newval for us */
@@ -16805,81 +11139,6 @@ static void assign_pgstat_temp_directory(const char* newval, void* extra)
     u_sess->stat_cxt.pgstat_stat_filename = fname;
 }
 
-static bool check_ssl_ciphers(char** newval, void**extra, GucSource)
-{
-	char* cipherStr = NULL;
-    char* cipherStr_tmp = NULL;
-    char* token = NULL;
-    int counter = 1;
-    char** ciphers_list = NULL;
-    bool find_ciphers_in_list = false;
-    int i = 0;
-    char* ptok = NULL;
-    const char* ssl_ciphers_list[] = {"DHE-RSA-AES256-GCM-SHA384",
-    "DHE-RSA-AES128-GCM-SHA256",
-    "DHE-RSA-AES256-CCM",
-    "DHE-RSA-AES128-CCM",
-    NULL};
-    if (*newval == NULL || **newval == '\0' || **newval == ';') {
-        ereport(ERROR, (errmsg("sslciphers can not be null")));
-    } else if (strcasecmp(*newval, "ALL") == 0){
-        return true;
-    } else {
-        cipherStr = (char*)strchr(*newval, ';'); /*if the sslciphers does not contain character ';',the count is 1*/
-        while (cipherStr != NULL) {
-            counter++;
-            cipherStr++;
-            if (*cipherStr == '\0') {
-                break;
-            }
-            if (cipherStr == strchr(cipherStr, ';')) {
-                ereport(ERROR, (errmsg("unrecognized ssl ciphers name: \"%s\"", *newval)));
-            }
-            cipherStr = strchr(cipherStr, ';');
-        }
-        ciphers_list = (char**)palloc(counter * sizeof(char*));
-
-        Assert(ciphers_list != NULL);
-        if (ciphers_list == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("malloc failed")));
-        }
-
-        cipherStr_tmp = pstrdup(*newval);
-        if (cipherStr_tmp == NULL) {
-            pfree_ext(ciphers_list);
-            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("malloc failed")));
-        }
-        token = strtok_r(cipherStr_tmp, ";", &ptok);
-        while (token != NULL) {
-            for (int j = 0; ssl_ciphers_list[j] != NULL; j++) {
-                if (strlen(ssl_ciphers_list[j]) == strlen(token) &&
-                    strncmp(ssl_ciphers_list[j], token, strlen(token)) == 0) {
-                    ciphers_list[i] = (char*)ssl_ciphers_list[j];
-                    find_ciphers_in_list = true;
-                    break;
-                }
-            }
-            if (!find_ciphers_in_list) {
-                const int maxCipherStrLen = 64;
-                char errormessage[maxCipherStrLen] = {0};
-                errno_t errorno = EOK;
-                errorno = strncpy_s(errormessage, sizeof(errormessage), token, sizeof(errormessage) - 1);
-                securec_check(errorno, cipherStr_tmp, ciphers_list, "\0");
-                errormessage[maxCipherStrLen-1] = '\0';
-                pfree_ext(cipherStr_tmp);
-                pfree_ext(ciphers_list);
-                ereport(ERROR, (errmsg("unrecognized ssl ciphers name: \"%s\"", errormessage)));
-            }
-            token = strtok_r(NULL, ";", &ptok);
-            i++;
-            find_ciphers_in_list = false;
-        }
-    }
-    pfree_ext(cipherStr_tmp);
-    pfree_ext(ciphers_list);
-    return true;
-}
-
 static bool check_application_name(char** newval, void** extra, GucSource source)
 {
     /* Only allow clean ASCII chars in the application name */
@@ -16899,297 +11158,6 @@ static void assign_application_name(const char* newval, void* extra)
     pgstat_report_appname(newval);
 }
 
-static void assign_connection_info(const char* newval, void* extra)
-{
-    /* Update the pg_stat_activity view */
-    pgstat_report_conninfo(newval);
-}
-
-static bool check_application_type(int* newval, void** extra, GucSource source)
-{
-    switch (source) {
-        case PGC_S_DYNAMIC_DEFAULT:
-        case PGC_S_ENV_VAR:
-        case PGC_S_ARGV:
-            return false;
-
-        case PGC_S_FILE:
-            *newval = NOT_PERFECT_SHARDING_TYPE;
-            return true;
-
-        case PGC_S_DATABASE:
-        case PGC_S_USER:
-        case PGC_S_DATABASE_USER:
-        case PGC_S_INTERACTIVE:
-        case PGC_S_TEST:
-            *newval = NOT_PERFECT_SHARDING_TYPE;
-            return true;
-
-        case PGC_S_DEFAULT:
-        case PGC_S_CLIENT:
-        case PGC_S_SESSION:
-            return true;
-
-        default:
-            GUC_check_errmsg("Unknown source");
-            return false;
-    }
-}
-
-static bool check_cgroup_name(char** newval, void** extra, GucSource source)
-{
-    /* Only allow clean ASCII chars in the control group name */
-    char* p = NULL;
-
-    for (p = *newval; *p; p++) {
-        if (*p < 32 || *p > 126)
-            *p = '?';
-    }
-
-    p = *newval;
-
-    if (StringIsValid(p) && IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry &&
-        (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET)) {
-        if (0 == g_instance.wlm_cxt->gscgroup_init_done)
-            ereport(ERROR,
-                (errcode(ERRCODE_SYSTEM_ERROR),
-                    errmsg("Failed to initialize Cgroup. "
-                           "Please check if workload manager is enabled "
-                           "and Cgroups have been created!")));
-
-        if (!OidIsValid(t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid))
-            return true;
-
-        WLMNodeGroupInfo* ng = WLMGetNodeGroupByUserId(t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid);
-        if (NULL == ng)
-            ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("Failed to get logic cluster information by user(oid %d).",
-                        t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid)));
-
-        if (-1 == gscgroup_check_group_name(ng, p))
-            return false;
-    }
-
-    return true;
-}
-
-static void assign_cgroup_name(const char* newval, void* extra)
-{
-    /* set "control_group" global variable */
-    if (IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry && newval && *newval) {
-        if (g_instance.wlm_cxt->gscgroup_init_done == 0)
-            return;
-
-        if (!OidIsValid(t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid))
-            return;
-
-        if (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET) {
-            WLMNodeGroupInfo* ng = WLMGetNodeGroupByUserId(t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid);
-            if (NULL == ng)
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_OBJECT),
-                        errmsg("Failed to get logic cluster information by user(oid %d).",
-                            t_thrd.shemem_ptr_cxt.MyBEEntry->st_userid)));
-
-            gscgroup_update_hashtbl(ng, u_sess->wlm_cxt->group_keyname);
-            WLMSetControlGroup(u_sess->wlm_cxt->group_keyname);
-        }
-    }
-}
-
-static const char* show_cgroup_name(void)
-{
-    return u_sess->wlm_cxt->control_group;
-}
-
-static bool check_query_band_name(char** newval, void** extra, GucSource source)
-{
-    /* Only allow clean ASCII chars in the application name */
-    char* p = NULL;
-
-    for (p = *newval; *p; p++) {
-        if (*p < 32 || *p > 126)
-            *p = '?';
-    }
-
-    return true;
-}
-
-/* function: check_session_respool
- * description: check GUC session_respool is invalid or not
- * arguments:
- *     newval: the input string for checking
- *     extra: the extra information
- *     source: the GUC Source information
- * return value: ture of false
- */
-static bool check_session_respool(char** newval, void** extra, GucSource source)
-{
-    /* Only allow clean ASCII chars in the session_respool name */
-    char* p = NULL;
-
-    for (p = *newval; *p; p++) {
-        if (*p < 32 || *p > 126)
-            *p = '?';
-    }
-
-    p = *newval;
-
-    if (StringIsValid(p) && t_thrd.shemem_ptr_cxt.MyBEEntry &&
-        (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET))
-        WLMCheckSessionRespool(p);
-
-    return true;
-}
-
-/* function: assign_session_respool
- * description: to parse the GUC value and assign to the global variable
- * arguments: standard GUC arguments
- */
-static void assign_session_respool(const char* newval, void* extra)
-{
-    /* set "control_group" global variable */
-    if (newval && *newval && t_thrd.shemem_ptr_cxt.MyBEEntry &&
-        (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET))
-        WLMSetSessionRespool(newval);
-    else
-        WLMSetSessionRespool(INVALID_POOL_NAME);
-}
-
-/* function: show_session_respool
- * description: to show session_respool
- * arguments:
- */
-static const char* show_session_respool(void)
-{
-    return u_sess->wlm_cxt->session_respool;
-}
-
-/* function: check_memory_detail_tracking
- * description: to verify if the input value is correct.
- * arguments:
- *     newval: the input string for checking
- *     extra: the extra information
- *     source: the GUC Source information
- * return value: ture of false
- *
- * Notes that: this GUC is only used on DEBUG version;
- *             the format should be input as "seqnum:plannodeid".
- *
- */
-static bool check_memory_detail_tracking(char** newval, void** extra, GucSource source)
-{
-#ifdef MEMORY_CONTEXT_CHECKING
-    /* Only allow clean ASCII chars in the string of operator memory log */
-    char *p, *q;
-
-    for (p = *newval; *p; p++) {
-        if (*p < 32 || *p > 126)
-            *p = '?';
-    }
-
-    p = *newval;
-    if (p && *p != '\0' && (NULL == (q = strchr(p, ':')) || 0 == isdigit(*(q + 1))))
-        return false;
-
-    return true;
-#else
-
-#ifndef FASTCHECK
-    char* p = *newval;
-
-    if (p && *p != '\0')
-        ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("unsupported to set memory_detail_tracking value under release version.")));
-#endif
-    return true;
-#endif
-}
-
-/* function: check_u_sess->attr.attr_memory.memory_detail_tracking
- * description: to parse the GUC value and assign to the global variable
- * arguments: standard GUC arguments
- */
-static void assign_memory_detail_tracking(const char* newval, void* extra)
-{
-#ifdef MEMORY_CONTEXT_CHECKING
-    MemoryTrackingParseGUC(newval);
-#endif
-}
-
-/* function: show_memory_detail_tracking
- * description: to show the information
- * arguments: standard GUC arguments
- */
-static const char* show_memory_detail_tracking(void)
-{
-    char* buf = t_thrd.buf_cxt.show_memory_detail_tracking_buf;
-
-#ifdef MEMORY_CONTEXT_CHECKING
-    int size = sizeof(t_thrd.buf_cxt.show_memory_detail_tracking_buf);
-    errno_t rc = snprintf_s(buf,
-        size,
-        size - 1,
-        "Memory Context Sequent Count: %d, Plan Nodeid: %d",
-        t_thrd.utils_cxt.memory_track_sequent_count,
-        t_thrd.utils_cxt.memory_track_plan_nodeid);
-    securec_check_ss(rc, "\0", "\0");
-#endif
-    return buf;
-}
-
-/* function: assign_collect_timer
- * description: assign collect timer
- * arguments: standard GUC arguments
- */
-static void assign_collect_timer(int newval, void* extra)
-{
-#define WLM_COLLECT_INVALID_TIME 5
-#define WLM_COLLECT_MIN_TIME 30
-
-    if (newval < WLM_COLLECT_INVALID_TIME && u_sess->utils_cxt.guc_new_value)
-        *u_sess->utils_cxt.guc_new_value = WLM_COLLECT_MIN_TIME;
-}
-
-static bool check_statement_mem(int* newval, void** extra, GucSource source)
-{
-    if ((*newval < 0) || (*newval > 0 && *newval < SIMPLE_THRESHOLD)) {
-        if (source != PGC_S_FILE)
-            ereport(WARNING,
-                (errmsg(
-                    "query mem can not be set lower than %dMB, so the guc variable is not avaiable.", MEM_THRESHOLD)));
-        *newval = 0;
-    }
-
-    return true;
-}
-
-static bool check_statement_max_mem(int* newval, void** extra, GucSource source)
-{
-    if ((*newval < 0) || (*newval > 0 && *newval < SIMPLE_THRESHOLD)) {
-        if (source != PGC_S_FILE)
-            ereport(WARNING,
-                (errmsg("query max mem can not be set lower than %dMB, so the guc variable is not avaiable.",
-                    MEM_THRESHOLD)));
-        *newval = 0;
-    }
-
-    return true;
-}
-
-static const char* show_unix_socket_permissions(void)
-{
-    char* buf = t_thrd.buf_cxt.show_unix_socket_permissions_buf;
-    int size = sizeof(t_thrd.buf_cxt.show_unix_socket_permissions_buf);
-    int rcs = 0;
-
-    rcs = snprintf_s(buf, size, size - 1, "%04o", g_instance.attr.attr_network.Unix_socket_permissions);
-    securec_check_ss(rcs, "\0", "\0");
-    return buf;
-}
-
 static const char* show_log_file_mode(void)
 {
     char* buf = t_thrd.buf_cxt.show_log_file_mode_buf;
@@ -17202,25 +11170,11 @@ static const char* show_log_file_mode(void)
 }
 
 /*
- * Brief			: Check the value of int-type parameter for security
- * Description		:
- * Notes			:
- */
-static bool check_int_parameter(int* newval, void** extra, GucSource source)
-{
-    if (*newval >= 0) {
-        return true;
-    } else {
-        return false;
-    }
-}
-
-/*
  * Brief			: Check the value of double-type parameter for security
  * Description		:
  * Notes			:
  */
-static bool check_double_parameter(double* newval, void** extra, GucSource source)
+bool check_double_parameter(double* newval, void** extra, GucSource source)
 {
     if (*newval >= 0) {
         return true;
@@ -17380,7 +11334,7 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
             salt[sizeof(salt) - 1] = '\0';
 
             iteration_count = decode_iteration(&rolepasswd[SM3_PASSWD_LEN]);
-            if (!gs_sm3_encrypt(passwd, salt, strlen(salt), encrypted_sm3_password, NULL, iteration_count)) {
+            if (!GsSm3Encrypt(passwd, salt, strlen(salt), encrypted_sm3_password, NULL, iteration_count)) {
                 str_reset(passwd);
                 str_reset(rolepasswd);
                 ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("sm3-password encryption failed")));
@@ -17524,8 +11478,7 @@ static bool verify_setrole_passwd(const char* rolename, char* passwd, bool IsSet
  * Description		: If the format of the channel is right return true, else return false.
  * Notes			:
  */
-
-static bool CheckReplChannel(const char* ChannelInfo)
+bool CheckReplChannel(const char* ChannelInfo)
 {
     char* iter = NULL;
     char* ReplStr = NULL;
@@ -17599,532 +11552,6 @@ static bool CheckReplChannel(const char* ChannelInfo)
 
     pfree(ReplStr);
     return true;
-}
-
-/*
- * @@GaussDB@@
- * Brief			: Get the number of right-format-channel in a replconninfo.
- * Description		: Check each channel of a replconninfo, and return the number of the right-format ones.
- * Notes			:
- */
-static int GetLengthAndCheckReplConn(const char* ConnInfoList)
-{
-    int repl_len = 0;
-    char* ReplStr = NULL;
-    char* token = NULL;
-    char* tmp_token = NULL;
-
-    if (NULL == ConnInfoList) {
-        return repl_len;
-    } else {
-        ReplStr = pstrdup(ConnInfoList);
-        if (NULL == ReplStr) {
-            ereport(LOG, (errmsg("ConnInfoList is null")));
-            return repl_len;
-        }
-        token = strtok_r(ReplStr, ",", &tmp_token);
-        while (token != NULL) {
-            if (CheckReplChannel(token)) {
-                repl_len++;
-            }
-
-            token = strtok_r(NULL, ",", &tmp_token);
-        }
-    }
-
-    pfree(ReplStr);
-    return repl_len;
-}
-
-/*
- * @@GaussDB@@
- * Brief			: Parse one replconninfo, and get the connect info of each channel.
- * Description		: Parse one replconninfo, get the connect info of each channel.
- *					  Then fill the ReplConnInfo array, and return it.
- * Notes			:
- */
-static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength)
-{
-    ReplConnInfo* repl = NULL;
-
-    int repl_length = 0;
-    char* iter = NULL;
-    char* pNext = NULL;
-    char* ReplStr = NULL;
-    char* token = NULL;
-    char* tmp_token = NULL;
-    char* ptr = NULL;
-    int parsed = 0;
-    int iplen = 0;
-    int portlen = strlen("localport");
-    int rportlen = strlen("remoteport");
-    int localservice_len = strlen("localservice");
-    int remoteservice_len = strlen("remoteservice");
-    int local_heartbeat_len = strlen("localheartbeatport");
-    int remote_heartbeat_len = strlen("remoteheartbeatport");
-    int cascadeLen = strlen("iscascade");
-
-    errno_t errorno = EOK;
-
-    if (InfoLength != NULL) {
-        *InfoLength = 0;
-    }
-
-    if (NULL == ConnInfoList || NULL == InfoLength) {
-        ereport(LOG, (errmsg("parameter error in ParseReplConnInfo()")));
-        return NULL;
-    } else {
-        ReplStr = pstrdup(ConnInfoList);
-        if (NULL == ReplStr) {
-            return NULL;
-        }
-
-        ptr = ReplStr;
-        while (*ptr != '\0') {
-            if (*ptr != ' ')
-                break;
-            ptr++;
-        }
-        if (*ptr == '\0') {
-            pfree(ReplStr);
-            return NULL;
-        }
-
-        repl_length = GetLengthAndCheckReplConn(ReplStr);
-        if (0 == repl_length) {
-            pfree(ReplStr);
-            return NULL;
-        }
-        repl = (ReplConnInfo*)MemoryContextAlloc(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB),
-            sizeof(ReplConnInfo) * repl_length);
-        if (NULL == repl) {
-            pfree(ReplStr);
-            return NULL;
-        }
-        errorno = memset_s(repl, sizeof(ReplConnInfo) * repl_length, 0, sizeof(ReplConnInfo) * repl_length);
-        securec_check(errorno, "\0", "\0");
-        token = strtok_r(ReplStr, ",", &tmp_token);
-        while (token != NULL) {
-            /* localhost */
-            iter = strstr(token, "localhost");
-            if (NULL == iter) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            iter += strlen("localhost");
-            while (' ' == *iter || '=' == *iter) {
-                iter++;
-            }
-            if (!isdigit(*iter) && *iter != ':' && !isalpha(*iter)) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            pNext = iter;
-            iplen = 0;
-            while (*pNext != ' ' && 0 != strncmp(pNext, "localport", portlen)) {
-                iplen++;
-                pNext++;
-            }
-            errorno = strncpy_s(repl[parsed].localhost, IP_LEN - 1, iter, iplen);
-            securec_check(errorno, "\0", "\0");
-            repl[parsed].localhost[iplen] = '\0';
-
-            /* localport */
-            iter = strstr(token, "localport");
-            if (NULL == iter) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            iter += portlen;
-            while (' ' == *iter || '=' == *iter) {
-                iter++;
-            }
-            if (!isdigit(*iter)) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            repl[parsed].localport = atoi(iter);
-
-            /* localservice */
-            iter = strstr(token, "localservice");
-            if (NULL != iter) {
-                iter += localservice_len;
-                while (' ' == *iter || '=' == *iter) {
-                    iter++;
-                }
-
-                if (isdigit(*iter)) {
-                    repl[parsed].localservice = atoi(iter);
-                }
-            }
-
-            /* localheartbeatport */
-            iter = strstr(token, "localheartbeatport");
-            if (NULL != iter) {
-                iter += local_heartbeat_len;
-                while (' ' == *iter || '=' == *iter) {
-                    iter++;
-                }
-
-                if (isdigit(*iter)) {
-                    repl[parsed].localheartbeatport = atoi(iter);
-                }
-            }
-
-            /* remotehost */
-            iter = strstr(token, "remotehost");
-            if (NULL == iter) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            iter += strlen("remotehost");
-            while (' ' == *iter || '=' == *iter) {
-                iter++;
-            }
-            if (!isdigit(*iter) && *iter != ':' && !isalpha(*iter)) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            pNext = iter;
-            iplen = 0;
-            while (*pNext != ' ' && 0 != strncmp(pNext, "remoteport", rportlen)) {
-                iplen++;
-                pNext++;
-            }
-            iplen = (iplen >= IP_LEN) ? (IP_LEN - 1) : iplen;
-            errorno = strncpy_s(repl[parsed].remotehost, IP_LEN, iter, iplen);
-            securec_check(errorno, "\0", "\0");
-            repl[parsed].remotehost[iplen] = '\0';
-
-            /* remoteport */
-            iter = strstr(token, "remoteport");
-            if (NULL == iter) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            iter += rportlen;
-            while (' ' == *iter || '=' == *iter) {
-                iter++;
-            }
-            if (!isdigit(*iter)) {
-                token = strtok_r(NULL, ",", &tmp_token);
-                continue;
-            }
-            repl[parsed].remoteport = atoi(iter);
-
-            /* remoteservice */
-            iter = strstr(token, "remoteservice");
-            if (NULL != iter) {
-                iter += remoteservice_len;
-                while (' ' == *iter || '=' == *iter) {
-                    iter++;
-                }
-
-                if (isdigit(*iter)) {
-                    repl[parsed].remoteservice = atoi(iter);
-                }
-            }
-
-            /* remote heartbeat port */
-            iter = strstr(token, "remoteheartbeatport");
-            if (NULL != iter) {
-                iter += remote_heartbeat_len;
-                while (' ' == *iter || '=' == *iter) {
-                    iter++;
-                }
-
-                if (isdigit(*iter)) {
-                    repl[parsed].remoteheartbeatport = atoi(iter);
-                }
-            }
-
-            /* is a cascade standby */
-            iter = strstr(token, "iscascade");
-            if (NULL != iter) {
-                iter += cascadeLen;
-
-                if (strstr(iter, "true") != NULL) {
-                    repl[parsed].isCascade = true;
-                }
-            }
-
-            token = strtok_r(NULL, ",", &tmp_token);
-            parsed++;
-        }
-    }
-
-    pfree(ReplStr);
-
-    *InfoLength = repl_length;
-
-    return repl;
-}
-
-static bool check_replication_type(int* newval, void** extra, GucSource source)
-{
-    if (*newval == RT_WITH_MULTI_STANDBY) {
-        if (!IsInitdb && (is_feature_disabled(DOUBLE_LIVE_DISASTER_RECOVERY_IN_THE_SAME_CITY) ||
-                             is_feature_disabled(DISASTER_RECOVERY_IN_TWO_PLACES_AND_THREE_CENTRES) ||
-                             is_feature_disabled(HA_SINGLE_PRIMARY_MULTI_STANDBY)))
-            ereport(FATAL,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("replication_type is not allowed set 1 "
-                           "in Current Version. Set to default (0).")));
-#ifndef ENABLE_MULTIPLE_NODES
-    } else {
-        ereport(FATAL, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-            errmsg("replication_type is only allowed set to 1, newval=%d.", *newval)));
-#endif
-    }
-    return true;
-}
-
-/*
- * @@GaussDB@@
- * Brief			: Check all the channel of one replconninfo.
- * Description		: Check each channel of one replconninfo. If one channel'format is not right, then return false.
- * Notes			:
- */
-static bool check_replconninfo(char** newval, void** extra, GucSource source)
-{
-    char* ReplStr = NULL;
-    char* token = NULL;
-    char* tmp_token = NULL;
-    char* ptr = NULL;
-    if (NULL == newval) {
-        return false;
-    } else {
-        ReplStr = pstrdup(*newval);
-        if (NULL == ReplStr) {
-            return false;
-        }
-        ptr = ReplStr;
-        while (*ptr != '\0') {
-            if (*ptr != ' ')
-                break;
-            ptr++;
-        }
-        if (*ptr == '\0') {
-            pfree(ReplStr);
-            return true;
-        }
-        token = strtok_r(ReplStr, ",", &tmp_token);
-        while (token != NULL) {
-            if (!CheckReplChannel(token)) {
-                pfree(ReplStr);
-                return false;
-            }
-
-            token = strtok_r(NULL, ",", &tmp_token);
-        }
-    }
-
-    pfree(ReplStr);
-    return true;
-}
-
-#ifndef ENABLE_MULTIPLE_NODES
-/*
- * @@GaussDB@@
- * Brief			: Determine if all eight replconninfos are empty.
- * Description		:
- * Notes			:
- */
-static inline bool GetReplCurArrayIsNull()
-{
-    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
-        if (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL) {
-            return false;
-        }
-    }
-    return true;
-}
-#endif
-
-/*
- * @@GaussDB@@
- * Brief			: Parse replconninfo1.
- * Description		:
- * Notes			:
- */
-static void assign_replconninfo1(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[1] != NULL)
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[1]);
-
-    /*
-     * We may need to move ReplConnArray to session level.
-     * At present, ReplConnArray is only used by PM, so it is safe.
-     */
-    t_thrd.postmaster_cxt.ReplConnArray[1] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[1] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[1], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[1] = true;
-
-#ifndef ENABLE_MULTIPLE_NODES
-        /* perceive single --> primary_standby */
-        if (t_thrd.postmaster_cxt.HaShmData != NULL &&
-            t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE &&
-            !GetReplCurArrayIsNull()) {
-                t_thrd.postmaster_cxt.HaShmData->current_mode = PRIMARY_MODE;
-        }
-#endif
-    }
-}
-
-/*
- * @@GaussDB@@
- * Brief			: Parse replconninfo2.
- * Description		:
- * Notes			:
- */
-static void assign_replconninfo2(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[2] != NULL)
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[2]);
-
-    t_thrd.postmaster_cxt.ReplConnArray[2] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[2] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[2], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[2] = true;
-    }
-}
-
-static void assign_replconninfo3(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[3])
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[3]);
-
-    t_thrd.postmaster_cxt.ReplConnArray[3] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[3] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[3], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[3] = true;
-    }
-}
-
-static void assign_replconninfo4(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[4])
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[4]);
-
-    t_thrd.postmaster_cxt.ReplConnArray[4] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[4] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[4], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[4] = true;
-    }
-}
-
-static void assign_replconninfo5(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[5])
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[5]);
-
-    t_thrd.postmaster_cxt.ReplConnArray[5] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[5] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[5], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[5] = true;
-    }
-}
-
-static void assign_replconninfo6(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[6])
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[6]);
-
-    t_thrd.postmaster_cxt.ReplConnArray[6] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[6] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[6], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[6] = true;
-    }
-}
-
-static void assign_replconninfo7(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[7])
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[7]);
-
-    t_thrd.postmaster_cxt.ReplConnArray[7] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[7] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[7], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[7] = true;
-    }
-}
-
-#ifndef ENABLE_MULTIPLE_NODES
-static void assign_replconninfo8(const char* newval, void* extra)
-{
-    int repl_length = 0;
-
-    if (t_thrd.postmaster_cxt.ReplConnArray[8]) {
-        pfree(t_thrd.postmaster_cxt.ReplConnArray[8]);
-    }
-
-    t_thrd.postmaster_cxt.ReplConnArray[8] = ParseReplConnInfo(newval, &repl_length);
-    if (u_sess->attr.attr_storage.ReplConnInfoArr[8] != NULL && newval != NULL &&
-        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[8], newval) != 0) {
-        t_thrd.postmaster_cxt.ReplConnChanged[8] = true;
-    }
-}
-#endif
-/*
- * @@GaussDB@@
- * Brief			: Check inlist2join info.
- * Description		: If inlist2join'format is not right, then return false.
- * Notes			:
- */
-static bool check_inlist2joininfo(char** newval, void** extra, GucSource source)
-{
-    if (NULL == newval) {
-        return false;
-    }
-    if (strcmp((const char*)*newval, (const char*)"disable") == 0 ||
-        strcmp((const char*)*newval, (const char*)"cost_base") == 0 ||
-        strcmp((const char*)*newval, (const char*)"rule_base") == 0) {
-        return true;
-    } else if (atoi((const char*)*newval) <= 0) {
-        GUC_check_errdetail(
-            "Available values: disable, cost_base, rule_base, or any positive integer as a inlist2join threshold");
-        return false;
-    } else
-        return true;
-}
-
-/*
- * @@GaussDB@@
- * Brief			:
- * Description		:  parse inlist2join info.
- * Notes			:
- */
-static void assign_inlist2joininfo(const char* newval, void* extra)
-{
-    int threshold = 0;
-
-    if (strcmp((const char*)newval, (const char*)"disable") == 0) {
-        u_sess->opt_cxt.qrw_inlist2join_optmode = QRW_INLIST2JOIN_DISABLE;
-    } else if (strcmp((const char*)newval, (const char*)"cost_base") == 0) {
-        u_sess->opt_cxt.qrw_inlist2join_optmode = QRW_INLIST2JOIN_CBO;
-    } else if (strcmp((const char*)newval, (const char*)"rule_base") == 0) {
-        u_sess->opt_cxt.qrw_inlist2join_optmode = QRW_INLIST2JOIN_FORCE;
-    } else {
-        threshold = atoi((const char*)newval);
-        if (threshold > 0) {
-            u_sess->opt_cxt.qrw_inlist2join_optmode = threshold;
-        }
-    }
 }
 
 /*
@@ -18449,6 +11876,7 @@ void comment_guc_lines(char** optlines, const char** opt_name)
                     optlines[opt_name_index][0] = '#';
                     rc = strncpy_s(optlines[opt_name_index] + 1, real_newsize -1, optline_copy, real_newsize - 2);
                     securec_check(rc, "\0", "\0");
+                    pfree_ext(optline_copy);
 
                     if (newsize > MAX_PARAM_LEN) {
                         ereport(WARNING, (errmsg("guc '%s' is out of 1024", optlines[opt_name_index])));
@@ -19148,69 +12576,6 @@ static bool logging_module_guc_check(char* newval)
 }
 
 /*
- * @Description: show the content of GUC "logging_module"
- * @Return: logging_module descripting text
- * @See also:
- */
-static const char* logging_module_guc_show(void)
-{
-    /*
-     * showing results is as following:
-     *     ALL,on(mod1,mod2,...),off(mod3,mod4,...)
-     */
-    StringInfoData outbuf;
-    initStringInfo(&outbuf);
-
-    const char* mod_name = NULL;
-    bool rm_last_delim = false;
-
-    /* copy the special "ALL" */
-    mod_name = get_valid_module_name(MOD_ALL);
-    appendStringInfo(&outbuf, "%s%c", mod_name, MOD_DELIMITER);
-
-    /* copy the string "on(" */
-    appendStringInfo(&outbuf, "on(");
-
-    /* copy each module name whose logging is enable */
-    rm_last_delim = false;
-    for (int i = MOD_ALL + 1; i < MOD_MAX; i++) {
-        if (module_logging_is_on((ModuleId)i)) {
-            /* FOR condition and module_logging_is_on() will assure its requirement.  */
-            mod_name = get_valid_module_name((ModuleId)i);
-            appendStringInfo(&outbuf, "%s%c", mod_name, MOD_DELIMITER);
-            rm_last_delim = true;
-        }
-    }
-    if (rm_last_delim) {
-        --outbuf.len;
-        outbuf.data[outbuf.len] = '\0';
-    }
-
-    /* copy the string "),off(" */
-    appendStringInfo(&outbuf, "),off(");
-
-    /* copy each module name whose logging is disable */
-    rm_last_delim = false;
-    for (int i = MOD_ALL + 1; i < MOD_MAX; i++) {
-        if (!module_logging_is_on((ModuleId)i)) {
-            /* FOR condition will assure its requirement.  */
-            mod_name = get_valid_module_name((ModuleId)i);
-            appendStringInfo(&outbuf, "%s%c", mod_name, MOD_DELIMITER);
-            rm_last_delim = true;
-        }
-    }
-    if (rm_last_delim) {
-        --outbuf.len;
-        outbuf.data[outbuf.len] = '\0';
-    }
-
-    /* end with string ")" */
-    appendStringInfoChar(&outbuf, ')');
-
-    return outbuf.data;
-}
-
-/*
  * @Description: check whether new value is well-formatted for GUC logging_module.
  * @IN extra: unused
  * @IN newval: new value
@@ -19218,7 +12583,7 @@ static const char* logging_module_guc_show(void)
  * @Return: if newval is well-formatted, return true; otherwise return false.
  * @See also:
  */
-static bool logging_module_check(char** newval, void** extra, GucSource source)
+bool logging_module_check(char** newval, void** extra, GucSource source)
 {
     ((void)extra);  /* not used argument */
     ((void)source); /* not used argument */
@@ -19235,7 +12600,7 @@ static bool logging_module_check(char** newval, void** extra, GucSource source)
  * @IN newval: new value
  * @See also:
  */
-static void logging_module_guc_assign(const char* newval, void* extra)
+void logging_module_guc_assign(const char* newval, void* extra)
 {
     ((void)extra); /* not used argument */
 
@@ -19244,34 +12609,6 @@ static void logging_module_guc_assign(const char* newval, void* extra)
     (void)logging_module_guc_check<true>(tmpNewVal);
     pfree(tmpNewVal);
 }
-
-/*
- * @Description: update plog_merge_age GUC argument according new value.
- * @IN extra: unused
- * @IN newval: new value about merging plog age, whose unit is MS.
- * @See also:
- */
-static void plog_merge_age_assign(int newval, void* extra)
-{
-    ((void)extra); /* not used argument */
-    t_thrd.log_cxt.plog_msg_switch_tm.tv_sec = newval / MS_PER_S;
-    t_thrd.log_cxt.plog_msg_switch_tm.tv_usec = (newval - MS_PER_S * t_thrd.log_cxt.plog_msg_switch_tm.tv_sec) * 1000;
-}
-
-#ifndef ENABLE_MULTIPLE_NODES
-static bool CheckUniqueSqlCleanRatio(double* newval, void** extra, GucSource source)
-{
-    if (g_instance.attr.attr_common.enable_auto_clean_unique_sql && *newval == 0) {
-            ereport(WARNING,
-                (errmsg("Can't set unique_sql_clean_ratio to 0 when enable_auto_clean_unique_sql is true. "
-                        "Reset it's value to default(%lf). If you want to disable auto clean unique sql, "
-                        "please set enable_auto_clean_unique_sql to false.",
-                    DEFAULT_CLEAN_RATIO)));
-        *newval = DEFAULT_CLEAN_RATIO;
-    }
-    return true;
-}
-#endif
 
 /* ------------------------------------------------------------ */
 /* GUC hooks for inplace/grey upgrade                                                         */
@@ -19337,178 +12674,6 @@ static void assign_is_inplace_upgrade(const bool newval, void* extra)
 {
     if (newval && u_sess->attr.attr_common.XactReadOnly)
         u_sess->attr.attr_common.XactReadOnly = false;
-}
-
-#define atooid(x) ((Oid)strtoul((x), NULL, 10))
-
-#define catalog_oid_list_length 7
-#define proc_oid_list_length 2
-#define type_oid_list_length 4
-#define namespace_oid_list_length 2
-#define general_oid_list_length 2
-
-static bool check_and_assign_catalog_oids(List* elemlist)
-{
-    if (list_length(elemlist) != catalog_oid_list_length)
-        return false;
-
-    bool isshared = false;
-    bool needstorage = false;
-    Oid relid = InvalidOid;
-    Oid comtypeid = InvalidOid;
-    Oid toastrelid = InvalidOid;
-    Oid indexrelid = InvalidOid;
-
-    if (!parse_bool((char*)list_nth(elemlist, 1), &isshared) ||
-        !parse_bool((char*)list_nth(elemlist, 2), &needstorage) ||
-        (relid = atooid((char*)list_nth(elemlist, 3))) >= FirstBootstrapObjectId ||
-        (comtypeid = atooid((char*)list_nth(elemlist, 4))) >= FirstBootstrapObjectId ||
-        (toastrelid = atooid((char*)list_nth(elemlist, 5))) >= FirstBootstrapObjectId ||
-        (indexrelid = atooid((char*)list_nth(elemlist, 6))) >= FirstBootstrapObjectId)
-        return false;
-
-    u_sess->upg_cxt.new_catalog_isshared = isshared;
-    u_sess->upg_cxt.new_catalog_need_storage = needstorage;
-    u_sess->upg_cxt.Inplace_upgrade_next_heap_pg_class_oid = relid;
-    u_sess->upg_cxt.Inplace_upgrade_next_pg_type_oid = comtypeid;
-    u_sess->upg_cxt.Inplace_upgrade_next_toast_pg_class_oid = toastrelid;
-    u_sess->upg_cxt.Inplace_upgrade_next_index_pg_class_oid = indexrelid;
-    if (isshared) {
-        MemoryContext oldcxt;
-        oldcxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
-
-        if (OidIsValid(relid))
-            u_sess->upg_cxt.new_shared_catalog_list = lappend_oid(u_sess->upg_cxt.new_shared_catalog_list, relid);
-        if (OidIsValid(toastrelid))
-            u_sess->upg_cxt.new_shared_catalog_list = lappend_oid(u_sess->upg_cxt.new_shared_catalog_list, toastrelid);
-        if (OidIsValid(indexrelid))
-            u_sess->upg_cxt.new_shared_catalog_list = lappend_oid(u_sess->upg_cxt.new_shared_catalog_list, indexrelid);
-
-        MemoryContextSwitchTo(oldcxt);
-    }
-
-    return true;
-}
-
-static bool check_and_assign_proc_oids(List* elemlist)
-{
-    if (list_length(elemlist) != proc_oid_list_length)
-        return false;
-
-    Oid procid = InvalidOid;
-
-    if ((procid = atooid((char*)list_nth(elemlist, 1))) >= FirstBootstrapObjectId)
-        return false;
-
-    u_sess->upg_cxt.Inplace_upgrade_next_pg_proc_oid = procid;
-
-    return true;
-}
-
-static bool check_and_assign_type_oids(List* elemlist)
-{
-    if (list_length(elemlist) != type_oid_list_length)
-        return false;
-
-    Oid typeoid = InvalidOid;
-    Oid arraytypeid = InvalidOid;
-    char typtype = TYPTYPE_BASE;
-
-    if ((typeoid = atooid((char*)list_nth(elemlist, 1))) >= FirstBootstrapObjectId ||
-        (arraytypeid = atooid((char*)list_nth(elemlist, 2))) >= FirstBootstrapObjectId ||
-        ((typtype = *(char*)list_nth(elemlist, 3)) != TYPTYPE_BASE && typtype != TYPTYPE_PSEUDO))
-        return false;
-
-    u_sess->upg_cxt.Inplace_upgrade_next_pg_type_oid = typeoid;
-    u_sess->upg_cxt.Inplace_upgrade_next_array_pg_type_oid = arraytypeid;
-    u_sess->cmd_cxt.TypeCreateType = typtype;
-
-    return true;
-}
-
-static bool check_and_assign_namespace_oids(List* elemlist)
-{
-    if (list_length(elemlist) != namespace_oid_list_length)
-        return false;
-
-    Oid namespaceid = InvalidOid;
-
-    if ((namespaceid = atooid((char*)list_nth(elemlist, 1))) >= FirstBootstrapObjectId)
-        return false;
-
-    u_sess->upg_cxt.Inplace_upgrade_next_pg_namespace_oid = namespaceid;
-
-    return true;
-}
-
-static bool check_and_assign_general_oids(List* elemlist)
-{
-    if (list_length(elemlist) != general_oid_list_length)
-        return false;
-
-    Oid generalid = InvalidOid;
-
-    if ((generalid = atooid((char*)list_nth(elemlist, 1))) >= FirstBootstrapObjectId)
-        return false;
-
-    u_sess->upg_cxt.Inplace_upgrade_next_general_oid = generalid;
-
-    return true;
-}
-
-static bool check_inplace_upgrade_next_oids(char** newval, void** extra, GucSource source)
-{
-    if (!u_sess->attr.attr_common.IsInplaceUpgrade && source != PGC_S_DEFAULT) {
-        ereport(WARNING, (errmsg("Can't set next object oids while not performing upgrade.")));
-        *newval = NULL;
-    }
-
-    if (*newval == NULL)
-        return true;
-
-    char* rawstring = NULL;
-    List* elemlist = NIL;
-
-    /* Need a modifiable copy of string */
-    rawstring = pstrdup(*newval);
-
-    /* Parse string into list of identifiers */
-    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
-        /* syntax error in list */
-        GUC_check_errdetail("List syntax is invalid.");
-        pfree(rawstring);
-        list_free(elemlist);
-        return false;
-    }
-
-    char* objectkind = (char*)list_nth(elemlist, 0);
-    bool checkpass = false;
-
-    if (pg_strcasecmp(objectkind, "IUO_CATALOG") == 0)
-        checkpass = check_and_assign_catalog_oids(elemlist);
-    else if (pg_strcasecmp(objectkind, "IUO_PROC") == 0)
-        checkpass = check_and_assign_proc_oids(elemlist);
-    else if (pg_strcasecmp(objectkind, "IUO_TYPE") == 0)
-        checkpass = check_and_assign_type_oids(elemlist);
-    else if (pg_strcasecmp(objectkind, "IUO_NAMESPACE") == 0)
-        checkpass = check_and_assign_namespace_oids(elemlist);
-    else if (pg_strcasecmp(objectkind, "IUO_GENERAL") == 0)
-        checkpass = check_and_assign_general_oids(elemlist);
-    else {
-        GUC_check_errdetail("String of object kind is invalid.");
-        pfree(rawstring);
-        list_free(elemlist);
-        return false;
-    }
-
-    pfree(rawstring);
-    list_free(elemlist);
-
-    if (!checkpass) {
-        GUC_check_errdetail("Format of object oid assignment is invalid.");
-        return false;
-    } else
-        return true;
 }
 
 /*
@@ -19693,7 +12858,7 @@ static const char* analysis_options_guc_show(void)
     return outbuf.data;
 }
 
-static bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source)
+bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source)
 {
     char RFC3986_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~!*'();:@&=+$,/?#[]";
     char* val = NULL;
@@ -19748,113 +12913,18 @@ static void analysis_options_guc_assign(const char* newval, void* extra)
     pfree(tmpNewVal);
 }
 
-typedef struct behavior_compat_entry {
-    const char* name; /* name of behavior compat entry */
-    int flag;         /* bit flag position */
-} behavior_compat_entry;
+#define DEFAULT_PARTIAL_SEQSCAN false
+#define DEFAULT_RECOVERY_UNDO_WORKERS 1
+#define DEFAULT_CAND_LIST_USAGE_COUNT false
+#define DEFAULT_USTATS_TRACKER_NAPTIME 20
+#define DEFAULT_UMAX_PRUNE_SEARCH_LEN 10
 
-static struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
-    {"display_leading_zero", OPT_DISPLAY_LEADING_ZERO},
-    {"end_month_calculate", OPT_END_MONTH_CALCULATE},
-    {"compat_analyze_sample", OPT_COMPAT_ANALYZE_SAMPLE},
-    {"bind_schema_tablespace", OPT_BIND_SCHEMA_TABLESPACE},
-    {"return_null_string", OPT_RETURN_NS_OR_NULL},
-    {"bind_procedure_searchpath", OPT_BIND_SEARCHPATH},
-    {"unbind_divide_bound", OPT_UNBIND_DIVIDE_BOUND},
-    {"correct_to_number", OPT_CORRECT_TO_NUMBER},
-    {"compat_concat_variadic", OPT_CONCAT_VARIADIC},
-    {"merge_update_multi", OPT_MEGRE_UPDATE_MULTI},
-    {"convert_string_digit_to_numeric", OPT_CONVERT_TO_NUMERIC}};
-
-/*
- * check_behavior_compat_options: GUC check_hook for behavior compat options
- */
-static bool check_behavior_compat_options(char** newval, void** extra, GucSource source)
+static void InitUStoreAttr()
 {
-    char* rawstring = NULL;
-    List* elemlist = NULL;
-    ListCell* cell = NULL;
-    int start = 0;
-
-    /* Need a modifiable copy of string */
-    rawstring = pstrdup(*newval);
-
-    /* Parse string into list of identifiers */
-    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
-        /* syntax error in list */
-        GUC_check_errdetail("invalid paramater for behavior compat information.");
-        pfree(rawstring);
-        list_free(elemlist);
-
-        return false;
-    }
-
-    foreach (cell, elemlist) {
-        const char* item = (const char*)lfirst(cell);
-        bool nfound = true;
-
-        for (start = 0; start < OPT_MAX; start++) {
-            if (0 == strcmp(item, behavior_compat_options[start].name)) {
-                nfound = false;
-                break;
-            }
-        }
-
-        if (nfound) {
-            GUC_check_errdetail("invalid behavior compat option \"%s\"", item);
-            pfree(rawstring);
-            list_free(elemlist);
-            return false;
-        }
-    }
-
-    pfree(rawstring);
-    list_free(elemlist);
-
-    return true;
-}
-
-/*
- * assign_distribute_test_param: GUC assign_hook for distribute_test_param
- */
-static void assign_behavior_compat_options(const char* newval, void* extra)
-{
-    char* rawstring = NULL;
-    List* elemlist = NULL;
-    ListCell* cell = NULL;
-    int start = 0;
-    int result = 0;
-
-    rawstring = pstrdup(newval);
-    (void)SplitIdentifierString(rawstring, ',', &elemlist);
-
-    u_sess->utils_cxt.behavior_compat_flags = 0;
-    foreach (cell, elemlist) {
-        for (start = 0; start < OPT_MAX; start++) {
-            const char* item = (const char*)lfirst(cell);
-
-            if (0 == strcmp(item, behavior_compat_options[start].name))
-                result += behavior_compat_options[start].flag;
-        }
-    }
-
-    pfree(rawstring);
-    list_free(elemlist);
-
-    u_sess->utils_cxt.behavior_compat_flags = result;
-}
-
-static void assign_convert_string_to_digit(bool newval, void* extra)
-{
-    if (u_sess->attr.attr_sql.convert_string_to_digit != newval) {
-        /*
-         * Invalidate the old operator cache whenever the convert_string_to_digit
-         * changed, as its change will modify type conversion priority which need
-         * refresh operator cache.
-         */
-        InvalidateOprCacheCallBack(0, 0, 0);
-    }
-    return;
+    u_sess->attr.attr_storage.enable_ustore_partial_seqscan = DEFAULT_PARTIAL_SEQSCAN;
+    u_sess->attr.attr_storage.enable_candidate_buf_usage_count = DEFAULT_CAND_LIST_USAGE_COUNT;
+    u_sess->attr.attr_storage.ustats_tracker_naptime = DEFAULT_USTATS_TRACKER_NAPTIME;
+    u_sess->attr.attr_storage.umax_search_length_for_prune = DEFAULT_UMAX_PRUNE_SEARCH_LEN;
 }
 
 bool check_percentile(char** newval, void** extra, GucSource source)
@@ -19931,31 +13001,249 @@ bool check_numa_distribute_mode(char** newval, void** extra, GucSource source)
     return false;
 }
 
-/* Initialize storage critical lwlock partition num */
-void InitializeNumLwLockPartitions(void)
-{
-    /* set default values */
-    SetLWLockPartDefaultNum();
-    /* Do str copy and remove space. */
-    char* attr = TrimStr(g_instance.attr.attr_storage.num_internal_lock_partitions_str);
-    if (attr == NULL || attr[0] == '\0') { /* use default values */
-        return;
-    }
-    const char* pdelimiter = ",";
-    List *res = NULL;
-    char* nextToken = NULL;
-    char* token = strtok_s(attr, pdelimiter, &nextToken);
-    while (token != NULL) {
-        res = lappend(res, TrimStr(token));
-        token = strtok_s(NULL, pdelimiter, &nextToken);
-    }
-    pfree(attr);
-    /* check input string and set lwlock num */
-    CheckAndSetLWLockPartInfo(res);
-    /* check range */
-    CheckLWLockPartNumRange();
+#include "guc-file.inc"
 
-    list_free_deep(res);
+#ifdef ENABLE_MULTIPLE_NODES
+static void assign_gtm_rw_timeout(int newval, void* extra)
+{
+    SetGTMrwTimeout(newval);
 }
 
-#include "guc-file.inc"
+static bool check_gtmhostconninfo(char** newval, void** extra, GucSource source)
+{
+    char *str = NULL;
+    char *tmp = NULL;
+    bool bRet = true;
+
+    if (NULL == newval) {
+        return false;
+    }
+
+    str = pstrdup(*newval);
+    if (NULL == str) {
+        return false;
+    }
+
+    tmp = str;
+
+    while (*tmp != '\0') {
+        if (isalpha(*tmp) || isdigit(*tmp) || *tmp == ' ' || *tmp == ',' || *tmp == '.' || *tmp == '*') {
+            tmp++;
+            continue;
+        }
+
+        bRet = false;
+        break;
+    }
+
+    pfree(str);
+
+    return bRet;
+}
+
+GTM_HOST_IP* ParseGtmHostConnInfo(const char* ConnInfoList, int* InfoLength)
+{
+    char* ReplStr = NULL;
+    char* token = NULL;
+    char* tmp_token = NULL;
+    uint32 len = 0;
+    uint32 tmp;
+    GTM_HOST_IP* pHostIP = NULL;
+    int rc;
+
+    if (ConnInfoList == NULL)
+        return NULL;
+
+    uint32 infolen = strlen(ConnInfoList);
+
+    ReplStr = pstrdup(ConnInfoList);
+    if (ReplStr == NULL)
+        return NULL;
+
+    token = strtok_r(ReplStr, ",", &tmp_token);
+    while (token != NULL) {
+        len++;
+        token = strtok_r(NULL, ",", &tmp_token);
+    }
+    pfree(ReplStr);
+
+    MemoryContext currCxt = SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB);
+    pHostIP = (len > 0) ? static_cast<GTM_HOST_IP *>(MemoryContextAllocZero(currCxt, sizeof(GTM_HOST_IP) * len))
+                        : static_cast<GTM_HOST_IP *>(MemoryContextAllocZero(currCxt, sizeof(GTM_HOST_IP)));
+
+    if (pHostIP == NULL)
+        return NULL;
+
+    ReplStr = static_cast<char*>(MemoryContextAllocZero(currCxt, infolen + 1));
+    if (ReplStr == NULL) {
+        pfree(pHostIP);
+        return NULL;
+    }
+
+    for (len = 0, tmp = 0; len < infolen; len++) {
+        if (ConnInfoList[len] != ' ')
+            ReplStr[tmp++] = ConnInfoList[len];
+    }
+    ReplStr[tmp] = '\0';
+
+    len = 0;
+    token = strtok_r(ReplStr, ",", &tmp_token);
+    while (token != NULL) {
+        rc = strncpy_s(pHostIP[len].acHostIP, sizeof(pHostIP[len].acHostIP), token, sizeof(pHostIP[len].acHostIP) - 1);
+        securec_check(rc, "\0", "\0");
+        pHostIP[len].acHostIP[127] = '\0';
+        len++;
+        token = strtok_r(NULL, ",", &tmp_token);
+    }
+
+    *InfoLength = len;
+    pfree(ReplStr);
+    return pHostIP;
+}
+
+static void assign_gtmhostconninfo0(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[0]);
+    u_sess->attr.attr_common.GtmHostArray[0] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[0]);
+}
+
+static void assign_gtmhostconninfo1(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[1]);
+    u_sess->attr.attr_common.GtmHostArray[1] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[1]);
+}
+
+static void assign_gtmhostconninfo2(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[2]);
+    u_sess->attr.attr_common.GtmHostArray[2] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[2]);
+}
+
+static void assign_gtmhostconninfo3(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[3]);
+    u_sess->attr.attr_common.GtmHostArray[3] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[3]);
+}
+
+static void assign_gtmhostconninfo4(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[4]);
+    u_sess->attr.attr_common.GtmHostArray[4] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[4]);
+}
+
+static void assign_gtmhostconninfo5(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[5]);
+    u_sess->attr.attr_common.GtmHostArray[5] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[5]);
+}
+
+static void assign_gtmhostconninfo6(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[6]);
+    u_sess->attr.attr_common.GtmHostArray[6] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[6]);
+}
+
+static void assign_gtmhostconninfo7(const char* newval, void* extra)
+{
+    pfree_ext(u_sess->attr.attr_common.GtmHostArray[7]);
+    u_sess->attr.attr_common.GtmHostArray[7] =
+        ParseGtmHostConnInfo(newval, &u_sess->attr.attr_common.GtmHostIPNumArray[7]);
+}
+
+/**
+ * check value of compaciton strategy one by one
+ * min_part in range [2,5]
+ * max_part in range [4,10]
+ * level_middle in range [4,12]
+ * level_max in range [7,20]
+ * is_fuzzy in range [0,1]
+ */
+static bool check_compaciton_strategy(char** newval, void** extra, GucSource source)
+{
+    char* check_char = TrimStr(*newval);
+    if (check_char == NULL) {
+        return true;
+    }
+    if (strlen(check_char) > TsProducer::MAX_STRATEGY_LEN) {
+        GUC_check_errdetail("input string too long, lenth is %lu, expected less than 15", strlen(*newval));
+        return false;
+    }
+    /* do not accept any thing except number and comma */
+    for (uint i = 0; i < strlen(check_char); i++) {
+        if ((check_char[i] < '0' || check_char[i] > '9') && check_char[i] != ',') {
+            GUC_check_errdetail("unexpacted letter in input val %c.", check_char[i]);
+            return false;
+        }
+    }
+    char* ptoken = NULL;
+    char* psave = NULL;
+    const char* pdelimiter = ",";
+    ptoken = TrimStr(strtok_r(check_char, pdelimiter, &psave));
+    /* filter min_parts */
+    if (!ts_compaction_guc_filter(ptoken, TsProducer::MIN_PART_MIN, TsProducer::MIN_PART_MAX)) {
+        GUC_check_errdetail("min part over range.");
+        return false;
+    }
+
+    /* filter max_parts */
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));    
+    if (!ts_compaction_guc_filter(ptoken, TsProducer::MAX_PART_MIN, TsProducer::MAX_PART_MAX)) {
+        GUC_check_errdetail("max part over range.");
+        return false;
+    }
+
+    /* filter level middle */
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));    
+    if (!ts_compaction_guc_filter(ptoken, TsProducer::LEVEL_MID_MIN, TsProducer::LEVEL_MID_MAX)) {
+        GUC_check_errdetail("level middle over range.");
+        return false;
+    }
+
+    /* filter level max */
+    ptoken = TrimStr(strtok_r(NULL, pdelimiter, &psave));    
+    if (!ts_compaction_guc_filter(ptoken, TsProducer::LEVEL_MAX_MIN, TsProducer::LEVEL_MAX_MAX)) {
+        GUC_check_errdetail("level max over range.");
+        return false;
+    }
+    
+    /* we only accept is_fuzzy to be 0 or 1 */
+    ptoken = TrimStr(psave);
+    Assert(ptoken != NULL);
+    if (strlen(ptoken) != 1 || strcmp(ptoken, ",") == 0 || !ts_compaction_guc_filter(ptoken, 0, 1)) {
+        GUC_check_errdetail("fuzzy value invalid!");
+        return false;
+    }
+    pfree(ptoken);
+    pfree(check_char);
+    return true;
+}
+
+/**
+ * filter guc based on min/max number
+ */
+static bool ts_compaction_guc_filter(const char* ptoken, const int min_num, const int max_num)
+{
+    int32 temp_number = 0;
+    if ((ptoken) != NULL && (ptoken)[0] != '\0') {
+        temp_number = pg_strtoint32(ptoken);
+        if (temp_number >= min_num && temp_number <= max_num) {
+            return true;
+        } else if (temp_number == 0) {
+            return true;
+        } else {
+            return false;
+        }
+    } else {
+        /* ptoken id null return true */
+        return true;
+    }
+    return false;
+}
+#endif

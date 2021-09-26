@@ -153,7 +153,6 @@ ORDER BY column1,column2;
 --
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 CREATE TEMP TABLE foo (f1 int);
 

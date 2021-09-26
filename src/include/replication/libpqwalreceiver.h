@@ -33,5 +33,7 @@ extern bool libpqrcv_connect(char* conninfo, XLogRecPtr* startpoint, char* slotn
 extern bool libpqrcv_receive(int timeout, unsigned char* type, char** buffer, int* len);
 extern void libpqrcv_send(const char* buffer, int nbytes);
 extern void libpqrcv_disconnect(void);
+extern void HaSetRebuildRepInfoError(HaRebuildReason reason);
+extern void SetObsRebuildReason(HaRebuildReason reason);
 
 #endif

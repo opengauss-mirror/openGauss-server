@@ -137,14 +137,15 @@ static char* format_type_internal(
 
     /*
      * Check if it's a regular (variable length) array type.  Fixed-length
-     * array types such as "name" shouldn't get deconstructed.  As of Postgres
+     * array types such as "name" shouldn't get deconstructed.  As of openGauss
      * 8.1, rather than checking typlen we check the toast property, and don't
      * deconstruct "plain storage" array types --- this is because we don't
      * want to show oidvector as oid[].
      */
     array_base_type = typeform->typelem;
 
-    if (array_base_type != InvalidOid && typeform->typstorage != 'p' && type_oid != OIDVECTOREXTENDOID) {
+    if (array_base_type != InvalidOid && typeform->typstorage != 'p' && type_oid != OIDVECTOREXTENDOID &&
+        type_oid != INT2VECTOREXTENDOID) {
         /* Switch our attention to the array element type */
         ReleaseSysCache(tuple);
         tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(array_base_type));

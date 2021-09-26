@@ -1,0 +1,1113 @@
+set enable_default_ustore_table = on;
+
+create schema test_ustore_insert_select_new;
+set current_schema='test_ustore_insert_select_new';
+
+drop table if exists t1;
+drop table if exists t2;
+
+drop type if exists composite_type;
+
+create type composite_type as (int_type integer, char_type text, date_type date);
+
+create table t1
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+
+create table t2
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+
+create table t3
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+
+-- create tables for post data insertion verification
+drop table if exists t1_verification;
+drop table if exists t2_verification;
+drop table if exists t3_verification;
+
+create table t1_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+
+create table t2_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+
+create table t3_verification
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+
+----------------------------------------------------------------------------------
+--------------------           ALL DATA TYPES              -----------------------
+---------------------------------------------------------------------------------
+--create table t1
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+--create table t2
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+--create table t3
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+---- create table for post data insertion verification
+--drop table if exists t1_verification;
+--drop table if exists t2_verification;
+--drop table if exists t3_verification;
+--
+--create table t1_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+--
+--create table t2_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+--
+--create table t3_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+
+-- insert data to t1
+\COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data1.data' delimiter '|';
+\COPY t1_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data1.data' delimiter '|';
+
+-- t1 post data insertion verification
+create view t1_data_verification as (select * from t1 except select * from t1_verification);
+
+select * from t1_data_verification;
+
+-- insert data to t2
+\COPY t2 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data2.data' delimiter '|';
+\COPY t2_verification FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_ustore_data2.data' delimiter '|';
+
+
+-- t2 post data insertion verification
+create view t2_data_verification as (select * from t2 except select * from t2_verification);
+
+select * from t2_data_verification;
+
+-- case 1: insert select into empty table
+insert into t3 select * from t2;
+insert into t3_verification select * from t2_verification;
+
+create view view1 as (select * from t3 except select * from t3_verification);
+
+select * from view1;
+
+-- case 2: insert select to non-empty table
+insert into t2 select * from t1;
+insert into t2_verification select * from t1_verification;
+
+create view view2 as (select * from t2 except select * from t2_verification);
+
+select * from view2;
+
+update t1 set c11='text', c16=time'00:00:01' where c6=false and c1=1;
+update t1_verification set c11='text', c16=time'00:00:01' where c6=false and c1=1;
+
+create view view3 as (select * from t1 except select * from t1_verification);
+select * from view3;
+
+update t2 set c6=false, c2=10 where c1=1 and c3>500;
+update t2_verification set c6=false, c2=10 where c1=1 and c3>500;
+
+create view view4 as (select * from t2 except select * from t2_verification);
+select * from view4;
+
+-- case 3: insert select with group by + having
+drop table if exists t4;
+create table t4
+(
+        c1 tinyint,
+        c2 smallint not null,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean not null,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date not null,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+
+drop table if exists t4_verification;
+create table t4_verification
+(
+        c1 tinyint,
+        c2 smallint not null,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean not null,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date not null,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+
+----------------------------------------------------------------------------------
+--------------------           ALL DATA TYPES              -----------------------
+---------------------------------------------------------------------------------
+--drop table if exists t4;
+--create table t4
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+--drop table if exists t4_verification;
+--create table t4_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+
+insert into t4 select * from t1 group by t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 having t1.c6=false;
+insert into t4_verification select * from t1_verification group by t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 having t1_verification.c6=false;
+
+
+create view view5 as (select * from t4 except select * from t4_verification);
+select * from view5;
+
+insert into t3 select * from t2 group by t2.c1, t2.c2, t2.c3, t2.c4, t2.c5, t2.c6, t2.c7, t2.c8, t2.c9, t2.c10, t2.c11, t2.c12, t2.c14, t2.c15, t2.c16, t2.c17 having t2.c6=true;
+insert into t3_verification select * from t2_verification group by t2_verification.c1, t2_verification.c2, t2_verification.c3, t2_verification.c4, t2_verification.c5, t2_verification.c6, t2_verification.c7, t2_verification.c8, t2_verification.c9, t2_verification.c10, t2_verification.c11, t2_verification.c12, t2_verification.c14, t2_verification.c15, t2_verification.c16, t2_verification.c17 having t2_verification.c6=true;
+
+
+create view view6 as (select * from t3 except select * from t3_verification);
+select * from view6;
+
+update t3 set c1=1, c2=2, c3=3 where c6=true and c4>5000;
+update t3_verification set c1=1, c2=2, c3=3 where c6=true and c4>5000;
+
+
+create view view7 as (select * from t3 except select * from t3_verification);
+select * from view7;
+
+update t3 set c6=false where c4=100;
+update t3_verification set c6=false where c4=100;
+
+create view view8 as (select * from t3 except select * from t3_verification);
+select * from view8;
+
+delete from t4 where c1=5;
+delete from t4_verification where c1=5;
+
+create view view9 as (select * from t4 except select * from t4_verification);
+select * from view9;
+
+delete from t4 where c4<10 and c6=false;
+delete from t4_verification where c4<10 and c6=false;
+
+create view view10 as (select * from t4 except select * from t4_verification);
+select * from view10;
+
+-- case 4: insert into join subquery select
+drop table if exists t5;
+create table t5
+(
+        c1 tinyint,
+        c2 smallint not null,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean not null,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date not null,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+
+
+drop table if exists t5_verification;
+create table t5_verification
+(
+        c1 tinyint,
+        c2 smallint not null,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean not null,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date not null,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=row);
+
+
+----------------------------------------------------------------------------------
+--------------------           ALL DATA TYPES              -----------------------
+---------------------------------------------------------------------------------
+--drop table if exists t5;
+--create table t5
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (storage_type=USTORE);
+--
+--drop table if exists t5_verification;
+--create table t5_verification
+--(
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--)
+--with (orientation=row);
+
+
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 left outer join t2 on t1.c2=t2.c2) as foo;
+insert into t5_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification left outer join t2_verification on t1_verification.c2=t2_verification.c2) as foo;
+
+create view view11 as (select * from t5 except select * from t5_verification);
+select * from view11;
+
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 left outer join t2 on t1.c2=t2.c2 where t1.c6=false) as foo;
+insert into t5_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification left outer join t2_verification on t1_verification.c2=t2_verification.c2 where t1_verification.c6=false) as foo;
+
+create view view12 as (select * from t5 except select * from t5_verification);
+select * from view12;
+
+start transaction;
+
+create view view13 as (select count(*) from t5 except select count(*) from t5_verification);
+select * from view13;
+
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 left outer join t2 on t1.c2=t2.c2 where t1.c6=false order by t1.c1) as foo;
+insert into t5_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification left outer join t2_verification on t1_verification.c2=t2_verification.c2 where t1_verification.c6=false order by t1_verification.c1) as foo;
+
+create view view14 as (select * from t5 except select * from t5_verification);
+select * from view14;
+
+insert into t5 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 left outer join t2 on t1.c2=t2.c2 where t1.c6=false group by t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 having t1.c2>5000 order by t1.c1) as foo;
+insert into t5_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification left outer join t2_verification on t1_verification.c2=t2_verification.c2 where t1_verification.c6=false group by t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 having t1_verification.c2>5000 order by t1_verification.c1) as foo;
+
+create view view15 as (select * from t5 except select * from t5_verification);
+select * from view15;
+
+create view view16 as (select count(*) from t5 except select count(*) from t5_verification);
+select * from view16;
+
+rollback;
+
+create view view17 as (select count(*) from t5);
+select * from view17;
+
+create view view18 as (select count(*) from t5_verification);
+select * from view18;
+
+create view view19 as (select count(*) from t5 except select count(*) from t5_verification);
+select * from view19;
+
+start transaction;
+delete from t4 where c1<20;
+delete from t4_verification where c1<20;
+
+create view view20 as (select count(*) from t4);
+select * from view20;
+
+create view view21 as (select count(*) from t4_verification);
+select * from view21;
+
+create view view22 as (select count(*) from t4 except select count(*) from t4_verification);
+select * from view22;
+
+delete from t4 where c6=false and c4>20;
+delete from t4_verification where c6=false and c4>20;
+
+create view view23 as (select count(*) from t4);
+select * from view23;
+
+create view view24 as (select count(*) from t4_verification);
+select * from view24;
+
+create view view25 as (select count(*) from t4 except select count(*) from t4_verification);
+select * from view25;
+
+commit;
+
+create view view26 as (select count(*) from t4);
+select * from view26;
+
+
+create view view27 as (select count(*) from t4_verification);
+select * from view27;
+
+
+create view view28 as (select count(*) from t4 except select count(*) from t4_verification);
+select * from view28;
+
+start transaction;
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 union select * from t2) as foo;
+insert into t4_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification union select * from t2_verification) as foo;
+
+create view view29 as (select * from t4 except select * from t4_verification);
+select * from view29;
+
+insert into t4 select * from ((select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 where t1.c6=false) union (select * from t2 where t2.c2>5000)) as foo;
+insert into t4_verification select * from ((select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification where t1_verification.c6=false) union (select * from t2_verification where t2_verification.c2>5000)) as foo;
+
+create view view30 as (select * from t4 except select * from t4_verification);
+select * from view30;
+
+
+create view view31 as (select count(*) from t4);
+select * from view31;
+
+create view view32 as (select count(*) from t4_verification);
+select * from view32;
+
+create view view33 as (select count(*) from t4 except select count(*) from t4_verification);
+select * from view33;
+
+rollback;
+
+create view view34 as (select count(*) from t4);
+select * from view34;
+
+create view view35 as (select count(*) from t4_verification);
+select * from view35;
+
+create view view36 as (select count(*) from t4 except select count(*) from t4_verification);
+select * from view36;
+
+insert into t4 select * from ((select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 where t1.c6=false) union all (select * from t2 where t2.c2>5000)) as foo;
+insert into t4_verification select * from ((select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification where t1_verification.c6=false) union all (select * from t2_verification where t2_verification.c2>5000)) as foo;
+
+create view view37 as (select * from t4 except select * from t4_verification);
+select * from view37;
+
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 intersect select * from t4) as foo where foo.c6=false;
+insert into t4_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification intersect select * from t4_verification) as foo where foo.c6=false;
+
+create view view38 as (select * from t4 except select * from t4_verification);
+select * from view38;
+
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 intersect all select * from t4) as foo where foo.c6=false;
+insert into t4_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification intersect all select * from t4_verification) as foo where foo.c6=false;
+
+create view view39 as (select * from t4 except select * from t4_verification);
+select * from view39;
+
+insert into t4 select * from (select t1.c1, t1.c2, t1.c3, t1.c4, t1.c5, t1.c6, t1.c7, t1.c8, t1.c9, t1.c10, t1.c11, t1.c12, t1.c14, t1.c15, t1.c16, t1.c17 from t1 except select * from t3) as foo;
+insert into t4_verification select * from (select t1_verification.c1, t1_verification.c2, t1_verification.c3, t1_verification.c4, t1_verification.c5, t1_verification.c6, t1_verification.c7, t1_verification.c8, t1_verification.c9, t1_verification.c10, t1_verification.c11, t1_verification.c12, t1_verification.c14, t1_verification.c15, t1_verification.c16, t1_verification.c17 from t1_verification except select * from t3_verification) as foo;
+
+create view view40 as (select * from t4 except select * from t4_verification);
+select * from view40;
+
+-- case 5: test with temp table
+drop table if exists t1_temp;
+drop table if exists t2_temp;
+
+create temp table t1_temp (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+
+create temp table t2_temp (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=USTORE);
+
+drop table if exists t1_temp_verification;
+drop table if exists t2_temp_verification;
+
+create temp table t1_temp_verification (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+) with (orientation=row);
+
+create temp table t2_temp_verification (
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+) with (orientation=row);
+
+----------------------------------------------------------------------------------
+--------------------           ALL DATA TYPES              -----------------------
+----------------------------------------------------------------------------------
+--drop table if exists t1_temp;
+--drop table if exists t2_temp;
+--
+--create temp table t1_temp (
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--) with (storage_type=USTORE);
+--
+--create temp table t2_temp (
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--) with (storage_type=USTORE);
+--
+--drop table if exists t1_temp_verification;
+--drop table if exists t2_temp_verification;
+--
+--create temp table t1_temp_verification (
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--) with (orientation=row);
+--
+--create temp table t2_temp_verification (
+--        c1 tinyint,
+--        c2 smallint,
+--        c3 integer,
+--        c4 bigint,
+--        c5 money,
+--        c6 boolean,
+--        c7 char(10),
+--        c8 character(10),
+--        c9 nchar(10),
+--        c10 varchar(10),
+--        c11 text,
+--        c12 clob,
+--        c13 blob,
+--        c14 bytea,
+--        c15 date,
+--        c16 time without time zone,
+--        c17 reltime,
+--        c18 composite_type
+--) with (orientation=row);
+
+
+insert into t1_temp select * from t1;
+insert into t1_temp_verification select * from t1_verification;
+
+create view view41 as (select * from t1_temp except select * from t1_temp_verification);
+select * from view41;
+
+insert into t1_temp (select * from t1 where t1.c1<100);
+insert into t1_temp_verification (select * from t1_verification where t1_verification.c1<100);
+
+create view view42 as (select * from t1_temp except select * from t1_temp_verification);
+select * from view42;
+
+update t1_temp set c1=0 where c6=true;
+update t1_temp_verification set c1=0 where c6=true;
+
+create view view43 as (select * from t1_temp except select * from t1_temp_verification);
+select * from view43;
+
+delete from t1_temp where c6=true;
+delete from t1_temp_verification where c6=true;
+
+create view view44 as (select * from t1_temp except select * from t1_temp_verification);
+select * from view44;
+
+create view view45 as (select count(*) from t1_temp);
+select * from view45;
+
+create view view46 as (select count(*) from t1_temp_verification);
+select * from view46;
+
+create view view47 as (select count(*) from t1_temp except select count(*) from t1_temp_verification);
+select * from view47;
+
+create view view48 as (select * from t1_temp except select * from t1_temp_verification);
+select * from view48;
+
+start transaction;
+savepoint sp1;
+create temp table temp1 (c1 integer, c2 text, c3 boolean, c4 money, c5 date, c6 clob);
+
+create view view49 as (select count(*) from t1_temp except select count(*) from t1_temp_verification);
+select * from view49;
+
+create view view50 as (select * from t1_temp except select * from t1_temp_verification);
+select * from view50;
+
+rollback to savepoint sp1;
+
+create view view51 as (select count(*) from t1_temp except select count(*) from t1_temp_verification);
+
+select * from view51;
+
+create view view52 as (select * from t1_temp except select * from t1_temp_verification);
+
+select * from view52;
+
+create temp table temp2 (c1 integer, c2 text, c3 boolean, c4 money, c5 date, c6 clob);
+rollback to savepoint sp1;
+end;
+
+create view view53 as (select count(*) from t1_temp except select count(*) from t1_temp_verification);
+select * from view53;
+
+
+create view view54 as (select * from t1_temp except select * from t1_temp_verification);
+select * from view54;
+
+start transaction isolation level read uncommitted;
+insert into t3 select * from t1 where c1=2;
+insert into t3_verification select * from t1_verification where c1=2;
+
+create view view55 as (select * from t3 except select * from t3_verification);
+select * from view55;
+
+update t3 set c1=1 where c4<5000 and c6=false;
+update t3_verification set c1=1 where c4<5000 and c6=false;
+
+create view view56 as (select * from t3 except select * from t3_verification);
+select * from view56;
+
+update t3 set c12='clob' where c6=true;
+update t3_verification set c12='clob' where c6=true;
+
+create view view57 as (select * from t3 except select * from t3_verification);
+select * from view57;
+
+insert into t5 (select * from t1 intersect all select * from t3 where t3.c3>500);
+insert into t5_verification (select * from t1_verification intersect all (select * from t3_verification where t3_verification.c3>500));
+
+create view view58 as (select * from t5 except select * from t5_verification);
+select * from view58;
+
+insert into t5 (select * from t1 intersect all select * from t3 where t3.c3>500);
+insert into t5_verification (select * from t1_verification intersect all select * from t3_verification where t3_verification.c3>500);
+
+create view view59 as (select * from t5 except select * from t5_verification);
+select * from view59;
+
+end;
+
+create view view60 as (select * from t3 except select * from t3_verification);
+select * from view60;
+
+create view view61 as (select * from t5 except select * from t5_verification);
+select * from view61;
+
+start transaction isolation level read committed;
+
+delete from t2 where c17 < reltime '@ 500 days';
+delete from t2_verification where c17 < reltime '@ 500 days';
+
+create view view62 as (select * from t2 except select * from t2_verification); 
+select * from view62;
+
+delete from t2 where c8 < 'zzazaa';
+delete from t2_verification where c8 < 'zzazaa';
+
+create view view63 as (select * from t2 except select * from t2_verification);
+select * from view63;
+
+rollback;
+
+create view view64 as (select * from t2 except select * from t2_verification);
+select * from view64;
+
+start transaction isolation level serializable;
+
+insert into t3 (select * from t2 where c6=false);
+insert into t3_verification (select * from t2_verification where c6=false);
+
+create view view65 as (select * from t3 except select * from t3_verification);
+select * from view65;
+
+end;
+
+create view view66 as (select * from t3 except select * from t3_verification);
+select * from view66;
+
+
+-- drop all tables and views
+drop view t1_data_verification CASCADE;
+drop view t2_data_verification CASCADE;
+
+drop view view1 CASCADE;
+drop view view2 CASCADE;
+drop view view3 CASCADE;
+drop view view4 CASCADE;
+drop view view5 CASCADE;
+drop view view6 CASCADE;
+drop view view7 CASCADE;
+drop view view8 CASCADE;
+drop view view9 CASCADE;
+drop view view10 CASCADE;
+drop view view11 CASCADE;
+drop view view12 CASCADE;
+drop view view13 CASCADE;
+drop view view14 CASCADE;
+drop view view15 CASCADE;
+drop view view16 CASCADE;
+drop view view17 CASCADE;
+drop view view18 CASCADE;
+drop view view19 CASCADE;
+drop view view20 CASCADE;
+drop view view21 CASCADE;
+drop view view22 CASCADE;
+drop view view23 CASCADE;
+drop view view24 CASCADE;
+drop view view25 CASCADE;
+drop view view26 CASCADE;
+drop view view27 CASCADE;
+drop view view28 CASCADE;
+drop view view29 CASCADE;
+drop view view30 CASCADE;
+drop view view31 CASCADE;
+drop view view32 CASCADE;
+drop view view33 CASCADE;
+drop view view34 CASCADE;
+drop view view35 CASCADE;
+drop view view36 CASCADE;
+drop view view37 CASCADE;
+drop view view38 CASCADE;
+drop view view39 CASCADE;
+drop view view40 CASCADE;
+drop view view41 CASCADE;
+drop view view42 CASCADE;
+drop view view43 CASCADE;
+drop view view44 CASCADE;
+drop view view45 CASCADE;
+drop view view46 CASCADE;
+drop view view47 CASCADE;
+drop view view48 CASCADE;
+drop view view49 CASCADE;
+drop view view50 CASCADE;
+drop view view51 CASCADE;
+drop view view52 CASCADE;
+drop view view53 CASCADE;
+drop view view54 CASCADE;
+drop view view55 CASCADE;
+drop view view56 CASCADE;
+drop view view57 CASCADE;
+drop view view58 CASCADE;
+drop view view59 CASCADE;
+drop view view60 CASCADE;
+drop view view61 CASCADE;
+drop view view62 CASCADE;
+drop view view63 CASCADE;
+drop view view64 CASCADE;
+drop view view65 CASCADE;
+drop view view66 CASCADE;
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t5;
+drop table t1_verification;
+drop table t2_verification;
+drop table t3_verification;
+drop table t4_verification;
+drop table t5_verification;
+
+drop table t1_temp;
+drop table t2_temp;
+drop table t1_temp_verification;
+drop table t2_temp_verification;

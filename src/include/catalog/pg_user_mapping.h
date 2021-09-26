@@ -54,8 +54,8 @@ typedef FormData_pg_user_mapping *Form_pg_user_mapping;
 #define Anum_pg_user_mapping_umserver		2
 #define Anum_pg_user_mapping_umoptions		3
 
-extern const char* sensitiveOptionsArray[];
-extern const int sensitiveArrayLength;
+extern const char* g_sensitiveOptionsArray[];
+extern const int g_sensitiveArrayLength;
 
 #endif   /* PG_USER_MAPPING_H */
 

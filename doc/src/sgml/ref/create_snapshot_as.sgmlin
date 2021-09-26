@@ -1,0 +1,18 @@
+<refentry id="SQL-CREATE_SNAPSHOT_AS">
+<refmeta>
+<refentrytitle>CREATE SNAPSHOT AS</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE SNAPSHOT AS</refname>
+<refpurpose>create a new snapshot from the results of a query</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE SNAPSHOT <qualified_name> [@ <version | ident | sconst>]
+    [COMMENT IS <sconst>}
+    AS query;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

@@ -16,9 +16,6 @@
 # gen_certificate.sh
 #    generate certificate
 #
-# IDENTIFICATION
-#    src/gausskernel/dbmind/tools/A-Detection/shell/gen_certificate.sh
-#
 #-------------------------------------------------------------------------
 
 source ./initialize_certificate.sh

@@ -147,7 +147,7 @@ static void vacuumLeafPage(spgBulkDeleteState *bds, Relation index, Buffer buffe
         if (lt->tupstate == SPGIST_LIVE) {
             Assert(ItemPointerIsValid(&lt->heapPtr));
 
-            if (bds->callback(&lt->heapPtr, bds->callback_state, InvalidOid)) {
+            if (bds->callback(&lt->heapPtr, bds->callback_state, InvalidOid, InvalidBktId)) {
                 bds->stats->tuples_removed += 1;
                 deletable[i] = true;
                 nDeletable++;
@@ -387,7 +387,7 @@ static void vacuumLeafRoot(spgBulkDeleteState *bds, Relation index, Buffer buffe
         if (lt->tupstate == SPGIST_LIVE) {
             Assert(ItemPointerIsValid(&lt->heapPtr));
 
-            if (bds->callback(&lt->heapPtr, bds->callback_state, InvalidOid)) {
+            if (bds->callback(&lt->heapPtr, bds->callback_state, InvalidOid, InvalidBktId)) {
                 bds->stats->tuples_removed += 1;
                 toDelete[xlrec.nDelete] = i;
                 xlrec.nDelete++;
@@ -836,7 +836,7 @@ Datum spgbulkdelete(PG_FUNCTION_ARGS)
 }
 
 /* Dummy callback to delete no tuples during spgvacuumcleanup */
-static bool dummy_callback(ItemPointer itemptr, void* state, Oid partOid = InvalidOid)
+static bool dummy_callback(ItemPointer itemptr, void* state, Oid partOid = InvalidOid, int2 bktId = InvalidBktId)
 {
     return false;
 }
@@ -885,7 +885,7 @@ Datum spgvacuumcleanup(PG_FUNCTION_ARGS)
      * this might just make matters worse.
      */
     if (!info->estimated_count) {
-        if (stats->num_index_tuples > info->num_heap_tuples) {
+        if (stats->num_index_tuples > info->num_heap_tuples && info->num_heap_tuples >= 0) {
             stats->num_index_tuples = info->num_heap_tuples;
         }
     }

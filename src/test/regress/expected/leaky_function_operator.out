@@ -15,6 +15,8 @@ CREATE OPERATOR >>>> (procedure = public.leak20, leftarg = integer, rightarg = i
 -- This should not show any "leak" notices before failing.
 EXPLAIN (COSTS OFF) SELECT * FROM public.atest12 ;
 ERROR:  permission denied for relation atest12
+DETAIL:  N/A
 -- This should not show any "leak" notices before failing.(After Patch)
 EXPLAIN (COSTS OFF) SELECT * FROM public.atest12 WHERE a >>>> 99;
 ERROR:  permission denied for relation atest12
+DETAIL:  N/A

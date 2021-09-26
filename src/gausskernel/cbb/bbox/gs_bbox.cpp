@@ -33,15 +33,16 @@
 #include "utils/elog.h"
 #include "utils/guc.h"
 #include "utils/fatal_err.h"
+
+#ifndef ENABLE_MULTIPLE_NODES
 #include "storage/buf/buf_internals.h"
+static void SigbusHandler(siginfo_t *si);
+#endif
 
 #define BBOX_PATH_SIZE 512
 #define DEFAULT_BLACKLIST_MASK (0xFFFFFFFFFFFFFFFF)
 
 #define INVALID_TID (-1)
-
-#define SIGBUS_MCEERR_AR 4
-#define SIGBUS_MCEERR_AO 5
 
 static char g_bbox_dump_path[BBOX_PATH_SIZE] = {0};
 
@@ -73,6 +74,11 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (sig == SIGBUS) {
+            SigbusHandler(si);
+        }
+#endif
     } else {
         /*
          * Subsequent fatal error will go to here. If it comes from different thread,
@@ -101,6 +107,12 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (sig == SIGBUS) {
+            SigbusHandler(si);
+        }
+#endif
 #ifndef ENABLE_MEMORY_CHECK
         sigset_t intMask;
         sigset_t oldMask;
@@ -126,9 +138,9 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
         }
     }
 }
-
+#ifndef ENABLE_MULTIPLE_NODES
 /*
- * SIGBUS -- When uce failure occurs in system memory, sigbus_handler will exit according to the region
+ * SIGBUS -- When uce failure occurs in system memory, SigbusHandler will exit according to the region
  * of its logical address.
  * 1. If the enableIncrementalCheckpoint is turned off, the uce feature no longer takes effect
  * 2. Calculate the buffer pool address range to determine whether the error address is in the buffer pool.
@@ -137,85 +149,51 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
  * 5. If the page is not dirty, the thread will send SIGINT to poma, then the thread that triggers the SIGBUS
  *    exit first and print warning message. If the page is dirty, print the PANIC log and coredump.
  */
-void sigbus_handler(int sig, siginfo_t *si, void *uc)
+const int SIGBUS_MCEERR_AR = 4;
+const int SIGBUS_MCEERR_AO = 5;
+static void SigbusHandler(siginfo_t *si)
 {
-    if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
-        if (u_sess->attr.attr_common.enable_bbox_dump)
-            bbox_handler(sig, si, uc);
-        else {
-            coredump_handler(sig, si, uc);
-        }
+    int bufId;
+    int siCode = si->si_code;
+    auto siAddr = (unsigned long long)si->si_addr;
+    /* If si_code is not 4 or 5, it is not Uncorrected Error. then gaussdb will PANIC */
+    if (siCode != SIGBUS_MCEERR_AR && siCode != SIGBUS_MCEERR_AO) {
+        write_stderr("PANIC: errcode:%u, SIGBUS signal received, Gaussdb will shut down immediately",
+                     ERRCODE_UE_COMMON_ERROR);
+        return;
     }
-
-    static volatile int64 first_tid = INVALID_TID;
-    int64 cur_tid = (int64)pthread_self();
-    uint64 buffer_size;
-    int buf_id;
-    int si_code = si->si_code;
-    unsigned long long sigbus_addr = (unsigned long long)si->si_addr;
-
-    if (first_tid == INVALID_TID &&
-            __sync_bool_compare_and_swap(&first_tid, INVALID_TID, cur_tid)) {
-        /* Only first fatal error will set db state and generate fatal error log */
-        (void)SetDBStateFileState(COREDUMP_STATE, false);
-        if (g_instance.attr.attr_common.enable_ffic_log) {
-            (void)gen_err_msg(sig, si, (ucontext_t *)uc);
-        }
-#ifndef ENABLE_MEMORY_CHECK
-        sigset_t intMask;
-        sigset_t oldMask;
-
-        sigfillset(&intMask);
-        pthread_sigmask(SIG_SETMASK, &intMask, &oldMask);
-#endif
-        /* If si_code is not 4 or 5, it is not Uncorrected Error. then gaussdb will PANIC*/
-        if (si_code != SIGBUS_MCEERR_AR && si_code != SIGBUS_MCEERR_AO) {
-            ereport(PANIC,
-                (errcode(ERRCODE_UE_COMMON_ERROR),
-                    errmsg("errcode:%u, SIGBUS signal received, Gaussdb will shut down immediately",
-                        ERRCODE_UE_COMMON_ERROR)));
-        }
 #ifdef __aarch64__
-        buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
+    uint64 bufferSize = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
 #else
-        buffer_size = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
+    uint64 bufferSize = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
 #endif
-        unsigned long long startaddr = (unsigned long long)t_thrd.storage_cxt.BufferBlocks;
-        unsigned long long endaddr = startaddr + buffer_size;
-        /* Determine the range of address carried by sigbus, And print the log according to the page state. */
-        if (sigbus_addr >= startaddr && sigbus_addr <= endaddr) {
-            buf_id = floor((sigbus_addr - startaddr) / (Size)BLCKSZ);
-            BufferDesc* buf_desc = GetBufferDescriptor(buf_id);
-            if (buf_desc->state & BM_DIRTY || buf_desc->state & BM_JUST_DIRTIED || buf_desc->state & BM_CHECKPOINT_NEEDED) {
-                ereport(PANIC,
-                    (errcode(ERRCODE_UE_DIRTY_PAGE),
-                        errmsg("errcode:%u, Uncorrected Error occurred at dirty page. The error address is: 0x%llx. Gaussdb will shut "
-                               "down immediately.",
-                        ERRCODE_UE_DIRTY_PAGE, sigbus_addr)));
-            } else {
-                ereport(WARNING,
-                    (errcode(ERRCODE_UE_CLEAN_PAGE),
-                        errmsg("errcode:%u, Uncorrected Error occurred at clean/free page. The error address is: 0x%llx. GaussDB will "
-                               "shutdown.",
-                            ERRCODE_UE_CLEAN_PAGE, sigbus_addr)));
-                gs_signal_send(PostmasterPid, SIGINT);
-                gs_thread_exit(1); // Prevent the same thread from being paused after entering the handler again, and cannot be correctly exited by POMA
-            }
-        } else if (sigbus_addr == 0) {
-            ereport(PANIC,
-                (errcode(ERRCODE_UE_COMMON_ERROR),
-                    errmsg("errcode:%u, SIGBUS signal received, sigbus_addr is None. Gaussdb will shut down immediately",
-                        ERRCODE_UE_COMMON_ERROR)));
+    auto startAddr = (unsigned long long)t_thrd.storage_cxt.BufferBlocks;
+    auto endAddr = startAddr + bufferSize;
+    /* Determine the range of address carried by sigbus, And print the log according to the page state. */
+    if (siAddr >= startAddr && siAddr <= endAddr) {
+        bufId = floor((siAddr - startAddr) / (Size)BLCKSZ);
+        BufferDesc *bufDesc = GetBufferDescriptor(bufId);
+        if (bufDesc->state & (BM_DIRTY | BM_JUST_DIRTIED | BM_CHECKPOINT_NEEDED)) {
+            write_stderr("PANIC: errcode:%u, Uncorrected error occurred at dirty page. The error address is: 0x%llx."
+                         "openGauss will shut down immediately.",
+                         ERRCODE_UE_DIRTY_PAGE, siAddr);
         } else {
-            ereport(PANIC,
-                (errcode(ERRCODE_UE_COMMON_ERROR),
-                    errmsg("errcode:%u, SIGBUS signal received. The error address is: 0x%llx, Gaussdb will shut down immediately",
-                        ERRCODE_UE_COMMON_ERROR, sigbus_addr)));
+            write_stderr("WARNING: errcode:%u, Uncorrected error occurred at clean/free page. The error address is:"
+                         "0x%llx. openGauss will shutdown.",
+                         ERRCODE_UE_CLEAN_PAGE, siAddr);
         }
+    } else if (siAddr == 0) {
+        write_stderr("PANIC: errcode:%u, SIGBUS signal received, sigbus_addr is None. openGauss will"
+                     "shutdown immediately",
+                     ERRCODE_UE_COMMON_ERROR);
     } else {
-        (void)pause();
+        write_stderr("PANIC: errcode:%u, SIGBUS signal received. The error address is: 0x%llx, openGauss will"
+                     "shutdown immediately",
+                     ERRCODE_UE_COMMON_ERROR, siAddr);
     }
+    return;
 }
+#endif
 
 /*
  * get_bbox_coredump_pattern_path - get the core dump path from the file "/proc/sys/kernel/core_pattern"
@@ -238,16 +216,14 @@ static void get_bbox_coredump_pattern_path(char* path, Size len)
     }
     fclose(fp);
 
-    if ((p = strrchr(path, '/')) == NULL) {
+    if ((p = strrchr(path, '/')) == NULL) { /* a relative-path file */
         *path = '\0';
-    } else {
+    } else { /* an absolute-path file */
         *(++p) = '\0';
-    }
-
-    if (stat(path, &stat_buf) != 0 || !S_ISDIR(stat_buf.st_mode) || access(path, W_OK) != 0) {
-        write_stderr("The core dump path is an invalid directory\n");
-        *path = '\0';
-        return;
+        if (stat(path, &stat_buf) != 0 || !S_ISDIR(stat_buf.st_mode) || access(path, W_OK) != 0) {
+            write_stderr("The core dump path is an invalid directory\n");
+            *path = '\0';
+        }
     }
 }
 
@@ -429,12 +405,12 @@ void assign_bbox_coredump(const bool newval, void* extra)
 
     if (newval && !FencedUDFMasterMode) {
         (void)install_signal(SIGABRT, bbox_handler);
-        (void)install_signal(SIGBUS, sigbus_handler);
+        (void)install_signal(SIGBUS, bbox_handler);
         (void)install_signal(SIGILL, bbox_handler);
         (void)install_signal(SIGSEGV, bbox_handler);
     } else {
         (void)install_signal(SIGABRT, coredump_handler);
-        (void)install_signal(SIGBUS, sigbus_handler);
+        (void)install_signal(SIGBUS, coredump_handler);
         (void)install_signal(SIGILL, coredump_handler);
         (void)install_signal(SIGSEGV, coredump_handler);
     }

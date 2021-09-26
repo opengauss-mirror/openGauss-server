@@ -60,10 +60,12 @@
 #include "storage/lock/lock.h"
 #include "utils/snapmgr.h"
 #include "access/tableam.h"
+#include "utils/fmgroids.h"
 
 #define NUM_UNIQUE_SQL_PARTITIONS 64
 #define UINT32_ACCESS_ONCE(var) ((uint32)(*((volatile uint32*)&(var))))
 #define UNIQUE_SQL_MAX_LEN (g_instance.attr.attr_common.pgstat_track_activity_query_size + 1)
+#define ATTR_NUM 27
 /* unique SQL max hash table size */
 const int UNIQUE_SQL_MAX_HASH_SIZE = 1000;
 extern Datum hash_uint32(uint32 k);
@@ -144,10 +146,7 @@ static void UnlockAspUniqueSQLHashPartition(uint32 hashCode)
 
 static inline int uint64_to_str(char* str, int strLen, uint64 val)
 {
-    if (strLen < MAX_LEN_CHAR_TO_BIGINT_BUF) {
-        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("The length of str: %d is less than %d", strLen, MAX_LEN_CHAR_TO_BIGINT_BUF)));
-    }
+    Assert(strLen >= MAX_LEN_CHAR_TO_BIGINT_BUF);
     char stack[MAX_LEN_CHAR_TO_BIGINT_BUF] = {0};
     int idx = 0;
     int i = 0;
@@ -196,7 +195,7 @@ void InitAsp()
     g_instance.stat_cxt.active_sess_hist_arrary = 
         (ActiveSessHistArrary *)MemoryContextAllocZero(g_instance.stat_cxt.AshContext, sizeof(ActiveSessHistArrary));
     g_instance.stat_cxt.active_sess_hist_arrary->curr_index = 0;
-    g_instance.stat_cxt.active_sess_hist_arrary->max_size = g_instance.attr.attr_common.asp_sample_num; 
+    g_instance.stat_cxt.active_sess_hist_arrary->max_size = g_instance.attr.attr_common.asp_sample_num;
 
     g_instance.stat_cxt.active_sess_hist_arrary->active_sess_hist_info =
         (SessionHistEntry *)MemoryContextAllocZero(g_instance.stat_cxt.AshContext,
@@ -245,25 +244,23 @@ static int64 GetTableRetentionTime()
 }
 static void CleanAspTable()
 {
+    ScanKeyData key;
+    SysScanDesc indesc = NULL;
+    HeapTuple tup = NULL;
     PG_TRY();
     {
         StartTransactionCommand();
         PushActiveSnapshot(GetTransactionSnapshot());
-        HeapTuple tuple = NULL;
-        Relation pg_asp_tbl = heap_open(GsAspRelationId, RowExclusiveLock);
-        TableScanDesc scan = tableam_scan_begin(pg_asp_tbl, SnapshotNow, 0, NULL);
+        Relation rel = heap_open(GsAspRelationId, RowExclusiveLock);
         int64 minTime = GetTableRetentionTime();
-        while (HeapTupleIsValid(tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
-            Datum value;
-            bool null = false;
-            value = heap_getattr(tuple, Anum_gs_asp_sample_time, pg_asp_tbl->rd_att, &null);
-            int64 val = DatumGetInt64(value);
-            if (val <= minTime) {
-                simple_heap_delete(pg_asp_tbl, &tuple->t_self);
-            }
+        ScanKeyInit(&key, Anum_gs_asp_sample_time, BTLessEqualStrategyNumber,
+            F_TIMESTAMP_LE, TimestampGetDatum(minTime));
+        indesc = systable_beginscan(rel, GsAspSampleIdTimedexId, true, SnapshotSelf, 1, &key);
+        while (HeapTupleIsValid(tup = systable_getnext(indesc))) {
+            simple_heap_delete(rel, &tup->t_self);
         }
-        tableam_scan_end(scan);
-        heap_close(pg_asp_tbl, RowExclusiveLock);
+        systable_endscan(indesc);
+        heap_close(rel, RowExclusiveLock);
         PopActiveSnapshot();
         CommitTransactionCommand();
     }
@@ -385,6 +382,9 @@ static void FormatBasicInfo(cJSON * root, SessionHistEntry *beentry)
     cJSON_AddItemToObject(root, "databaseid", cJSON_CreateNumber(beentry->databaseid));
     cJSON_AddItemToObject(root, "thread_id", cJSON_CreateString(thread_id));
     cJSON_AddItemToObject(root, "sessionid", cJSON_CreateString(sessionid));
+    char* gId = GetGlobalSessionStr(beentry->globalSessionId);
+    cJSON_AddItemToObject(root, "global_sessionid", cJSON_CreateString(gId));
+    pfree(gId);
     timestamp = Datum_to_string(TimestampGetDatum(beentry->start_time), TIMESTAMPTZOID, false);
     cJSON_AddItemToObject(root, "start_time", cJSON_CreateString(timestamp));
     pfree(timestamp);
@@ -765,10 +765,7 @@ static void GetBlockInfo(Datum* values, bool* nulls, const SessionHistEntry *bee
 
 static void GetTuple(Datum* values, int val_len, bool* nulls, int null_len, SessionHistEntry *beentry)
 {
-    if (val_len < Natts_gs_asp || null_len < Natts_gs_asp) {
-        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-                errmsg("Array length %d or %d is less than %d", val_len, null_len, Natts_gs_asp)));
-    }
+    Assert(val_len == Natts_gs_asp && null_len == Natts_gs_asp);
     values[Anum_gs_asp_sample_id - 1] = Int64GetDatum(beentry->sample_id);
     values[Anum_gs_asp_sample_time - 1] = TimestampTzGetDatum(beentry->sample_time);
     values[Anum_gs_asp_need_flush_sample - 1] = BoolGetDatum(beentry->need_flush_sample);
@@ -808,6 +805,9 @@ static void GetTuple(Datum* values, int val_len, bool* nulls, int null_len, Sess
     GetBlockInfo(values, nulls, beentry);
     GetClientTuple(values, nulls, beentry);
     GetQueryTuple(values, nulls, beentry);
+    char* gId = GetGlobalSessionStr(beentry->globalSessionId);
+    values[Anum_gs_asp_global_sessionid - 1] = CStringGetTextDatum(gId);
+    pfree(gId);
 }
 
 static void WriteToSysTable(SessionHistEntry *beentry)
@@ -936,6 +936,7 @@ static BackendState CopyActiveSessInfo(uint64 sample_id, bool need_flush_sample,
     ash_arrary_slot->numnodes = beentry->st_numnodes;
     ash_arrary_slot->locallocktag = beentry->locallocktag;
     ash_arrary_slot->st_block_sessionid = beentry->st_block_sessionid;
+    ash_arrary_slot->globalSessionId = beentry->globalSessionId;
     return beentry->st_state;
 }
 
@@ -1053,7 +1054,8 @@ static void SetThrdCxt(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Asp", MEMORY_CONTEXT_DFX);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Asp",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
 }
 
 static void ReloadInfo()
@@ -1144,34 +1146,37 @@ static void InitTupleAttr(FuncCallContext** funcctx)
 {
     MemoryContext oldcontext;
     TupleDesc tupdesc = NULL;
+    int i = 0;
     oldcontext = MemoryContextSwitchTo((*funcctx)->multi_call_memory_ctx);
-    tupdesc = CreateTemplateTupleDesc(26, false);
-    TupleDescInitEntry(tupdesc, (AttrNumber)1, "sampleid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)2, "sample_time", TIMESTAMPTZOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)3, "need_flush_sample", BOOLOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)4, "databaseid", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)5, "thread_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)6, "sessionid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)7, "start_time", TIMESTAMPTZOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)8, "event", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)9, "lwtid", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)10, "psessionid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)11, "tlevel", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)12, "smpid", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)13, "userid", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)14, "application_name", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)15, "client_addr", INETOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)16, "client_hostname", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)17, "client_port", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)18, "query_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)19, "unique_query_id", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)20, "user_id", OIDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)21, "cn_id", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)22, "unique_query", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)23, "locktag", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)24, "lockmode", TEXTOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)25, "block_sessionid", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)26, "wait_status", TEXTOID, -1, 0);
+    tupdesc = CreateTemplateTupleDesc(ATTR_NUM, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sampleid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sample_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "need_flush_sample", BOOLOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "databaseid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "thread_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "start_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "event", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "lwtid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "psessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "tlevel", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "smpid", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "userid", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "application_name", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "client_addr", INETOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "client_hostname", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "client_port", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "unique_query_id", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "user_id", OIDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "cn_id", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "unique_query", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "locktag", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "lockmode", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "block_sessionid", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "wait_status", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "global_sessionid", TEXTOID, -1, 0);
+    Assert(i == ATTR_NUM);
     (*funcctx)->tuple_desc = BlessTupleDesc(tupdesc);
     (*funcctx)->user_fctx = palloc0(sizeof(int));
     (*funcctx)->max_calls = g_instance.stat_cxt.active_sess_hist_arrary->curr_index;
@@ -1194,8 +1199,8 @@ Datum get_local_active_session(PG_FUNCTION_ARGS)
 
     if (funcctx->call_cntr < funcctx->max_calls) {
         /* for each row */
-        Datum values[26];
-        bool nulls[26] = {false};
+        Datum values[ATTR_NUM];
+        bool nulls[ATTR_NUM] = {false};
         HeapTuple tuple = NULL;
         SessionHistEntry *beentry = NULL;
         errno_t rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -1210,7 +1215,7 @@ Datum get_local_active_session(PG_FUNCTION_ARGS)
                 GetTuple(values, Natts_gs_asp, nulls, Natts_gs_asp, beentry);
             } else {
                 /* No permissions to view data about this session */
-                for (uint32 i = 0; i < 26; i++) {
+                for (uint32 i = 0; i < ATTR_NUM; i++) {
                     nulls[i] = true;
                 }
             }

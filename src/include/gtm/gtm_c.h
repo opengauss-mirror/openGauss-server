@@ -105,7 +105,7 @@ extern uint32 MaxNumThreadActive;
 #define GlobalTransactionTimelineIsValid(timeline) (((GTM_Timeline)(timeline)) != InvalidTransactionTimeline)
 
 /*
- * As GTM and Postgres-XC packages are separated, GTM and XC's API
+ * As GTM and openGauss packages are separated, GTM and XC's API
  * use different type names for timestamps and sequences, but they have to be the same!
  */
 typedef int64 GTM_Timestamp; /* timestamp data is 64-bit based */

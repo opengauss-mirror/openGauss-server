@@ -28,17 +28,18 @@
 #include "utils/memutils.h"
 
 const char* MemoryContextGroup::memory_context_group_name[MEMORY_CONTEXT_MAX] = {
-        "CBBTopMemoryContext",
-        "CommunicationTopMemoryContext",
-        "DefaultTopMemoryContext",
-        "DFXTopMemoryContext",
-        "ExecutorTopMemoryContext",
-        "NumaTopMemoryContext",
-        "OptimizerTopMemoryContext",
-        "SecurityTopMemoryContext",
-        "StorageTopMemoryContext",
-        "TSDBTopMemoryContext",
-        "StreamingTopMemoryContext"
+    "CBBTopMemoryContext",
+    "CommunicationTopMemoryContext",
+    "DefaultTopMemoryContext",
+    "DFXTopMemoryContext",
+    "ExecutorTopMemoryContext",
+    "NumaTopMemoryContext",
+    "OptimizerTopMemoryContext",
+    "SecurityTopMemoryContext",
+    "StorageTopMemoryContext",
+    "TSDBTopMemoryContext",
+    "StreamingTopMemoryContext",
+    "AITopMemoryContext"
 };
 
 MemoryContextGroup::MemoryContextGroup()

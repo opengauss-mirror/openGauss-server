@@ -117,6 +117,16 @@ typedef enum {
     INSTANCE_DATAINSTANCE, /* postgresql.conf */
 } NodeType;
 
+/* Define all the node types */
+typedef enum {
+    GUC_NONE = 0,
+    GUC_CNDN,
+    GUC_GTM,
+    GUC_CMSERVER,
+    GUC_CMAGENT,
+    GUC_LCNAME
+} GUC_Node_Type;
+
 const int INVALID_LINES_IDX = -1;
 #define GUC_OPT_CONF_FILE "cluster_guc.conf"
 #define SUCCESS 0
@@ -376,6 +386,10 @@ bool get_hostname_or_ip(char* out_name, size_t name_len)
     }
 
     env_value = gs_getenv_r("HOST_IP");
+    if (env_value != NULL) {
+        check_env_value(env_value);
+    }
+
     if ((env_value == NULL) || (env_value[0] == '\0')) {
         (void)gethostname(out_name, name_len);
         if (out_name[0] == '\0') {
@@ -650,7 +664,23 @@ int init_gauss_cluster_config(void)
         status = read_config_file(path, &err_no);
     }
     if (0 != status) {
-        write_stderr("ERROR: Invalid cluster_staic_config file\n");
+        switch (status) {
+            case OPEN_FILE_ERROR: {
+                write_stderr("ERROR: The cluster_staic_config file is not generated or is manually deleted.\n");
+                return 1;
+            }
+            case READ_FILE_ERROR: {
+                write_stderr("ERROR: The cluster_staic_config file permission is insufficient.\n");
+                return 1;
+            }
+            case OUT_OF_MEMORY: {
+                write_stderr("ERROR: The cluster_staic_config open failed cause out of memeory.\n");
+                return 1;
+            }
+            default:
+                break;
+        }
+        write_stderr("ERROR: Invalid return value from read_config_file\n");
         return 1;
     }
 
@@ -700,11 +730,7 @@ int save_guc_para_info()
     char temp_line_info[MAXPGPATH] = {0};
     char* get_result = NULL;
     char* outer_ptr = NULL;
-    bool is_cndn = false;
-    bool is_gtm = false;
-    bool is_cmserver = false;
-    bool is_cmagent = false;
-    bool is_lc = false;
+    GUC_Node_Type type = GUC_NONE;
     char gausshome[MAXPGPATH] = {0};
     char guc_file[MAXPGPATH] = {0};
 
@@ -744,27 +770,19 @@ int save_guc_para_info()
         if (line_info[0] == '#') {
             continue;
         } else if (strncmp(line_info, "[coordinator/datanode]", sizeof("[coordinator/datanode]")) == 0) {
-            is_cndn = true;
+            type = GUC_CNDN;
             continue;
         } else if (strncmp(line_info, "[gtm]", sizeof("[gtm]")) == 0) {
-            is_gtm = true;
-            is_cndn = false;
+            type = GUC_GTM;
             continue;
         } else if (strncmp(line_info, "[cmserver]", sizeof("[cmserver]")) == 0) {
-            is_cmserver = true;
-#ifdef ENABLE_MULTIPLE_NODES
-            is_gtm = false;
-#else
-            is_cndn = false;
-#endif
+            type = GUC_CMSERVER;
             continue;
         } else if (strncmp(line_info, "[cmagent]", sizeof("[cmagent]")) == 0) {
-            is_cmagent = true;
-            is_cmserver = false;
+            type = GUC_CMAGENT;
             continue;
         } else if (strncmp(line_info, "[lcname]", sizeof("[lcname]")) == 0) {
-            is_lc = true;
-            is_cmagent = false;
+            type = GUC_LCNAME;
             continue;
         }  else if (strncmp(line_info, "[end]", sizeof("[end]")) == 0) {
             break;
@@ -779,29 +797,35 @@ int save_guc_para_info()
             return FAILURE;
         }
 
-        if (is_cndn) {
-            cndn_param[cndn_param_number] = xstrdup(get_result);
-            cndn_guc_info[cndn_param_number] = xstrdup(temp_line_info);
-            cndn_param_number++;
-        } else if (is_gtm) {
-            gtm_param[gtm_param_number] = xstrdup(get_result);
-            gtm_guc_info[gtm_param_number] = xstrdup(temp_line_info);
-            gtm_param_number++;
-        } else if (is_cmserver) {
-            cmserver_param[cmserver_param_number] = xstrdup(get_result);
-            cmserver_guc_info[cmserver_param_number] = xstrdup(temp_line_info);
-            cmserver_param_number++;
-        } else if (is_cmagent) {
-            cmagent_param[cmagent_param_number] = xstrdup(get_result);
-            cmagent_guc_info[cmagent_param_number] = xstrdup(temp_line_info);
-            cmagent_param_number++;
-        } else if (is_lc) {
-            lc_param[lc_param_number] = xstrdup(get_result);
-            lc_guc_info[lc_param_number] = xstrdup(temp_line_info);
-            lc_param_number++;
-        } else {
-            fclose(fp);
-            return FAILURE;
+        switch (type) {
+            case GUC_CNDN:
+                cndn_param[cndn_param_number] = xstrdup(get_result);
+                cndn_guc_info[cndn_param_number] = xstrdup(temp_line_info);
+                cndn_param_number++;
+                break;
+            case GUC_GTM:
+                gtm_param[gtm_param_number] = xstrdup(get_result);
+                gtm_guc_info[gtm_param_number] = xstrdup(temp_line_info);
+                gtm_param_number++;
+                break;
+            case GUC_CMSERVER:
+                cmserver_param[cmserver_param_number] = xstrdup(get_result);
+                cmserver_guc_info[cmserver_param_number] = xstrdup(temp_line_info);
+                cmserver_param_number++;
+                break;
+            case GUC_CMAGENT:
+                cmagent_param[cmagent_param_number] = xstrdup(get_result);
+                cmagent_guc_info[cmagent_param_number] = xstrdup(temp_line_info);
+                cmagent_param_number++;
+                break;
+            case GUC_LCNAME:
+                lc_param[lc_param_number] = xstrdup(get_result);
+                lc_guc_info[lc_param_number] = xstrdup(temp_line_info);
+                lc_param_number++;
+                break;
+            default:
+                fclose(fp);
+                return FAILURE;
         }
     }
 

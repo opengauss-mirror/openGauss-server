@@ -46,13 +46,13 @@ typedef struct RedisMergeItemOrderArray {
     int length;
 }RedisMergeItemOrderArray;
 
-extern RedisMergeItem *hbkt_get_merge_item_from_str(char *merge_list, int merge_list_length, int2 bucketid);
+extern RedisMergeItem *hbkt_get_one_merge_item(char *merge_list, int merge_list_length, int2 bucketid);
 
 extern TableScanDesc GetTableScanDesc(TableScanDesc scan, Relation rel);
 extern IndexScanDesc GetIndexScanDesc(IndexScanDesc scan);
 extern List* hbkt_load_buckets(Relation relation, BucketInfo* bkt_info);
 
-extern RedisMergeItemOrderArray *hbkt_get_merge_list_from_str(char* merge_list, int merge_list_length);
+extern RedisMergeItemOrderArray *hbkt_get_all_merge_item(char* merge_list, int merge_list_length);
 
 void hbkt_set_merge_list_to_pgxc_class_option(Oid pcrelid, RedisMergeItemOrderArray* merge_items, bool first_set);
 
@@ -62,8 +62,12 @@ extern void freeRedisMergeItemOrderArray(RedisMergeItemOrderArray *merge_items);
 extern bool hbkt_sampling_scan_nextbucket(TableScanDesc hpScan);
 extern bool hbkt_bitmapheap_scan_nextbucket(HBktTblScanDesc hpScan);
 extern bool hbkt_tbl_tid_nextbucket(HBktTblScanDesc hpScan);
+extern bool cbi_bitmapheap_scan_nextbucket(HBktTblScanDesc hpscan, GPIScanDesc gpiscan, CBIScanDesc cbiscan);
+extern Relation cbi_bitmapheap_scan_getbucket(const HBktTblScanDesc hpscan, const GPIScanDesc gpiscan,
+    const CBIScanDesc cbiscan, int2 bucketid);
 
-extern TableScanDesc scan_handler_tbl_beginscan(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, ScanState* sstate = NULL);
+extern TableScanDesc scan_handler_tbl_beginscan(Relation relation, Snapshot snapshot, int nkeys, ScanKey key,
+        ScanState* sstate = NULL, bool isRangeScanInRedis = false);
 extern TableScanDesc scan_handler_tbl_begin_tidscan(Relation relation, ScanState* state);
 extern void scan_handler_tbl_end_tidscan(TableScanDesc scan);
 extern void scan_handler_tbl_markpos(TableScanDesc scan);
@@ -72,8 +76,9 @@ extern void scan_handler_tbl_init_parallel_seqscan(TableScanDesc scan, int32 dop
 extern TableScanDesc scan_handler_tbl_beginscan_bm(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, ScanState* sstate);
 extern TableScanDesc scan_handler_tbl_beginscan_sampling(Relation relation, Snapshot snapshot, int nkeys, ScanKey key, bool allow_strat, bool allow_sync, ScanState* sstate);
 extern Tuple scan_handler_tbl_getnext(TableScanDesc scan, ScanDirection direction, Relation rel);
-extern void scan_handler_tbl_endscan(TableScanDesc scan, Relation rel);
-extern void scan_handler_tbl_rescan(TableScanDesc scan, struct ScanKeyData* key, Relation rel);
+extern void scan_handler_tbl_endscan(TableScanDesc scan);
+extern void scan_handler_tbl_rescan(TableScanDesc scan, struct ScanKeyData* key, Relation rel,
+    bool is_bitmap_rescan = false);
 #define NOT_EXIST_MERGE_LIST "not_exist_merge_list"
 
 #endif /* HASHPART_AM_H */

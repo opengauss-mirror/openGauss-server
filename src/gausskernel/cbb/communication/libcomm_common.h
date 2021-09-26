@@ -168,7 +168,8 @@ extern uint64 mc_timers_ms(void);
                 WARNING, "(LIBCOMM MALLOC)\t[FAULT INJECTION]Failed to malloc, caller: %s:%d.", __FILE__, __LINE__); \
             (ptr) = NULL;                                                                                            \
         } else {                                                                                                     \
-            Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt);                                 \
+            Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt ||                                \
+                CurrentMemoryContext == g_instance.comm_logic_cxt.comm_logic_mem_cxt);                               \
             (ptr) = (type*)palloc0_noexcept((size));                                                                 \
             if (unlikely(NULL == (ptr))) {                                                                           \
                 gs_memprot_reset_beyondchunk();                                                                      \
@@ -188,7 +189,8 @@ extern uint64 mc_timers_ms(void);
 #elif defined MEMORY_CONTEXT_CHECKING
 #define LIBCOMM_MALLOC(ptr, size, type)                                              \
     do {                                                                             \
-        Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt);     \
+        Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt ||    \
+            CurrentMemoryContext == g_instance.comm_logic_cxt.comm_logic_mem_cxt);   \
         if (gs_memory_enjection())                                                   \
             (ptr) = NULL;                                                            \
         else                                                                         \
@@ -210,7 +212,8 @@ extern uint64 mc_timers_ms(void);
 #else
 #define LIBCOMM_MALLOC(ptr, size, type)                                              \
     do {                                                                             \
-        Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt);     \
+        Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt ||    \
+            CurrentMemoryContext == g_instance.comm_logic_cxt.comm_logic_mem_cxt);   \
         (ptr) = (type*)palloc0_noexcept((size));                                     \
         if (unlikely(NULL == (ptr))) {                                               \
             gs_memprot_reset_beyondchunk();                                          \
@@ -229,14 +232,15 @@ extern uint64 mc_timers_ms(void);
     } while (0)
 #endif
 
-#define LIBCOMM_FREE(ptr, size)                                                      \
-    do {                                                                             \
-        if (likely(NULL != (ptr))) {                                                 \
-            Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt); \
-            pfree_ext((ptr));                                                        \
-            (void)atomic_sub(&libcomm_used_memory, (size));                          \
-            (ptr) = NULL;                                                            \
-        }                                                                            \
+#define LIBCOMM_FREE(ptr, size)                                                         \
+    do {                                                                                \
+        if (likely(NULL != (ptr))) {                                                    \
+            Assert(CurrentMemoryContext == g_instance.comm_cxt.comm_global_mem_cxt ||   \
+                CurrentMemoryContext == g_instance.comm_logic_cxt.comm_logic_mem_cxt);  \
+            pfree_ext((ptr));                                                           \
+            (void)atomic_sub(&libcomm_used_memory, (size));                             \
+            (ptr) = NULL;                                                               \
+        }                                                                               \
     } while (0)
 
 #define LIBCOMM_ELOG(elevel, format, ...)       \
@@ -251,6 +255,21 @@ extern uint64 mc_timers_ms(void);
             Assert(0 != 0);                                            \
         }                                                              \
     } while (0)
+
+#ifdef USE_SSL
+
+#define LIBCOMM_FIND_SSL(ssl, sock, errstr)                                           \
+    do {                                                                              \
+        if (g_instance.attr.attr_network.comm_enable_SSL) {                           \
+            (ssl) = LibCommClientGetSSLForSocket(sock);                               \
+            if ((ssl) == NULL) {                                                      \
+                LIBCOMM_ELOG(WARNING, "%s%d", (errstr), (sock));                      \
+                return -1;                                                            \
+            }                                                                         \
+        }                                                                             \
+    } while (0)
+
+#endif
 
 #define LIBCOMM_PTHREAD_RWLOCK_INIT(lock, attr) LIBCOMM_SYSTEM_CALL(pthread_rwlock_init(lock, attr))
 
@@ -603,7 +622,11 @@ struct cmailbox_statistic {
 struct c_mailbox : public mailbox {
     struct mc_lqueue* buff_q;       // buffer queue for caching received data from the counterpart stream
     cmailbox_statistic* statistic;  // consumer thread statistic information
+	
+    /* This field is added by the CN DN logical link function to efficiently notify users. */
+    SessionInfo *session_info_ptr;
 };
+
 
 // Resolves system errors and native	errors to	human-readable string.
 const char* mc_strerror(int errnum);
@@ -627,11 +650,12 @@ extern void libcomm_free_iov_item(struct mc_lqueue_item** iov_item, int size);
 extern int libcomm_malloc_iov_item(struct mc_lqueue_item** iov_item, int size);
 extern int gs_send_msg_by_unix_domain(const void* msg, int msg_len);
 extern int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_idx, bool is_reply);
-extern int gs_send_ctrl_msg_by_socket(int ctrl_sock, FCMSG_T* msg, int node_idx);
+extern int gs_send_ctrl_msg_by_socket(LibCommConn *conn, FCMSG_T* msg, int node_idx);
 extern void gs_set_reply_sock(int node_idx);
 extern int libcomm_tcp_recv(LibcommRecvInfo* recv_info);
 extern int gs_accept_data_conntion(struct iovec* iov, sock_id fd_id);
 extern bool is_tcp_mode();
+extern void NotifyListener(struct c_mailbox* cmailbox, bool err_occurs, const char* caller_name);
 
 // declarations of functions
 extern int gs_update_fd_to_htab_socket_version(struct sock_id* fd_id);
@@ -662,5 +686,116 @@ extern int gs_s_get_connection_state(ip_key addr, int node_idx, int type);
 extern void gs_r_close_logic_connection(struct c_mailbox* cmailbox, int close_reason, FCMSG_T* msg);
 extern void gs_poll_signal(binary_semaphore* sem);
 
+extern int LibCommClientReadBlock(LibCommConn *conn, void* data, int size, int flags);
+extern int LibCommClientWriteBlock(LibCommConn *conn, void* data, int size);
+extern int LibCommClientCheckSocket(LibCommConn * conn);
+#ifdef USE_SSL
 
+#define CLIENT_CERT_FILE "client.crt"
+#define CLIENT_KEY_FILE "client.key"
+#define ROOT_CERT_FILE "root.crt"
+#define ROOT_CRL_FILE "root.crl"
+
+#define MAXPATH 1024
+#define MAXBUFSIZE 256
+
+typedef enum{
+    LIBCOMM_POLLING_FAILED = 0,
+    LIBCOMM_POLLING_READING, /* These two indicate that one may	  */
+    LIBCOMM_POLLING_WRITING, /* use select before polling again.   */
+    LIBCOMM_POLLING_SYSCALL,
+    LIBCOMM_POLLING_OK,
+    LIBCOMM_POLLING_ACTIVE /* unused; keep for awhile for backwards
+                          * compatibility */
+} LibcommPollingStatusType;
+
+extern LibcommPollingStatusType LibCommClientSecureOpen(LibCommConn * conn, bool isUnidirectional = true);
+extern void LibCommClientSSLClose(LibCommConn *conn);
+extern int LibCommClientWaitTimed(int forRead, int forWrite, LibCommConn *conn, time_t finish_time);
+extern int LibCommClientSecureInit();
+extern ssize_t LibCommClientSSLWrite(SSL *ssl, const void* ptr, size_t len);
+extern ssize_t LibCommClientSSLRead(SSL *ssl, void* ptr, size_t len);
+extern SSL* LibCommClientGetSSLForSocket(int socket);
+
+extern void comm_initialize_SSL();
+extern void comm_ssl_close(SSL_INFO* port);
+extern int comm_ssl_open_server(SSL_INFO* port, int fd);
+extern libcomm_sslinfo** comm_ssl_find_port(libcomm_sslinfo** head, int sock);
+extern SSL* comm_ssl_find_ssl_by_fd(int sock);
+#endif
+
+extern int LibCommInitChannelConn(int nodeNum);
+
+#include "libcomm_utils/libcomm_lock_free_queue.h"
+
+typedef enum {
+    WAKEUP_PIPE_START = 0,
+    WAKEUP_PIPE_END,
+    WAKEUP_PIPE_SIZE
+} WAKEUP_PIPE_IDX;
+
+class WakeupPipe {
+public:
+    WakeupPipe(void);
+    virtual ~WakeupPipe() = 0;
+    void InitPipe(int *input_pipes);
+    void ClosePipe(int *input_pipes);
+    void DoWakeup();
+    inline const bool IsWakeupFd(int fd)
+    {
+        return (fd == m_normal_wakeup_pipes[WAKEUP_PIPE_START]);
+    };
+    void RemoveWakeupFd();
+    int m_epfd;
+protected:
+    inline void SetWakeupEpfd(int epfd)
+    {
+        m_epfd = epfd;
+    };
+    struct epoll_event m_ev;
+
+private:
+    int m_normal_wakeup_pipes[WAKEUP_PIPE_SIZE];
+};
+
+class CommEpollFd : public WakeupPipe, public BaseObject {
+public:
+    CommEpollFd(int epfd, int size);
+    ~CommEpollFd();
+
+    void Init(int epfd);
+    void DeInit();
+    int EpollCtl(int op, int fd, const struct epoll_event *event);
+    bool IsLogicFd(uint64_t data);
+    inline knl_session_context *GetSessionBaseOnEvent(const struct epoll_event* ev)
+    {
+        return (ev) ? (knl_session_context*)ev->data.ptr : NULL;
+    };
+    int RegisterNewSession(knl_session_context* session);
+    int ResetSession(const knl_session_context* session);
+    int UnRegisterSession(const knl_session_context* session);
+    void PushReadyEvent(SessionInfo *session_info, bool err_occurs);
+    const bool CheckError(const SessionInfo *session_info);
+    const bool CheckEvent(const SessionInfo *session_info);
+    int EpollWait(int epfd, epoll_event *events, int maxevents, int timeout);
+    int GetReadyEvents();
+    ArrayLockFreeQueue<SessionInfo> m_ready_events_queue;
+
+private:
+    int m_max_session_size;
+    FdCollection *m_comm_fd_collection;
+
+    /* for EpollWait */
+    struct epoll_event *m_events;
+    int m_maxevents;
+    int m_timeout;
+    struct epoll_event *m_ready_events;
+
+    /* number of total ready fds(physic + logic) */
+    int m_all_ready_fds;
+};
+
+extern CommEpollFd *GetCommEpollFd(int epfd);
+extern void LogicEpollCreate(int epfd, int size);
+extern void CloseLogicEpfd(int epfd);
 #endif  //_GS_LIBCOMM_COMMON_H_

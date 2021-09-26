@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------------------
  * 
  * decode.h
- *        PostgreSQL WAL to logical transformation
+ *        openGauss WAL to logical transformation
  *
  * Portions Copyright (c) 2012-2014, PostgreSQL Global Development Group
  * 

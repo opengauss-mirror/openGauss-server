@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * tupdesc.cpp
- *	  POSTGRES tuple descriptor support code
+ *	  openGauss tuple descriptor support code
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -501,7 +501,8 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
         if (strcmp(NameStr(attr1->attname), NameStr(attr2->attname)) != 0) {
             return false;
         }
-        if (attr1->atttypid != attr2->atttypid) {
+        const bool cl_skip = IsClientLogicType(attr1->atttypid) && (Oid)attr1->atttypmod == attr2->atttypid;
+        if (attr1->atttypid != attr2->atttypid && !cl_skip) {
             return false;
         }
         if (attr1->attstattarget != attr2->attstattarget) {
@@ -513,13 +514,13 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
         if (attr1->attndims != attr2->attndims) {
             return false;
         }
-        if (attr1->atttypmod != attr2->atttypmod) {
+        if (attr1->atttypmod != attr2->atttypmod && !cl_skip) {
             return false;
         }
         if (attr1->attbyval != attr2->attbyval) {
             return false;
         }
-        if (attr1->attstorage != attr2->attstorage) {
+        if (attr1->attstorage != attr2->attstorage && !cl_skip) {
             return false;
         }
         if (attr1->attkvtype != attr2->attkvtype) {
@@ -546,7 +547,7 @@ bool equalTupleDescs(TupleDesc tupdesc1, TupleDesc tupdesc2)
         if (attr1->attinhcount != attr2->attinhcount) {
             return false;
         }
-        if (attr1->attcollation != attr2->attcollation) {
+        if (attr1->attcollation != attr2->attcollation && !cl_skip) {
             return false;
         }
         /* attacl, attoptions and attfdwoptions are not even present... */
@@ -897,13 +898,32 @@ int UpgradeAdaptAttr(Oid atttypid, ColumnDef *entry)
     return attdim;
 }
 
-static void BlockRowCompressRelOption(const Node *orientedFrom, const ColumnDef *entry)
+static void BlockRowCompressRelOption(const char *tableFormat, const ColumnDef *entry)
 {
-    if (pg_strcasecmp(ORIENTATION_ROW, strVal(orientedFrom)) == 0 &&  ATT_CMPR_NOCOMPRESS < entry->cmprs_mode
-        && entry->cmprs_mode <= ATT_CMPR_NUMSTR) {
+    if (pg_strcasecmp(ORIENTATION_ROW, tableFormat) == 0 &&  ATT_CMPR_NOCOMPRESS < entry->cmprs_mode &&
+        entry->cmprs_mode <= ATT_CMPR_NUMSTR) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
              errmsg("row-oriented table does not support compression")));
+    }
+}
+
+static void BlockColumnRelOption(const char *tableFormat, const Oid atttypid, const int32 atttypmod)
+{
+    if (((pg_strcasecmp(ORIENTATION_COLUMN, tableFormat)) == 0 ||
+        (pg_strcasecmp(ORIENTATION_TIMESERIES, tableFormat)) == 0) &&
+        !IsTypeSupportedByCStore(atttypid, atttypmod)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("type \"%s\" is not supported in column store", format_type_with_typemod(atttypid, atttypmod))));
+    }
+}
+
+static void BlockORCRelOption(const char *tableFormat, const Oid atttypid, const int32 atttypmod)
+{
+    if ((pg_strcasecmp(ORIENTATION_ORC, tableFormat) == 0) && !IsTypeSupportedByORCRelation(atttypid)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("type \"%s\" is not supported in DFS ORC format column store",
+                               format_type_with_typemod(atttypid, atttypmod))));
     }
 }
 
@@ -928,6 +948,11 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
     int32 atttypmod;
     Oid attcollation;
     int attdim;
+    const char *tableFormat = "";
+
+    if (orientedFrom != NULL) {
+        tableFormat = strVal(orientedFrom);
+    }
 
     /*
      * allocate a new tuple descriptor
@@ -989,17 +1014,8 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         attcollation = GetColumnDefCollation(NULL, entry, atttypid);
         attdim = UpgradeAdaptAttr(atttypid, entry);
 
-        if (((0 == pg_strcasecmp(ORIENTATION_COLUMN, strVal(orientedFrom))) ||
-             (0 == pg_strcasecmp(ORIENTATION_TIMESERIES, strVal(orientedFrom)))) &&
-            !IsTypeSupportedByCStore(atttypid, atttypmod))
-            ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type \"%s\" is not supported in column store",
-                                                                    format_type_with_typemod(atttypid, atttypmod))));
-
-        if ((0 == pg_strcasecmp(ORIENTATION_ORC, strVal(orientedFrom))) && !IsTypeSupportedByORCRelation(atttypid))
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                            errmsg("type \"%s\" is not supported in DFS ORC format column store",
-                                   format_type_with_typemod(atttypid, atttypmod))));
+        BlockColumnRelOption(tableFormat, atttypid, atttypmod);
+        BlockORCRelOption(tableFormat, atttypid, atttypmod);
 
         if (entry->typname->setof)
             ereport(ERROR, (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
@@ -1026,7 +1042,7 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         VerifyAttrCompressMode(entry->cmprs_mode, thisatt->attlen, attname);
         thisatt->attcmprmode = entry->cmprs_mode;
 
-        BlockRowCompressRelOption(orientedFrom, entry);
+        BlockRowCompressRelOption(tableFormat, entry);
     }
 
     if (has_not_null) {

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * procarray.cpp
- *	  POSTGRES process array code.
+ *	  openGauss process array code.
  *
  *
  * This module maintains arrays of the PGPROC and PGXACT structures for all
@@ -87,6 +87,7 @@
 #include "funcapi.h"
 #include "gtm/gtm_txn.h"
 #include "miscadmin.h"
+#include "postmaster/snapcapturer.h"
 #include "storage/lmgr.h"
 #include "storage/procarray.h"
 #include "storage/spin.h"
@@ -199,6 +200,92 @@ static void UpdateCSNAtTransactionCommit(CommitSeqNo maxCommitCSN);
 
 
 extern bool StreamTopConsumerAmI();
+
+#define PROCARRAY_MAXPROCS      (g_instance.shmem_cxt.MaxBackends + \
+    g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS)
+
+/*
+ * Report shared-memory space needed by CreateProcXactHashTable
+ */
+Size ProcXactHashTableShmemSize(void)
+{
+    return hash_estimate_size(PROCARRAY_MAXPROCS, sizeof(ProcXactLookupEntry));
+}
+
+void CreateProcXactHashTable(void)
+{
+    HASHCTL         info;
+
+    info.keysize = sizeof(TransactionId);
+    info.entrysize = sizeof(ProcXactLookupEntry);
+    info.hash = tag_hash;
+    info.num_partitions = NUM_PROCXACT_PARTITIONS; /* We only have 812 threads in current configuration */
+
+    g_instance.ProcXactTable = ShmemInitHash("Proc Xact Lookup Table", PROCARRAY_MAXPROCS, PROCARRAY_MAXPROCS,
+        &info, HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
+}
+
+/* @Return partition lock id. */
+static LWLock *LockProcXactHashTablePartition(TransactionId xid, LWLockMode mode)
+{
+        uint32 hashValue = get_hash_value(g_instance.ProcXactTable, &xid);
+        uint32 partition = hashValue & (NUM_PROCXACT_PARTITIONS - 1);
+        uint32 lockid = (uint32)(FirstProcXactMappingLock + partition);
+        LWLock* lock = &t_thrd.shemem_ptr_cxt.mainLWLockArray[lockid].lock;
+
+        LWLockAcquire(lock, mode);
+
+        return lock;
+}
+
+int
+ProcXactHashTableLookup(TransactionId xid)
+{
+        /* Caller should make sure ProcArrayLock is held by it in share mode */
+        ProcXactLookupEntry *result = NULL;
+        bool found = false;
+
+        LWLock* lock = LockProcXactHashTablePartition(xid, LW_SHARED);
+
+        result = (ProcXactLookupEntry *) hash_search(g_instance.ProcXactTable, &xid, HASH_FIND, &found);
+
+        LWLockRelease(lock);
+
+        return found ? result->proc_id : InvalidProcessId;
+}
+
+void
+ProcXactHashTableAdd(TransactionId xid, int procId)
+{
+        /* Caller should make sure ProcArrayLock is held by it in exclusive mode */
+        bool found = true;
+
+        LWLock* lock = LockProcXactHashTablePartition(xid, LW_EXCLUSIVE);
+
+        ProcXactLookupEntry *result =
+            (ProcXactLookupEntry *)hash_search(g_instance.ProcXactTable, &xid, HASH_ENTER, &found);
+
+        LWLockRelease(lock);
+
+        result->proc_id = procId;
+}
+
+void
+ProcXactHashTableRemove(TransactionId xid)
+{
+        bool found = false;
+
+        LWLock *lock = LockProcXactHashTablePartition(xid, LW_EXCLUSIVE);
+
+        hash_search(g_instance.ProcXactTable, &xid, HASH_REMOVE, &found);
+
+        LWLockRelease(lock);
+
+        if (!found)
+            ereport(WARNING, (errcode(ERRCODE_DUPLICATE_OBJECT),
+                errmsg("transaction identifier %lu not exists in ProcXact hash table", xid)));
+}
+
 /*
  * Report shared-memory space needed by CreateSharedProcArray.
  */
@@ -207,7 +294,8 @@ Size ProcArrayShmemSize(void)
     Size size;
 
     /* Size of the ProcArray structure itself */
-#define PROCARRAY_MAXPROCS (g_instance.shmem_cxt.MaxBackends + g_instance.attr.attr_storage.max_prepared_xacts)
+#define PROCARRAY_MAXPROCS (g_instance.shmem_cxt.MaxBackends + \
+    g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS)
 
     size = offsetof(ProcArrayStruct, pgprocnos);
     size = add_size(size, mul_size(sizeof(int), PROCARRAY_MAXPROCS));
@@ -268,6 +356,7 @@ void ProcArrayAdd(PGPROC* proc)
     int index = 0;
     errno_t rc;
     LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+    PGXACT* pgxact = &g_instance.proc_base_all_xacts[proc->pgprocno];
 
     if (arrayP->numProcs >= arrayP->maxProcs) {
         /*
@@ -305,6 +394,10 @@ void ProcArrayAdd(PGPROC* proc)
     arrayP->pgprocnos[index] = proc->pgprocno;
     arrayP->numProcs++;
 
+    if (TransactionIdIsValid(pgxact->xid)) {
+        ProcXactHashTableAdd(pgxact->xid, proc->pgprocno);
+    }
+
     LWLockRelease(ProcArrayLock);
 }
 
@@ -337,6 +430,11 @@ void ProcArrayRemove(PGPROC* proc, TransactionId latestXid)
             /* Shouldn't be trying to remove a live transaction here */
             Assert(!TransactionIdIsValid(pgxact->xid));
         }
+    }
+
+    /* Clear xid from ProcXactHashTable. We can ignore BootstrapTransactionId */
+    if (TransactionIdIsNormal(pgxact->xid)) {
+        ProcXactHashTableRemove(pgxact->xid);
     }
 
     for (index = 0; index < arrayP->numProcs; index++) {
@@ -418,7 +516,7 @@ void ProcArrayEndTransaction(PGPROC* proc, TransactionId latestXid, bool isCommi
         /*
          * Remove this assertion. We have seen this failing because a ROLLBACK
          * statement may get canceled by a Coordinator, leading to recursive
-         * abort of a transaction. This must be a PostgreSQL issue, highlighted
+         * abort of a transaction. This must be a openGauss issue, highlighted
          * by XC. See thread on hackers with subject "Canceling ROLLBACK
          * statement"
          */
@@ -481,6 +579,11 @@ static inline void ProcArrayEndTransactionInternal(PGPROC* proc, PGXACT* pgxact,
     /* Store xid and nsubxids to update csnlog */
     *xid = pgxact->xid;
     *nsubxids = pgxact->nxids;
+
+    /* Clear xid from ProcXactHashTable. We can ignore BootstrapTransactionId */
+    if (TransactionIdIsNormal(*xid)) {
+        ProcXactHashTableRemove(*xid);
+    }
 
     pgxact->handle = InvalidTransactionHandle;
     pgxact->xid = InvalidTransactionId;
@@ -1179,7 +1282,8 @@ RecentXmin
  * in HeapTupleSatisfiesMVCC. But we keep assert checking every scene for
 data consistency.
  */
-bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcutByRecentXmin, bool bCareNextxid)
+bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcutByRecentXmin,
+                               bool bCareNextxid, bool isTopXact, bool checkLatestCompletedXid)
 {
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
 #ifdef USE_ASSERT_CHECKING
@@ -1204,7 +1308,8 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
     assigned value
      * local must sync with gtm.
      */
-    if (shortcutByRecentXmin && TransactionIdPrecedes(xid, u_sess->utils_cxt.RecentXmin)) {
+    if (shortcutByRecentXmin &&
+        TransactionIdPrecedes(xid, pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo))) {
         xc_by_recent_xmin_inc();
 
         /*
@@ -1250,7 +1355,7 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
      * Now that we have the lock, we can check latestCompletedXid; if the
      * target Xid is after that, it's surely still running.
      */
-    if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, xid)) {
+    if (checkLatestCompletedXid && TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid, xid)) {
         LWLockRelease(ProcArrayLock);
         xc_by_latest_xid_inc();
 
@@ -1265,78 +1370,94 @@ bool TransactionIdIsInProgress(TransactionId xid, uint32* needSync, bool shortcu
         return true;
     }
 
-    /* No shortcuts, gotta grovel through the array */
-    for (i = 0; i < arrayP->numProcs; i++) {
-        int pgprocno = arrayP->pgprocnos[i];
-        volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
-        volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
-        TransactionId pxid;
+    if (isTopXact && !bCareNextxid) {
+        int procId = ProcXactHashTableLookup(xid);
 
-        /* Ignore my own proc --- dealt with it above */
-        if (proc == t_thrd.proc)
-            continue;
+        volatile PGXACT *pgxact = &g_instance.proc_base_all_xacts[procId];
 
-        /* Fetch xid just once - see GetNewTransactionId */
-        pxid = pgxact->xid;
-
-        if (!TransactionIdIsValid(pxid)) {
-            if (bCareNextxid && TransactionIdIsValid(pgxact->next_xid))
-                pxid = pgxact->next_xid;
-            else
-                continue;
-        }
-
-        /*
-         * Step 1: check the main Xid
-         */
-        if (TransactionIdEquals(pxid, xid)) {
-            if (needSync != NULL)
+        if (procId != InvalidProcessId) {
+            if (needSync != NULL) {
                 *needSync = pgxact->needToSyncXid;
+            }
             LWLockRelease(ProcArrayLock);
-            xc_by_main_xid_inc();
-            Assert(shortCutCheckRes == true);
             return true;
         }
 
-        /*
-         * We can ignore main Xids that are younger than the target Xid, since
-         * the target could not possibly be their child.
-         */
-        if (TransactionIdPrecedes(xid, pxid))
-            continue;
+        LWLockRelease(ProcArrayLock);
+    } else {
+        /* No shortcuts, gotta grovel through the array */
+        for (i = 0; i < arrayP->numProcs; i++) {
+            int pgprocno = arrayP->pgprocnos[i];
+            volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
+            volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
+            TransactionId pxid;
 
-        /*
-         * Step 2: check the cached child-Xids arrays
-         */
-        if (pgxact->nxids > 0) {
-            /* Use subxidsLock to protect subxids */
-            LWLockAcquire(proc->subxidsLock, LW_SHARED);
-            for (j = pgxact->nxids - 1; j >= 0; j--) {
-                /* Fetch xid just once - see GetNewTransactionId */
-                TransactionId cxid = proc->subxids.xids[j];
+            /* Ignore my own proc --- dealt with it above */
+            if (proc == t_thrd.proc)
+                continue;
 
-                if (TransactionIdEquals(cxid, xid)) {
-                    if (needSync != NULL)
-                        *needSync = pgxact->needToSyncXid;
-                    LWLockRelease(proc->subxidsLock);
-                    LWLockRelease(ProcArrayLock);
-                    xc_by_child_xid_inc();
-                    Assert(shortCutCheckRes == true);
-                    return true;
-                }
+            /* Fetch xid just once - see GetNewTransactionId */
+            pxid = pgxact->xid;
+
+            if (!TransactionIdIsValid(pxid)) {
+                if (bCareNextxid && TransactionIdIsValid(pgxact->next_xid))
+                    pxid = pgxact->next_xid;
+                else
+                    continue;
             }
-            LWLockRelease(proc->subxidsLock);
-        }
-    }
 
-    LWLockRelease(ProcArrayLock);
+            /*
+             * Step 1: check the main Xid
+             */
+            if (TransactionIdEquals(pxid, xid)) {
+                if (needSync != NULL)
+                    *needSync = pgxact->needToSyncXid;
+                LWLockRelease(ProcArrayLock);
+                xc_by_main_xid_inc();
+                Assert(shortCutCheckRes == true);
+                return true;
+            }
+
+            /*
+             * We can ignore main Xids that are younger than the target Xid, since
+             * the target could not possibly be their child.
+             */
+            if (TransactionIdPrecedes(xid, pxid))
+                continue;
+
+            /*
+             * Step 2: check the cached child-Xids arrays
+             */
+            if (pgxact->nxids > 0) {
+                /* Use subxidsLock to protect subxids */
+                LWLockAcquire(proc->subxidsLock, LW_SHARED);
+                for (j = pgxact->nxids - 1; j >= 0; j--) {
+                    /* Fetch xid just once - see GetNewTransactionId */
+                    TransactionId cxid = proc->subxids.xids[j];
+
+                    if (TransactionIdEquals(cxid, xid)) {
+                        if (needSync != NULL)
+                            *needSync = pgxact->needToSyncXid;
+                        LWLockRelease(proc->subxidsLock);
+                        LWLockRelease(ProcArrayLock);
+                        xc_by_child_xid_inc();
+                        Assert(shortCutCheckRes == true);
+                        return true;
+                    }
+                }
+                LWLockRelease(proc->subxidsLock);
+            }
+        }
+
+        LWLockRelease(ProcArrayLock);
+    }
 
     /*
      * Step 3: in hot standby mode, check the CSN log.
      */
     if (RecoveryInProgress()) {
         CommitSeqNo csn;
-        csn = TransactionIdGetCommitSeqNo(xid, false, false, true);
+        csn = TransactionIdGetCommitSeqNo(xid, false, false, true, NULL);
         if (COMMITSEQNO_IS_COMMITTED(csn) || COMMITSEQNO_IS_ABORTED(csn))
             return false;
         else
@@ -1412,14 +1533,14 @@ static void UpdateRecentGlobalXmin(TransactionId currGlobalXmin, TransactionId r
  * increasing that setting on the fly is another easy way to make
  * GetOldestXmin() move backwards, with no consequences for data integrity.
  */
-TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin)
+TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin, bool bRecentGlobalXminNoCheck)
 {
     TransactionId result = InvalidTransactionId;
     TransactionId currGlobalXmin;
     TransactionId replication_slot_xmin;
     volatile TransactionId replication_slot_catalog_xmin = InvalidTransactionId;
 
-    if (!bFixRecentGlobalXmin && TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin))
+    if (!bFixRecentGlobalXmin && TransactionIdIsNormal(u_sess->utils_cxt.RecentGlobalXmin) && !bRecentGlobalXminNoCheck)
         return u_sess->utils_cxt.RecentGlobalXmin;
 
     /* Fetch into local variable, don't need to hold ProcArrayLock */
@@ -1439,7 +1560,7 @@ TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin)
                 currGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
                 UpdateRecentGlobalXmin(currGlobalXmin, result);
             }
-        } else {
+        } else if (!bRecentGlobalXminNoCheck) {
             /* Get recentGlobalXmin from ShmemVariableCache */
             currGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
             if (TransactionIdIsNormal(currGlobalXmin) &&
@@ -1486,6 +1607,38 @@ TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin)
         result = replication_slot_catalog_xmin;
 
     return result;
+}
+
+TransactionId GetGlobalOldestXmin()
+{
+    TransactionId result = InvalidTransactionId;
+
+    /* directly fetch Global OldestXmin */
+    result = GetMultiSnapshotOldestXmin();
+
+    /* Update by vacuum_defer_cleanup_age */
+    if (TransactionIdPrecedes(result, (uint64)u_sess->attr.attr_storage.vacuum_defer_cleanup_age))
+        result = FirstNormalTransactionId;
+    else
+        result -= u_sess->attr.attr_storage.vacuum_defer_cleanup_age;
+
+    return result;
+}
+
+TransactionId GetOldestXminForUndo(void)
+{
+    TransactionId oldestXmin = GetMultiSnapshotOldestXmin();
+    if (ENABLE_TCAP_VERSION) {
+        if (TransactionIdPrecedes(oldestXmin, (uint64)u_sess->attr.attr_storage.version_retention_age)) {
+            oldestXmin = FirstNormalTransactionId;
+        } else {
+            oldestXmin -= u_sess->attr.attr_storage.version_retention_age;
+        }
+    }
+    if (unlikely(TransactionIdPrecedes(oldestXmin, g_instance.proc_base->oldestXidInUndo))) {
+        oldestXmin = g_instance.proc_base->oldestXidInUndo;
+    }
+    return oldestXmin;
 }
 
 /*
@@ -1568,7 +1721,7 @@ Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot)
         (GTM_LITE_MODE && ((is_exec_cn && !force_local_snapshot) || /* GTM_LITE exec cn */
                            (!is_exec_cn && u_sess->utils_cxt.snapshot_source == SNAPSHOT_COORDINATOR))))  { /* GTM_LITE other node */
         /*
-         * Obtain a global snapshot for a Postgres-XC session
+         * Obtain a global snapshot for a openGauss session
          * if possible. When not in postmaster environment, get local snapshot, --single mode e.g.
          */
         if (!useLocalXid) {
@@ -1591,10 +1744,11 @@ RETRY:
             snapshot->gtm_snapshot_type = GTM_SNAPSHOT_TYPE_LOCAL;
         }
         Snapshot result = GetLocalSnapshotData(snapshot);
+        snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
+
         if (result) {
             if (GTM_LITE_MODE) {
                 /* gtm lite check csn, if not pass, try to get local snapshot form multiversion again */
-                snapshot->snapshotcsn = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->nextCommitSeqNo);
                 CommitSeqNo return_csn = set_proc_csn_and_check("GetLocalSnapshotData", snapshot->snapshotcsn,
                                                                 snapshot->gtm_snapshot_type, SNAPSHOT_DATANODE);
                 if (!COMMITSEQNO_IS_COMMITTED(return_csn)) {
@@ -1623,8 +1777,30 @@ RETRY:
      * It is sufficient to get shared lock on ProcArrayLock, even if we are
      * going to set MyPgXact->xmin.
      */
+    snapshot->takenDuringRecovery = RecoveryInProgress();
+#ifndef ENABLE_MULTIPLE_NODES
+    bool retry_get = false;
+RETRY_GET:
+    if (snapshot->takenDuringRecovery) {
+        if (retry_get) {
+            CHECK_FOR_INTERRUPTS();
+            pg_usleep(100L);
+        }
+        XLogRecPtr redoEndLsn = GetXLogReplayRecPtr(NULL, NULL);
+        LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+        if ((t_thrd.xact_cxt.ShmemVariableCache->standbyXmin
+            <= t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin)
+            && (t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn > redoEndLsn)) {
+            LWLockRelease(ProcArrayLock);
+            retry_get = true;
+            goto RETRY_GET;
+        }
+    } else {
+        LWLockAcquire(ProcArrayLock, LW_SHARED);
+    }
+#else
     LWLockAcquire(ProcArrayLock, LW_SHARED);
-
+#endif
     /* xmax is always latestCompletedXid + 1 */
     xmax = t_thrd.xact_cxt.ShmemVariableCache->latestCompletedXid;
     Assert(TransactionIdIsNormal(xmax));
@@ -1641,7 +1817,7 @@ RETRY:
      * change while we hold ProcArrayLock, so those newly added transaction
      * ids would be filtered away, so we need not be concerned about them.
      */
-    snapshot->takenDuringRecovery = RecoveryInProgress();
+
 #ifndef ENABLE_MULTIPLE_NODES
     if (!snapshot->takenDuringRecovery || forHSFeedBack) {
 #else
@@ -2441,7 +2617,7 @@ VirtualTransactionId* GetCurrentVirtualXIDs(
  * Be careful to *not* pfree the result from this function. We reuse
  * this array sufficiently often that we use malloc for the result.
  */
-VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid)
+VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbOid, XLogRecPtr lsn)
 {
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
     int count = 0;
@@ -2492,7 +2668,13 @@ VirtualTransactionId* GetConflictingVirtualXIDs(TransactionId limitXmin, Oid dbO
             }
         }
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin < limitXmin)
+        t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXmin = limitXmin;
 
+    if (t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn < lsn)
+        t_thrd.xact_cxt.ShmemVariableCache->standbyRedoCleanupXminLsn = lsn;
+#endif
     LWLockRelease(ProcArrayLock);
 
     /* add the terminator */
@@ -2838,28 +3020,163 @@ void CancelSingleNodeBackends(Oid databaseOid, Oid userOid, ProcSignalReason sig
 }
 
 
+LWLock *RoleidPartitionLock(uint32 hashCode)
+{
+    int id = FirstSessRoleIdLock + hashCode % NUM_SESSION_ROLEID_PARTITIONS;
+    return GetMainLWLockByIndex(id);
+}
+
+/* Init RoleId HashTable */
+void InitRoleIdHashTable()
+{
+    HASHCTL hctl;
+    errno_t rc = 0;
+
+    MemoryContext context = AllocSetContextCreate(g_instance.instance_context,
+                                                  "RoleIdHashtblContext",
+                                                  ALLOCSET_SMALL_MINSIZE,
+                                                  ALLOCSET_SMALL_INITSIZE,
+                                                  ALLOCSET_DEFAULT_MAXSIZE);
+
+    rc = memset_s(&hctl, sizeof(HASHCTL), 0, sizeof(HASHCTL));
+    securec_check(rc, "", "");
+
+    hctl.keysize = sizeof(Oid);
+    hctl.entrysize = sizeof(RoleIdHashEntry);
+    hctl.hash = oid_hash;
+    hctl.hcxt = context;
+    hctl.num_partitions = NUM_SESSION_ROLEID_PARTITIONS;
+
+    g_instance.roleid_cxt.roleid_table = HeapMemInitHash("Roleid map",
+        INIT_ROLEID_HASHTBL,
+        MAX_ROLEID_HASHTBL,
+        &hctl,
+        HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
+
+}
+/* get the RoleId Count. */
+int GetRoleIdCount(Oid roleoid)
+{
+    bool found = false;
+    uint32 hashCode = 0;
+    volatile int64 roleNum = 0;
+    RoleIdHashEntry *entry = NULL;
+
+    hashCode = oid_hash(&roleoid, sizeof(Oid));
+    LWLock *lock = RoleidPartitionLock(hashCode);
+
+    (void)LWLockAcquire(lock, LW_SHARED);
+
+    entry = (RoleIdHashEntry *)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_FIND, &found);
+
+    if (!found) {
+        roleNum = 0;
+    } else {
+        roleNum = entry->roleNum;
+    }
+
+    LWLockRelease(lock);
+
+    return roleNum;
+}
+
+int IncreaseUserCount(Oid roleoid)
+{
+    bool found = false;
+    uint32 hashCode = 0;
+    volatile int64 roleNum = 0;
+    RoleIdHashEntry *entry = NULL;
+
+    if(roleoid == 0) {
+        return 0;
+    }
+
+    hashCode = oid_hash(&roleoid, sizeof(Oid));
+    LWLock *lock = RoleidPartitionLock(hashCode);
+
+    (void)LWLockAcquire(lock, LW_EXCLUSIVE);
+
+    entry = (RoleIdHashEntry *)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_ENTER, &found);
+
+    if (!found) {
+        entry->roleNum = 1;
+    } else {
+        entry->roleNum++;
+    }
+
+    roleNum = entry->roleNum;
+    LWLockRelease(lock);
+    return roleNum;
+}
+
+int DecreaseUserCount(Oid roleoid)
+{
+    bool found = false;
+    uint32 hashCode = 0;
+    volatile int64 roleNum = 0;
+    RoleIdHashEntry *entry = NULL;
+
+    if(roleoid == 0) {
+        return 0;
+    }
+    hashCode = oid_hash(&roleoid, sizeof(Oid));
+    LWLock *lock = RoleidPartitionLock(hashCode);
+
+    (void)LWLockAcquire(lock, LW_EXCLUSIVE);
+
+    entry = (RoleIdHashEntry *)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_ENTER, &found);
+
+    if (!found) {
+       RemoveUserCount(roleoid); 
+    } else {
+        entry->roleNum--;
+        roleNum = entry->roleNum;
+    }
+
+    LWLockRelease(lock);
+    return roleNum;
+}
+
+void RemoveUserCount(Oid roleoid)
+{
+    bool found = false;
+    uint32 hashCode = 0;
+    hashCode = oid_hash(&roleoid, sizeof(Oid));
+    LWLock *lock = RoleidPartitionLock(hashCode);
+
+    (void)LWLockAcquire(lock, LW_EXCLUSIVE);
+
+    (void)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_REMOVE, &found);
+
+    LWLockRelease(lock);
+}
+
 /*
  * CountUserBackends --- count backends that are used by specified user
  */
 int CountUserBackends(Oid roleid)
 {
-    ProcArrayStruct* arrayP = g_instance.proc_array_idx;
+    
     int count = 0;
+    if (!ENABLE_THREAD_POOL) {
+        ProcArrayStruct* arrayP = g_instance.proc_array_idx;
+        LWLockAcquire(ProcArrayLock, LW_SHARED);
 
-    LWLockAcquire(ProcArrayLock, LW_SHARED);
+        for (int index = 0; index < arrayP->numProcs; index++) {
+            int pgprocno = arrayP->pgprocnos[index];
+            volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
 
-    for (int index = 0; index < arrayP->numProcs; index++) {
-        int pgprocno = arrayP->pgprocnos[index];
-        volatile PGPROC* proc = g_instance.proc_base_all_procs[pgprocno];
+            if (proc->pid == 0)
+                continue; /* do not count prepared xacts */
 
-        if (proc->pid == 0)
-            continue; /* do not count prepared xacts */
+            if (proc->roleId == roleid)
+                count++;
+        }
 
-        if (proc->roleId == roleid)
-            count++;
+        LWLockRelease(ProcArrayLock);
+    } else {
+        count = GetRoleIdCount(roleid);
     }
-
-    LWLockRelease(ProcArrayLock);
 
     return count;
 }
@@ -3070,6 +3387,16 @@ void ProcArraySetReplicationSlotXmin(TransactionId xmin, TransactionId catalog_x
     if (!already_locked)
         LWLockRelease(ProcArrayLock);
 }
+
+/*
+ * GetReplicationSlotCatalogXmin
+ * 
+ * Return replication_slot_catalog_xmin.
+ */
+TransactionId GetReplicationSlotCatalogXmin() {
+    return g_instance.proc_array_idx->replication_slot_catalog_xmin;
+}
+
 /*
  * ProcArrayGetReplicationSlotXmin
  *
@@ -3246,7 +3573,7 @@ void UnsetGlobalSnapshotData(void)
 }
 
 /*
- * Entry of snapshot obtention for Postgres-XC node
+ * Entry of snapshot obtention for openGauss node
  * returns information about running transactions.
  * The returned snapshot includes xmin (lowest still-running xact ID),
  * xmax (highest completed xact ID + 1), and a list of running xact IDs
@@ -3658,7 +3985,7 @@ void proc_cancel_invalid_gtm_lite_conn()
                 ereport(WARNING, (errmsg("GTMLite: could not send signal to thread %lu: %m", proc->pid)));
                 (void)pg_atomic_exchange_u32(&proc->signal_cancel_gtm_conn_flag, 0);
             } else {
-                ereport(LOG, (errmsg("GTMLite: success to send SIGUSR2 to postgres thread: %lu.", proc->pid)));
+                ereport(LOG, (errmsg("GTMLite: success to send SIGUSR2 to openGauss thread: %lu.", proc->pid)));
             }
         }
     }
@@ -3720,9 +4047,15 @@ TransactionId GetGlobal2pcXmin()
  */
 void SyncWaitXidEnd(TransactionId xid, Buffer buffer)
 {
+    if (!BufferIsValid(buffer)) {
+        /* Wait local transaction finish */
+        SyncLocalXidWait(xid);
+        return;
+    }
+
     BufferDesc *bufHdr = GetBufferDescriptor(buffer - 1);
     LWLockMode mode = GetHeldLWLockMode(bufHdr->content_lock);
-    
+
     Assert(mode == LW_EXCLUSIVE || mode == LW_SHARED);
 
     /* Release buffer lock */
@@ -4090,7 +4423,6 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
     snapshot->takenDuringRecovery = snapxid->takenDuringRecovery;
 
     TransactionId replication_slot_xmin = g_instance.proc_array_idx->replication_slot_xmin;
-    TransactionId replication_slot_catalog_xmin = g_instance.proc_array_idx->replication_slot_catalog_xmin;
 
     if (!TransactionIdIsValid(t_thrd.pgxact->xmin)) {
         t_thrd.pgxact->xmin = u_sess->utils_cxt.TransactionXmin = snapxid->xmin;
@@ -4109,18 +4441,6 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
         TransactionIdPrecedes(replication_slot_xmin, u_sess->utils_cxt.RecentGlobalXmin))
         u_sess->utils_cxt.RecentGlobalXmin = replication_slot_xmin;
 
-    /* Non-catalog tables can be vacuumed if older than this xid */
-    u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
-
-    /*
-     * Check whether there's a replication slot requiring an older catalog
-     * xmin.
-     */
-    if (TransactionIdIsNormal(replication_slot_catalog_xmin) &&
-        NormalTransactionIdPrecedes(replication_slot_catalog_xmin, u_sess->utils_cxt.RecentGlobalXmin)) {
-        u_sess->utils_cxt.RecentGlobalXmin = replication_slot_catalog_xmin;
-    }
-
     u_sess->utils_cxt.RecentXmin = snapxid->xmin;
     snapshot->xmin = snapxid->xmin;
     snapshot->xmax = snapxid->xmax;
@@ -4130,6 +4450,8 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
     snapshot->active_count = 0;
     snapshot->regd_count = 0;
     snapshot->copied = false;
+    /* Non-catalog tables can be vacuumed if older than this xid */
+    u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
 
     ReleaseSnapshotData(snapshot);
 
@@ -4322,6 +4644,7 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
     snapxid->takenDuringRecovery = RecoveryInProgress();
 
     pg_write_barrier();
+
     ereport(DEBUG1, (errmsg("Generated snapshot in ring buffer slot %lu\n", SNAPXID_INDEX(snapxid))));
     SetNextSnapXid();
 }

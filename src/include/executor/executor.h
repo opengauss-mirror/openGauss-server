@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * executor.h
- *	  support for the POSTGRES executor module
+ *	  support for the openGauss executor module
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -14,7 +14,7 @@
 #ifndef EXECUTOR_H
 #define EXECUTOR_H
 
-#include "executor/execdesc.h"
+#include "executor/exec/execdesc.h"
 #include "nodes/parsenodes.h"
 #include "nodes/params.h"
 #include "pgxc/pgxc.h"
@@ -229,15 +229,20 @@ extern TupleTableSlot* EvalPlanQual(EState* estate, EPQState* epqstate, Relation
     ItemPointer tid, TransactionId priorXmax, bool partRowMoveUpdate);
 extern HeapTuple heap_lock_updated(
     CommandId cid, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax);
+extern TupleTableSlot* EvalPlanQualUHeap(EState* estate, EPQState* epqstate, Relation relation, Index rti, ItemPointer tid, TransactionId priorXmax);
+extern TupleTableSlot *EvalPlanQualUSlot(EPQState *epqstate, Relation relation, Index rti);
+extern HeapTuple EvalPlanQualFetch(
+    EState* estate, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax);
 extern void EvalPlanQualInit(EPQState* epqstate, EState* estate, Plan* subplan, List* auxrowmarks, int epqParam);
 extern void EvalPlanQualSetPlan(EPQState* epqstate, Plan* subplan, List* auxrowmarks);
-extern void EvalPlanQualSetTuple(EPQState* epqstate, Index rti, HeapTuple tuple);
-extern HeapTuple EvalPlanQualGetTuple(EPQState* epqstate, Index rti);
+extern void EvalPlanQualSetTuple(EPQState* epqstate, Index rti, Tuple tuple);
+extern Tuple EvalPlanQualGetTuple(EPQState* epqstate, Index rti);
 
 #define EvalPlanQualSetSlot(epqstate, slot) ((epqstate)->origslot = (slot))
 extern void EvalPlanQualFetchRowMarks(EPQState* epqstate);
+extern void EvalPlanQualFetchRowMarksUHeap(EPQState* epqstate);
 extern TupleTableSlot* EvalPlanQualNext(EPQState* epqstate);
-extern void EvalPlanQualBegin(EPQState* epqstate, EState* parentestate);
+extern void EvalPlanQualBegin(EPQState* epqstate, EState* parentestate, bool isUHeap = false);
 extern void EvalPlanQualEnd(EPQState* epqstate);
 
 /*
@@ -288,6 +293,18 @@ typedef struct TupOutputState {
     DestReceiver* dest;
 } TupOutputState;
 
+typedef struct ExecIndexTuplesState {
+    EState* estate;
+    Relation targetPartRel;
+    Partition p;
+    bool* conflict;
+} ExecIndexTuplesState;
+
+typedef struct ConflictInfoData {
+    TransactionId     conflictXid;
+    ItemPointerData   conflictTid;
+} ConflictInfoData;
+
 extern TupOutputState* begin_tup_output_tupdesc(DestReceiver* dest, TupleDesc tupdesc);
 extern void do_tup_output(
     TupOutputState* tstate, Datum* values, size_t values_len, const bool* isnull, size_t isnull_len);
@@ -318,8 +335,6 @@ extern ExprContext* CreateExprContext(EState* estate);
 extern ExprContext* CreateStandaloneExprContext(void);
 extern void FreeExprContext(ExprContext* econtext, bool isCommit);
 extern void ReScanExprContext(ExprContext* econtext);
-extern VectorBatch* ExecBatchScan(ScanState* node, ExecScanAccessMtd access_mtd, ExecScanRecheckMtd recheck_mtd);
-extern VectorBatch* ExecBatchSeqScan(SeqScanState* node);
 
 #define ResetExprContext(econtext) MemoryContextReset((econtext)->ecxt_per_tuple_memory)
 
@@ -378,9 +393,19 @@ extern Partition ExecOpenScanParitition(
 extern void ExecOpenIndices(ResultRelInfo* resultRelInfo, bool speculative);
 extern void ExecCloseIndices(ResultRelInfo* resultRelInfo);
 extern List* ExecInsertIndexTuples(
-    TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel, Partition p, int2 bucketId, bool* conflict);
-extern bool ExecCheckIndexConstraints(TupleTableSlot* slot, EState* estate,
-    Relation targetRel, Partition p, int2 bucketId, ItemPointer conflictTid);
+    TupleTableSlot* slot, ItemPointer tupleid, EState* estate, Relation targetPartRel,
+    Partition p, int2 bucketId, bool* conflict, Bitmapset *modifiedIdxAttrs, bool inplaceUpdated = false);
+extern bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation targetRel, Partition p,
+                                      bool *isgpi, int2 bucketId, ConflictInfoData *conflictInfo,
+                                      Oid *conflictPartOid = NULL, int2 *conflictBucketId = NULL);
+
+extern void ExecDeleteIndexTuples(TupleTableSlot* slot, ItemPointer tupleid, EState* estate,
+    Relation targetPartRel, Partition p, const Bitmapset *modifiedIdxAttrs, const bool inplaceUpdated);
+
+extern void ExecUHeapDeleteIndexTuplesGuts(
+    TupleTableSlot* oldslot, Relation rel, ModifyTableState* node, ItemPointer tupleid,
+    ExecIndexTuplesState exec_index_tuples_state, Bitmapset *modifiedIdxAttrs, bool inplaceUpdated);
+
 extern bool check_exclusion_constraint(Relation heap, Relation index, IndexInfo* indexInfo, ItemPointer tupleid,
     Datum* values, const bool* isnull, EState* estate, bool newIndex, bool errorOK);
 extern void RegisterExprContextCallback(ExprContext* econtext, ExprContextCallbackFunction function, Datum arg);

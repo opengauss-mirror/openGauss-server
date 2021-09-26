@@ -37,6 +37,7 @@ typedef struct TBMIterator TBMIterator;
 typedef struct {
     BlockNumber blockno; /* page number containing tuples */
     Oid partitionOid;
+    int2 bucketid;
     int ntuples;         /* -1 indicates lossy result */
     bool recheck;        /* should the tuples be rechecked? */
     /* Note: recheck is always true if ntuples < 0 */
@@ -44,12 +45,14 @@ typedef struct {
 } TBMIterateResult;
 
 /* function prototypes in nodes/tidbitmap.c */
-extern TIDBitmap* tbm_create(long maxbytes);
+extern TIDBitmap* TbmCreate(long maxbytes, bool is_ustore = false);
 extern void tbm_free(TIDBitmap* tbm);
 
 extern void tbm_add_tuples(
-    TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck, Oid partitionOid = InvalidOid);
-extern void tbm_add_page(TIDBitmap* tbm, BlockNumber pageno, Oid partitionOid = InvalidOid);
+    TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck, Oid partitionOid = InvalidOid,
+    int2 bucketid = InvalidBktId);
+extern void tbm_add_page(TIDBitmap* tbm, BlockNumber pageno, Oid partitionOid = InvalidOid,
+    int2 bucketid = InvalidBktId);
 
 extern void tbm_union(TIDBitmap* a, const TIDBitmap* b);
 extern void tbm_intersect(TIDBitmap* a, const TIDBitmap* b);
@@ -61,4 +64,6 @@ extern TBMIterateResult* tbm_iterate(TBMIterator* iterator);
 extern void tbm_end_iterate(TBMIterator* iterator);
 extern bool tbm_is_global(const TIDBitmap* tbm);
 extern void tbm_set_global(TIDBitmap* tbm, bool isGlobal);
+extern bool tbm_is_crossbucket(const TIDBitmap* tbm);
+extern void tbm_set_crossbucket(TIDBitmap* tbm, bool crossbucket);
 #endif /* TIDBITMAP_H */

@@ -32,6 +32,8 @@
 #include "column_settings_list.h"
 #include "global_settings_list.h"
 #include "columns_list.h"
+#include "proc_list.h"
+#include "cached_type_list.h"
 #include "search_path_list.h"
 
 #define delete_key(__p)      \
@@ -66,8 +68,7 @@ public:
      * @param cache_refresh_type flags defining what to fetche from server
      * @return boolean for success or failure
      */
-
-    static CacheLoader &get_instance();
+    CacheLoader();
     ~CacheLoader();
     bool fetch_catalog_tables(PGconn *conn);
     void load_search_path(const char *search_path, const char *user_name);
@@ -75,7 +76,7 @@ public:
     /* *
      * @brief checking if there is global settings in cache
      * @return true if any global settings is in the cache, false if not
-     * useful function to test if we want to process query - in case no global setting in cache there is no need to
+     * useful function to test if we want to process query - in case no client master key in cache there is no need to
      * parse the query
      */
     bool has_global_setting() const;
@@ -90,6 +91,7 @@ public:
     const CachedColumn *get_cached_column(Oid table_oid, int column_position) const;
     const CachedColumn *get_cached_column(const char *database_name, const char *schema_name, const char *table_name,
         const char *column_name) const;
+    const CachedColumn* get_cached_column(Oid oid) const;
     const ICachedColumn **get_cached_columns(const char *database_name, const char *schema_name, const char *table_name,
         size_t &columns_list_size) const;
 
@@ -113,9 +115,14 @@ public:
         size_t &column_settings_list_size) const;
     ColumnHookExecutor *get_column_hook_executor(Oid column_setting_oid) const;
 
+    /* Proc GETTERS */
+    const CachedProc* get_proc_by_oid(Oid procOid) const;
+    CachedProc* get_proc_by_details(const char* database_name, const char* schema_name, const char* proc_name) const;
+    /* type getter */
+    const CachedType* get_type_by_oid(Oid typid) const;
     /* *
-     * @brief get all column settings that were created by same global setting
-     * @param globalSettingName FQDN of global setting
+     * @brief get all column settings that were created by same client master key
+     * @param globalSettingName FQDN of client master key
      * @return  all column settings depened on this global settings
      */
     size_t get_object_fqdn(const char *object_name, const bool is_global_setting, char *object_fqdn) const;
@@ -131,24 +138,29 @@ public:
     {
         m_search_path_list.set_user_schema(user_name);
     }
-    void clear();
+    void clear();    
 
 private:
-    bool clear_global_settings();
-    CacheLoader();
+    bool clear_global_settings();    
 
 private:
     ColumnSettingsList m_column_settings_list;
     GlobalSettingsList m_global_settings_list;
     SchemasList m_schemas_list; /* < list of all schmeas that contain client logic values */
     ColumnsList m_columns_list;
+    ProcList m_proc_list;
+    CachedTypeList m_cached_types_list;
     SearchPathList m_search_path_list;
 
     bool fill_pgsettings(PGconn *conn);
     bool fill_global_settings_map(PGconn *conn);
     bool fill_cached_columns(PGconn *conn);
+    bool fill_cached_procs(PGconn *conn);
+    const bool fill_cached_types(PGconn *conn);
     bool fill_column_settings_info_cache(PGconn *conn);
     bool fetch_variables(PGconn *conn, CacheRefreshType cache_refresh_type);
+    bool load_client_logic_cache(CacheRefreshType cache_refresh_type, PGconn *conn);
+    bool get_current_user(PGconn * const conn) const;
 
     bool m_is_first_fetch;      /* < indicator if fetched at least once in the past any of the variables or the catalog
                                     tables from the server */

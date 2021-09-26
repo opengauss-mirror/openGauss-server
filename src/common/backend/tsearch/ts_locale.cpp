@@ -15,7 +15,7 @@
 #include "knl/knl_variable.h"
 
 #include "catalog/pg_collation.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "tsearch/ts_locale.h"
 #include "tsearch/ts_public.h"
 

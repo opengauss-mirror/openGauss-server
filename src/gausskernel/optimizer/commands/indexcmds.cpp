@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * indexcmds.cpp
- *	  POSTGRES define and remove index code.
+ *	  openGauss define and remove index code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -40,6 +40,7 @@
 #include "foreign/foreign.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/planner.h"
@@ -54,6 +55,7 @@
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "storage/tcap.h"
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -69,12 +71,9 @@
 
 /* non-export function prototypes */
 void CheckPredicate(Expr* predicate);
-void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
-    int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId,
-    bool amcanorder, bool isconstraint);
 Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, Oid accessMethodId);
-char* ChooseIndexName(const char* tabname, Oid namespaceId, const List* colnames, const List* exclusionOpNames, bool primary,
-    bool isconstraint, bool psort = false);
+static char* ChooseIndexName(const char* tabname, Oid namespaceId, const List* colnames, const List* exclusionOpNames,
+    bool primary, bool isconstraint, bool psort = false);
 static char* ChoosePartitionIndexName(const char* partname, Oid partitionedindexId,
     List* colnames, /* List *exclusionOpNames, */
     bool primary, bool isconstraint, bool psort = false);
@@ -82,10 +81,9 @@ static char* ChoosePartitionIndexName(const char* partname, Oid partitionedindex
 static char* ChoosePartitionName(
     const char* name1, const char* name2, const char* label, Oid partitionedrelid, char partType);
 static char* ChooseIndexNameAddition(const List* colnames);
-List* ChooseIndexColumnNames(const List* indexElems);
 static void RangeVarCallbackForReindexIndex(
     const RangeVar* relation, Oid relId, Oid oldRelId, bool target_is_partition, void* arg);
-static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, List* indexParams);
+static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const List* indexParams);
 static bool relationHasInformationalPrimaryKey(const Relation conrel);
 static void handleErrMsgForInfoCnstrnt(const IndexStmt* stmt, const Relation rel);
 static void buildConstraintNameForInfoCnstrnt(
@@ -97,6 +95,9 @@ static bool CheckIndexMethodConsistency(HeapTuple indexTuple, Relation indexRela
 static bool CheckSimpleAttrsConsistency(HeapTuple tarTuple, const int16* currAttrsArray, int currKeyNum);
 static int AttrComparator(const void* a, const void* b);
 static void AddIndexColumnForGpi(IndexStmt* stmt);
+static void AddIndexColumnForCbi(IndexStmt* stmt);
+static void CheckIndexParamsNumber(IndexStmt* stmt);
+static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams);
 
 /*
  * CheckIndexCompatible
@@ -322,11 +323,9 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     Oid accessMethodId = InvalidOid;
     Oid namespaceId = InvalidOid;
     Oid tablespaceId = InvalidOid;
-    Oid relfilenode = InvalidOid;
     bool dfsTablespace = false;
     List* indexColNames = NIL;
     List* allIndexParams = NIL;
-    List *filenodeList = NIL;
     Relation rel;
     Relation indexRelation;
     HeapTuple tuple;
@@ -352,6 +351,9 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     List* partitiontspList = NIL;
     char relPersistence;
     bool concurrent;
+    StdRdOptions* index_relopts;
+    int8 indexsplitMethod = INDEXSPLIT_NO_DEFAULT;
+    int crossbucketopt = -1;
 
     /*
      * Force non-concurrent build on temporary relations, even if CONCURRENTLY
@@ -384,6 +386,21 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
 
+    /* Forbidden to create gin index on ustore table. */
+    if (rel->rd_tam_type == TAM_USTORE) {
+        if (strcmp(stmt->accessMethod, "btree") == 0) {
+            elog(ERROR, "btree index is not supported for ustore, please use ubtree instead");
+        }
+        if (strcmp(stmt->accessMethod, "ubtree") != 0) {
+            elog(ERROR, "%s index is not supported for ustore", (stmt->accessMethod));
+        }
+    }
+
+    if (strcmp(stmt->accessMethod, "ubtree") == 0 &&
+        rel->rd_tam_type != TAM_USTORE) {
+        elog(ERROR, "ubtree index is only supported for ustore");
+    }
+
     relationId = RelationGetRelid(rel);
     namespaceId = RelationGetNamespace(rel);
 
@@ -396,14 +413,28 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
-    /* default partition index is set to Global index */
-    if (RELATION_IS_PARTITIONED(rel) && !stmt->isPartitioned) {
+
+    if (RELATION_IS_PARTITIONED(rel)) {
+        if (stmt->unique && (!stmt->isPartitioned || is_alter_table)) {
+            /*
+             * If index key of unique or primary key index include the partition key,
+             * default index is set to local index. Otherwise, set to global index.
+             */
+            stmt->isGlobal = !CheckIdxParamsOwnPartKey(rel, stmt->indexParams);
+        } else if (!stmt->isPartitioned) {
+            /* default partition index is set to Global index */
+            stmt->isGlobal = (!DEFAULT_CREATE_LOCAL_INDEX ? true : stmt->isGlobal);
+        }
         stmt->isPartitioned = true;
-        stmt->isGlobal = true;
+#ifndef ENABLE_MULTIPLE_NODES
+        if (stmt->unique && stmt->isPartitioned && RelationIsCUFormat(rel)) {
+            /* CStore unique index must include the partition key and set to local index */
+            stmt->isGlobal = false;
+        }
+#endif
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
-    if (stmt->isGlobal) {
+    if (stmt->isGlobal && DISABLE_MULTI_NODES_GPI) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Global partition index only support single node mode.")));
     }
@@ -413,7 +444,29 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                 errmsg(
                     "global partition index not support on work version num less than %u.", SUPPORT_GPI_VERSION_NUM)));
     }
-#endif
+
+    if (RELATION_HAS_BUCKET(rel)) {
+        /* determine the crossbucket option */
+        stmt->crossbucket = get_crossbucket_option(&stmt->options, stmt->isGlobal, stmt->accessMethod, &crossbucketopt);
+    }
+
+    if (stmt->crossbucket) {
+        if (stmt->whereClause != NULL) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cross-bucket index does not support WHERE clause")));
+        }
+
+        if (pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE) != 0 && (crossbucketopt > 0)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cross-bucket index only supports btree access method")));
+        }
+
+        if (concurrent) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("cannot create CONCURRENTLY cross-bucket index")));
+        }
+    }
+
     /*
      * normal table does not support local partitioned index
      */
@@ -438,7 +491,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
-    if (list_length(stmt->indexIncludingParams) > 0) {
+    if (list_length(stmt->indexIncludingParams) > 0 && !skip_build) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("create index does not support have include parameter")));
     }
@@ -451,29 +504,22 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot create concurrent partitioned indexes ")));
     }
 
-    if (stmt->isGlobal && (list_length(stmt->indexParams) > INDEX_MAX_KEYS - 1)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS),
-                errmsg("cannot use more than %d columns in an global partition index", INDEX_MAX_KEYS - 1)));
-    }
+    CheckIndexParamsNumber(stmt);
 
-    /* Add special index columns tableoid to global partition index */
+    /* Add special index columns tableoid to global partition index. */
     if (stmt->isGlobal) {
         AddIndexColumnForGpi(stmt);
+    }
+
+    /* Add special index columns tablebucketid to crossbucket index. */
+    if (stmt->crossbucket) {
+        AddIndexColumnForCbi(stmt);
     }
 
     if (list_intersection(stmt->indexParams, stmt->indexIncludingParams) != NIL) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                 errmsg("included columns must not intersect with key columns")));
-    }
-
-    if (list_length(stmt->indexParams) <= 0) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("must specify at least one column")));
-    }
-    if (list_length(stmt->indexParams) > INDEX_MAX_KEYS) {
-        ereport(ERROR,
-            (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("cannot use more than %d columns in an index", INDEX_MAX_KEYS)));
     }
 
     /*
@@ -636,7 +682,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
 
         /*
-         * check unique , if it is a unique/exclusion index,
+         * Check unique , if it is a unique/exclusion index,
          * index column must include the partition key.
          * For global partition index, we cancel this check.
          */
@@ -682,7 +728,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexColNames = ChooseIndexColumnNames(allIndexParams);
 
     /*
-     * Select name for index if caller didn't specify
+     * Select name for index if caller didn't specify.
      */
     indexRelationName = stmt->idxname;
     if (indexRelationName == NULL) {
@@ -701,6 +747,11 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * look up the access method, verify it can handle the requested features
      */
     accessMethodName = stmt->accessMethod;
+    if (RelationIsUstoreFormat(rel) &&
+        (strcmp(accessMethodName, "gist") == 0 || strcmp(accessMethodName, "gin") == 0)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("access method \"%s\" is not supported in ustore", accessMethodName)));
+    }
     tuple = SearchSysCache1(AMNAME, PointerGetDatum(accessMethodName));
     if (!HeapTupleIsValid(tuple)) {
         /*
@@ -721,7 +772,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
     accessMethodId = HeapTupleGetOid(tuple);
     accessMethodForm = (Form_pg_am)GETSTRUCT(tuple);
-    if (stmt->unique && !accessMethodForm->amcanunique)
+    if (stmt->unique &&
+#ifndef ENABLE_MULTIPLE_NODES
+    !accessMethodForm->amcanunique)
+#else
+    (!accessMethodForm->amcanunique || accessMethodId == CBTREE_AM_OID))
+#endif
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("access method \"%s\" does not support unique indexes", accessMethodName)));
@@ -746,12 +802,46 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     if (stmt->whereClause)
         CheckPredicate((Expr*)stmt->whereClause);
 
+    if (RelationIsUstoreFormat(rel)) {
+        DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE));
+        if (stmt->options == NULL) {
+            stmt->options = list_make1(def);
+        } else {
+            ListCell* cell = NULL;
+            bool optionsHasStorage = false;
+
+            foreach (cell, stmt->options) {
+                DefElem* defElem = (DefElem*)lfirst(cell);
+                if (pg_strcasecmp(defElem->defname, "storage_type") == 0) {
+                    optionsHasStorage = true;
+                    break;
+                }
+            }
+
+            if (!optionsHasStorage)
+                stmt->options = lappend(stmt->options, def);
+        }
+    }
+
     /*
      * Parse AM-specific options, convert to text array form, validate.
      */
     reloptions = transformRelOptions((Datum)0, stmt->options, NULL, NULL, false, false);
 
-    (void)index_reloptions(amoptions, reloptions, true);
+    index_relopts = (StdRdOptions *)index_reloptions(amoptions, reloptions, true);
+    if (index_relopts != NULL && strcmp(accessMethodName, "btree") == 0) {
+        /* check if the table supports to create crossbucket index */
+        if (is_contain_crossbucket(stmt->options) && !RELATION_HAS_BUCKET(rel) && !skip_build) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Could not create cross-bucket index for non-hashbucket table.")));
+        }
+        /* Set the page split method */
+        if (RelationIsIndexsplitMethodInsertpt(index_relopts)) {
+            indexsplitMethod = INDEXSPLIT_NO_INSERTPT;
+        }
+        pfree_ext(index_relopts);
+    }
 
     /*
      * Prepare arguments for index_create, primarily an IndexInfo structure.
@@ -773,6 +863,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_Concurrent = concurrent;
     indexInfo->ii_BrokenHotChain = false;
     indexInfo->ii_PgClassAttrId = 0;
+    indexInfo->ii_ParallelWorkers = 0;
 
     typeObjectId = (Oid*)palloc(numberOfAttributes * sizeof(Oid));
     collationObjectId = (Oid*)palloc(numberOfAttributes * sizeof(Oid));
@@ -808,6 +899,19 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         }
     }
 
+    if (stmt->crossbucket) {
+        if (PointerIsValid(indexInfo->ii_ExclusionOps)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cross-bucket index does not support EXCLUDE constraints")));
+        }
+        if (PointerIsValid(indexInfo->ii_Expressions)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cross-bucket index does not support EXPRESSION")));
+        }
+    }
+
 #ifdef PGXC
     /* Check if index is safely shippable */
     if (IS_PGXC_COORDINATOR) {
@@ -837,10 +941,13 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 #endif
 
+#ifndef ENABLE_MULTIPLE_NODES
     if (RelationIsCUFormat(rel) && (stmt->primary || stmt->unique)) {
         /* If it is a unique index, move data on delta to CU. */
         MoveDeltaDataToCU(rel);
     }
+#endif
+
     /*
      * Extra checks when creating a PRIMARY KEY index.
      * If be informational constraint, we are not to set not null in pg_attribute.
@@ -905,7 +1012,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     IndexCreateExtraArgs extra;
-    SetIndexCreateExtraArgs(&extra, stmt->oldPSortOid, stmt->isPartitioned, stmt->isGlobal);
+    SetIndexCreateExtraArgs(&extra, stmt->oldPSortOid, stmt->isPartitioned, stmt->isGlobal, stmt->crossbucket);
 
     if (stmt->internal_flag) {
 #ifdef ENABLE_MOT
@@ -914,6 +1021,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ForeignTable *ftbl = GetForeignTable(relationId);
             ForeignServer *server = GetForeignServer(ftbl->serverid);
             if (isMOTTableFromSrvName(server->servername)) {
+                bool idxNameChanged = false;
                 indexRelationId = index_create(rel,
                     indexRelationName,
                     indexRelationId,
@@ -935,6 +1043,17 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                     concurrent,
                     &extra);
                 heap_close(rel, NoLock);
+
+                if (stmt->idxname == NULL) {
+                    stmt->idxname = indexRelationName;
+                    idxNameChanged = true;
+                }
+
+                CreateForeignIndex(stmt, indexRelationId);
+
+                if (idxNameChanged) {
+                    stmt->idxname = NULL;
+                }
                 return indexRelationId;
             }
 
@@ -957,12 +1076,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         indexInfo->ii_desc.query_mem[1] = stmt->memUsage.max_mem;
     }
 
-    if (!(u_sess->attr.attr_sql.enable_cluster_resize && RELATION_OWN_BUCKET(rel) &&
-             !t_thrd.xact_cxt.inheritFileNode)) {
-        relfilenode  = stmt->oldNode;
-        filenodeList = stmt->partIndexOldNodes;
-    }
-
     /*
      * Make the catalog entries for the index, including constraints. Then, if
      * not skip_build || concurrent, actually build the index.
@@ -970,7 +1083,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexRelationId = index_create(rel,
         indexRelationName,
         indexRelationId,
-        relfilenode,
+        stmt->oldNode,
         indexInfo,
         indexColNames,
         accessMethodId,
@@ -986,7 +1099,9 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         (g_instance.attr.attr_common.allowSystemTableMods || u_sess->attr.attr_common.IsInplaceUpgrade),
         skip_build || concurrent,
         concurrent,
-        &extra);
+        &extra,
+        false,
+        indexsplitMethod);
     /* Add any requested comment */
     if (stmt->idxcomment != NULL)
         CreateComments(indexRelationId, RelationRelationId, 0, stmt->idxcomment);
@@ -1020,8 +1135,9 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             List* partitionidlist = NIL;
             Oid toastid = InvalidOid;
             Relation pg_partition_rel = NULL;
-
+            int indexnum = 0;
             indexInfo->ii_BrokenHotChain = false;
+            partExtra.crossbucket = stmt->crossbucket;
 
             if (!PointerIsValid(partitionIndexdef)) {
                 ereport(ERROR,
@@ -1044,11 +1160,17 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                 /* reset the extra arguments data. */
                 partExtra.existingPSortOid = InvalidOid;
 
-                if (OidIsValid(relfilenode)) {
+                if (PointerIsValid(stmt->partIndexOldNodes)) {
                     Assert(stmt->partIndexOldPSortOid);
-                    partIndexFileNode = list_nth_oid(filenodeList, count);
+                    partIndexFileNode = list_nth_oid(stmt->partIndexOldNodes, count);
                     partExtra.existingPSortOid = list_nth_oid(stmt->partIndexOldPSortOid, count);
                     count++;
+                }
+                if (u_sess->attr.attr_sql.enable_cluster_resize && stmt->partIndexUsable &&
+                    !stmt->partIndexUsable[indexnum++]) {
+                    ereport(LOG, (errmsg("In redistribution, the %dth partition of source index is unusable, "
+                        "the tmp table will skip.", indexnum)));
+                    continue;
                 }
 
                 partition = partitionOpen(rel, partitionid, ShareLock);
@@ -1222,6 +1344,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_Concurrent = true;
     indexInfo->ii_BrokenHotChain = false;
 
+    u_sess->attr.attr_sql.create_index_concurrently = true;
     /* Now build the index */
     index_build(rel, NULL, indexRelation, NULL, indexInfo, stmt->primary, false, INDEX_CREATE_NONE_PARTITION);
 
@@ -1402,7 +1525,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
  * Return		:
  * Notes		:
  */
-static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, List* indexParams)
+static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, const List* indexParams)
 {
     char* attname = NameStr(attTup->attname); /* get the column name */
     ListCell* cell = NULL;
@@ -2148,8 +2271,8 @@ static char* ChoosePartitionName(
  *
  * The argument list is pretty ad-hoc :-(
  */
-char* ChooseIndexName(const char* tabname, Oid namespaceId, const List* colnames, const List* exclusionOpNames, bool primary,
-    bool isconstraint, bool psort)
+static char* ChooseIndexName(const char* tabname, Oid namespaceId, const List* colnames, const List* exclusionOpNames,
+    bool primary, bool isconstraint, bool psort)
 {
     char* indexname = NULL;
 
@@ -2318,6 +2441,8 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
         RangeVarCallbackForReindexIndex,
         (void*)&heapOid);
 
+    TrForbidAccessRbObject(RelationRelationId, indOid, indexRelation->relname);
+
     /*
      * Obtain the current persistence of the existing index.  We already hold
      * lock on the index.
@@ -2337,6 +2462,7 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
             ShareLock);  // lock on heap partition
     reindex_index(indOid, indPartOid, false, mem_info, false);
 
+#ifndef ENABLE_MULTIPLE_NODES
     Oid relId = IndexGetRelation(indOid, false);
     if (RelationIsCUFormatByOid(relId) && irel->rd_index != NULL && irel->rd_index->indisunique) {
         /*
@@ -2345,6 +2471,7 @@ void ReindexIndex(RangeVar* indexRelation, const char* partition_name, AdaptMem*
          */
         ReindexDeltaIndex(indOid, indPartOid);
     }
+#endif
 }
 
 void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid, const char* partitionName, Oid partId,
@@ -2496,6 +2623,9 @@ void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_
         /* The lock level used here should match reindexPartition(). */
         heapOid = RangeVarGetRelidExtended(
             relation, AccessShareLock, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
+
+        TrForbidAccessRbObject(RelationRelationId, heapOid, relation->relname);
+
         heapPartOid = partitionNameGetPartitionOid(
             heapOid, partition_name, PART_OBJ_TYPE_TABLE_PARTITION, ShareLock, false, false, NULL, NULL, NoLock);
         reindexPartition(heapOid,
@@ -2503,13 +2633,15 @@ void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_
             REINDEX_REL_PROCESS_TOAST | REINDEX_REL_SUPPRESS_INDEX_USE | REINDEX_REL_CHECK_CONSTRAINTS,
             REINDEX_ALL_INDEX);
     } else {
-        /* The lock level used here should match reindex_relation(). */
+        /* The lock level used here should match ReindexRelation(). */
         heapOid =
             RangeVarGetRelidExtended(relation, ShareLock, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
-        if (!reindex_relation(heapOid,
-                REINDEX_REL_PROCESS_TOAST | REINDEX_REL_SUPPRESS_INDEX_USE | REINDEX_REL_CHECK_CONSTRAINTS,
-                REINDEX_ALL_INDEX,
-                mem_info))
+
+        TrForbidAccessRbObject(RelationRelationId, heapOid, relation->relname);
+
+        if (!ReindexRelation(heapOid,
+            REINDEX_REL_PROCESS_TOAST | REINDEX_REL_SUPPRESS_INDEX_USE | REINDEX_REL_CHECK_CONSTRAINTS,
+            REINDEX_ALL_INDEX, NULL, mem_info))
             ereport(NOTICE, (errmsg("table \"%s\" has no indexes", relation->relname)));
     }
 }
@@ -2531,6 +2663,8 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
 
     heapOid = RangeVarGetRelidExtended(
         relation, AccessShareLock, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
+
+    TrForbidAccessRbObject(RelationRelationId, heapOid, relation->relname);
 
     rel = heap_open(heapOid, AccessShareLock);
 
@@ -2555,7 +2689,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
             partitionRel = partitionGetRelation(rel, part);
             Oid cudescOid = partitionRel->rd_rel->relcudescrelid;
 
-            if (!reindex_relation(cudescOid, flags, REINDEX_ALL_INDEX)) {
+            if (!ReindexRelation(cudescOid, flags, REINDEX_ALL_INDEX, NULL)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_PARTITION_ERROR),
                         errmsg("The operation of 'REINDEX INTERNAL TABLE %s PARTITION %s' failed. ",
@@ -2575,7 +2709,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
                     partitionRel = partitionGetRelation(rel, part);
                     Oid cudescOid = partitionRel->rd_rel->relcudescrelid;
 
-                    if (!reindex_relation(cudescOid, flags, REINDEX_ALL_INDEX)) {
+                    if (!ReindexRelation(cudescOid, flags, REINDEX_ALL_INDEX, NULL)) {
                         ereport(ERROR,
                             (errcode(ERRCODE_PARTITION_ERROR),
                                 errmsg("The operation of 'REINDEX INTERNAL TABLE %s' on part \"%u\" failed. ",
@@ -2589,7 +2723,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
             } else {
                 Oid cudescOid = rel->rd_rel->relcudescrelid;
 
-                if (!reindex_relation(cudescOid, flags, REINDEX_ALL_INDEX)) {
+                if (!ReindexRelation(cudescOid, flags, REINDEX_ALL_INDEX, NULL)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_INDEX_CORRUPTED),
                             errmsg("The operation of 'REINDEX INTERNAL TABLE %s' failed. ", relation->relname)));
@@ -2598,7 +2732,7 @@ void ReindexInternal(RangeVar* relation, const char* partition_name)
         }
     } else if (RelationIsPAXFormat(rel)) {
         Oid cudescOid = rel->rd_rel->relcudescrelid;
-        if (!reindex_relation(cudescOid, flags, REINDEX_ALL_INDEX)) {
+        if (!ReindexRelation(cudescOid, flags, REINDEX_ALL_INDEX, NULL)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INDEX_CORRUPTED),
                     errmsg("The operation of 'REINDEX INTERNAL TABLE %s' failed. ", relation->relname)));
@@ -2669,7 +2803,7 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
      * Scan pg_class to build a list of the relations we need to reindex.
      *
      * We only consider plain relations here (toast rels will be processed
-     * indirectly by reindex_relation).
+     * indirectly by ReindexRelation).
      */
     relationRelation = heap_open(RelationRelationId, AccessShareLock);
     scan = tableam_scan_begin(relationRelation, SnapshotNow, 0, NULL);
@@ -2695,6 +2829,11 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
         if (HeapTupleGetOid(tuple) == RelationRelationId)
             continue; /* got it already */
 
+        /* Skip object in recycle bin. */
+        if (TrIsRefRbObjectEx(RelationRelationId, HeapTupleGetOid(tuple), NameStr(classtuple->relname))) {
+            continue;
+        }
+
         old = MemoryContextSwitchTo(private_context);
         relids = lappend_oid(relids, HeapTupleGetOid(tuple));
         MemoryContextSwitchTo(old);
@@ -2713,7 +2852,8 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
         PushActiveSnapshot(GetTransactionSnapshot());
         PG_TRY();
         {
-            if (reindex_relation(relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, mem_info, true))
+
+            if (ReindexRelation(relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, NULL, mem_info, true))
                 ereport(NOTICE,
                     (errmsg("table \"%s.%s\" was reindexed",
                         get_namespace_name(get_rel_namespace(relid)),
@@ -2757,6 +2897,7 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
     List* indelist = NIL;
     ListCell* cell = NULL;
     Partition partition = NULL;
+    Relation partitionDelta = NULL;
     char* indexPartitionName = NULL;
     Oid indexRelOid = InvalidOid;
     Oid indexHeapOid = InvalidOid;
@@ -2791,6 +2932,7 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
         IndexElem* indexelem = NULL;
         indexColNames = NIL;
         indexElemList = NIL;
+        Oid partIndexOid = InvalidOid;
         indexRelOid = lfirst_oid(cell);
         indexRel = relation_open(indexRelOid, AccessShareLock);
         indexInfo = BuildIndexInfo(indexRel);
@@ -2868,8 +3010,9 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
 
         PartIndexCreateExtraArgs partExtraArg;
         partExtraArg.existingPSortOid = InvalidOid;
+        partExtraArg.crossbucket = RelationIsCrossBucketIndex(indexRel);
 
-        (void)partition_index_create(indexPartitionName,
+        partIndexOid = partition_index_create(indexPartitionName,
             InvalidOid,
             partition,
             indexRel->rd_rel->reltablespace,
@@ -2882,6 +3025,21 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
             false,
             &partExtraArg);
 
+#ifndef ENABLE_MULTIPLE_NODES
+        if (RelationIsCUFormat(partitionedRelation) && indexForm->indisunique) {
+            if (!PointerIsValid(partitionDelta)) {
+                partitionDelta = heap_open(partition->pd_part->reldeltarelid, ShareLock);
+            }
+            char partDeltaIdxName[NAMEDATALEN] = {0};
+            error_t ret = snprintf_s(partDeltaIdxName, sizeof(partDeltaIdxName),
+                sizeof(partDeltaIdxName) - 1, "pg_delta_part_index_%u", partIndexOid);
+            securec_check_ss_c(ret, "\0", "\0");
+
+            (void)CreateDeltaUniqueIndex(partitionDelta, partDeltaIdxName, indexInfo, indexElemList,
+                indexColNames, indexForm->indisprimary);
+        }
+#endif
+
         relation_close(indexRel, NoLock);
         heap_freetuple(indexTuple);
         heap_freetuple(indexTupleInPgclass);
@@ -2889,6 +3047,10 @@ void addIndexForPartition(Relation partitionedRelation, Oid partOid)
 
     heap_close(pg_partition_rel, RowExclusiveLock);
     partitionClose(partitionedRelation, partition, NoLock);
+
+    if (PointerIsValid(partitionDelta)) {
+        heap_close(partitionDelta, NoLock);
+    }
 }
 
 void dropIndexForPartition(Oid partOid)
@@ -2913,7 +3075,6 @@ void dropIndexForPartition(Oid partOid)
     /* iterate the index partition list */
     foreach (cell, partIndexlist) {
         partIndexTuple = (HeapTuple)lfirst(cell);
-
         if (HeapTupleIsValid(partIndexTuple)) {
             partForm = (Form_pg_partition)GETSTRUCT(partIndexTuple);
 
@@ -3235,6 +3396,13 @@ static int AttrComparator(const void* a, const void* b)
 /* Set the internal index column partoid for global partition index */
 static void AddIndexColumnForGpi(IndexStmt* stmt)
 {
+    ListCell* cell = NULL;
+    foreach (cell, stmt->indexIncludingParams) {
+        IndexElem* param = (IndexElem*)lfirst(cell);
+        if (strcmp(param->name, "tableoid") == 0) {
+            return;
+        }
+    }
     IndexElem* iparam = makeNode(IndexElem);
     iparam->name = pstrdup("tableoid");
     iparam->expr = NULL;
@@ -3242,4 +3410,58 @@ static void AddIndexColumnForGpi(IndexStmt* stmt)
     iparam->collation = NIL;
     iparam->opclass = NIL;
     stmt->indexIncludingParams = lappend(stmt->indexIncludingParams, iparam);
+}
+
+/* Set the internal index column bucketid for crossbucket index */
+static void AddIndexColumnForCbi(IndexStmt* stmt)
+{
+    ListCell* cell = NULL;
+    foreach (cell, stmt->indexIncludingParams) {
+        IndexElem* param = (IndexElem*)lfirst(cell);
+        if (strcmp(param->name, "tablebucketid") == 0) {
+            return;
+        }
+    }
+    IndexElem* iparam = makeNode(IndexElem);
+    iparam->name = pstrdup("tablebucketid");
+    iparam->expr = NULL;
+    iparam->indexcolname = NULL;
+    iparam->collation = NIL;
+    iparam->opclass = NIL;
+    stmt->indexIncludingParams = lappend(stmt->indexIncludingParams, iparam);
+}
+static void CheckIndexParamsNumber(IndexStmt* stmt) {
+    if (list_length(stmt->indexParams) <= 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), errmsg("must specify at least one column")));
+    }
+    if (list_length(stmt->indexParams) > INDEX_MAX_KEYS) {
+        ereport(ERROR,
+            (errcode(ERRCODE_TOO_MANY_COLUMNS), errmsg("cannot use more than %d columns in an index", INDEX_MAX_KEYS)));
+    }
+    if (stmt->isGlobal && stmt->crossbucket && (list_length(stmt->indexParams) > GLOBAL_CROSSBUCKET_INDEX_MAX_KEYS)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                errmsg("cannot use more than %d columns in a global cross-bucket index", 
+                    GLOBAL_CROSSBUCKET_INDEX_MAX_KEYS)));
+    } else if (stmt->isGlobal && (list_length(stmt->indexParams) > INDEX_MAX_KEYS - 1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                errmsg("cannot use more than %d columns in an global partition index", INDEX_MAX_KEYS - 1)));
+    } else if (stmt->crossbucket && (list_length(stmt->indexParams) > INDEX_MAX_KEYS - 1)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_TOO_MANY_COLUMNS),
+                errmsg("cannot use more than %d columns in a cross-bucket index", INDEX_MAX_KEYS - 1)));
+    }
+}
+static bool CheckIdxParamsOwnPartKey(Relation rel, const List* indexParams)
+{
+    int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
+    for (int i = 0; i < partKey->dim1; i++) {
+        int2 attNum = partKey->values[i];
+        Form_pg_attribute attTup = rel->rd_att->attrs[attNum - 1];
+        if (!columnIsExist(rel, attTup, indexParams)) {
+            return false;
+        }
+    }
+    return true;
 }

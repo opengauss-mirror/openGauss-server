@@ -22,12 +22,13 @@
 #include "gtm/gtm_c.h"
 #endif
 #include "nodes/pg_list.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/datetime.h"
 #include "utils/hsearch.h"
 #include "utils/snapshot.h"
 #include "utils/plancache.h"
 #include "threadpool/threadpool_worker.h"
+#include "access/ustore/undo/knl_uundotype.h"
 
 /*
  * Xact isolation levels
@@ -122,6 +123,7 @@ extern volatile int synchronous_commit;
 #define XLOG_XACT_ABORT_PREPARED 0x40
 #define XLOG_XACT_ASSIGNMENT 0x50
 #define XLOG_XACT_COMMIT_COMPACT 0x60
+#define XLOG_XACT_ABORT_WITH_XID 0x70
 
 typedef struct xl_xact_assignment {
     TransactionId xtop;    /* assigned XID's top-level XID */
@@ -302,6 +304,7 @@ extern GTM_Timeline GetCurrentTransactionTimeline(void);
 extern TransactionState GetCurrentTransactionState(void);
 extern TransactionId GetParentTransactionIdIfAny(TransactionState s);
 extern void ResetTransactionInfo(void);
+extern void EndParallelWorkerTransaction(void);
 
 #ifdef PGXC /* PGXC_COORD */
 extern TransactionId GetNewGxidGTM(TransactionState s, bool is_sub_xact);
@@ -312,9 +315,13 @@ extern void SetTopGlobalTransactionId(GlobalTransactionId gxid);
 #endif
 extern TransactionId GetTransactionIdFromGidStr(char* gid);
 extern TransactionId GetStableLatestTransactionId(void);
+extern void SetCurrentSubTransactionLocked(void);
+extern bool HasCurrentSubTransactionLock(void);
+extern ResourceOwner GetCurrentTransactionResOwner(void);
 extern SubTransactionId GetCurrentSubTransactionId(void);
 extern bool SubTransactionIsActive(SubTransactionId subxid);
 extern CommandId GetCurrentCommandId(bool used);
+extern bool GetCurrentCommandIdUsed(void);
 extern TimestampTz GetCurrentTransactionStartTimestamp(void);
 extern TimestampTz GetCurrentStatementStartTimestamp(void);
 extern TimestampTz GetCurrentStatementLocalStartTimestamp(void);
@@ -419,6 +426,7 @@ extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
 extern void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr);
 extern HTAB* relfilenode_hashtbl_create();
 extern CommitSeqNo getLocalNextCSN();
+
 extern void UpdateNextMaxKnownCSN(CommitSeqNo csn);
 #ifdef ENABLE_MOT
 extern bool IsMOTEngineUsed();
@@ -428,11 +436,23 @@ extern bool IsMixedEngineUsed();
 extern void SetCurrentTransactionStorageEngine(StorageEngineType storageEngineType);
 #endif
 
+extern bool XidIsConcurrent(TransactionId xid);
+extern void unlink_onefile(RelFileNode node, ForkNumber forknum, Oid ownerid);
+
+
 extern char* GetSavepointName(List* options);
 extern void RecordSavepoint(const char* cmd, const char* name, bool hasSent, SavepointStmtType stmtType);
 extern void SendSavepointToRemoteCoordinator();
 extern void HandleReleaseOrRollbackSavepoint(const char* cmd, const char* name, SavepointStmtType stmtType);
 extern void FreeSavepointList();
 extern TransactionState CopyTxnStateByCurrentMcxt(TransactionState state);
+
+extern void SetCurrentTransactionUndoRecPtr(UndoRecPtr urecPtr, UndoPersistence upersistence);
+extern UndoRecPtr GetCurrentTransactionUndoRecPtr(UndoPersistence upersistence);
+extern void ApplyUndoActions(void);
+extern void SetUndoActionsInfo(void);
+extern void ResetUndoActionsInfo(void);
+extern bool CanPerformUndoActions(void);
+extern void push_unlink_rel_to_hashtbl(ColFileNodeRel *xnodes, int nrels);
 
 #endif /* XACT_H */

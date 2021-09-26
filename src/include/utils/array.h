@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * array.h
- *	  Declarations for Postgres arrays.
+ *	  Declarations for openGauss arrays.
  *
  * A standard varlena array has the following internal structure:
  *	  <vl_len_>		- standard varlena header word

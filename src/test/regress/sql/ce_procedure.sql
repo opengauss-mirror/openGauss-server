@@ -9,25 +9,25 @@ SET CHECK_FUNCTION_BODIES TO ON;
 \! gs_ktool -d all
 \! gs_ktool -g
 
-DROP CLIENT MASTER KEY prodedureCMK CASCADE;
-CREATE CLIENT MASTER KEY prodedureCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
-CREATE COLUMN ENCRYPTION KEY prodedureCEK WITH VALUES (CLIENT_MASTER_KEY = prodedureCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
+DROP CLIENT MASTER KEY procedureCMK CASCADE;
+CREATE CLIENT MASTER KEY procedureCMK WITH ( KEY_STORE = gs_ktool , KEY_PATH = "gs_ktool/1" , ALGORITHM = AES_256_CBC);
+CREATE COLUMN ENCRYPTION KEY procedureCEK WITH VALUES (CLIENT_MASTER_KEY = procedureCMK, ALGORITHM = AEAD_AES_256_CBC_HMAC_SHA256);
 
 CREATE TABLE IF NOT EXISTS Image(
 id INT,
-title VARCHAR(30)                                ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-Artist TEXT                                             ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-description TEXT                                   ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-DataTime DATE                                     ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-Xresolution INT                                     ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-Yresolution INT                                      ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-ResolutionUnit VARCHAR(8)               ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-ImageSize INT                                        ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-Alititude INT                                          ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-Latitude FLOAT4                                    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-Longitude FLOAT4                                 ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
-ImagePath VARCHAR(100)                    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = prodedureCEK , ENCRYPTION_TYPE = DETERMINISTIC)
-) DISTRIBUTE BY HASH(id);
+title VARCHAR(30)    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+Artist TEXT          ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+description TEXT     ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+DataTime DATE,
+Xresolution INT      ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+Yresolution INT      ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+ResolutionUnit VARCHAR(8)    ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+ImageSize INT        ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+Alititude INT        ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+Latitude FLOAT4      ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+Longitude FLOAT4     ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC),
+ImagePath VARCHAR(100)       ENCRYPTED WITH (COLUMN_ENCRYPTION_KEY = procedureCEK , ENCRYPTION_TYPE = DETERMINISTIC)
+);
 
 INSERT INTO Image VALUES ( 1, 'img4214189','IDO', 'it is a flower in roadsize', '2019-11-07', 1080, 1440, 'px', 776, 108, 23.45, 120.24, '/DCIM/Camera/img4214189');
 INSERT INTO Image VALUES ( 2, 'img4214190','IDO', 'the park', '2019-11-10', 1080, 1920, 'px', 187, 292, 45.28, 102.24, '/DCIM/Camera/img4214190');
@@ -55,30 +55,38 @@ CREATE OR REPLACE PROCEDURE INSERT_IMAGE
 )
 AS
 BEGIN
-	INSERT INTO Image VALUES ( id_param, artist_param, artist_param, description_param, dataTime_param, xresolution_param, yresolution_param, resolution_unit_param, imageSize_param, alititude_param, latitude_param, longitude_param, imagePath_param);
+	INSERT INTO Image VALUES ( id_param, title_param, artist_param, description_param, dataTime_param, xresolution_param, yresolution_param, resolution_unit_param, imageSize_param, alititude_param, latitude_param, longitude_param, imagePath_param);
 END;
 /
 
 CALL INSERT_IMAGE(8, 'img4214196','ZAVIER', 'a river', '2019-11-22 12:45:26', 720, 720, 'px', 1244, 510, 29.75, 105.79, '/DCIM/Camera/img4214196');
 
-CREATE OR REPLACE PROCEDURE UPDATE_DESCRIPTION
-(
-    title_param  IN   VARCHAR(30),
-    description_param  IN   TEXT,
-	result       OUT  VARCHAR(30)
-)
+CREATE OR REPLACE PROCEDURE UPDATE_DESCRIPTION(title_param IN VARCHAR(30), description_param IN TEXT, result OUT VARCHAR(30))
 AS
 BEGIN
 	UPDATE Image SET description = description_param WHERE title = title_param;
-	result = description_param;
-	dbe_output.print_line(result);
+	result:= title_param;
 END;
 /
 
-CALL UPDATE_DESCRIPTION('img4214189','the description is update','');
+CALL UPDATE_DESCRIPTION('img4214189','the description is update', result);
 
+create function select_data() returns table(id_param int, artist_param text)
+as
+$BODY$
+begin
+return query(select id, Artist from Image order by id);
+end
+$BODY$
+LANGUAGE plpgsql;
+
+call select_data();
+
+DROP PROCEDURE IF EXISTS INSERT_IMAGE;
+DROP PROCEDURE IF EXISTS update_description();
+DROP FUNCTION IF EXISTS select_data();
 DROP TABLE IF EXISTS Image;
-DROP COLUMN ENCRYPTION KEY prodedureCEK;
-DROP CLIENT MASTER KEY prodedureCMK;
+DROP COLUMN ENCRYPTION KEY procedureCEK;
+DROP CLIENT MASTER KEY procedureCMK;
 
 \! gs_ktool -d all

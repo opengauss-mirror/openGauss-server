@@ -65,6 +65,7 @@
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "storage/lmgr.h"
+#include "parser/parse_hint.h"
 #include "tcop/pquery.h"
 #include "tcop/utility.h"
 #include "utils/hotkey.h"
@@ -75,6 +76,7 @@
 #include "utils/globalplancache.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_slow_query.h"
+#include "commands/sqladvisor.h"
 
 #ifdef ENABLE_MOT
 #include "storage/mot/jit_exec.h"
@@ -99,6 +101,7 @@ static void ReleaseGenericPlan(CachedPlanSource* plansource);
 static bool CheckCachedPlan(CachedPlanSource* plansource);
 static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, ParamListInfo boundParams,
                                            bool isBuildingCustomPlan);
+static void ReportReasonForPlanChoose(PlanChooseReason reason);
 static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundParams);
 static bool IsForceCustomplan(CachedPlanSource *plansource);
 static bool IsDeleteLimit(CachedPlanSource* plansource, ParamListInfo boundParams);
@@ -143,14 +146,22 @@ static bool IsSupportGPCStmt(const Node* node)
     bool isSupportGPC = false;
     switch (nodeTag(node)) {
         case T_InsertStmt:
+            isSupportGPC = !has_no_gpc_hint(((InsertStmt*)node)->hintState);
+            break;
         case T_DeleteStmt:
+            isSupportGPC = !has_no_gpc_hint(((DeleteStmt*)node)->hintState);
+            break;
         case T_UpdateStmt:
+            isSupportGPC = !has_no_gpc_hint(((UpdateStmt*)node)->hintState);
+            break;
         case T_MergeStmt:
+            isSupportGPC = !has_no_gpc_hint(((MergeStmt*)node)->hintState);
+            break;
         case T_SelectStmt:
-            isSupportGPC = false;
+            isSupportGPC = !has_no_gpc_hint(((SelectStmt*)node)->hintState);
             break;
         default:
-            isSupportGPC = true;
+            isSupportGPC = false;
             break;
     }
     return isSupportGPC;
@@ -192,7 +203,7 @@ CachedPlanSource* CreateCachedPlan(Node* raw_parse_tree, const char* query_strin
 
     Assert(query_string != NULL); /* required as of 8.4 */
     bool isSupportGPC = raw_parse_tree && IsSupportGPCStmt(raw_parse_tree);
-    bool enable_pbe_gpc = ENABLE_GPC && stmt_name != NULL && stmt_name[0] != '\0' && !isSupportGPC;
+    bool enable_pbe_gpc = ENABLE_GPC && stmt_name != NULL && stmt_name[0] != '\0' && isSupportGPC;
 
     if(!enable_pbe_gpc && !(ENABLE_CN_GPC && enable_spi_gpc)) {
        /*
@@ -1341,6 +1352,7 @@ static void GPCFillPlanCache(CachedPlanSource* plansource, bool isBuildingCustom
         plansource->gpc.key->spi_signature = plansource->spi_signature;
         GlobalPlanCache::EnvFill(&plansource->gpc.key->env, plansource->dependsOnRole);
         plansource->gpc.key->env.search_path = plansource->search_path;
+        plansource->gpc.key->env.param_types = plansource->param_types;
         plansource->gpc.key->env.num_params = plansource->num_params;
         (void)MemoryContextSwitchTo(oldcxt);
     }
@@ -1443,6 +1455,53 @@ static bool is_upsert_query_with_update_param(Node* raw_parse_tree)
     return false;
 }
 
+static bool choose_by_hint(const CachedPlanSource* plansource, bool* choose_cplan)
+{
+    if (list_length(plansource->query_list) != 1) {
+        return false;
+    }
+    Query *parse = (Query*)linitial(plansource->query_list);
+    HintState *hint = parse->hintState;
+    if (hint != NULL && hint->cache_plan_hint != NIL) {
+        PlanCacheHint* pchint = (PlanCacheHint*)llast(hint->cache_plan_hint);
+        if (pchint == NULL) {
+            return false;
+        }
+        pchint->base.state = HINT_STATE_USED;
+        *choose_cplan = pchint->chooseCustomPlan;
+        return true;
+    }
+    return false;
+}
+
+/* report the reason why we choose this plan, corresponding to enum PlanChooseReason */
+static void ReportReasonForPlanChoose(PlanChooseReason reason)
+{
+    char* msg[MAX_PLANCHOOSEREASON] =
+        {"GPlan, reason: shared plancache need choose gplan.",
+         "CPlan, reason: Upsert with update query can't choose gplan.",
+#ifdef ENABLE_MOT
+         "GPlan, reason: Don't choose custom plan if using pbe optimization and MOT engine.",
+#endif
+         "CPlan, reason: For PBE, such as col=$1+$2, generate cplan.",
+         "CPlan, reason: One-shot plans will always be considered custom.",
+         "GPlan, reason: No parameters.",
+         "GPlan, reason: Transaction control statements.",
+         "GPlan, reason: Caller wants to force the decision.",
+         "CPlan, reason: Caller wants to force the decision.",
+         "CPlan, reason: Contains cstore table.",
+         "Choose by hint.",
+         "GPlan, reason: Using pbe optimization.",
+         "GPlan, reason: Settings force the decision.",
+         "CPlan, reason: Settings force the decision.",
+         "CPlan, reason: First 5 times using CPlan.",
+         "GPlan, reason: GPlan's cost is less than 10% more expensive than average custom plan.",
+         "CPlan, reason: Default choosing."};
+    int elevel = (log_min_messages <= DEBUG2 && module_logging_is_on(MOD_OPT_CHOICE)) ? NOTICE : DEBUG2;
+    ereport(elevel, (errmodule(MOD_OPT_CHOICE), errmsg("[Choosing C/G Plan]: %s", msg[reason])));
+    return;
+}
+
 /*
  * ChooseCustomPlan: choose whether to use custom or generic plan
  *
@@ -1451,74 +1510,102 @@ static bool is_upsert_query_with_update_param(Node* raw_parse_tree)
 static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundParams)
 {
     double avg_custom_cost;
+    bool ret = false;
 
     /*
      * Note: shared plancache need choose gplan, and shared plancache already has shared gplan.
      * DO NOT create cachedplan for shared plancache. Only create cachedplan for plancache not in GPC.
      */
     if (plansource->gpc.status.InShareTable()) {
+        ReportReasonForPlanChoose(SHARED_PLANCACHE);
         return false;
     }
 
     /* upsert with update query can't choose gplan */
     if (is_upsert_query_with_update_param(plansource->raw_parse_tree)) {
+        ReportReasonForPlanChoose(UPSERT_UPDATE_QUERY);
         return true;
     }
 
 #ifdef ENABLE_MOT
     /* Don't choose custom plan if using pbe optimization and MOT engine. */
     if (u_sess->attr.attr_sql.enable_pbe_optimization && IsMOTEngineUsed()) {
+        ReportReasonForPlanChoose(PBE_OPT_AND_MOT_ENGINE);
         return false;
     }
 #endif
 
     /* For PBE, such as col=$1+$2, generate cplan. */
     if (IsDeleteLimit(plansource, boundParams) == true) {
+        ReportReasonForPlanChoose(PARAM_EXPR);
         return true;
     }
 
     /* One-shot plans will always be considered custom */
-    if (plansource->is_oneshot)
+    if (plansource->is_oneshot) {
+        ReportReasonForPlanChoose(ONE_SHOT_PLAN);
         return true;
+    }
 
     /* Otherwise, never any point in a custom plan if there's no parameters */
-    if (boundParams == NULL)
+    if (boundParams == NULL) {
+        ReportReasonForPlanChoose(NO_BOUND_PARAM);
         return false;
+    }
 
     /* ... nor for transaction control statements */
     if (IsTransactionStmtPlan(plansource)) {
+        ReportReasonForPlanChoose(TRANSACTION_STAT);
         return false;
     }
 
     /* See if caller wants to force the decision */
-    if (plansource->cursor_options & CURSOR_OPT_GENERIC_PLAN)
+    if (plansource->cursor_options & CURSOR_OPT_GENERIC_PLAN) {
+        ReportReasonForPlanChoose(CALLER_FORCE_GPLAN);
         return false;
-    if (plansource->cursor_options & CURSOR_OPT_CUSTOM_PLAN)
-        return true;
-
-    /* If we contains cstore table, always custom except fqs on CN */
-    if (IsForceCustomplan(plansource) == true) {
+    }
+    if (plansource->cursor_options & CURSOR_OPT_CUSTOM_PLAN) {
+        ReportReasonForPlanChoose(CALLER_FORCE_CPLAN);
         return true;
     }
 
+    /* If we contains cstore table, always custom except fqs on CN */
+    if (IsForceCustomplan(plansource) == true) {
+        ReportReasonForPlanChoose(CSTORE_TABLE);
+        return true;
+    }
+
+    /* Make decision according to hint */
+    if (choose_by_hint(plansource, &ret)) {
+        ReportReasonForPlanChoose(CHOOSE_BY_HINT);
+        return ret;
+    }
+
     /* Don't choose custom plan if using pbe optimization */
-    if (u_sess->attr.attr_sql.enable_pbe_optimization && plansource->gplan_is_fqs)
+    bool isPbeAndFqs = u_sess->attr.attr_sql.enable_pbe_optimization && plansource->gplan_is_fqs;
+    if (isPbeAndFqs) {
+        ReportReasonForPlanChoose(PBE_OPTIMIZATION);
         return false;
+    }
 
     /* Let settings force the decision */
     if (unlikely(PLAN_CACHE_MODE_AUTO != u_sess->attr.attr_sql.g_planCacheMode)) {
         if (PLAN_CACHE_MODE_FORCE_GENERIC_PLAN == u_sess->attr.attr_sql.g_planCacheMode) {
+            ReportReasonForPlanChoose(SETTING_FORCE_GPLAN);
             return false;
         }
 
         if (PLAN_CACHE_MODE_FORCE_CUSTOM_PLAN  == u_sess->attr.attr_sql.g_planCacheMode) {
+            ReportReasonForPlanChoose(SETTING_FORCE_CPLAN);
             return true;
         }
     }
 
     /* Generate custom plans until we have done at least 5 (arbitrary) */
-    if (plansource->num_custom_plans < 5)
+    if (plansource->num_custom_plans < 5) {
+        ReportReasonForPlanChoose(TRY_CPLAN);
         return true;
+    }
 
     avg_custom_cost = plansource->total_custom_cost / plansource->num_custom_plans;
 
@@ -1530,10 +1617,16 @@ static bool ChooseCustomPlan(CachedPlanSource* plansource, ParamListInfo boundPa
      *
      * Note that if generic_cost is -1 (indicating we've not yet determined
      * the generic plan cost), we'll always prefer generic at this point.
+     *
+     * If the cost of generic plan and custom plan are both 0, in case of
+     * FQS/remotelimit, we prefer generic plan.
      */
-    if (plansource->generic_cost < avg_custom_cost * 1.1)
+    if (plansource->generic_cost <= avg_custom_cost * 1.1) {
+        ReportReasonForPlanChoose(COST_PREFER_GPLAN);
         return false;
+    }
 
+    ReportReasonForPlanChoose(DEFAULT_CHOOSE);
     return true;
 }
 

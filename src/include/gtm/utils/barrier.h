@@ -38,7 +38,7 @@
  * barrier.  In practice, on machines with strong memory ordering, read and
  * write barriers may require nothing more than a compiler barrier.
  *
- * For an introduction to using memory barriers within the PostgreSQL backend,
+ * For an introduction to using memory barriers within the openGauss backend,
  * see src/backend/storage/lmgr/README.barrier
  */
 

@@ -1,0 +1,1039 @@
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+create schema schema_test_ztt;
+set search_path = schema_test_ztt;
+-- TEST timestamp
+drop table t_tmp;
+ERROR:  table "t_tmp" does not exist
+create table t_tmp(id int, snaptime timestamp, snapcsn bigint);
+-- saveTimeCSN
+CREATE OR REPLACE FUNCTION saveTimeCSN(int8)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+begin
+    insert into t_tmp select $1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+	return 1;
+end;
+$BODY$;
+-- findTime
+CREATE OR REPLACE FUNCTION findTime(int8)
+  RETURNS timestamp
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count timestamp;
+begin
+  count = (select snaptime from t_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+drop tablespace if exists new_tablespace_1;
+NOTICE:  Tablespace "new_tablespace_1" does not exist, skipping.
+\! rm -rf @abs_srcdir@/new_tablespace_1
+CREATE TABLESPACE new_tablespace_1 location '@abs_srcdir@/new_tablespace_1';
+create user user1 WITH ENCRYPTED PASSWORD 'gauss@123';
+-- TEST ALTER TABLE
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(0);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+drop table tab_x1;
+ERROR:  table "tab_x1" does not exist
+create table tab_x1 (a int, b int);
+select * from tab_x1 timecapsule timestamp findTime(0);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(0); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select saveTimeCSN(-1);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+create UNIQUE index index_tab_x1_1 on tab_x1(a);
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(1);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+insert into tab_x1 values(1,2),(3,4),(5,6);
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(2);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 add constraint constraint_1 primary key (a);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "constraint_1" for table "tab_x1"
+select * from tab_x1 timecapsule timestamp findTime(1);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(2);  
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+truncate table t_tmp;
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(1);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 drop constraint constraint_1;
+select * from tab_x1 timecapsule timestamp findTime(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(1); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(2);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 add constraint constraint_1 primary key (a);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "constraint_1" for table "tab_x1"
+select * from tab_x1 timecapsule timestamp findTime(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(2); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(3);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 drop constraint constraint_1;
+select * from tab_x1 timecapsule timestamp findTime(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(3); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(4);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 add constraint constraint_2 check(a<100000);
+select * from tab_x1 timecapsule timestamp findTime(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(4); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(5);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 rename constraint constraint_2 to constraint_2_r;
+select * from tab_x1 timecapsule timestamp findTime(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(5); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(6);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 rename constraint constraint_2_r to constraint_2; 
+select * from tab_x1 timecapsule timestamp findTime(6);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(6); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(7);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 add constraint constraint_3 primary key using index index_tab_x1_1;
+NOTICE:  ALTER TABLE / ADD CONSTRAINT USING INDEX will rename index "index_tab_x1_1" to "constraint_3"
+select * from tab_x1 timecapsule timestamp findTime(7);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(7); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(8);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 drop constraint constraint_2;
+select * from tab_x1 timecapsule timestamp findTime(8);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(8); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(9);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+create UNIQUE index index_tab_x1_2 on tab_x1(a);
+alter table tab_x1 CLUSTER ON index_tab_x1_2;
+select * from tab_x1 timecapsule timestamp findTime(9);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(9); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(10);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 owner to user1;
+select * from tab_x1 timecapsule timestamp findTime(10);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(10); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(11);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 set tablespace new_tablespace_1;
+select * from tab_x1 timecapsule timestamp findTime(11);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(11); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(12);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+	$$
+	DECLARE
+	BEGIN
+	RETURN NEW;
+	END
+	$$ LANGUAGE PLPGSQL;
+CREATE TRIGGER insert_trigger
+	BEFORE INSERT ON tab_x1
+	FOR EACH ROW
+	EXECUTE PROCEDURE tri_insert_func();
+alter table tab_x1 DISABLE trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(12);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(12); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(13);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 enable trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(13);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(13); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(14);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 enable REPLICA trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(14);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(14); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(15);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 enable ALWAYS trigger insert_trigger;
+select * from tab_x1 timecapsule timestamp findTime(15);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(15); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(16);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 DISABLE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(16);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(16); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(17);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 ENABLE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(17);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(17); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(18);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 FORCE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(18);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(18); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(19);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 NO FORCE ROW LEVEL SECURITY;
+select * from tab_x1 timecapsule timestamp findTime(19);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(19); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(20);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 add c varchar(10);
+select * from tab_x1 timecapsule timestamp findTime(20);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(20); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(21);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 MODIFY c int;
+select * from tab_x1 timecapsule timestamp findTime(21);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(21); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(22);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 drop IF EXISTS c;
+select * from tab_x1 timecapsule timestamp findTime(22);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(22); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(23);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter table tab_x1 add c int;
+select * from tab_x1 timecapsule timestamp findTime(23);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(23);  
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(24); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c TYPE int;
+select * from tab_x1 timecapsule timestamp findTime(24);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(24);  
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(25);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET DEFAULT 1;
+select * from tab_x1 timecapsule timestamp findTime(25);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(25); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(26);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+truncate table tab_x1;
+insert into tab_x1 values(1,2,3),(4,5,6);
+ALTER TABLE tab_x1 ALTER COLUMN c set not null;
+select * from tab_x1 timecapsule timestamp findTime(26);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(26);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(27);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c drop not null;
+select * from tab_x1 timecapsule timestamp findTime(27);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(27);  
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(28);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET STATISTICS -1;
+select * from tab_x1 timecapsule timestamp findTime(28);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(28); 
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(29); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ADD STATISTICS ((b,c));
+select * from tab_x1 timecapsule timestamp findTime(29);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(29); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(30);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 DELETE STATISTICS ((b,c));
+select * from tab_x1 timecapsule timestamp findTime(30);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(30); 
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(31);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET (n_distinct = 7);
+select * from tab_x1 timecapsule timestamp findTime(31);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(31); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(32); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c reset (n_distinct);
+select * from tab_x1 timecapsule timestamp findTime(32);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(32); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(33); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 ALTER COLUMN c SET STORAGE PLAIN;
+select * from tab_x1 timecapsule timestamp findTime(33);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(33);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(34); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 RENAME TO tab_x1_t;
+select * from tab_x1_t timecapsule timestamp findTime(34);
+ERROR:  The table definition of "tab_x1_t" has been changed.
+timecapsule table tab_x1_t to timestamp findTime(34);  
+ERROR:  The table definition of "tab_x1_t" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(35);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1_t RENAME TO tab_x1;
+select * from tab_x1 timecapsule timestamp findTime(35);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(35); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(36); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 RENAME a TO a_t;
+select * from tab_x1 timecapsule timestamp findTime(36);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(36); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(37); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+ALTER TABLE tab_x1 RENAME a_t TO a;
+select * from tab_x1 timecapsule timestamp findTime(37);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(37); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(38); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+vacuum full tab_x1;
+select * from tab_x1 timecapsule timestamp findTime(38);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(38);  
+ERROR:  The table definition of "tab_x1" has been changed.
+-- TEST DROP TRIGGER
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(39);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+drop trigger insert_trigger on tab_x1;
+select * from tab_x1 timecapsule timestamp findTime(39);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(39);  
+ERROR:  The table definition of "tab_x1" has been changed.
+-- CREATE INDEX CASE
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(41);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+create index index_tab_x1_b on tab_x1(b);
+select * from tab_x1 timecapsule timestamp findTime(41);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(41);  
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+-- ALTER INDEX CASE
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(42);
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter index index_tab_x1_b rename to index_tab_x1_b_t;
+select * from tab_x1 timecapsule timestamp findTime(42);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(42);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(43); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter index index_tab_x1_b_t rename to index_tab_x1_b;
+select * from tab_x1 timecapsule timestamp findTime(43);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(43); 
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(44); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter index index_tab_x1_b SET TABLESPACE new_tablespace_1;
+select * from tab_x1 timecapsule timestamp findTime(44);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(44);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(47); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter index index_tab_x1_b REBUILD;
+select * from tab_x1 timecapsule timestamp findTime(47);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(47);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(48); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+alter index index_tab_x1_b UNUSABLE;
+select * from tab_x1 timecapsule timestamp findTime(48);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(48);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(49); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+reindex index index_tab_x1_b;
+select * from tab_x1 timecapsule timestamp findTime(49);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(49); 
+ERROR:  The table definition of "tab_x1" has been changed.
+ 
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select saveTimeCSN(50); 
+ savetimecsn 
+-------------
+           1
+(1 row)
+
+drop index index_tab_x1_b;
+select * from tab_x1 timecapsule timestamp findTime(50);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(50);  
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(1);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(1); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(2);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(2); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(3); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(3);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(4); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(4);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(5); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(5);
+ERROR:  The table definition of "tab_x1" has been changed.
+timecapsule table tab_x1 to timestamp findTime(6); 
+ERROR:  The table definition of "tab_x1" has been changed.
+select * from tab_x1 timecapsule timestamp findTime(6); 
+ERROR:  The table definition of "tab_x1" has been changed.
+-- END CASE
+drop table t_tmp;
+drop table tab_x1 cascade;
+drop function saveTimeCSN;
+drop function findTime;
+drop user user1 cascade;
+drop TABLESPACE new_tablespace_1;
+drop schema schema_test_ztt;
+ERROR:  cannot drop schema schema_test_ztt because other objects depend on it
+DETAIL:  function tri_insert_func() depends on schema schema_test_ztt
+HINT:  Use DROP ... CASCADE to drop the dependent objects too.
+reset search_path;
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 10000
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 10000
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show vacuum_defer_cleanup_age;
+ vacuum_defer_cleanup_age 
+--------------------------
+ 0
+(1 row)
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+show version_retention_age;
+ version_retention_age 
+-----------------------
+ 0
+(1 row)
+

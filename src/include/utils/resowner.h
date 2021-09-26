@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * resowner.h
- *	  POSTGRES resource owner definitions.
+ *	  openGauss resource owner definitions.
  *
  * Query-lifespan resources are tracked by associating them with
  * ResourceOwner objects.  This provides a simple mechanism for ensuring
@@ -19,7 +19,7 @@
 #ifndef RESOWNER_H
 #define RESOWNER_H
 
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "utils/catcache.h"
 #include "utils/plancache.h"
 #include "utils/snapshot.h"
@@ -59,7 +59,7 @@ typedef void (*ResourceReleaseCallback)(ResourceReleasePhase phase, bool isCommi
  */
 
 /* generic routines */
-extern ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, MemoryGroupType memGroup);
+extern ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, MemoryContext memCxt);
 extern void ResourceOwnerRelease(ResourceOwner owner, ResourceReleasePhase phase, bool isCommit, bool isTopLevel);
 extern void ResourceOwnerDelete(ResourceOwner owner);
 extern ResourceOwner ResourceOwnerGetParent(ResourceOwner owner);
@@ -74,6 +74,11 @@ extern void UnregisterResourceReleaseCallback(ResourceReleaseCallback callback, 
 extern void ResourceOwnerEnlargeBuffers(ResourceOwner owner);
 extern void ResourceOwnerRememberBuffer(ResourceOwner owner, Buffer buffer);
 extern void ResourceOwnerForgetBuffer(ResourceOwner owner, Buffer buffer);
+
+/* support for segment head buffer refcount management */
+extern void ResourceOwnerEnlargeSegmentBuffers(ResourceOwner owner);
+extern void ResourceOwnerRememberSegmentBuffer(ResourceOwner owner, Buffer buffer, SegmentDesc *seg_desc);
+extern void ResourceOwnerForgetSegmentBuffer(ResourceOwner owner, SegmentDesc *seg_desc);
 
 /* support for catcache refcount management */
 extern void ResourceOwnerEnlargeCatCacheRefs(ResourceOwner owner);

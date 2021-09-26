@@ -105,7 +105,7 @@ Datum hashbuild(PG_FUNCTION_ARGS)
     buildstate.heapRel = heap;
 
     /* do the heap scan */
-    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, hashbuildCallback, (void*)&buildstate);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, hashbuildCallback, (void*)&buildstate, NULL);
 
     if (buildstate.spool != NULL) {
         /* sort the tuples and insert them into the index */
@@ -325,11 +325,18 @@ Datum hashgetbitmap(PG_FUNCTION_ARGS)
 {
     IndexScanDesc scan = (IndexScanDesc)PG_GETARG_POINTER(0);
     TIDBitmap *tbm = (TIDBitmap *)PG_GETARG_POINTER(1);
+    if (scan == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+            (errmsg("scan can not be null in hashgetbitmap function"))));
+    }
     HashScanOpaque so = (HashScanOpaque)scan->opaque;
     bool res = false;
     int64 ntids = 0;
     Oid partHeapOid = IndexScanGetPartHeapOid(scan);
-
+    if (so == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION),
+            (errmsg("scan->opaque can not be null in hashgetbitmap function"))));
+    }
     res = _hash_first(scan, ForwardScanDirection);
 
     while (res) {
@@ -761,7 +768,7 @@ void hashbucketcleanup(Relation rel, Bucket cur_bucket, Buffer bucket_buf,
              * To remove the dead tuples, we strictly want to rely on results
              * of callback function.  refer btvacuumpage for detailed reason.
              */
-            if (callback && callback(htup, callback_state, InvalidOid)) {
+            if (callback && callback(htup, callback_state, InvalidOid, InvalidBktId)) {
                 kill_tuple = true;
                 if (tuples_removed)
                     *tuples_removed += 1;

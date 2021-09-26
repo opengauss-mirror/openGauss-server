@@ -27,7 +27,7 @@
 #include "commands/trigger.h"
 #endif
 #include "executor/executor.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "pgxc/execRemote.h"
 #include "nodes/nodes.h"
 #include "access/printtup.h"
@@ -44,7 +44,7 @@
 #include "libpq/ip.h"
 #include "libpq/libpq.h"
 #include <sys/poll.h>
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "postmaster/postmaster.h"
 #include "access/transam.h"
 #include "gssignal/gs_signal.h"
@@ -217,6 +217,10 @@ static void append_msg_to_batch(VecStreamState* vs_state, VectorBatch* batch)
                     data_len = sizeof(Datum);
                     column->m_vals[current_row] = *(Datum*)data;
                     break;
+                case NAME_TYPE:
+                    data_len = strlen(data) + 1;
+                    column->AddHeaderVar(PointerGetDatum(data), current_row);
+                    break;
                 case FIXED_TYPE:
                     /* fixed length value */
                     desc = vs_state->ss.ps.ps_ResultTupleSlot->tts_tupleDescriptor;
@@ -379,6 +383,8 @@ void redistributeStreamInitType(TupleDesc desc, uint32* cols_type)
             cols_type[i] = VALUE_TYPE;
         } else if (attr->atttypid == TIDOID) {
             cols_type[i] = TID_TYPE;
+        } else if (attr->atttypid == NAMEOID) {
+            cols_type[i] = NAME_TYPE;
         } else if (attr->attlen == -1) {
             if (attr->atttypid == NUMERICOID)
                 cols_type[i] = NUMERIC_TYPE;

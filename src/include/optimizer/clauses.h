@@ -107,18 +107,15 @@ extern bool treat_as_join_clause(Node* clause, RestrictInfo* rinfo, int varRelid
 extern List* extract_function_outarguments(Oid funcid, List* parameters, List* funcname);
 extern bool need_adjust_agg_inner_func_type(Aggref* aggref);
 
-#ifndef ENABLE_MULTIPLE_NODES
+
 extern bool contain_rownum_walker(Node *node, void *context); 
 
-static inline bool contain_rownum_expr(Node *node) 
-{
-    return contain_rownum_walker(node, NULL);
-}
+extern bool ContainRownumExpr(Node *node);
 
 /* Check if it includes Rownum */
 static inline void ExcludeRownumExpr(ParseState* pstate, Node* expr)
 {
-    if (contain_rownum_expr(expr))                                                          
+    if (ContainRownumExpr(expr))                                                          
             ereport(ERROR,                                                                      
                 (errcode(ERRCODE_SYNTAX_ERROR),                                                 
                 errmsg("specified ROWNUM is not allowed here."),                                
@@ -126,5 +123,5 @@ static inline void ExcludeRownumExpr(ParseState* pstate, Node* expr)
 }
 
 extern List* get_quals_lists(Node *jtnode);
-#endif
+
 #endif /* CLAUSES_H */

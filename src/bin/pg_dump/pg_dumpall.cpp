@@ -142,6 +142,7 @@ static char* passwd = NULL;
 static bool dont_overwritefile = false;
 static bool dump_templatedb = false;
 static char* parallel_jobs = NULL;
+static bool is_pipeline = false;
 
 GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
 #define RAND_COUNT 100
@@ -169,6 +170,8 @@ void stopLLT()
 #endif /* PGXC */
 
 static void free_dumpall();
+static void get_password_pipeline();
+static void get_role_password();
 
 int main(int argc, char* argv[])
 {
@@ -236,6 +239,7 @@ int main(int argc, char* argv[])
         {"include-extensions", no_argument, NULL, 10},
         {"include-templatedb", no_argument, NULL, 11},
         {"parallel-jobs", required_argument, NULL, 12},
+        {"pipeline", no_argument, NULL, 13},
         {NULL, 0, NULL, 0}};
 
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_dump"));
@@ -263,8 +267,11 @@ int main(int argc, char* argv[])
     if ((ret = find_other_exec(argv[0], "gs_dump", PGDUMP_VERSIONSTR, pg_dump_bin)) < 0) {
         char full_path[MAXPGPATH] = {0};
 
-        if (find_my_exec(argv[0], full_path) < 0)
-            strlcpy(full_path, progname, sizeof(full_path));
+        if (find_my_exec(argv[0], full_path) < 0) {
+            errno_t err = EOK;
+            err = strcpy_s(full_path, sizeof(full_path), progname);
+            securec_check_c(err, "\0", "\0");
+        }
 
         if (ret == -1)
             write_stderr(_("The program \"gs_dump\" is needed by %s "
@@ -284,6 +291,10 @@ int main(int argc, char* argv[])
 
     /* parse the dumpall options */
     getopt_dumpall(argc, argv, long_options, &optindex);
+
+    if (is_pipeline) {
+        get_password_pipeline();
+    }
 
     /* validate the optons values */
     validate_dumpall_options(argv);
@@ -416,6 +427,10 @@ int main(int argc, char* argv[])
         std_strings = "off";
     }
 
+    if ((use_role != NULL) && (rolepasswd == NULL)) {
+        get_role_password();
+    }
+
     /* Set the role if requested */
     if (use_role != NULL && server_version >= 80100) {
         PGresult* res = NULL;
@@ -489,7 +504,7 @@ int main(int argc, char* argv[])
         dumpall_printf(OPF, "%s", init_rand);
     }
 
-    dumpall_printf(OPF, "--\n-- PostgreSQL database cluster dump\n--\n\n");
+    dumpall_printf(OPF, "--\n-- openGauss database cluster dump\n--\n\n");
     if (verbose)
         dumpTimestamp((char*)"Started on");
 
@@ -520,7 +535,7 @@ int main(int argc, char* argv[])
 
     if (verbose)
         dumpTimestamp((char*)"Completed on");
-    dumpall_printf(OPF, "--\n-- PostgreSQL database cluster dump complete\n--\n\n");
+    dumpall_printf(OPF, "--\n-- openGauss database cluster dump complete\n--\n\n");
 
     if (filename != NULL) {
         fclose(OPF);
@@ -537,6 +552,49 @@ int main(int argc, char* argv[])
     free_dumpall();
 
     exit_nicely(0);
+}
+
+static void get_password_pipeline()
+{
+    int pass_max_len = 1024;
+    char* pass_buf = NULL;
+    errno_t rc = EOK;
+
+    if (isatty(fileno(stdin))) {
+        exit_horribly(NULL, "Terminal is not allowed to use --pipeline\n");
+    }
+
+    pass_buf = (char*)pg_malloc(pass_max_len);
+    rc = memset_s(pass_buf, pass_max_len, 0, pass_max_len);
+    securec_check_c(rc, "\0", "\0");
+
+    if (passwd != NULL) {
+        errno_t rc = memset_s(passwd, strlen(passwd), 0, strlen(passwd));
+        securec_check_c(rc, "\0", "\0");
+        GS_FREE(passwd);
+    }
+
+    if (NULL != fgets(pass_buf, pass_max_len, stdin)) {
+        prompt_password = TRI_YES;
+        appendPQExpBuffer(pgdumpopts, " -W");
+        pass_buf[strlen(pass_buf) - 1] = '\0';
+        passwd = gs_strdup(pass_buf);
+        doShellQuoting(pgdumpopts, passwd);
+    }
+
+    rc = memset_s(pass_buf, pass_max_len, 0, pass_max_len);
+    securec_check_c(rc, "\0", "\0");
+    free(pass_buf);
+    pass_buf = NULL;
+
+}
+
+static void get_role_password() {
+    GS_FREE(rolepasswd);
+    rolepasswd = simple_prompt("Role Password: ", 100, false);
+    if (rolepasswd == NULL) {
+        exit_horribly(NULL, "out of memory\n");
+    }
 }
 
 static void free_dumpall()
@@ -972,6 +1030,10 @@ static void getopt_dumpall(int argc, char** argv, struct option options[], int* 
                 parallel_jobs = gs_strdup(optarg);
                 break;
 
+            case 13:
+                is_pipeline = true;
+                break;
+
             default:
                 write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
                 exit_nicely(1);
@@ -1102,16 +1164,11 @@ static void validate_dumpall_options(char** argv)
     if (include_nodes)
         appendPQExpBuffer(pgdumpopts, " --include-nodes");
 #endif
-
-    if ((use_role != NULL && rolepasswd == NULL) || (use_role == NULL && rolepasswd != NULL)) {
-        write_msg(NULL, "options --role --rolepassword need use together\n");
-        exit_nicely(0);
-    }
 }
 
 void help(void)
 {
-    printf(_("%s extracts a PostgreSQL database cluster into an SQL script file.\n\n"), progname);
+    printf(_("%s extracts a openGauss database cluster into an SQL script file.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]...\n"), progname);
 
@@ -1148,6 +1205,8 @@ void help(void)
     printf(_("  --with-key=KEY                              AES128 encryption key ,must be 16 bytes in length\n"));
     printf(_("  --include-extensions                        include extensions in dumpall \n"));
     printf(_("  --include-templatedb                        include dumping of template database also \n"));
+    printf(_("  --pipeline                                  use pipeline to pass the password,\n"
+             "                                              forbidden to use in terminal\n"));
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  --dump-nodes                                include nodes and node groups in the dump\n"));
     printf(_(

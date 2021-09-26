@@ -17,15 +17,27 @@ ALTER DEFAULT PRIVILEGES
 
 where abbreviated_grant_or_revoke can be:
 grant_on_tables_clause
+  | grant_on_sequences_clause
   | grant_on_functions_clause
   | grant_on_types_clause
+  | grant_on_client_master_keys_clause
+  | grant_on_column_encryption_keys_clause
   | revoke_on_tables_clause
+  | revoke_on_sequences_clause
   | revoke_on_functions_clause
   | revoke_on_types_clause
+  | revoke_on_client_master_keys_clause
+  | revoke_on_column_encryption_keys_clause
 where grant_on_tables_clause can be:
 GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES |
     ALTER | DROP | COMMENT | INDEX | VACUUM } [, ...] | ALL [ PRIVILEGES ] }
     ON TABLES
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ]
+where grant_on_sequences_clause can be:
+GRANT { { SELECT | UPDATE | USAGE | ALTER | DROP | COMMENT }
+    [, ...] | ALL [ PRIVILEGES ] }
+    ON SEQUENCES
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ]
 where grant_on_functions_clause can be:
@@ -38,11 +50,28 @@ GRANT { { USAGE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
     ON TYPES
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ]
+where grant_on_client_master_keys_clause can be:
+GRANT { { USAGE | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON CLIENT_MASTER_KEYS
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ]
+where grant_on_column_encryption_keys_clause can be:
+GRANT { { USAGE | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON COLUMN_ENCRYPTION_KEYS
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ]
 where revoke_on_tables_clause can be:
 REVOKE [ GRANT OPTION FOR ]
     { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES |
     ALTER | DROP | COMMENT | INDEX | VACUUM } [, ...] | ALL [ PRIVILEGES ] }
     ON TABLES
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
+where revoke_on_sequences_clause can be:
+REVOKE [ GRANT OPTION FOR ]
+    { { SELECT | UPDATE | USAGE | ALTER | DROP | COMMENT }
+    [, ...] | ALL [ PRIVILEGES ] }
+    ON SEQUENCES
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
 where revoke_on_functions_clause can be:
@@ -55,6 +84,18 @@ where revoke_on_types_clause can be:
 REVOKE [ GRANT OPTION FOR ]
     { { USAGE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
     ON TYPES
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
+where revoke_on_client_master_keys_clause can be:
+REVOKE [ GRANT OPTION FOR ]
+    { { USAGE | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON CLIENT_MASTER_KEYS
+    FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
+where revoke_on_column_encryption_keys_clause can be:
+REVOKE [ GRANT OPTION FOR ]
+    { { USAGE | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON COLUMN_ENCRYPTION_KEYS
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT | CASCADE CONSTRAINTS ]
 </synopsis>

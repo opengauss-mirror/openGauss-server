@@ -14,6 +14,7 @@ ALTER SCHEMA schema_name
     RENAME TO new_name;
 ALTER SCHEMA schema_name
     OWNER TO new_owner;
+ALTER SCHEMA schema_name {WITH | WITHOUT} BLOCKCHAIN;
 </synopsis>
 </refsynopsisdiv>
 </refentry>

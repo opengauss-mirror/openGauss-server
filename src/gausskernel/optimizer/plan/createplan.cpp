@@ -28,6 +28,7 @@
 #include "catalog/pg_class.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_opfamily.h"
 #include "catalog/pgxc_group.h"
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
@@ -75,7 +76,7 @@
 #include "parser/parse_oper.h"
 #include "catalog/pg_proc.h"
 #endif
-#include "executor/nodeExtensible.h"
+#include "executor/node/nodeExtensible.h"
 
 #define EQUALJOINVARRATIO ((2.0) / (3.0))
 
@@ -109,6 +110,7 @@ static FunctionScan* create_functionscan_plan(PlannerInfo* root, Path* best_path
 static ValuesScan* create_valuesscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static Plan* create_ctescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static WorkTableScan* create_worktablescan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
+static BaseResult *create_resultscan_plan(PlannerInfo *root, Path *best_path, List *tlist, List *scan_clauses);
 static ExtensiblePlan* create_extensible_plan(
     PlannerInfo* root, ExtensiblePath* best_path, List* tlist, List* scan_clauses);
 static ForeignScan* create_foreignscan_plan(PlannerInfo* root, ForeignPath* best_path, List* tlist, List* scan_clauses);
@@ -124,6 +126,7 @@ static Node* fix_indexqual_operand(Node* node, IndexOptInfo* index, int indexcol
 static List* get_switched_clauses(List* clauses, Relids outerrelids);
 static List* order_qual_clauses(PlannerInfo* root, List* clauses);
 static void copy_path_costsize(Plan* dest, Path* src);
+static void copy_generic_path_info(Plan *dest, Path *src);
 static SeqScan* make_seqscan(List* qptlist, List* qpqual, Index scanrelid);
 static CStoreScan* make_cstorescan(List* qptlist, List* qpqual, Index scanrelid);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -442,6 +445,12 @@ Plan* create_stream_plan(PlannerInfo* root, StreamPath* best_path)
         return subplan;
     }
 
+    /* return as cn gather plan when switch on */
+    if (permit_gather(root) && IS_STREAM_TYPE(best_path, STREAM_GATHER)) {
+        Plan* result_plan = make_simple_RemoteQuery(subplan, root, false);
+        return result_plan;
+    }
+
     /* We don't want any excess columns when streaming */
     disuse_physical_tlist(subplan, best_path->subpath);
 
@@ -701,6 +710,10 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
             plan = (Plan*)create_ctescan_plan(root, best_path, tlist, scan_clauses);
             break;
 
+        case T_BaseResult:
+            plan = (Plan *) create_resultscan_plan(root, best_path, tlist, scan_clauses);
+            break;
+
         case T_WorkTableScan:
             plan = (Plan*)create_worktablescan_plan(root, best_path, tlist, scan_clauses);
             break;
@@ -726,7 +739,9 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
     if (ENABLE_WORKLOAD_CONTROL && plan != NULL)
         WLMmonitor_check_and_update_IOCost(root, best_path->pathtype, plan->total_cost);
 
-    (void*)setPartitionParam(root, plan, best_path->parent);
+    if (!CheckPathUseGlobalPartIndex(best_path)) {
+        (void*)setPartitionParam(root, plan, best_path->parent);
+    }
     (void*)setBucketInfoParam(root, plan, best_path->parent);
 
     /*
@@ -2596,7 +2611,7 @@ static Scan* create_indexscan_plan(
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Unsupported Index Scan FOR TIMESERIES.")));
     } else {
-        if (indexonly)
+        if (indexonly) {
             scan_plan = (Scan*)make_indexonlyscan(tlist,
                 qpqual,
                 baserelid,
@@ -2605,7 +2620,7 @@ static Scan* create_indexscan_plan(
                 fixed_indexorderbys,
                 best_path->indexinfo->indextlist,
                 best_path->indexscandir);
-        else
+        } else {
             scan_plan = (Scan*)make_indexscan(tlist,
                 qpqual,
                 baserelid,
@@ -2615,6 +2630,8 @@ static Scan* create_indexscan_plan(
                 fixed_indexorderbys,
                 indexorderbys,
                 best_path->indexscandir);
+            ((IndexScan*)scan_plan)->is_ustore = best_path->is_ustore;
+        }
     }
 
 #ifdef STREAMPLAN
@@ -2801,6 +2818,7 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
                     errmsg("Unsupported Bitmap And FOR TIMESERIES.")));
         } else
             plan = (Plan*)make_bitmap_and(subplans);
+        ((BitmapAnd*)plan)->is_ustore = apath->is_ustore;
         plan->startup_cost = apath->path.startup_cost;
         plan->total_cost = apath->path.total_cost;
         set_plan_rows(
@@ -2860,6 +2878,7 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
                         errmsg("Unsupported Bitmap OR FOR TIMESERIES.")));
             } else
                 plan = (Plan*)make_bitmap_or(subplans);
+            ((BitmapOr*)plan)->is_ustore = opath->is_ustore;
             plan->startup_cost = opath->path.startup_cost;
             plan->total_cost = opath->path.total_cost;
             set_plan_rows(plan,
@@ -2909,6 +2928,7 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
             /* then convert to a bitmap indexscan */
             plan = (Plan*)make_bitmap_indexscan(
                 iscan->scan.scanrelid, iscan->indexid, iscan->indexqual, iscan->indexqualorig);
+            ((BitmapIndexScan*)plan)->is_ustore = iscan->is_ustore;
             indexscan = (Plan*)iscan;
         }
 #ifdef STREAMPLAN
@@ -3648,6 +3668,42 @@ static Plan* create_ctescan_plan(PlannerInfo* root, Path* best_path, List* tlist
 }
 
 /*
+ * create_resultscan_plan
+ *      Returns a Result plan for the RTE_RESULT base relation scanned by
+ *     'best_path' with restriction clauses 'scan_clauses' and targetlist
+ *     'tlist'.
+ */
+static BaseResult *create_resultscan_plan(PlannerInfo *root, Path *best_path,
+    List *tlist, List *scan_clauses)
+{
+    BaseResult     *scan_plan;
+    Index           scan_relid = best_path->parent->relid;
+    RangeTblEntry *rte PG_USED_FOR_ASSERTS_ONLY;
+
+    Assert(scan_relid > 0);
+    rte = planner_rt_fetch(scan_relid, root);
+    Assert(rte->rtekind == RTE_RESULT);
+
+    /* Sort clauses into best execution order */
+    scan_clauses = order_qual_clauses(root, scan_clauses);
+
+    /* Reduce RestrictInfo list to bare expressions; ignore pseudoconstants */
+    scan_clauses = extract_actual_clauses(scan_clauses, false);
+
+    /* Replace any outer-relation variables with nestloop params */
+    if (best_path->param_info) {
+        scan_clauses = (List *)
+        replace_nestloop_params(root, (Node *) scan_clauses);
+    }
+
+    scan_plan = make_result(root, tlist, (Node *) scan_clauses, NULL);
+
+    copy_generic_path_info(&scan_plan->plan, best_path);
+
+    return scan_plan;
+}
+
+/*
  * create_worktablescan_plan
  *	 Returns a worktablescan plan for the base relation scanned by 'best_path'
  *	 with restriction clauses 'scan_clauses' and targetlist 'tlist'.
@@ -4327,7 +4383,7 @@ static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path,
          * matter which way we imagine this column to be ordered.)  But a
          * non-redundant inner pathkey had better match outer's ordering too.
          */
-        if ((onewpathkey && inewpathkey) && (opathkey->pk_opfamily != ipathkey->pk_opfamily ||
+        if ((onewpathkey && inewpathkey) && (!OpFamilyEquals(opathkey->pk_opfamily, ipathkey->pk_opfamily) ||
                                                 opathkey->pk_eclass->ec_collation != ipathkey->pk_eclass->ec_collation))
             ereport(ERROR,
                 (errmodule(MOD_OPT),
@@ -5446,6 +5502,18 @@ static List* order_qual_clauses(PlannerInfo* root, List* clauses)
 /*
  * Copy cost and size info from a Path node to the Plan node created from it.
  * The executor usually won't use this info, but it's needed by EXPLAIN.
+ * Also copy the parallel-related flags, which the executor *will* use.
+ */
+static void copy_generic_path_info(Plan *dest, Path *src)
+{
+    dest->startup_cost = src->startup_cost;
+    dest->total_cost = src->total_cost;
+    dest->plan_rows = src->rows;
+}
+
+/*
+ * Copy cost and size info from a Path node to the Plan node created from it.
+ * The executor usually won't use this info, but it's needed by EXPLAIN.
  */
 static void copy_path_costsize(Plan* dest, Path* src)
 {
@@ -5498,7 +5566,6 @@ static SeqScan* make_seqscan(List* qptlist, List* qpqual, Index scanrelid)
     plan->righttree = NULL;
     plan->isDeltaTable = false;
     node->scanrelid = scanrelid;
-    node->executeBatch = false;
 
     return node;
 }
@@ -6566,7 +6633,7 @@ HashJoin* create_direct_hashjoin(
 
     join_plan->transferFilterFlag = CanTransferInJoin(joinType);
     join_plan->join.plan.exec_type = EXEC_ON_DATANODES;
-    join_plan->join.plan.exec_nodes = stream_merge_exec_nodes(outerPlan, hash_plan);
+    join_plan->join.plan.exec_nodes = stream_merge_exec_nodes(outerPlan, hash_plan, ENABLE_PRED_PUSH(root));
     join_plan->streamBothSides =
         contain_special_plan_node(outerPlan, T_Stream) || contain_special_plan_node(hash_plan, T_Stream);
     join_plan->join.nulleqqual = nulleqqual;
@@ -8389,7 +8456,7 @@ Plan* make_stream_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, No
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (result_plan->dop == 1 && IsA(result_plan, Limit)) {
+    if (IsA(result_plan, Limit) && limitOffset == NULL) {
         return result_plan;
     }
 #endif
@@ -8434,9 +8501,17 @@ BaseResult* make_result(PlannerInfo* root, List* tlist, Node* resconstantqual, P
     plan->qual = qual;
     plan->righttree = NULL;
     node->resconstantqual = resconstantqual;
+
+    /* 
+     * We currently apply this optimization in multiple nodes mode only
+     * while sticking to the original plans in the single node mode, because
+     * dummy path implementation for single node mode has not been completed yet.
+     */
+#ifdef ENABLE_MULTIPLE_NODES
     if (is_dummy_plan(plan)) {
         subplan = NULL;
     }
+#endif
     plan->lefttree = subplan;
 
 #ifdef STREAMPLAN
@@ -8782,6 +8857,15 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
                 node->plan.vec_output = true;
             else if (result_rte->orientation == REL_ROW_ORIENTED)
                 node->plan.vec_output = false;
+        }
+
+        /*
+         * If the FROM clause is empty, append a dummy RTE_RESULT RTE at the end of the parse->rtable 
+         * during subquery_planner. For that case, vec_output should be false.
+         */
+        RangeTblEntry* result_add = root->simple_rte_array[root->simple_rel_array_size - 1];
+        if (result_add != NULL && result_add->rtekind == RTE_RESULT) {
+            node->plan.vec_output = false;
         }
     }
 

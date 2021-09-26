@@ -1396,14 +1396,24 @@ void set_flag_to_flush_buffer(void)
 static char* LogCtlGetLogDirectory(const char* logid, bool include_nodename)
 {
     char path[MAXPGPATH] = {0};
-    char* log_rootdir = gs_getenv_r("GAUSSLOG");
+    char* rootdir = gs_getenv_r("GAUSSLOG");
+    char log_rootdir[PATH_MAX + 1] = {'\0'};
+    if (rootdir == NULL || realpath(rootdir, log_rootdir) == NULL) {
+        ereport(WARNING,
+            (errmodule(MOD_EXECUTOR), errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+            errmsg("Failed to obtain environment value $GAUSSLOG!"),
+            errdetail("N/A"),
+            errcause("Incorrect environment value."),
+            erraction("Please refer to backend log for more details.")));
+    }
+    rootdir = NULL;
     int rc = 0;
 
     /*
      * $GAUSSLOG env must not be an empty string.
      * if so, log directory will be under root dir '/' and permition denied.
      */
-    if (log_rootdir && *log_rootdir != '\0') {
+    if (*log_rootdir != '\0') {
         check_backend_env(log_rootdir);
         rc = strcat_s(path, MAXPGPATH, log_rootdir);
         securec_check_c(rc, "\0", "\0");
@@ -1460,7 +1470,7 @@ static void LogCtlSetGlobalNames(void)
 }
 
 /*
- * logCtlTimeZone will be inited by postmaster only once.
+ * logCtlTimeZone will be inited by postmaster only once.`
  * it's a pity that log_timezone is null in syslog thread,
  * so we have to set this global information from postmaster thread.
  */

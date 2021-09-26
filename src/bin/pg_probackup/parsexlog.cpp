@@ -32,10 +32,10 @@
  * a bit nicer.
  */
 #if PG_VERSION_NUM >= 100000
-#define PG_RMGR(symname,name,redo,desc,identify,startup,cleanup,mask) \
+#define PG_RMGR(symname, name, redo, desc, identify, startup, cleanup, mask, undo, undo_desc) \
   name,
 #else
-#define PG_RMGR(symname,name,redo,desc,identify,startup,cleanup) \
+#define PG_RMGR(symname, name, redo, desc, identify, startup, cleanup, undo, undo_desc) \
   name,
 #endif
 
@@ -55,7 +55,7 @@ static const char *RmgrNames[RM_MAX_ID + 1] = {
 #define XLOG_XACT_ABORT_PREPARED        0x40
 /* only keep same with the kernel #define XLOG_XACT_ASSIGNMENT		0x50  is not used in the pg_probackup*/
 /* free opcode 0x60 */
-/* free opcode 0x70 */
+#define XLOG_XACT_ABORT_WITH_XID        0x70
 
 /* mask for filtering opcodes out of xl_info */
 #define XLOG_XACT_OPMASK        0x70
@@ -1837,13 +1837,20 @@ extractPageInfo(XLogReaderState *record, XLogReaderData *reader_data,
         RelFileNode rnode;
         ForkNumber	forknum;
         BlockNumber blkno;
+        XLogPhyBlock pblk;
 
-        if (!XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blkno))
+        if (!XLogRecGetBlockTag(record, block_id, &rnode, &forknum, &blkno, &pblk))
             continue;
 
         /* We only care about the main fork; others are copied as is */
         if (forknum != MAIN_FORKNUM)
             continue;
+
+        if (OidIsValid(pblk.relNode)) {
+            Assert(PhyBlockIsValid(pblk));
+            rnode.relNode = pblk.relNode;
+            rnode.bucketNode = pblk.block;
+        }
 
         process_block_change(forknum, rnode, blkno);
     }
@@ -1897,7 +1904,7 @@ getRecordTimestamp(XLogReaderState *record, TimestampTz *recordXtime)
         return true;
     }
     else if (rmid == RM_XACT_ID && (xact_info == XLOG_XACT_ABORT ||
-                xact_info == XLOG_XACT_ABORT_PREPARED))
+                xact_info == XLOG_XACT_ABORT_PREPARED || xact_info == XLOG_XACT_ABORT_WITH_XID))
     {
         *recordXtime = ((xl_xact_abort_local *) XLogRecGetData(record))->xact_time;
         return true;
@@ -1932,17 +1939,21 @@ bool validate_wal_segment(TimeLineID tli, XLogSegNo segno, const char *prefetch_
 }
 
 /*
- *  * Returns information about the block that a block reference refers to.
- *   *
- *    * If the WAL record contains a block reference with the given ID, *rnode,
- *     * *forknum, and *blknum are filled in (if not NULL), and returns TRUE.
- *      * Otherwise returns FALSE.
- *       */
-bool XLogRecGetBlockTag(
-    XLogReaderState* record, uint8 block_id, RelFileNode* rnode, ForkNumber* forknum, BlockNumber* blknum)
+ *  Returns information about the block that a block reference refers to.
+ *  If the WAL record contains a block reference with the given ID, *rnode,
+ *  forknum, and *blknum are filled in (if not NULL), and returns TRUE.
+ *  Otherwise returns FALSE.
+ */
+bool XLogRecGetBlockTag(XLogReaderState* record, uint8 block_id, RelFileNode* rnode,
+    ForkNumber* forknum, BlockNumber* blknum, XLogPhyBlock *pblk)
 {
     DecodedBkpBlock* bkpb = NULL;
 
+    if (pblk != NULL) {
+        pblk->relNode = InvalidOid;
+        pblk->block = InvalidBlockNumber;
+        pblk->lsn = InvalidXLogRecPtr;
+    }
     if (!record->blocks[block_id].in_use)
         return false;
 
@@ -1953,6 +1964,11 @@ bool XLogRecGetBlockTag(
         *forknum = bkpb->forknum;
     if (blknum != NULL)
         *blknum = bkpb->blkno;
+    if (pblk != NULL) {
+        pblk->relNode = bkpb->seg_fileno;
+        pblk->block = bkpb->seg_blockno;
+        pblk->lsn = record->EndRecPtr;
+    }
     return true;
 }
 

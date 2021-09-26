@@ -21,8 +21,8 @@ SELECT '' AS seven, * FROM VARCHAR_TBL ORDER BY f1;
        | 1
        | 2
        | 3
-       | a
        | A
+       | a
        | c
        | 
 (7 rows)
@@ -55,7 +55,8 @@ SELECT '' AS five, c.*
       | 1
       | 2
       | 3
-(3 rows)
+      | A
+(4 rows)
 
 SELECT '' AS six, c.*
    FROM VARCHAR_TBL c
@@ -65,17 +66,17 @@ SELECT '' AS six, c.*
      | 1
      | 2
      | 3
+     | A
      | a
-(4 rows)
+(5 rows)
 
 SELECT '' AS one, c.*
    FROM VARCHAR_TBL c
    WHERE c.f1 > 'a' ORDER BY f1;
  one | f1 
 -----+----
-     | A
      | c
-(2 rows)
+(1 row)
 
 SELECT '' AS two, c.*
    FROM VARCHAR_TBL c
@@ -83,9 +84,8 @@ SELECT '' AS two, c.*
  two | f1 
 -----+----
      | a
-     | A
      | c
-(3 rows)
+(2 rows)
 
 DROP FOREIGN TABLE VARCHAR_TBL;
 --

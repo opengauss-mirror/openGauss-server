@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * datum.h
- *	  POSTGRES Datum (abstract data type) manipulation routines.
+ *	  openGauss Datum (abstract data type) manipulation routines.
  *
  * These routines are driven by the 'typbyval' and 'typlen' information,
  * which must previously have been obtained by the caller for the datatype
@@ -44,5 +44,14 @@ extern void datumFree(Datum value, bool typByVal, int typLen);
  * XXX : See comments in the code for restrictions!
  */
 extern bool datumIsEqual(Datum value1, Datum value2, bool typByVal, int typLen);
+
+/*
+ * DatumImageEq
+ *
+ * Compares two datums for identical contents, based on byte images.  Return
+ * true if the two datums are equal, false otherwise.
+ */
+extern bool DatumImageEq(Datum value1, Datum value2,
+                                bool typByVal, int typLen);
 
 #endif /* DATUM_H */

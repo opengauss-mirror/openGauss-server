@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * item.h
- *	  POSTGRES disk item definitions.
+ *	  openGauss disk item definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

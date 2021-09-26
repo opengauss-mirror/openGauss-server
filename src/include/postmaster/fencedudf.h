@@ -33,6 +33,7 @@
 #define FENCEDUDF_H
 #include "access/htup.h"
 
+extern void StartUDFMaster();
 extern void FencedUDFMasterMain(int argc, char* argv[]);
 extern bool RPCInitFencedUDFIfNeed(Oid functionId, FmgrInfo* finfo, HeapTuple procedureTuple);
 template <bool batchMode>

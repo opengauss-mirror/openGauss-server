@@ -21,6 +21,12 @@ GRANT { {{ SELECT | INSERT | UPDATE | REFERENCES | COMMENT } ( column_name [, ..
     ON [ TABLE ] table_name [, ...]
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ];
+GRANT { { SELECT | UPDATE | USAGE | ALTER | DROP | COMMENT } [, ...]
+    | ALL [ PRIVILEGES ] }
+    ON { [ SEQUENCE ] sequence_name [, ...]
+    | ALL SEQUENCES IN SCHEMA schema_name [, ...] }
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
 GRANT { { CREATE | CONNECT | TEMPORARY | TEMP | ALTER | DROP | COMMENT }
     [, ...] | ALL [ PRIVILEGES ] }
     ON DATABASE database_name [, ...]
@@ -28,6 +34,14 @@ GRANT { { CREATE | CONNECT | TEMPORARY | TEMP | ALTER | DROP | COMMENT }
     [ WITH GRANT OPTION ];
 GRANT { USAGE | ALL [ PRIVILEGES ] }
     ON DOMAIN domain_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { { USAGE | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON CLIENT_MASTER_KEY client_master_key
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
+GRANT { { USAGE | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON COLUMN_ENCRYPTION_KEY column_encryption_key
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ];
 GRANT { USAGE | ALL [ PRIVILEGES ] }
@@ -47,6 +61,10 @@ GRANT { USAGE | ALL [ PRIVILEGES ] }
     ON LANGUAGE lang_name [, ...]
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ];
+GRANT { { CREATE | USAGE | COMPUTE | ALTER | DROP } [, ...] | ALL [ PRIVILEGES ] }
+    ON NODE GROUP group_name [, ...]
+    TO { [ GROUP ] role_name | PUBLIC } [, ...]
+    [ WITH GRANT OPTION ];
 GRANT { { SELECT | UPDATE } [, ...] | ALL [ PRIVILEGES ] }
     ON LARGE OBJECT loid [, ...]
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
@@ -63,8 +81,16 @@ GRANT { { USAGE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
     ON TYPE type_name [, ...]
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ];
-GRANT { { CREATE | USAGE | COMPUTE | ALTER | DROP } [, ...] | ALL [ PRIVILEGES ] }
-    ON NODE GROUP group_name [, ...]
+GRANT { USAGE | ALL [PRIVILEGES] }
+    ON DATA SOURCE src_name [, ...]
+    TO { [GROUP] role_name | PUBLIC } [, ...]
+    [WITH GRANT OPTION];
+GRANT { { READ | WRITE } [, ...] | ALL [PRIVILEGES] }
+    ON DIRECTORY directory_name [, ...]
+    TO { [GROUP] role_name | PUBLIC } [, ...]
+    [WITH GRANT OPTION];
+GRANT { { EXECUTE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }
+    ON PACKAGE package_name [, ...]
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ];
 GRANT role_name [, ...]
@@ -72,9 +98,6 @@ GRANT role_name [, ...]
    [ WITH ADMIN OPTION ];
 GRANT ALL { PRIVILEGES | PRIVILEGE }
    TO role_name;
-GRANT {USAGE | ALL [PRIVILEGES]}
-   ON DATA SOURCE src_name [, ...]
-   TO {[GROUP] role_name | PUBLIC]} [, ...] [WITH GRANT OPTION];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

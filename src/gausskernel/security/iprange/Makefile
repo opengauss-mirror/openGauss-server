@@ -63,7 +63,7 @@ libiprange.so: $(OBJS)
 	$(CXX) -std=c++11  $(CPPFLAGS) -fPIC -shared -c iprange.cpp -o $(target)
 
 iprange: libiprange.so
-	mv *.so $(top_builddir)/src/distribute/test/ut/lib
+	mv *.so $(top_builddir)/../distribute/test/ut/lib
 
 # Dependency is to ensure that path changes propagate
 

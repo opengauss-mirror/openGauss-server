@@ -210,26 +210,26 @@ drop table p1 cascade;
 -- test that operations with a dropped column do not try to reference
 -- its datatype
 
-create domain mytype as text;
-create table foo (f1 text, f2 mytype, f3 text);;
+--create domain mytype as text;
+--create table foo (f1 text, f2 mytype, f3 text);;
 
 insert into foo values('bb','cc','dd');
 select * from foo order by f1;
 
-drop domain mytype cascade;
+--drop domain mytype cascade;
 
-select * from foo order by f1;
-insert into foo values('qq','rr');
-select * from foo order by f1;
-update foo set f3 = 'zz';
-select * from foo order by f1;
-select f3,max(f1) from foo group by f3;
+--select * from foo order by f1;
+--insert into foo values('qq','rr');
+--select * from foo order by f1;
+--update foo set f3 = 'zz';
+--select * from foo order by f1;
+--select f3,max(f1) from foo group by f3;
 
 -- Simple tests for alter table column type
-delete from foo where f1 = 'qq';
-alter table foo alter f1 TYPE integer; -- fails
-alter table foo alter f1 TYPE varchar(10);
-drop table foo;
+--delete from foo where f1 = 'qq';
+--alter table foo alter f1 TYPE integer; -- fails
+--alter table foo alter f1 TYPE varchar(10);
+--drop table foo;
 
 create table anothertab (atcol1 serial8, atcol2 boolean,
 	constraint anothertab_chk check (atcol1 <= 3));;
@@ -295,8 +295,8 @@ alter table tab1 alter column b type varchar; -- fails
 create table recur1 (f1 int);
 alter table recur1 add column f2 recur1; -- fails
 alter table recur1 add column f2 recur1[]; -- fails
-create domain array_of_recur1 as recur1[];
-alter table recur1 add column f2 array_of_recur1; -- fails
+--create domain array_of_recur1 as recur1[];
+--alter table recur1 add column f2 array_of_recur1; -- fails
 create table recur2 (f1 int, f2 recur1);
 alter table recur1 add column f2 recur2; -- fails
 alter table recur1 add column f2 int;
@@ -424,7 +424,7 @@ create view alter1.v1 as select * from alter1.t1;
 
 create function alter1.plus1(int) returns int as 'select $1+1' language sql;
 
-create domain alter1.posint integer check (value > 0);
+--create domain alter1.posint integer check (value > 0);
 
 create type alter1.ctype as (f1 int, f2 text);
 
@@ -449,7 +449,7 @@ insert into alter1.t1(f2) values(12);
 alter table alter1.t1 set schema alter2;
 alter table alter1.v1 set schema alter2;
 alter function alter1.plus1(int) set schema alter2;
-alter domain alter1.posint set schema alter2;
+--alter domain alter1.posint set schema alter2;
 alter operator class alter1.ctype_hash_ops using hash set schema alter2;
 alter operator family alter1.ctype_hash_ops using hash set schema alter2;
 alter operator alter1.=(alter1.ctype, alter1.ctype) set schema alter2;

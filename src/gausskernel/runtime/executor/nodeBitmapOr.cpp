@@ -29,8 +29,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodeBitmapOr.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeBitmapOr.h"
 #include "miscadmin.h"
 
 /* ----------------------------------------------------------------
@@ -96,6 +96,7 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
     int nplans;
     int i;
     TIDBitmap* result = NULL;
+    bool isUstore = ((BitmapOr*)node->ps.plan)->is_ustore;
 
     /* must provide our own instrumentation support */
     if (node->ps.instrument) {
@@ -125,10 +126,14 @@ Node* MultiExecBitmapOr(BitmapOrState* node)
             /* first subplan */
             if (result == NULL) {
                 /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
-                result = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
-                /* If bitmapscan uses global partition index, set tbm to global */
+                result = TbmCreate(u_sess->attr.attr_memory.work_mem * 1024L, isUstore);
+                /* If bitmapscan uses global partition index, set tbm to global. */
                 if (RelationIsGlobalIndex(((BitmapIndexScanState*)subnode)->biss_RelationDesc)) {
                     tbm_set_global(result, true);
+                }
+                /* If bitmapscan uses crossbucket index, set tbm to crossbucket. */
+                if (RelationIsCrossBucketIndex(((BitmapIndexScanState*)subnode)->biss_RelationDesc)) {
+                    tbm_set_crossbucket(result, true);
                 }
             }
 

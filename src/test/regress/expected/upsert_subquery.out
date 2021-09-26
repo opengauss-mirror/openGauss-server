@@ -539,21 +539,19 @@ explain (costs off, verbose) select count(*) from hh;                           
 
 insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                                               -- suc
 explain (costs off, verbose) insert into aa values(3,3,3,3) on duplicate key update a2 = (select count(*) from hh);                  -- subquery is not execute by smp, but there still is a two-level agg.
-                    QUERY PLAN                     
----------------------------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  Insert on upserttest.aa
    Conflict Resolution: UPDATE
    Conflict Arbiter Indexes: aa_pkey, aa_a4_key
    InitPlan 1 (returns $0)
      ->  Aggregate
-           Output: pg_catalog.count(*)
-           ->  Aggregate
-                 Output: count(*)
-                 ->  Seq Scan on upserttest.hh
-                       Output: hh.h1, hh.h2, hh.h3
+           Output: count(*)
+           ->  Seq Scan on upserttest.hh
+                 Output: hh.h1, hh.h2, hh.h3
    ->  Result
          Output: 3, 3, 3, 3
-(12 rows)
+(10 rows)
 
 explain (costs off, verbose) select 4,count(*), 4, 4 from hh;                                                                        -- should be a smp query
                   QUERY PLAN                  
@@ -577,11 +575,9 @@ explain (costs off, verbose) insert into aa select 4,count(*), 4, 4 from hh on d
    Conflict Arbiter Indexes: aa_pkey, aa_a4_key
    InitPlan 1 (returns $0)
      ->  Aggregate
-           Output: pg_catalog.count(*)
-           ->  Aggregate
-                 Output: count(*)
-                 ->  Seq Scan on upserttest.hh
-                       Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+           Output: count(*)
+           ->  Seq Scan on upserttest.hh
+                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
    ->  Subquery Scan on "*SELECT*"
          Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
          ->  Aggregate
@@ -592,25 +588,23 @@ explain (costs off, verbose) insert into aa select 4,count(*), 4, 4 from hh on d
                            Output: 4, count(*)
                            ->  Seq Scan on upserttest.hh
                                  Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
-(20 rows)
+(18 rows)
 
 prepare sub4 as insert into aa select $1, count(*), 4, 4 from hh on duplicate key update a2 =(select count(*) + $1 from hh);
 execute sub4(1);                                                                                                                     -- suc
 explain (costs off, verbose) execute sub4(1);                                                                                        -- insert-part is a smp plan, but update-part not
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  Insert on upserttest.aa
    Conflict Resolution: UPDATE
    Conflict Arbiter Indexes: aa_pkey, aa_a4_key
    InitPlan 1 (returns $0)
      ->  Aggregate
-           Output: (pg_catalog.count(*) + 1)
-           ->  Aggregate
-                 Output: count(*)
-                 ->  Seq Scan on upserttest.hh
-                       Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+           Output: (count(*) + 1)
+           ->  Seq Scan on upserttest.hh
+                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
    ->  Subquery Scan on "*SELECT*"
-         Output: 1, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
          ->  Aggregate
                Output: (1), pg_catalog.count(*), (4), (4)
                ->  Streaming(type: BROADCAST dop: 1/2)
@@ -619,7 +613,7 @@ explain (costs off, verbose) execute sub4(1);                                   
                            Output: 1, count(*), 4
                            ->  Seq Scan on upserttest.hh
                                  Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
-(20 rows)
+(18 rows)
 
 set query_dop = 1;
 select * from aa order by a1;
@@ -633,8 +627,8 @@ select * from aa order by a1;
 
 execute sub4(2);                                                                                                                     -- suc
 explain (costs off, verbose) execute sub4(2);                                                                                        -- the plan was rebuilt, not a smp any more.
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  Insert on upserttest.aa
    Conflict Resolution: UPDATE
    Conflict Arbiter Indexes: aa_pkey, aa_a4_key
@@ -644,7 +638,7 @@ explain (costs off, verbose) execute sub4(2);                                   
            ->  Seq Scan on upserttest.hh
                  Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
    ->  Subquery Scan on "*SELECT*"
-         Output: 2, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
          ->  Aggregate
                Output: 2, count(*), 4, 4
                ->  Seq Scan on upserttest.hh
@@ -887,13 +881,13 @@ set query_dop = 2;
 prepare sub5 as insert into aa select $1, count(*), 4, 4 from hh on duplicate key update a2 =(select count(*) * excluded.a1 + $1 from hh);
 execute sub5(1);                                                                                                                     -- suc
 explain (costs off, verbose) execute sub5(1);                                                                                        -- insert-part is a smp plan, but update-part not
-                                          QUERY PLAN                                          
-----------------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  Insert on upserttest.aa
    Conflict Resolution: UPDATE
    Conflict Arbiter Indexes: aa_pkey, aa_a4_key
    ->  Subquery Scan on "*SELECT*"
-         Output: 1, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
          ->  Aggregate
                Output: (1), pg_catalog.count(*), (4), (4)
                ->  Streaming(type: BROADCAST dop: 1/2)
@@ -904,23 +898,21 @@ explain (costs off, verbose) execute sub5(1);                                   
                                  Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
    SubPlan 1
      ->  Aggregate
-           Output: ((pg_catalog.count(*) * "excluded".a1) + 1)
-           ->  Aggregate
-                 Output: count(*)
-                 ->  Seq Scan on upserttest.hh
-                       Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
-(20 rows)
+           Output: ((count(*) * "excluded".a1) + 1)
+           ->  Seq Scan on upserttest.hh
+                 Output: upserttest.hh.h1, upserttest.hh.h2, upserttest.hh.h3
+(18 rows)
 
 set query_dop = 1;
 execute sub5(2);                                                                                                                     -- suc
 explain (costs off, verbose) execute sub5(2);                                                                                        -- the plan was rebuilt, not a smp any more.
-                                    QUERY PLAN                                     
------------------------------------------------------------------------------------
+                                              QUERY PLAN                                               
+-------------------------------------------------------------------------------------------------------
  Insert on upserttest.aa
    Conflict Resolution: UPDATE
    Conflict Arbiter Indexes: aa_pkey, aa_a4_key
    ->  Subquery Scan on "*SELECT*"
-         Output: 2, "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
+         Output: "*SELECT*"."?column?", "*SELECT*".count, "*SELECT*"."?column?", "*SELECT*"."?column?"
          ->  Aggregate
                Output: 2, count(*), 4, 4
                ->  Seq Scan on upserttest.hh

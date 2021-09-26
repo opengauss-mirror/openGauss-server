@@ -26,12 +26,13 @@
 #include "pgxc/execRemote.h"
 #include "storage/lock/lwlock.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "workload/workload.h"
 #include "access/multi_redo_settings.h"
 #include "instruments/instr_event.h"
 #include "instruments/unique_sql_basic.h"
 #include "knl/knl_instance.h"
+
 
 /* Values for track_functions GUC variable --- order is significant! */
 typedef enum TrackFunctionsLevel { TRACK_FUNC_OFF, TRACK_FUNC_PL, TRACK_FUNC_ALL } TrackFunctionsLevel;
@@ -67,7 +68,8 @@ typedef enum StatMsgType {
     PGSTAT_MTYPE_COLLECTWAITINFO,
     PGSTAT_MTYPE_RESPONSETIME,
     PGSTAT_MTYPE_PROCESSPERCENTILE,
-    PGSTAT_MTYPE_CLEANUPHOTKEYS
+    PGSTAT_MTYPE_CLEANUPHOTKEYS,
+    PGSTAT_MTYPE_PRUNESTAT
 } StatMsgType;
 
 /* ----------
@@ -106,12 +108,14 @@ typedef struct PgStat_TableCounts {
     PgStat_Counter t_tuples_inserted;
     PgStat_Counter t_tuples_updated;
     PgStat_Counter t_tuples_deleted;
+    PgStat_Counter t_tuples_inplace_updated;
     PgStat_Counter t_tuples_hot_updated;
     bool t_truncated;
 
     PgStat_Counter t_tuples_inserted_post_truncate;
     PgStat_Counter t_tuples_updated_post_truncate;
     PgStat_Counter t_tuples_deleted_post_truncate;
+    PgStat_Counter t_tuples_inplace_updated_post_truncate;
 
     PgStat_Counter t_delta_live_tuples;
     PgStat_Counter t_delta_dead_tuples;
@@ -124,6 +128,265 @@ typedef struct PgStat_TableCounts {
     PgStat_Counter t_cu_hdd_sync;
     PgStat_Counter t_cu_hdd_asyn;
 } PgStat_TableCounts;
+
+#ifdef DEBUG_UHEAP
+
+typedef int64 UHeapStat_Counter;
+
+#define MAX_TYPE_GET_TRANSSLOT_FROM            8
+#define MAX_TYPE_XID_IN_PROGRESS               7
+#define MAX_TYPE_SINGLE_LOCKER_STATUS          4
+
+struct IUD_Count
+{
+    unsigned int ins;
+    unsigned int del;
+    unsigned int upd;
+};
+
+struct IUD_FreeSpace
+{
+    size_t ins;
+    size_t del;
+    size_t upd;
+};
+
+typedef struct UHeapStat_Collect
+{
+    UHeapStat_Counter prune_page[7]; // 0 is success, 1 is not enough space, 2 is update is in progress
+
+    /*
+     * Where to get the transaction slot
+     * 0 - got a slot reserved by current transaction
+     * 3 - got a free slot after invalidation
+     * 4 - got a free slot after freezing
+     * 7 - cannot get a free slot
+     */
+    UHeapStat_Counter get_transslot_from[MAX_TYPE_GET_TRANSSLOT_FROM];
+
+    UHeapStat_Counter update[2]; /* 0 inplace 1 non-inplace */
+
+    UHeapStat_Counter dml;
+    UHeapStat_Counter retry;
+    UHeapStat_Counter retry_time;
+    UHeapStat_Counter retry_max;
+    UHeapStat_Counter retry_time_max;
+    /*
+     * Reasons why non-inplace update happened instead of inplace update:
+     *
+     * 0 - Index Updated
+     * 1 - Toast
+     * 2 - Page Prune Not Successful
+     * 3 - nblocks <= NUM_BLOCKS_FOR_NON_INPLACE_UPDATES
+     * 4 - Slot reused
+     */
+    UHeapStat_Counter noninplace_update_cause[5];
+
+    /* Reasons why a transaction slot is marked frozen
+     * 0: transaction slot is already frozen - debugging purposes only
+     * 1: xid in slot is older than any xid in undo
+     * 2: tuple xid is marked as committed from hint bit
+     * 3: tuple slot is invalid but xid in the slot is visible to the snapshot
+     * 4: slot is invalid, trans info is grabbed from undo but xid is less than any xid in undo
+     * 5: Current xid is the tuple single locker
+    */
+    UHeapStat_Counter visibility_check_with_xid[6];
+
+    UHeapStat_Counter tuple_visits;
+    UHeapStat_Counter tuple_old_version_visits;
+
+    UHeapStat_Counter undo_groups_allocate;
+    UHeapStat_Counter undo_slots_allocate;
+    UHeapStat_Counter undo_groups_release;
+    UHeapStat_Counter undo_slots_recycle;
+    UHeapStat_Counter undo_space_recycle;
+    UHeapStat_Counter undo_space_unrecycle;
+    uint64 oldest_xid_having_undo_delay;
+
+    UHeapStat_Counter undo_page_visited_sum_len;
+
+    UHeapStat_Counter undo_record_prepare_nzero_count;
+    UHeapStat_Counter undo_record_prepare_rzero_count;
+
+    UHeapStat_Counter undo_chain_visited_count;
+    UHeapStat_Counter undo_chain_visited_sum_len;
+    UHeapStat_Counter undo_chain_visited_max_len;
+    UHeapStat_Counter undo_chain_visited_min_len;
+    UHeapStat_Counter undo_chain_visited_miss_count;
+
+    UHeapStat_Counter undo_discard_lock_hold_cnt;
+    UHeapStat_Counter undo_discard_lock_hold_time_sum;
+    UHeapStat_Counter undo_discard_lock_hold_time_max;
+    UHeapStat_Counter undo_discard_lock_hold_time_min;
+
+    UHeapStat_Counter undo_discard_lock_wait_cnt;
+    UHeapStat_Counter undo_discard_lock_wait_time_sum;
+    UHeapStat_Counter undo_discard_lock_wait_time_max;
+    UHeapStat_Counter undo_discard_lock_wait_time_min;
+
+    UHeapStat_Counter undo_space_lock_hold_cnt;
+    UHeapStat_Counter undo_space_lock_hold_time_sum;
+    UHeapStat_Counter undo_space_lock_hold_time_max;
+    UHeapStat_Counter undo_space_lock_hold_time_min;
+
+    UHeapStat_Counter undo_space_lock_wait_cnt;
+    UHeapStat_Counter undo_space_lock_wait_time_sum;
+    UHeapStat_Counter undo_space_lock_wait_time_max;
+    UHeapStat_Counter undo_space_lock_wait_time_min;
+    struct IUD_Count  op_count_suc;
+    struct IUD_Count  op_count_tot;
+    struct IUD_FreeSpace op_space_tot;
+} UHeapStat_Collect;
+
+#define UHeapStat_local t_thrd.uheap_stats_cxt.uheap_stat_local
+#define UHeapStat_shared t_thrd.uheap_stats_cxt.uheap_stat_shared
+
+extern void UHeapSchemeInit(void);
+extern Size UHeapShmemSize(void);
+extern void UHeapStatInit(UHeapStat_Collect *UHeapStat);
+extern void AtEOXact_UHeapStats();
+
+/* Type of INPLACE XLOG OPERATION */
+
+/* Type of INDEX XLOG OPERATION */
+
+
+/* Type of HEAP XLOG OPERATION */
+
+/* Types of UPDATE */
+#define INPLACE_UPDATE 0
+#define NON_INPLACE_UPDATE 1
+
+/* Types of GetTransactionSlotInfo */
+
+
+/* Types of visibility_checks_with_xid */
+#define VISIBILITY_CHECK_SUCCESS_FROZEN_SLOT      0
+#define VISIBILITY_CHECK_SUCCESS_OLDEST_XID       1
+#define VISIBILITY_CHECK_SUCCESS_WITH_XID_STATUS  2
+#define VISIBILITY_CHECK_SUCCESS_INVALID_SLOT     3
+#define VISIBILITY_CHECK_SUCCESS_UNDO             4
+#define VISIBILITY_CHECK_SUCCESS_SINGLE_LOCKER    5
+
+/* Types of visibility_checks */
+
+/* IndeOnlyNext Tuple Visibility. */
+
+/* Types of prune_page */
+#define PRUNE_PAGE_SUCCESS            0
+#define PRUNE_PAGE_NO_SPACE           1
+#define PRUNE_PAGE_UPDATE_IN_PROGRESS 2
+#define PRUNE_PAGE_IN_RECOVERY        3
+#define PRUNE_PAGE_INVALID            4
+#define PRUNE_PAGE_XID_FILTER         5
+#define PRUNE_PAGE_FILLFACTOR         6
+
+/* Places to get transslot */
+#define TRANSSLOT_RESERVED_BY_CURRENT_XID		0
+#define TRANSSLOT_FREE							1
+#define TRANSSLOT_ON_TPD_BY_CURRENT_XID			2
+#define TRANSSLOT_FREE_AFTER_INVALIDATION		3
+#define TRANSSLOT_FREE_AFTER_FREEZING			4
+#define TRANSSLOT_RESERVE_FREE_SLOTT_FROM_TPD	5
+#define TRANSSLOT_ALLOCATE_TPD_AND_RESERVE		6
+#define TRANSSLOT_CANNOT_GET					7
+
+/* Noninplace update reasons */
+#define INDEX_UPDATED				0
+#define TOAST						1
+#define PAGE_PRUNE_FAILED	2
+#define nblocks_LESS_THAN_NBLOCKS	3
+#define SLOT_REUSED					4
+
+#define UHEAPSTAT_COUNT_DML() \
+                UHeapStat_local->dml += 1
+#define UHEAPSTAT_COUNT_RETRY(time, retry) \
+                UHeapStat_local->retry += retry;              \
+                UHeapStat_local->retry_time += time;         \
+                UHeapStat_local->retry_max = Max(UHeapStat_local->retry_max, retry);          \
+                UHeapStat_local->retry_time_max = Max(UHeapStat_local->retry_time_max, time)
+
+#define UHEAPSTAT_COUNT_OP_PRUNEPAGE(optype, counts) \
+        UHeapStat_local->op_count_tot.optype += counts;
+    
+#define UHEAPSTAT_COUNT_OP_PRUNEPAGE_SUC(optype, counts) \
+        UHeapStat_local->op_count_suc.optype += counts;
+    
+#define UHEAPSTAT_COUNT_OP_PRUNEPAGE_SPC(optype, counts) \
+        UHeapStat_local->op_space_tot.optype += counts;
+
+#define UHEAPSTAT_COUNT_PRUNEPAGE(type) \
+    UHeapStat_local->prune_page[type] += 1
+#define UHEAPSTAT_COUNT_GET_TRANSSLOT_FROM(type) \
+    UHeapStat_local->get_transslot_from[type] += 1
+#define UHEAPSTAT_COUNT_UPDATE(type) \
+    UHeapStat_local->update[type] += 1
+#define UHEAPSTAT_COUNT_NONINPLACE_UPDATE_CAUSE(type) \
+    UHeapStat_local->noninplace_update_cause[type] += 1
+#define UHEAPSTAT_COUNT_VISIBILITY_CHECK_WITH_XID(result) \
+    UHeapStat_local->visibility_check_with_xid[result] += 1
+
+#define UHEAPSTAT_COUNT_TUPLE_VISITS() \
+    UHeapStat_local->tuple_visits += 1
+#define UHEAPSTAT_COUNT_TUPLE_OLD_VERSION_VISITS() \
+    UHeapStat_local->tuple_old_version_visits += 1
+
+#define UHEAPSTAT_COUNT_UNDO_GROUPS_ALLOCATE() \
+    UHeapStat_shared->undo_groups_allocate += 1
+#define UHEAPSTAT_COUNT_UNDO_GROUPS_RELEASE() \
+    UHeapStat_shared->undo_groups_release += 1
+#define UHEAPSTAT_COUNT_UNDO_SLOTS_ALLOCATE() \
+    UHeapStat_shared->undo_slots_allocate += 1
+#define UHEAPSTAT_COUNT_UNDO_SLOTS_RECYCLE() \
+    UHeapStat_shared->undo_slots_recycle += 1
+#define UHEAPSTAT_COUNT_UNDO_SPACE_RECYCLE() \
+    UHeapStat_shared->undo_space_recycle += 1
+#define UHEAPSTAT_COUNT_UNDO_SPACE_UNRECYCLE() \
+    UHeapStat_shared->undo_space_unrecycle += 1
+#define UHEAPSTAT_COUNT_XID_DELAY(len) \
+    UHeapStat_shared->oldest_xid_having_undo_delay = len
+
+#define UHEAPSTAT_COUNT_UNDO_PAGE_VISITS() \
+    UHeapStat_local->undo_page_visited_sum_len += 1
+
+#define UHEAPSTAT_COUNT_UNDO_RECORD_PREPARE_NZERO() \
+    UHeapStat_local->undo_record_prepare_nzero_count += 1
+#define UHEAPSTAT_COUNT_UNDO_RECORD_PREPARE_RZERO() \
+    UHeapStat_local->undo_record_prepare_rzero_count += 1
+
+#define UHEAPSTAT_COUNT_UNDO_CHAIN_VISTIED(len)                 \
+    UHeapStat_local->undo_chain_visited_count++;                \
+    UHeapStat_local->undo_chain_visited_sum_len += len;         \
+    if (len > UHeapStat_local->undo_chain_visited_max_len) {    \
+        UHeapStat_local->undo_chain_visited_max_len = len;      \
+    }                                                           \
+    if (len < UHeapStat_local->undo_chain_visited_min_len) {    \
+        UHeapStat_local->undo_chain_visited_min_len = len;      \
+    }
+#define UHEAPSTAT_COUNT_UNDO_CHAIN_VISITED_MISS() \
+    UHeapStat_local->undo_chain_visited_miss_count += 1
+
+#define UHEAPSTAT_UPDATE_UNDO_DISCARD_LOCK_WAIT_TIME(time) \
+    UHeapStat_local->undo_discard_lock_wait_cnt += 1; \
+    UHeapStat_local->undo_discard_lock_wait_time_sum += time; \
+    UHeapStat_local->undo_discard_lock_wait_time_max = Max(UHeapStat_local->undo_discard_lock_wait_time_max, time); \
+    UHeapStat_local->undo_discard_lock_wait_time_min = Min(UHeapStat_local->undo_discard_lock_wait_time_min, time)
+#define UHEAPSTAT_UPDATE_UNDO_DISCARD_LOCK_HOLD_TIME(time) \
+    UHeapStat_local->undo_discard_lock_hold_cnt += 1; \
+    UHeapStat_local->undo_discard_lock_hold_time_sum += time; \
+    UHeapStat_local->undo_discard_lock_hold_time_max = Max(UHeapStat_local->undo_discard_lock_hold_time_max, time); \
+    UHeapStat_local->undo_discard_lock_hold_time_min = Min(UHeapStat_local->undo_discard_lock_hold_time_min, time)
+#define UHEAPSTAT_UPDATE_UNDO_SPACE_LOCK_WAIT_TIME(time) \
+    UHeapStat_local->undo_space_lock_wait_cnt += 1; \
+    UHeapStat_local->undo_space_lock_wait_time_sum += time; \
+    UHeapStat_local->undo_space_lock_wait_time_max = Max(UHeapStat_local->undo_space_lock_wait_time_max, time); \
+    UHeapStat_local->undo_space_lock_wait_time_min = Min(UHeapStat_local->undo_space_lock_wait_time_min, time)
+#define UHEAPSTAT_UPDATE_UNDO_SPACE_LOCK_HOLD_TIME(time) \
+    UHeapStat_local->undo_space_lock_hold_cnt += 1; \
+    UHeapStat_local->undo_space_lock_hold_time_sum += time; \
+    UHeapStat_local->undo_space_lock_hold_time_max = Max(UHeapStat_local->undo_space_lock_hold_time_max, time); \
+    UHeapStat_local->undo_space_lock_hold_time_min = Min(UHeapStat_local->undo_space_lock_hold_time_min, time)
+#endif // DEBUG_UHEAP
 
 /* Possible targets for resetting cluster-wide shared values */
 typedef enum PgStat_Shared_Reset_Target { RESET_BGWRITER } PgStat_Shared_Reset_Target;
@@ -161,6 +424,24 @@ typedef struct PgStat_TableStatus {
     uint32 t_statFlag;
     struct PgStat_TableXactStatus* trans; /* lowest subxact's counts */
     PgStat_TableCounts t_counts;          /* event counts to be sent */
+
+    /*
+     * The global statistics has been checked.
+     * We should do it once per transaction for perf reasons.
+     * Nice to have: might need to add an expiry for long running transactions.
+     */
+    bool t_globalStatChecked;
+
+    /* snapshot deadtuples % */
+    float4 t_freeRatio;
+    float4 t_pruneSuccessRatio;
+
+    /*
+     * Pointer to the starting_blocks array and the current index
+     * in the array we're currently traversing.
+     */
+    pg_atomic_uint32 *startBlockArray;
+    uint32 startBlockIndex;
 } PgStat_TableStatus;
 
 /* ----------
@@ -168,14 +449,21 @@ typedef struct PgStat_TableStatus {
  * ----------
  */
 typedef struct PgStat_TableXactStatus {
-    PgStat_Counter tuples_inserted;    /* tuples inserted in (sub)xact */
-    PgStat_Counter tuples_updated;     /* tuples updated in (sub)xact */
-    PgStat_Counter tuples_deleted;     /* tuples deleted in (sub)xact */
-    bool truncated;                    /* relation truncated in this (sub)xact */
-    PgStat_Counter inserted_pre_trunc; /* tuples inserted prior to truncate */
-    PgStat_Counter updated_pre_trunc;  /* tuples updated prior to truncate */
-    PgStat_Counter deleted_pre_trunc;  /* tuples deleted prior to truncate */
-    int nest_level;                    /* subtransaction nest level */
+    PgStat_Counter tuples_inserted; /* tuples inserted in (sub)xact */
+    PgStat_Counter tuples_updated;  /* tuples updated in (sub)xact */
+    PgStat_Counter tuples_deleted;  /* tuples deleted in (sub)xact */
+    PgStat_Counter tuples_inplace_updated;
+    bool truncated;                 /* relation truncated in this (sub)xact */
+    PgStat_Counter inserted_pre_trunc;  /* tuples inserted prior to truncate */
+    PgStat_Counter updated_pre_trunc;   /* tuples updated prior to truncate */
+    PgStat_Counter deleted_pre_trunc;   /* tuples deleted prior to truncate */
+    PgStat_Counter inplace_updated_pre_trunc;
+    /* The following members with _accum suffix will not be erased by truncate */
+    PgStat_Counter tuples_inserted_accum;
+    PgStat_Counter tuples_updated_accum;
+    PgStat_Counter tuples_deleted_accum;
+    PgStat_Counter tuples_inplace_updated_accum;
+    int nest_level;                 /* subtransaction nest level */
     /* links to other structs for same relation: */
     struct PgStat_TableXactStatus* upper; /* next higher subxact if any */
     PgStat_TableStatus* parent;           /* per-table status */
@@ -344,6 +632,15 @@ typedef struct PgStat_MsgVacuum {
     TimestampTz m_vacuumtime;
     PgStat_Counter m_tuples;
 } PgStat_MsgVacuum;
+
+typedef struct PgStat_MsgPrune {
+    PgStat_MsgHdr m_hdr;
+    Oid m_databaseid;
+    Oid m_tableoid;
+    uint32 m_statFlag;
+    PgStat_Counter m_scanned_blocks;
+    PgStat_Counter m_pruned_blocks;
+} PgStat_MsgPrune;
 
 /* ----------
  * PgStat_MsgIUD                             Sent by the insert/delete/update
@@ -681,6 +978,36 @@ typedef struct PgStat_StatDBEntry {
     HTAB* functions;
 } PgStat_StatDBEntry;
 
+#define START_BLOCK_ARRAY_SIZE 20
+
+typedef struct PgStat_StartBlockTableKey {
+    Oid dbid;
+    Oid relid;
+    Oid parentid;
+} PgStat_StartBlockTableKey;
+
+typedef struct PgStat_StartBlockTableEntry {
+    PgStat_StartBlockTableKey tabkey;
+    pg_atomic_uint32 starting_blocks[START_BLOCK_ARRAY_SIZE];
+} PgStat_StartBlockTableEntry;
+
+typedef struct UHeapPruneStat {
+    /* in-memory representation of db and table statistics. Updated by GlobalStatsTracker thread */
+    HTAB *global_stats_map;
+
+    /* No backend can read the hash when 1 */
+    pg_atomic_uint64 quiesce;
+
+    /* Current number of backends reading the hash */
+    pg_atomic_uint64 readers;
+
+    /* assigns a block number for a backend to prune */
+    HTAB *blocks_map;
+
+    /* Memory context where the HTABs live */
+    MemoryContext global_stats_cxt;
+} UHeapPruneStat;
+
 typedef enum PgStat_StatTabType {
     STATFLG_RELATION = 0,  /* stat info for relation */
     STATFLG_PARTITION = 1, /* stat info for partition */
@@ -735,6 +1062,7 @@ typedef struct PgStat_StatTabEntry {
     PgStat_Counter tuples_inserted;
     PgStat_Counter tuples_updated;
     PgStat_Counter tuples_deleted;
+    PgStat_Counter tuples_inplace_updated;
     PgStat_Counter tuples_hot_updated;
 
     PgStat_Counter n_live_tuples;
@@ -747,6 +1075,9 @@ typedef struct PgStat_StatTabEntry {
     PgStat_Counter cu_mem_hit;
     PgStat_Counter cu_hdd_sync;
     PgStat_Counter cu_hdd_asyn;
+
+    PgStat_Counter success_prune_cnt;
+    PgStat_Counter total_prune_cnt;
 
     TimestampTz vacuum_timestamp; /* user initiated vacuum */
     PgStat_Counter vacuum_count;
@@ -948,6 +1279,12 @@ typedef enum WaitEventIO {
     WAIT_EVENT_TWOPHASE_FILE_READ,
     WAIT_EVENT_TWOPHASE_FILE_SYNC,
     WAIT_EVENT_TWOPHASE_FILE_WRITE,
+    WAIT_EVENT_UNDO_FILE_EXTEND,
+    WAIT_EVENT_UNDO_FILE_PREFETCH,
+    WAIT_EVENT_UNDO_FILE_READ,
+    WAIT_EVENT_UNDO_FILE_WRITE,
+    WAIT_EVENT_UNDO_FILE_FLUSH,
+    WAIT_EVENT_UNDO_FILE_SYNC,
     WAIT_EVENT_WAL_BOOTSTRAP_SYNC,
     WAIT_EVENT_WAL_BOOTSTRAP_WRITE,
     WAIT_EVENT_WAL_COPY_READ,
@@ -1151,6 +1488,7 @@ typedef struct PgBackendStatus {
     ThreadId st_procpid;
     /* The entry is valid when one session is coupled to a thread pool worker */
     uint64 st_sessionid;
+    GlobalSessionId globalSessionId;
 
     /* Times when current backend, transaction, and activity started */
     TimestampTz st_proc_start_timestamp;
@@ -1233,6 +1571,7 @@ typedef struct PgBackendStatus {
     WaitInfo waitInfo;
     LOCALLOCKTAG locallocktag; /* locked object */
     /* The entry is valid if st_block_sessionid > 0, unused if st_block_sessionid == 0 */
+
     volatile uint64 st_block_sessionid; /* block session */
     syscalllock statement_cxt_lock;     /* mutex for statement context(between session and statement flush thread) */
     void* statement_cxt;                /* statement context of full sql */
@@ -1338,8 +1677,10 @@ extern void PgstatCollectorMain();
  */
 const int NUM_PERCENTILE = 2;
 extern void pgstat_ping(void);
-extern void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus, int64 duration);
-extern void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_info, int64 duration);
+extern void UpdateWaitStatusStat(volatile WaitInfo* InstrWaitInfo, uint32 waitstatus,
+    int64 duration, TimestampTz current_time);
+extern void UpdateWaitEventStat(WaitInfo* InstrWaitInfo, uint32 wait_event_info,
+    int64 duration, TimestampTz current_time);
 extern void UpdateWaitEventFaildStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_info);
 extern void CollectWaitInfo(WaitInfo* gsInstrWaitInfo, WaitStatusInfo status_info, WaitEventInfo event_info);
 extern void InstrWaitEventInitLastUpdated(PgBackendStatus* current_entry, TimestampTz current_time);
@@ -1357,7 +1698,9 @@ extern void pgstat_report_autovac_timeout(Oid tableoid, uint32 statFlag, bool sh
 extern void pgstat_report_vacuum(Oid tableoid, uint32 statFlag, bool shared, PgStat_Counter tuples);
 extern void pgstat_report_truncate(Oid tableoid, uint32 statFlag, bool shared);
 extern void pgstat_report_data_changed(Oid tableoid, uint32 statFlag, bool shared);
-
+void PgstatReportPrunestat(Oid tableoid, uint32 statFlag,
+                            bool shared, PgStat_Counter scanned,
+                            PgStat_Counter pruned);
 extern void pgstat_report_sql_rt(uint64 UniqueSQLId, int64 start_time, int64 rt);
 extern void pgstat_report_analyze(Relation rel, PgStat_Counter livetuples, PgStat_Counter deadtuples);
 
@@ -1383,10 +1726,13 @@ extern void pgstat_report_conninfo(const char* conninfo);
 extern void pgstat_report_xact_timestamp(TimestampTz tstamp);
 extern void pgstat_report_waiting_on_resource(WorkloadManagerEnqueueState waiting);
 extern void pgstat_report_queryid(uint64 queryid);
+extern void pgstat_report_global_session_id(GlobalSessionId globalSessionId);
 extern void pgstat_report_jobid(uint64 jobid);
 extern void pgstat_report_parent_sessionid(uint64 sessionid, uint32 level = 0);
 extern void pgstat_report_smpid(uint32 smpid);
+
 extern void pgstat_report_blocksid(void* waitLockThrd, uint64 blockSessionId);
+
 extern bool pgstat_get_waitlock(uint32 wait_event_info);
 extern const char* pgstat_get_wait_event(uint32 wait_event_info);
 extern const char* pgstat_get_backend_current_activity(ThreadId pid, bool checkUser);
@@ -1462,8 +1808,9 @@ static inline WaitState pgstat_report_waitstatus(WaitState waitstatus, bool isOn
         beentry->waitInfo.status_info.start_time = GetCurrentTimestamp();
     } else if (u_sess->attr.attr_common.enable_instr_track_wait &&
                (uint32)oldwaitstatus != (uint32)STATE_WAIT_UNDEFINED && waitstatus == STATE_WAIT_UNDEFINED) {
-        int64 duration = GetCurrentTimestamp() - beentry->waitInfo.status_info.start_time;
-        UpdateWaitStatusStat(&beentry->waitInfo, (uint32)oldwaitstatus, duration);
+        TimestampTz current_time =  GetCurrentTimestamp();
+        int64 duration = current_time - beentry->waitInfo.status_info.start_time;
+        UpdateWaitStatusStat(&beentry->waitInfo, (uint32)oldwaitstatus, duration, current_time);
         beentry->waitInfo.status_info.start_time = 0;
     }
 
@@ -1629,7 +1976,7 @@ static inline void pgstat_report_wait_lock_failed(uint32 wait_event_info)
  */
 static inline void pgstat_report_waitevent(uint32 wait_event_info)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return;
@@ -1646,8 +1993,9 @@ static inline void pgstat_report_waitevent(uint32 wait_event_info)
         beentry->waitInfo.event_info.start_time = GetCurrentTimestamp();
     } else if (u_sess->attr.attr_common.enable_instr_track_wait && old_wait_event_info != WAIT_EVENT_END &&
                wait_event_info == WAIT_EVENT_END) {
-        int64 duration = GetCurrentTimestamp() - beentry->waitInfo.event_info.start_time;
-        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, duration);
+        TimestampTz current_time = GetCurrentTimestamp();
+        int64 duration = current_time - beentry->waitInfo.event_info.start_time;
+        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, duration, current_time);
         beentry->waitInfo.event_info.start_time = 0;
         beentry->waitInfo.event_info.duration = duration;
     }
@@ -1657,7 +2005,7 @@ static inline void pgstat_report_waitevent(uint32 wait_event_info)
 
 static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
 {
-    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
 
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return;
@@ -1669,7 +2017,8 @@ static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
      */
     if (u_sess->attr.attr_common.enable_instr_track_wait && wait_event_info != WAIT_EVENT_END) {
         beentry->st_waitevent = WAIT_EVENT_END;
-        UpdateWaitEventStat(&beentry->waitInfo, wait_event_info, 0);
+        TimestampTz current_time = GetCurrentTimestamp();
+        UpdateWaitEventStat(&beentry->waitInfo, wait_event_info, 0, current_time);
     }
 
     pgstat_increment_changecount_after(beentry);
@@ -1756,7 +2105,9 @@ static inline void pgstat_reset_waitStatePhase(WaitState waitstatus, WaitStatePh
 extern void pgstat_count_heap_insert(Relation rel, int n);
 extern void pgstat_count_heap_update(Relation rel, bool hot);
 extern void pgstat_count_heap_delete(Relation rel);
+extern void PgstatCountHeapUpdateInplace(Relation rel);
 extern void pgstat_count_truncate(Relation rel);
+extern void PgstatCountHeapUpdateInplace(Relation rel);
 extern void pgstat_update_heap_dead_tuples(Relation rel, int delta);
 
 extern void pgstat_count_cu_update(Relation rel, int n);
@@ -2292,7 +2643,7 @@ extern void getSessionStatistics(Tuplestorestate* tupStore, TupleDesc tupDesc,
 extern Size sessionStatShmemSize(void);
 extern void sessionStatShmemInit(void);
 
-#define NUM_BUFFERCACHE_PAGES_ELEM 9
+#define NUM_BUFFERCACHE_PAGES_ELEM 10
 
 #define CONNECTIONINFO_LEN 8192 /* Maximum length of GUC parameter connection_info */
 
@@ -2303,6 +2654,7 @@ typedef struct {
     uint32 bufferid;
     Oid relfilenode;
     int2 bucketnode;
+    uint32 storage_type;
     Oid reltablespace;
     Oid reldatabase;
     ForkNumber forknum;
@@ -2468,6 +2820,7 @@ extern THR_LOCAL XLogStatCollect *g_xlog_stat_shared;
 extern void XLogStatShmemInit(void);
 extern Size XLogStatShmemSize(void);
 extern bool CheckUserExist(Oid userId, bool removeCount);
+
 extern PgBackendStatusNode* gs_stat_read_current_status(uint32* maxCalls);
 extern uint32 gs_stat_read_current_status(Tuplestorestate *tupStore, TupleDesc tupDesc, FuncType insert,
                                           bool hasTID = false, ThreadId threadId = 0);
@@ -2475,6 +2828,7 @@ extern void pgstat_setup_memcxt(void);
 extern void pgstat_clean_memcxt(void);
 extern PgBackendStatus* gs_stat_fetch_stat_beentry(int32 beid);
 extern void pgstat_send(void* msg, int len);
+extern char* GetGlobalSessionStr(GlobalSessionId globalSessionId);
 
 typedef struct PgStat_NgMemSize {
     int* ngmemsize;
@@ -2535,9 +2889,35 @@ typedef enum NetInfoType {
     do {                                                                                               \
         if (str_len > 0 && t_thrd.shemem_ptr_cxt.mySessionTimeEntry) {                                 \
             u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_TIMES] += GetCurrentTimestamp() - startTime; \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_N_CALLS]++;                                  \
-            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_SIZE] += str_len;                            \
-        }                                                                                              \
-    } while (0)
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_N_CALLS]++;                                 \
+            u_sess->stat_cxt.localNetInfo[NET_STREAM_RECV_SIZE] += str_len;                           \
+        }                                                                                             \
+    } while(0)
+
+bool GetTableGstats(Oid dbid, Oid relid, Oid parentid, PgStat_StatTabEntry *tabentry);
+extern void GlobalStatsTrackerMain();
+extern void GlobalStatsTrackerInit();
+extern bool IsGlobalStatsTrackerProcess();
+PgStat_StartBlockTableEntry* StartBlockHashTableLookup(PgStat_StartBlockTableKey *tabkey);
+PgStat_StartBlockTableEntry* StartBlockHashTableAdd(PgStat_StartBlockTableKey *tabkey);
+PgStat_StartBlockTableEntry* GetStartBlockHashEntry(PgStat_StartBlockTableKey *tabkey);
+
+typedef struct IoWaitStatGlobalInfo {
+    char device[MAX_DEVICE_DIR]; /* device name */
+
+    /* iostat */
+    double rs;      /* r/s */
+    double ws;      /* w/s */
+    double util;    /* %util */
+    double w_ratio; /* write proportion */
+
+    /* for io scheduler */
+    int total_tbl_util;
+    int tick_count;
+
+    /* for io wait list */
+    int io_wait_list_len;
+} IoWaitStatGlobalInfo;
 
 #endif /* PGSTAT_H */
+

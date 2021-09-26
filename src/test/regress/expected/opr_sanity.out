@@ -1078,6 +1078,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  1991 | comm_client_info
  1992 | global_comm_get_client_info
  1993 | shobj_description
+ 1995 | gs_comm_proxy_thread_status
  1998 | pg_get_running_xacts
  1999 | pg_check_xidlimit
  2000 | pg_get_xidlimit
@@ -2578,6 +2579,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4703 | has_directory_privilege
  4704 | has_directory_privilege
  4705 | has_directory_privilege
+ 4767 | gs_read_block_from_remote
  4789 | remote_rto_stat
  4999 | remote_recovery_status
  5000 | get_instr_workload_info
@@ -2613,6 +2615,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5030 | gs_wlm_readjust_user_space_through_username
  5031 | pg_stat_get_wlm_instance_info
  5032 | pg_stat_get_wlm_instance_info_with_cleanup
+ 5034 | gs_io_wait_status
  5345 | pv_builtin_functions
  5519 | int1cmp
  5520 | hashint1
@@ -2690,6 +2693,9 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6204 | pg_stop_backup
  6224 | gs_get_next_xid_csn
  6321 | pg_stat_file_recursive
+ 7000 | pg_stat_segment_space_info
+ 7001 | pg_stat_segment_extent_usage
+ 7002 | gs_space_shrink
  7777 | sysdate
  7998 | set_working_grand_version_num_manually
  8050 | datalength

@@ -60,6 +60,10 @@
 #include "mb/pg_wchar.h"
 #include "pg_config_paths.h"
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 static int pqPutMsgBytes(const void* buf, size_t len, PGconn* conn);
 static int pqSendSome(PGconn* conn, int len);
 static int pqSocketCheck(PGconn* conn, int forRead, int forWrite, time_t end_time);

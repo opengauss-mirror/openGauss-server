@@ -50,6 +50,7 @@ extern bool IsAllBuildSenderExit();
 extern bool WalSegmemtRemovedhappened;
 extern AlarmCheckResult WalSegmentsRemovedChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam);
 extern Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS);
+extern Datum get_paxos_replication_info(PG_FUNCTION_ARGS);
 extern Tuplestorestate* BuildTupleResult(FunctionCallInfo fcinfo, TupleDesc* tupdesc);
 
 extern void GetFastestReplayStandByServiceAddress(
@@ -59,6 +60,7 @@ extern void IdentifyMode(void);
 extern bool WalSndAllInProgress(int type);
 extern bool WalSndQuorumInProgress(int type);
 extern XLogSegNo WalGetSyncCountWindow(void);
+extern void add_archive_task_to_list(int archive_task_status_idx, WalSnd *walsnd);
 
 /*
  * Remember that we want to wakeup walsenders later

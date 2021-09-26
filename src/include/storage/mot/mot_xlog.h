@@ -28,7 +28,7 @@
 #include "access/xlogreader.h"
 #include "lib/stringinfo.h"
 
-extern void MOTRedo(XLogReaderState *record);
-extern void MOTDesc(StringInfo buf, XLogReaderState *record);
+extern void MOTRedo(XLogReaderState* record);
+extern void MOTDesc(StringInfo buf, XLogReaderState* record);
 
 #endif /* MOT_XLOG_H */

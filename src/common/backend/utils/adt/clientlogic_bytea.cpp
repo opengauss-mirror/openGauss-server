@@ -50,7 +50,7 @@
 #include "utils/int8.h"
 #include "utils/sortsupport.h"
 #include "utils/syscache.h"
-#include "executor/nodeSort.h"
+#include "executor/node/nodeSort.h"
 #define byteawithoutorderwithequalcol bytea
 #define byteawithoutordercol bytea
 #define JUDGE_INPUT_VALID(X, Y)		((NULL == (X)) || (NULL == (Y)))

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * sinvaladt.h
- *	  POSTGRES shared cache invalidation data manager.
+ *	  openGauss shared cache invalidation data manager.
  *
  * The shared cache invalidation manager is responsible for transmitting
  * invalidation messages between backends.	Any message sent by any backend

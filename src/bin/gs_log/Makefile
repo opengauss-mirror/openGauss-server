@@ -88,4 +88,4 @@ install: all installdirs
 
 utgslog: $(OBJS) | submake-libpq submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS)  $(LDFLAGS) $(LDFLAGS_EX) -o libutgslog.so
-	mv libutgslog.so $(top_builddir)/src/distribute/test/ut/lib
+	mv libutgslog.so $(top_builddir)/../distribute/test/ut/lib

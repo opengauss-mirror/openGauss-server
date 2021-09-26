@@ -734,10 +734,13 @@ LCOV
 GCOV
 enable_debug
 enable_ccache
+enable_libnet
 enable_rpath
 enable_cassert
 enable_llt
 enable_llvm
+llvm_major_version
+llvm_minor_version
 enable_ut
 enable_qunit
 enable_jemalloc
@@ -748,10 +751,10 @@ enable_mot
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
-enable_pldebugger
 enable_thread_check
 enable_shared
 default_gs_version
+default_kernel_version
 default_port
 WANTED_LANGUAGES
 enable_nls
@@ -804,6 +807,7 @@ gcc_version
 PACKAGE_BUGREPORT
 PACKAGE_STRING
 PACKAGE_VERSION
+OPENGAUSS_VERSION
 PACKAGE_TARNAME
 PACKAGE_NAME
 PATH_SEPARATOR
@@ -830,11 +834,11 @@ enable_mot
 enable_memory_check
 enable_mysql_fdw
 enable_oracle_fdw
-enable_pldebugger
 enable_thread_check
 enable_spinlocks
 enable_debug
 enable_ccache
+enable_libnet
 enable_profiling
 enable_coverage
 enable_default_gcc
@@ -2179,7 +2183,8 @@ configure_args=$ac_configure_args
 PACKAGE_VERSION='9.2.4'
 # Postgres-XC 1.1devel is based on PostgreSQL 9.2.4
 PACKAGE_XC_VERSION='1.1'
-
+# openGauss is based on PostgreSQL 9.2.4 and it will be the Kernel of GaussDB database
+OPENGAUSS_VERSION='2.1.0'
 
 cat >>confdefs.h <<_ACEOF
 #define PG_VERSION "$PACKAGE_VERSION"
@@ -2661,9 +2666,11 @@ else
   fi
 
   if test "$enable_ccache" = yes; then
-      default_gs_version="(GaussDB Kernel V500R001C20 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
+      default_gs_version="(openGauss 2.1.0 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
+      default_kernel_version="(GaussDB Kernel V500R002C00 build 1f1f1f1f) compiled at 2100-00-00 00:00:00 commit 9999 last mr 9999 debug"
   else
       default_gs_version="($product $version build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
+      default_kernel_version="($product $version build $gitversion) compiled at `date -d today +\"%Y-%m-%d %H:%M:%S\"` commit $commits last mr $mrid $debug_str"
   fi
 fi
 
@@ -2672,7 +2679,7 @@ fi
 $as_echo "$default_gs_version" >&6; }
 
 cat >>confdefs.h <<_ACEOF
-#define DEF_GS_VERSION "${default_gs_version}"
+#define DEF_GS_VERSION "${default_kernel_version}"
 _ACEOF
 
 
@@ -2990,28 +2997,6 @@ else
 
 fi
 
-# Check whether --enable-pldebugger was given.
-if test "${enable_pldebugger+set}" = set; then
-  enableval=$enable_pldebugger;
-  case $enableval in
-    yes)
-      :
-      ;;
-    no)
-      :
-      ;;
-    *)
-      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-pldebugger option" >&5
-$as_echo "$as_me: error: no argument expected for --enable-pldebugger option" >&2;}
-   { (exit 1); exit 1; }; }
-      ;;
-  esac
-
-else
-  enable_pldebugger=no
-
-fi
-
 
 # Check whether --enable-thread-check was given.
 if test "${enable_thread_check+set}" = set; then
@@ -3124,6 +3109,29 @@ $as_echo "$as_me: error: no argument expected for --enable-ccache option" >&2;}
 
 else
   enable_ccache=no
+
+fi
+
+
+# Check whether --enable-libnet was given.
+if test "${enable_libnet+set}" = set; then
+  enableval=$enable_libnet;
+  case $enableval in
+    yes)
+      :
+      ;;
+    no)
+      :
+      ;;
+    *)
+      { { $as_echo "$as_me:$LINENO: error: no argument expected for --enable-libnet option" >&5
+$as_echo "$as_me: error: no argument expected for --enable-libnet option" >&2;}
+   { (exit 1); exit 1; }; }
+      ;;
+    esac
+
+else
+   enable_libnet=no
 
 fi
 
@@ -5786,6 +5794,19 @@ enable_llvm=yes
 
 fi
 
+llvm_version_str='10.0.0'
+if [ ! -z "${with_3rdpartydir}" ]; then
+    platstr=$(sh src/get_PlatForm_str.sh)
+    llvm_version_str=`${with_3rdpartydir}/dependency/${platstr}/llvm/comm/bin/llvm-config --version`
+fi
+llvm_major_version=$(echo $llvm_version_str | awk -F "." '{print $1}')
+llvm_minor_version=$(echo $llvm_version_str | awk -F "." '{print $2}')
+
+cat >>confdefs.h <<_ACEOF
+#define LLVM_MAJOR_VERSION $llvm_major_version
+#define LLVM_MINOR_VERSION $llvm_minor_version
+_ACEOF
+
 #
 # Enable ut 
 #
@@ -5950,6 +5971,11 @@ else
 
 fi
 
+if test "$with_gssapi" = yes; then
+cat >>confdefs.h <<\_ACEOF
+#define ENABLE_PYTHON 1
+_ACEOF
+fi
 
 { $as_echo "$as_me:$LINENO: result: $with_python" >&5
 $as_echo "$with_python" >&6; }
@@ -29640,15 +29666,18 @@ else
   cc_string=$CC
 fi
 
-
+if test "$enable_multiple_nodes" = yes; then
 cat >>confdefs.h <<_ACEOF
-#define PG_VERSION_STR "PostgreSQL $PACKAGE_VERSION ${default_gs_version} on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
+#define PG_VERSION_STR "openGauss $OPENGAUSS_VERSION ${default_kernel_version} on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
 _ACEOF
-
-# Supply additional version name for Postgres-XC
+else
+cat >>confdefs.h <<_ACEOF
+#define PG_VERSION_STR "${default_gs_version} on $host, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
+_ACEOF
+fi
 
 cat >>confdefs.h <<_ACEOF
-#define PGXC_VERSION_STR "Postgres-XC $PACKAGE_XC_VERSION on $host, based on PostgreSQL $PACKAGE_VERSION, compiled by $cc_string, `expr $ac_cv_sizeof_void_p \* 8`-bit"
+#define OPENGAUSS_VERSION_NUM_STR "${OPENGAUSS_VERSION}"
 _ACEOF
 
 # Supply a numeric version string for use by 3rd party add-ons
@@ -31097,12 +31126,19 @@ if test -n "$ac_unrecognized_opts" && test "$enable_option_checking" != no; then
   { $as_echo "$as_me:$LINENO: WARNING: unrecognized options: $ac_unrecognized_opts" >&5
 $as_echo "$as_me: WARNING: unrecognized options: $ac_unrecognized_opts" >&2;}
 fi
-
-find src/common/backend -name "*.l" | sort > ./ereport.txt
+if [[ "$enable_multiple_nodes" != no ]]; then
+    find ../distribute/kernel/ -name "*.l" | sort >> ../distribute_ereport.txt
+    find ../distribute/kernel/ -name "*.y" | sort >> ../distribute_ereport.txt
+    find ../distribute/kernel/ -name "*.cpp" | sort >> ../distribute_ereport.txt
+fi
 find src/gausskernel/ -name "*.l" | sort >> ./ereport.txt
 find src/common/backend -name "*.y" | sort >> ./ereport.txt
 find src/gausskernel/ -name "*.y" | sort >> ./ereport.txt
 find src/common/backend -name "*.cpp" | sort >> ./ereport.txt
 find src/gausskernel/ -name "*.cpp" | sort >> ./ereport.txt
 
-
+if [[ "$enable_multiple_nodes" != no ]] || [[ "$enable_privategauss" != no ]]; then
+  find ../distribute/cm -name "*.l" | sort > ./cm_ereport.txt
+  find ../distribute/cm -name "*.y" | sort >> ./cm_ereport.txt
+  find ../distribute/cm -name "*.cpp" | sort >> ./cm_ereport.txt
+fi

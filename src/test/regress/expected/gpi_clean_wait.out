@@ -21,9 +21,9 @@ select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a
 (2 rows)
 
 explain (costs off) select * from test_gpi_more_invalid where a >= 3000;
-                                QUERY PLAN                                 
----------------------------------------------------------------------------
- Index Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+                                     QUERY PLAN                                     
+------------------------------------------------------------------------------------
+ Index Only Scan using global_index_gpi_more_invalid_a_b_c on test_gpi_more_invalid
    Index Cond: (a >= 3000)
 (2 rows)
 
@@ -55,10 +55,10 @@ explain (costs off) select count(*) from test_gpi_more_invalid where a <= 100 an
 (4 rows)
 
 explain (costs off) select count(*) from test_gpi_more_invalid where a > 3000;
-                                      QUERY PLAN                                      
---------------------------------------------------------------------------------------
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
  Aggregate
-   ->  Index Only Scan using global_index_gpi_more_invalid_b on test_gpi_more_invalid
+   ->  Index Only Scan using global_index_gpi_more_invalid_a_b_c on test_gpi_more_invalid
          Index Cond: (a > 3000)
 (3 rows)
 
@@ -455,13 +455,13 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
 
 -- test_gpi_more_invalid have wait_clean_gpi=y
 select a.relname,a.parttype,a.reloptions from pg_partition a, pg_class b where a.parentid = b.oid and b.relname = 'test_gpi_more_invalid' and a.reloptions[3] like '%wait_clean_gpi=y%' order by 1,2,3;
-        relname        | parttype |                    reloptions                     
------------------------+----------+---------------------------------------------------
- test_gpi_more_invalid | r        | {orientation=row,compression=no,wait_clean_gpi=y}
-(1 row)
+ relname | parttype | reloptions 
+---------+----------+------------
+(0 rows)
 
 alter index local_index_gpi_more_invalid_a_b unusable;
 reindex table test_gpi_more_invalid;
+NOTICE:  table "test_gpi_more_invalid" has no indexes
 -- all global index unusuable
 select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid = c.oid where i.indrelid = 'test_gpi_more_invalid'::regclass ORDER BY c.relname;
                relname               | indisusable 
@@ -470,7 +470,7 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
  global_index_gpi_more_invalid_a_b_c | f
  global_index_gpi_more_invalid_b     | f
  global_index_gpi_more_invalid_c     | f
- local_index_gpi_more_invalid_a_b    | t
+ local_index_gpi_more_invalid_a_b    | f
 (5 rows)
 
 alter index global_index_gpi_more_invalid_a rebuild;
@@ -485,7 +485,7 @@ select c.relname, i.indisusable from pg_index i join pg_class c on i.indexrelid 
  global_index_gpi_more_invalid_a_b_c | t
  global_index_gpi_more_invalid_b     | t
  global_index_gpi_more_invalid_c     | t
- local_index_gpi_more_invalid_a_b    | t
+ local_index_gpi_more_invalid_a_b    | f
 (5 rows)
 
 reset enable_seqscan；

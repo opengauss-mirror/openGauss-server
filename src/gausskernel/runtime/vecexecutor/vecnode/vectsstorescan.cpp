@@ -28,7 +28,7 @@
 #include "catalog/pg_proc.h"
 #include "vecexecutor/vectsstorescan.h"
 #include "executor/executor.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "nodes/plannodes.h"
 #include "nodes/nodeFuncs.h"
 #include "utils/snapmgr.h"
@@ -265,6 +265,7 @@ static TsStoreScanState* build_tsstore_scan_state(TsStoreScan* node, EState* est
     scanstate->tag_id_num = 0;
     scanstate->only_scan_tag = (node->series_func_calls > 0);
     scanstate->ts_store_search = New(CurrentMemoryContext) TsStoreSearch();
+    scanstate->only_const_col = false;
     if (!node->tablesample) {
         scanstate->isSampleScan = false;
     } else {

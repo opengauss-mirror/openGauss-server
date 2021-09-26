@@ -68,6 +68,8 @@ typedef ComboCidEntryData* ComboCidEntry;
 
 /* Initial size of the array */
 #define CCID_ARRAY_SIZE 100
+/* If size is not enough, increase it */
+#define CCID_ARRAY_INCSIZE 10000
 
 /* prototypes for internal functions */
 static CommandId GetComboCommandId(CommandId cmin, CommandId cmax);
@@ -282,7 +284,7 @@ static CommandId GetComboCommandId(CommandId cmin, CommandId cmax)
      */
     if (u_sess->utils_cxt.usedComboCids >= u_sess->utils_cxt.sizeComboCids) {
         /* We need to grow the array */
-        int newsize = u_sess->utils_cxt.sizeComboCids * 2;
+        int newsize = u_sess->utils_cxt.sizeComboCids + CCID_ARRAY_INCSIZE;
 
         u_sess->utils_cxt.comboCids =
             (ComboCidKeyData*)repalloc(u_sess->utils_cxt.comboCids, sizeof(ComboCidKeyData) * newsize);
@@ -346,6 +348,4 @@ void StreamTxnContextRestoreComboCid(void* stc)
     STCRestoreElem((ComboCidKey)(((StreamTxnContext*)stc)->comboCids), u_sess->utils_cxt.comboCids);
     STCRestoreElem(((StreamTxnContext*)stc)->usedComboCids, u_sess->utils_cxt.usedComboCids);
     STCRestoreElem(((StreamTxnContext*)stc)->sizeComboCids, u_sess->utils_cxt.sizeComboCids);
-    Assert((u_sess->utils_cxt.sizeComboCids > 0 && u_sess->utils_cxt.comboHash) ||
-           (u_sess->utils_cxt.sizeComboCids == 0 && !u_sess->utils_cxt.comboHash));
 }

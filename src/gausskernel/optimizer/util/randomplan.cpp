@@ -155,6 +155,15 @@ List* get_random_path(RelOptInfo* parent_rel, Path** cheapest_startup_path, Path
     Path* path = NULL;
     unsigned int random_pathno = 0;
 
+    /* Handle random cheapest gather path */
+    if (parent_rel->pathlist == NIL && parent_rel->cheapest_gather_path != NULL) {
+        *cheapest_startup_path = parent_rel->cheapest_gather_path;
+        *cheapest_total_path = parent_rel->cheapest_gather_path;
+        cheapest_path_list = lappend(cheapest_path_list, parent_rel->cheapest_gather_path);
+
+        return cheapest_path_list;
+    }
+
     foreach (p, parent_rel->pathlist) {
         path = (Path*)lfirst(p);
 

@@ -26,7 +26,7 @@
 #include "miscadmin.h"
 #include "optimizer/cost.h"
 #include "storage/buf/bufmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -197,7 +197,7 @@ Datum gistbuild(PG_FUNCTION_ARGS)
     /*
      * Do the heap scan.
      */
-    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, gistBuildCallback, (void *)&buildstate);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, gistBuildCallback, (void *)&buildstate, NULL);
 
     /*
      * If buffering was used, flush out all the tuples that are still in the

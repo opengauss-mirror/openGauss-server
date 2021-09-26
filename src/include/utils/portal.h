@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * portal.h
- *	  POSTGRES portal definitions.
+ *	  openGauss portal definitions.
  *
  * A portal is an abstraction which represents the execution state of
  * a running or runnable query.  Portals support both SQL-level CURSORs
@@ -47,7 +47,7 @@
 #define PORTAL_H
 
 #include "datatype/timestamp.h"
-#include "executor/execdesc.h"
+#include "executor/exec/execdesc.h"
 #include "utils/resowner.h"
 
 /*

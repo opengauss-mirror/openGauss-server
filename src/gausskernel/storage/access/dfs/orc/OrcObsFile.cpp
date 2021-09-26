@@ -24,7 +24,7 @@
 #include <sstream>
 #include <fstream>
 
-/* Becareful: liborc header file must before  postgres header file */
+/* Becareful: liborc header file must before  openGauss header file */
 #include "orc_rw.h"
 #include "orc/Adaptor.hh"
 #include "orc/Exceptions.hh"

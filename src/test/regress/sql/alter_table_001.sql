@@ -153,7 +153,6 @@ DROP TABLE tmp;
 --
 CREATE TABLE tmp (regtable int);
 -- Enforce use of COMMIT instead of 2PC for temporary objects
--- SET enforce_two_phase_commit TO off;
 \set VERBOSITY verbose
 -- CREATE TEMP TABLE tmp (tmptable int);
 

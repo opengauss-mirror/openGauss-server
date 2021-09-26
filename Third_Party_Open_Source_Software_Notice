@@ -6865,12 +6865,6 @@ misrepresented as being the original software.
 3. This notice may not be removed or altered from any source
 distribution.
 
-Software: postgresql-hll 2.10.2
-Copyright notice：Copyright 2013 Aggregate Knowledge, Inc.
-License：Apache License V2.0
-Please see above
-
-
 Software: numactl 2.0.13
 Copyright notice：Copyright (C) 2010 Intel Corporation
 Copyright (C) 2005 Andi Kleen, SuSE Labs.

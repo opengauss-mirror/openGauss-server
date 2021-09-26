@@ -346,6 +346,12 @@ select * from compos;
   1 | 1
 (1 row)
 
+begin
+a.b.c();
+end;
+/
+ERROR:  schema "a" does not exist
+CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 1
 drop schema hw_function_p_4 cascade;
 NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to function func_tmp_test2(character varying)

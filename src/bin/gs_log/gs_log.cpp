@@ -32,7 +32,7 @@
 
 #include "gs_log_dump.h"
 #include "bin/elog.h"
-
+#include "port.h"
 using namespace std;
 
 /* append a new line */
@@ -302,6 +302,7 @@ static FILE* open_default_out_logfile(const char* infile)
 
     log_outfile = get_log_default_outfile(infile);
     if (NULL != log_outfile) {
+        canonicalize_path(log_outfile);
         log_outfd = fopen(log_outfile, "w");
         if (log_outfd == NULL) {
             fprintf(
@@ -808,6 +809,7 @@ static void enter_gensql_br(int argc, char* const* argv)
 
     if (NULL != outfile) {
         /* create output file */
+        canonicalize_path(outfile);
         FILE* outfd = fopen(outfile, "w");
         if (NULL == outfd) {
             fprintf(stderr, "Create file \"%s\" failed: %s\n", outfile, strerror(errno));
@@ -876,6 +878,9 @@ int main(int argc, char** argv)
             help(progname);
             exit(0);
         }
+    }
+    if (progname) {
+        free((void*)progname);
     }
     return 0;
 }

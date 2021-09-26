@@ -127,6 +127,8 @@ typedef struct {
 
 #define DEFAULT_WAIT 60
 #define MAX_BUF_SIZE 4096
+#define MAX_COMMAND_LEN 4096
+#define MAX_CHILD_PATH 1024
 
 static int sig = SIGHUP; /* default */
 CtlCommand ctl_command = NO_COMMAND;
@@ -481,6 +483,39 @@ static pgpid_t get_pgpid(void)
     return (pgpid_t)pid;
 }
 
+static void check_path(const char *path_name)
+{
+    const char* danger_character_list[] = {"|",
+        ";",
+        "&",
+        "$",
+        "<",
+        ">",
+        "`",
+        "\\",
+        "'",
+        "\"",
+        "{",
+        "}",
+        "(",
+        ")",
+        "[",
+        "]",
+        "~",
+        "*",
+        "?",
+        "!",
+        "\n",
+        NULL};
+    int i = 0;
+    for (i = 0; danger_character_list[i] != NULL; i++) {
+        if (strstr(path_name, danger_character_list[i]) != NULL) {
+            fprintf(stderr, "invalid token \"%s\" in path name: (%s)\n", danger_character_list[i], path_name);
+            exit(1);
+        }
+    }
+}
+
 /*
 * @@GaussDB@@
 * Brief            : static ErrCode writefile(char *path, char **lines,
@@ -492,6 +527,7 @@ ErrCode writefile(char* path, char** lines, UpdateOrAddParameter isAddorUpdate)
 {
     FILE* out_file = NULL;
     char** line = NULL;
+    int fd = -1;
     if (UPDATE_PARAMETER == isAddorUpdate) {
         canonicalize_path(path);
         if ((out_file = fopen(path, "w")) == NULL) {
@@ -499,7 +535,13 @@ ErrCode writefile(char* path, char** lines, UpdateOrAddParameter isAddorUpdate)
                 _("%s: could not open file \"%s\" for writing: %s\n"), progname, path, gs_strerror(errno));
             return CODE_OPEN_CONFFILE_FAILED;
         }
+
+        fd = fileno(out_file);
+        if ((fd >= 0) && (-1 == fchmod(fd, S_IRUSR | S_IWUSR))) {
+            (void)write_stderr(_("could not set permissions of file  \"%s\"\n"), path);
+        }
         rewind(out_file);
+
         for (line = lines; *line != NULL; line++) {
             if (fputs(*line, out_file) < 0) {
                 (void)write_stderr(_("%s: could not write file \"%s\": %s\n"), progname, path, gs_strerror(errno));
@@ -1034,6 +1076,65 @@ append_string_info(char **optLines, const char *newContext)
 }
 
 #ifndef ENABLE_MULTIPLE_NODES
+/*
+ * For a line in the configuration file, skip current spaces.
+ */
+static void SkipSpace(char* &line)
+{
+    while (line != NULL && isspace((unsigned char)*line)) {
+        ++line;
+    }
+}
+
+/*
+ * Handle commented lines in the configuration file.
+ * return:
+ * true - replconninfoX is commented
+ * false - replconninfoX is not in current line.
+ */
+static bool ProcessCommented(char* &line, char* replconninfoX)
+{
+    ++line;
+    SkipSpace(line);
+    /* replconninfoX must be invalid if it is commented*/
+    if (line != NULL && strncmp(line, replconninfoX, strlen(replconninfoX)) == 0) {
+        return true;
+    }
+    return false;
+}
+
+/*
+ * Handle lines which is not commented in the configuration file.
+ * notNullReplconninfoNums - the number of replconninfo which is not null
+ * matchReplconninfoX - whether replconninfoX is in current line.
+ * isReplconninfoXNull - whether replconninfoX is NULL.
+ */
+static void ProcessNotCommented(char* &line, char* replconninfoX,
+    int &notNullReplconninfoNums, bool &isReplconninfoXNull, bool &matchReplconninfoX)
+{
+    if (line != NULL && strncmp(line, "replconninfo", strlen("replconninfo")) == 0) {
+        if (strncmp(line, replconninfoX, strlen(replconninfoX)) == 0) {
+            matchReplconninfoX = true;
+        }
+        line += strlen(replconninfoX);
+        /* Skip all the blanks between the param and '=' */
+        SkipSpace(line);
+        /* Skip '=' */
+        if (line != NULL && *line == '=') {
+            line++;
+        }
+        /* Skip all the blanks between the '=' and value */
+        SkipSpace(line);
+        if (line != NULL && strncmp(line, "''", strlen("''")) != 0 &&
+            strncmp(line, "\"\"", strlen("\"\"")) != 0) {
+            ++notNullReplconninfoNums;
+            if (matchReplconninfoX) {
+                isReplconninfoXNull = false;
+            }
+        }
+    }
+}
+
 /*******************************************************************************
  Function    : IsLastNotNullReplconninfo
  Description : determine if replconninfoX which is being set is the last one valid replconninfo
@@ -1052,47 +1153,21 @@ static bool IsLastNotNullReplconninfo(char** optLines, char* replconninfoX)
     for (int i = 0; optLines != NULL && optLines[i] != NULL; i++) {
         p = optLines[i];
         /* Skip all the blanks at the begin of the optLine */
-        while (p != NULL && isspace((unsigned char)*p)) {
-            ++p;
-        }
+        SkipSpace(p);
         if (p == NULL) {
             continue;
         }
         if (*p == '#') {
-            ++p;
-            while (p != NULL && isspace((unsigned char)*p)) {
-                ++p;
-            }
-            /* replconninfoX must be invalid if it is commented*/
-            if (p != NULL && strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
+            if(ProcessCommented(p, replconninfoX)) {
                 return false;
+            } else {
+                continue;
             }
-            continue;
         }
-        if (p != NULL && strncmp(p, "replconninfo", strlen("replconninfo")) == 0) {
-            if (strncmp(p, replconninfoX, strlen(replconninfoX)) == 0) {
-                matchReplconninfoX = true;
-            }
-            p += strlen(replconninfoX);
-            /* Skip all the blanks between the param and '=' */
-            while (p != NULL && isspace((unsigned char)*p)) {
-                p++;
-            }
-            /* Skip '=' */
-            if (p != NULL && *p == '=') {
-                p++;
-            }
-            /* Skip all the blanks between the '=' and value */
-            while (p != NULL && isspace((unsigned char)*p)) {
-                p++;
-            }
-            if (p != NULL && strncmp(p, "''", strlen("''")) != 0 &&
-                strncmp(p, "\"\"", strlen("\"\"")) != 0) {
-                ++notNullReplconninfoNums;
-                if (matchReplconninfoX) {
-                    isReplconninfoXNull = false;
-                }
-            }
+        ProcessNotCommented(p, replconninfoX, notNullReplconninfoNums,
+                            isReplconninfoXNull, matchReplconninfoX);
+        if (notNullReplconninfoNums > 1) {
+            return false;
         }
     }
     /* return true if replconninfoX which is being set is the last one valid replconninfo */
@@ -1594,7 +1669,8 @@ static void do_help_encrypt(void)
 {
 
     (void)printf(_("\nEncrypt plain text to cipher text:\n"));
-    (void)printf(_("    %s encrypt [-M keymode] -K password [-U username] -D DATADIR\n"), progname);
+    (void)printf(_("    %s encrypt [-M keymode] -K password [-U username] "
+                   "{-D DATADIR | -R RANDFILEDIR -C CIPHERFILEDIR}\n"), progname);
 }
 
 static void do_help_generate(void)
@@ -1660,6 +1736,8 @@ static void do_help_encrypt_options(void)
                    "value is server mode\n"));
     (void)printf(_("  -K PASSWORD            the plain password you want to encrypt, which length should between 8~16 and at least 3 different types of characters\n"));
     (void)printf(_("  -U, --keyuser=USER     if appointed, the cipher files will name with the user name\n"));
+    (void)printf(_("  -R RANDFILEDIR         set the dir that put the rand file\n"));
+    (void)printf(_("  -C CIPHERFILEDIR       set the dir that put the cipher file\n"));
     (void)printf(_("\n"));
 }
 
@@ -2209,6 +2287,62 @@ void clear_g_incorrect_nodeInfo()
     GS_FREE(g_incorrect_nodeInfo->nodename_array);
     GS_FREE(g_incorrect_nodeInfo);
 }
+
+static void process_encrypt_cmd(const char* pgdata_D, const char* pgdata_C, const char* pgdata_R)
+{
+    errno_t rc = 0;
+
+    if (pgdata_D && (pgdata_R || pgdata_C)) {
+        write_stderr(_("%s: encrypt cannot use -D, -R and -C same time!\n"), progname);
+        do_advice();
+        exit(1);
+    }
+
+    if (!pgdata_D && !(pgdata_R || pgdata_C)) {
+        write_stderr(_("%s: encrypt must use -D or <-R and -C> !\n"), progname);
+        do_advice();
+        exit(1);
+    }
+
+    if ((pgdata_R && !pgdata_C) || (!pgdata_R && pgdata_C)) {
+        write_stderr(_("%s: encrypt must use -R and -C same time!\n"), progname);
+        do_advice();
+        exit(1);
+    }
+
+    if (!pgdata_D) {
+        pgdata_D = (char *)pgdata_C;
+    }
+    checkDataDir(pgdata_D);
+    if (pgdata_R) {
+        checkDataDir(pgdata_R);
+    }
+    gen_cipher_rand_files(key_mode, g_plainkey, key_username, pgdata_D, NULL);
+    if (pgdata_R) {
+        FILE* cmd_fp = NULL;
+        char read_buf[MAX_CHILD_PATH] = {0};
+        char* mv_cmd = NULL;
+
+        mv_cmd = (char*)pg_malloc_zero(MAX_COMMAND_LEN + 1);
+        rc = snprintf_s(mv_cmd, MAX_COMMAND_LEN, MAX_COMMAND_LEN - 1, "mv %s/*.rand %s/",
+                        pgdata_C, pgdata_R);
+        securec_check_ss_c(rc, "\0", "\0");
+        cmd_fp = popen(mv_cmd, "r");
+        if (NULL == cmd_fp) {
+            (void)write_stderr("could not open mv command.\n");
+            GS_FREE(mv_cmd);
+            exit(1);
+        }
+        while (fgets(read_buf, sizeof(read_buf) - 1, cmd_fp) != 0) {
+            printf("%s\n", read_buf);
+            rc = memset_s(read_buf, sizeof(read_buf), 0, sizeof(read_buf));
+            securec_check_c(rc, "\0", "\0");
+        }
+        pclose(cmd_fp);
+        GS_FREE(mv_cmd);
+    }
+}
+
 /*
  * @@GaussDB@@
  * Brief            :
@@ -2237,6 +2371,8 @@ int main(int argc, char** argv)
     (void)setvbuf(stderr, NULL, _IONBF, 0);
 #endif
     char* pgdata_D = NULL;
+    char* pgdata_R = NULL;
+    char* pgdata_C = NULL;
     char* nodename = NULL;
     char* instance_name = NULL;
     int nRet = 0;
@@ -2279,12 +2415,26 @@ int main(int argc, char** argv)
     optind = 1;
     /* process command-line options */
     while (optind < argc) {
-        while ((c = getopt_long(argc, argv, "N:I:D:c:h:Z:U:M:K:S:o:", long_options, &option_index)) != -1) {
+        while ((c = getopt_long(argc, argv, "N:I:D:R:C:c:h:Z:U:M:K:S:o:", long_options, &option_index)) != -1) {
             switch (c) {
                 case 'D': {
                     GS_FREE(pgdata_D);
                     pgdata_D = xstrdup(optarg);
                     canonicalize_path(pgdata_D);
+                    break;
+                }
+                case 'R': {
+                    GS_FREE(pgdata_R);
+                    pgdata_R = xstrdup(optarg);
+                    canonicalize_path(pgdata_R);
+                    check_path(pgdata_R);
+                    break;
+                }
+                case 'C': {
+                    GS_FREE(pgdata_C);
+                    pgdata_C = xstrdup(optarg);
+                    canonicalize_path(pgdata_C);
+                    check_path(pgdata_C);
                     break;
                 }
                 case 'o': {
@@ -2489,9 +2639,6 @@ int main(int argc, char** argv)
         instance_name = xstrdup("all");
     }
 
-    // We have checked CHECK_CONF_COMMAND in checkUDFsecboxParameter,
-    // so we do not check it here.
-
     // log output redirect
     init_log(PROG_NAME);
 
@@ -2527,8 +2674,7 @@ int main(int argc, char** argv)
     }
 
     if (ctl_command == ENCRYPT_KEY_COMMAND) {
-        checkDataDir(pgdata_D);
-        gen_cipher_rand_files(key_mode, g_plainkey, key_username, pgdata_D, NULL);
+        process_encrypt_cmd(pgdata_D, pgdata_C, pgdata_R);
         (void)write_log("gs_guc encrypt %s\n", loginfo);
     } else if (ctl_command == GENERATE_KEY_COMMAND) {
         doGenerateOperation(pgdata_D, loginfo);
@@ -2568,6 +2714,8 @@ int main(int argc, char** argv)
     GS_FREE(g_cipherkey);
     GS_FREE(key_username);
     GS_FREE(pgdata_D);
+    GS_FREE(pgdata_R);
+    GS_FREE(pgdata_C);
     GS_FREE(instance_name);
 
     if (ctl_command == ENCRYPT_KEY_COMMAND || ctl_command == GENERATE_KEY_COMMAND)

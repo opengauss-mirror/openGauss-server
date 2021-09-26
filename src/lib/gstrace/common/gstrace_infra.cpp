@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <signal.h>
 #include <sys/time.h>
 #include <sys/syscall.h>
 #include <sys/stat.h>
@@ -367,7 +368,7 @@ static void detachTraceBufferIfDisabled()
     pTrcCxt->pTrcCfg->bEnabled = false;
 }
 
-void gstrace_destory(int code, uintptr_t arg)
+void gstrace_destory(int code, void *arg)
 {
     trace_context* pTrcCxt = getTraceContext();
 
@@ -384,6 +385,7 @@ void gstrace_destory(int code, uintptr_t arg)
 
         /* Don't munmap trace config because may other threads are accessing it. */
         pTrcCxt->pTrcCfg->key = -1;
+        pTrcCxt->pTrcCfg->pid = 0;
 
         /* unlink trace buffer file */
         getSharedMemName(sMemName, sizeof(sMemName), TRC_BUF_SHARED_MEM_NAME, key);
@@ -393,6 +395,31 @@ void gstrace_destory(int code, uintptr_t arg)
         getSharedMemName(sMemName, sizeof(sMemName), TRC_CFG_SHARED_MEM_NAME, key);
         (void)shm_unlink(sMemName);
     }
+}
+
+static int try_reuse_configshm(const char* sCfgMemName, int identifer)
+{
+    int fdCfg = shm_open(sCfgMemName, O_RDWR | O_EXCL, S_IRWXU);
+    if (fdCfg == -1) {
+        return -1;
+    }
+
+    struct stat stat;
+    if (fstat(fdCfg, &stat) == 0 && stat.st_size == sizeof(trace_config)) {
+        trace_config* pTrcCfg = (trace_config*)mmap(
+            NULL, sizeof(trace_config), PROT_READ | PROT_WRITE, MAP_SHARED, fdCfg, 0);
+
+        /* (1) the same MAGIC; (2) the same port; (3) the process not exist. */
+        if (pTrcCfg->trc_cfg_magic_no == GS_TRC_CFG_MAGIC_N &&
+            pTrcCfg->key == (uint32_t)identifer && kill(pTrcCfg->pid, 0) != 0 && errno == ESRCH) {
+            (void)munmap(pTrcCfg, sizeof(trace_config));
+            return fdCfg;
+        }
+        (void)munmap(pTrcCfg, sizeof(trace_config));
+    }
+
+    close(fdCfg);
+    return -1;
 }
 
 int gstrace_init(int key)
@@ -410,7 +437,11 @@ int gstrace_init(int key)
     getSharedMemName(sCfgMemName, sizeof(sCfgMemName), TRC_CFG_SHARED_MEM_NAME, key);
 
     /* initial shared mem open for trace config info */
-    int fdCfg = shm_open(sCfgMemName, O_RDWR | O_CREAT, S_IRWXU);
+    int fdCfg = shm_open(sCfgMemName, O_RDWR | O_CREAT | O_EXCL, S_IRWXU);
+    if (fdCfg == -1 && errno == EEXIST) {
+        fdCfg = try_reuse_configshm(sCfgMemName, key);
+    }
+
     if (fdCfg == -1) {
         // Failed to initialize config shared memory buffer
         return TRACE_COMMON_ERROR;
@@ -437,11 +468,14 @@ int gstrace_init(int key)
     securec_check(ret, "\0", "\0");
     pTrcCxt->pTrcCfg->trc_cfg_magic_no = GS_TRC_CFG_MAGIC_N;
     pTrcCxt->pTrcCfg->key = key;
+    pTrcCxt->pTrcCfg->pid = getpid();
     pTrcCxt->pTrcCfg->bEnabled = false;
     pTrcCxt->pTrcCfg->version = TRACE_VERSION;
     ret = memcpy_s(
         pTrcCxt->pTrcCfg->hash_trace_config_file, LENGTH_TRACE_CONFIG_HASH, hash_str, LENGTH_TRACE_CONFIG_HASH);
     securec_check(ret, "\0", "\0");
+
+    (void)on_exit(gstrace_destory, NULL);
 
     return TRACE_OK;
 }
@@ -563,6 +597,16 @@ trace_msg_code gstrace_stop(int key)
 
     while (1) {
         if (!pTrcCxt->pTrcCfg->bEnabled) {
+            /* kernel has detached with shared buffer. */
+            break;
+        } else if (kill(pTrcCxt->pTrcCfg->pid, 0) != 0  && errno == ESRCH) {
+            /*
+             * case when kernel stopped in advance.
+             * Attention: it is unsafty for concurrency among INIT/START/STOP operations now.
+             */
+            pTrcCxt->pTrcInfra = NULL;
+            pTrcCxt->pTrcCfg->status = TRACE_STATUS_END_STOP;
+            pTrcCxt->pTrcCfg->bEnabled = false;
             break;
         }
         usleep(GS_TRC_WAIT_IN_US);

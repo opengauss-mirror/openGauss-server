@@ -43,7 +43,7 @@ def save_csv(result, save_path):
     if save_path:
         save_path = os.path.realpath(save_path)
         if not os.path.exists(os.path.dirname(save_path)):
-            os.makedirs(os.path.dirname(save_path))
+            os.makedirs(os.path.dirname(save_path), mode=0o700)
     with open(save_path, mode='w') as f:
         for query, execution_time in result:
             f.write(query + ',' + str(execution_time) + '\n')

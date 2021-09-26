@@ -30,7 +30,8 @@ else
 	CC = g++
 endif
 
-override CPPFLAGS := -I$(ZLIB_INCLUDE_PATH) $(CPPFLAGS)
+override CPPFLAGS := -I$(ZLIB_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(LIBCURL_INCLUDE_PATH) $(CPPFLAGS)
+override LDFLAGS := -L$(CJSON_LIB_PATH) -L$(LIBCURL_LIB_PATH) $(LDFLAGS)
 ifdef LLT
     override LIBS := -L${LLT_LIBS_PATH} $(LIBS)
 endif
@@ -46,7 +47,7 @@ OBJS=	pg_backup_archiver.o pg_backup_db.o pg_backup_custom.o \
 	pg_backup_null.o pg_backup_tar.o \
 	pg_backup_directory.o dumpmem.o dumputils.o compress_io.o $(WIN32RES)
 	
-LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -lz
+LIBS += -lgssapi_krb5_gauss -lgssrpc_gauss -lkrb5_gauss -lkrb5support_gauss -lk5crypto_gauss -lcom_err_gauss -lcjson -lcurl -lz
 COMMON_OBJS = $(top_builddir)/src/lib/elog/elog.a
 
 EXTRA_OBJS =  $(top_builddir)/src/gausskernel/cbb/utils/aes/aes.o
@@ -57,13 +58,16 @@ kwlookup.cpp: % : $(top_srcdir)/src/common/backend/parser/%
 
 all: submake-aes gs_dump gs_restore gs_dumpall
 libpq_pgport:=$(subst -lpq,-lpq_ce,$(libpq_pgport))
-
 ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
-libpq_pgport += -L$(top_builddir)/src/distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
+libpq_pgport += -L$(top_builddir)/../distribute/bin/gs_ktool/ -lgs_ktool -lsecurec -L$(LIBKMC_LIB_PATH) -lkmc
 endif
 
 gs_dump: pg_dump.o common.o pg_dump_sort.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq_ce submake-libpgport
 	$(CC) $(CXXFLAGS) $(MY_CFLAGS) pg_dump.o common.o pg_dump_sort.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
+
+gs_dump_ut: pg_dump.o common.o pg_dump_sort.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq_ce submake-libpgport
+	$(CC) -fPIC -shared $(CXXFLAGS) $(MY_CFLAGS) pg_dump.o common.o pg_dump_sort.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o lib$@.so
+	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
 
 gs_restore: pg_restore.o $(OBJS) $(KEYWRDOBJS) $(COMMON_OBJS) | submake-libpq_ce submake-libpgport
 	$(CC) $(CXXFLAGS) $(MY_CFLAGS) pg_restore.o $(KEYWRDOBJS) $(OBJS) $(EXTRA_OBJS) $(COMMON_OBJS) $(LIBS) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) -o $@$(X)
@@ -73,7 +77,7 @@ gs_dumpall: pg_dumpall.o dumputils.o dumpmem.o $(COMMON_OBJS) $(KEYWRDOBJS) | su
 
 gs_dumpall_ut: pg_dumpall.o $(OBJS) $(COMMON_OBJS) $(KEYWRDOBJS) | submake-libpq_ce submake-libpgport
 	$(CC)  -fPIC -shared $(CXXFLAGS) $(MY_CFLAGS) pg_dumpall.o $(OBJS) $(COMMON_OBJS) $(KEYWRDOBJS)  $(EXTRA_OBJS) $(WIN32RES) $(libpq_pgport) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o lib$@.so
-	mv lib$@.so $(top_builddir)/src/distribute/test/ut/lib
+	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
 
 .PHONY: submake-aes
 submake-aes:

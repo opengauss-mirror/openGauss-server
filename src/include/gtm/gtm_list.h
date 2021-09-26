@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * gtm_list.h
- *	  interface for PostgreSQL generic linked list package
+ *	  interface for openGauss generic linked list package
  *
  * This package implements singly-linked homogeneous lists.
  *

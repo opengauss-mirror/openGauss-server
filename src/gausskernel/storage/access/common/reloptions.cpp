@@ -14,6 +14,7 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "miscadmin.h"
 #include "knl/knl_variable.h"
 
 #include "access/gist_private.h"
@@ -39,6 +40,8 @@
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
+#include "tde_key_management/tde_key_manager.h"
+#include "tde_key_management/tde_key_storage.h"
 
 /*
  * Contents of pg_class.reloptions
@@ -58,6 +61,7 @@
  */
 /* value check functions for reloptions */
 static void ValidateStrOptOrientation(const char *val);
+static void  ValidateStrOptIndexsplit(const char *val);
 static void ValidateStrOptCompression(const char *val);
 static void ValidateStrOptTableAccessMethod(const char* val);
 static void ValidateStrOptTTL(const char *val);
@@ -74,6 +78,9 @@ static void ValidateStrOptSpcCfgPath(const char *val);
 static void ValidateStrOptSpcStorePath(const char *val);
 static void check_append_mode(const char *val);
 static void ValidateStrOptStringOptimize(const char *val);
+static void ValidateStrOptEncryptAlgo(const char *val);
+static void ValidateStrOptDekCipher(const char *val);
+static void ValidateStrOptCmkId(const char *val);
 
 static relopt_bool boolRelOpts[] = {
     {{ "autovacuum_enabled", "Enables autovacuum in this relation", RELOPT_KIND_HEAP | RELOPT_KIND_TOAST }, true },
@@ -103,8 +110,11 @@ static relopt_bool boolRelOpts[] = {
      false },
     {{ "ignore_enable_hadoop_env", "ignore enable_hadoop_env option", RELOPT_KIND_HEAP }, false },
     {{ "hashbucket", "Enables hashbucket in this relation", RELOPT_KIND_HEAP }, false },
+    {{ "segment", "Enables segment in this relation", RELOPT_KIND_HEAP}, false},
     {{ "primarynode", "Enables primarynode for replicatition relation", RELOPT_KIND_HEAP }, false },
     {{ "on_commit_delete_rows", "global temp table on commit options", RELOPT_KIND_HEAP}, true},
+    {{ "crossbucket", "Enables cross bucket index creation in this index relation", RELOPT_KIND_BTREE}, false },
+    {{ "enable_tde", "enable table's level transparent data encryption", RELOPT_KIND_HEAP }, false },
     /* list terminator */
     {{NULL}}
 };
@@ -215,6 +225,16 @@ static relopt_int intRelOpts[] = {
 
     {{ "rel_cn_oid", "rel oid on coordinator", RELOPT_KIND_HEAP }, 0, 0, 2000000000 },
 
+    {{ "init_td", "number of td slots", RELOPT_KIND_HEAP }, UHEAP_DEFAULT_TD, UHEAP_MIN_TD, UHEAP_MAX_TD },
+    {{ "bucketcnt", "number of bucket map counts", RELOPT_KIND_HEAP }, 0, 32, 16384 },
+    {
+        {
+            "parallel_workers",
+            "Number of parallel processes that can be used per executor node for this relation.",
+            RELOPT_KIND_HEAP,
+        },
+        -1, 0, 32
+    },
     /* list terminator */
     {{NULL}}
 };
@@ -288,11 +308,18 @@ static relopt_string stringRelOpts[] = {
      "auto" },
 
     {
-        { "orientation", "row-store, col-store, orc-store or timeseries", RELOPT_KIND_HEAP },
+        { "orientation", "row-store, col-store, orc-store, inplace-store or timeseries", RELOPT_KIND_HEAP },
         10,
         false,
         ValidateStrOptOrientation,
         ORIENTATION_ROW,
+    },
+    {
+        {"indexsplit", "default, insertpt", RELOPT_KIND_BTREE},
+        7,
+        false,
+        ValidateStrOptIndexsplit,
+        INDEXSPLIT_OPT_DEFAULT,
     },
     {
         { "ttl", "time to live for timeseries data management", RELOPT_KIND_HEAP },
@@ -416,18 +443,47 @@ static relopt_string stringRelOpts[] = {
         NULL,
         "",
     },
-	{
-        {"table_access_method", "Specifies the Table accessor routines", RELOPT_KIND_HEAP},
-        strlen(TABLE_ACCESS_METHOD_HEAP),
+    {
+        {"storage_type", "Specifies the Table accessor routines",
+         RELOPT_KIND_HEAP | RELOPT_KIND_BTREE | RELOPT_KIND_TOAST},
+        strlen(TABLE_ACCESS_METHOD_ASTORE),
         false,
         ValidateStrOptTableAccessMethod,
-        TABLE_ACCESS_METHOD_HEAP,
+        TABLE_ACCESS_METHOD_ASTORE,
+    },
+    {
+        { "dek_cipher", "The cipher of TDE dek", RELOPT_KIND_HEAP },
+        0,
+        false,
+        ValidateStrOptDekCipher,
+        "",
+    },
+    {
+        { "cmk_id", "The id of TDE cmk", RELOPT_KIND_HEAP },
+        0,
+        false,
+        ValidateStrOptCmkId,
+        "",
+    },
+    {
+        { "encrypt_algo", "The algo of TDE", RELOPT_KIND_HEAP },
+        0,
+        false,
+        ValidateStrOptEncryptAlgo,
+        "",
     },
     {
         {"wait_clean_gpi", "Whether to wait for gpi cleanup", RELOPT_KIND_HEAP },
         1,
         false,
         CheckWaitCleanGpi,
+        "n",
+    },
+    {
+        {"wait_clean_cbi", "Whether to wait for cbi cleanup", RELOPT_KIND_BTREE },
+        1,
+        false,
+        CheckWaitCleanCbi,
         "n",
     },
     {
@@ -770,16 +826,14 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
             foreach (cell, defList) {
                 DefElem *def = (DefElem *)lfirst(cell);
                 int kw_len;
-
-                /* ignore if not in the same namespace */
-                if (namspace == NULL) {
-                    if (def->defnamespace != NULL)
+                    /* ignore if not in the same namespace */
+                    if (namspace == NULL) {
+                        if (def->defnamespace != NULL)
+                            continue;
+                    } else if (def->defnamespace == NULL)
                         continue;
-                } else if (def->defnamespace == NULL)
-                    continue;
-                else if (pg_strcasecmp(def->defnamespace, namspace) != 0)
-                    continue;
-
+                    else if (pg_strcasecmp(def->defnamespace, namspace) != 0)
+                        continue;
                 kw_len = strlen(def->defname);
                 if (text_len > kw_len && text_str[kw_len] == '=' && pg_strncasecmp(text_str, def->defname, kw_len) == 0)
                     break;
@@ -802,6 +856,8 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
      * user didn't say RESET (option=val).  (Must do this because the grammar
      * doesn't enforce it.)
      */
+    const char *storageType = NULL;
+    bool toastStorageTypeSet = false;
     foreach (cell, defList) {
         DefElem *def = (DefElem *)lfirst(cell);
 
@@ -843,6 +899,16 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
             if (namspace == NULL) {
                 if (def->defnamespace != NULL)
                     continue;
+            } else if (pg_strcasecmp(def->defname, "storage_type") == 0 && pg_strcasecmp(namspace, "toast") == 0) {
+                /* save the storage type of parent table for toast table, may be used as its storage type */
+                if (def->defnamespace == NULL) {
+                    /* save parent storage type for toast */
+                    storageType = ((def->arg != NULL) ? defGetString(def) : "true");
+                    continue;
+                } else if (pg_strcasecmp(def->defnamespace, namspace) != 0) {
+                    continue;
+                }
+                toastStorageTypeSet = true; /* toast table set the storage type itself */
             } else if (def->defnamespace == NULL)
                 continue;
             else if (pg_strcasecmp(def->defnamespace, namspace) != 0)
@@ -857,11 +923,25 @@ Datum transformRelOptions(Datum oldOptions, List *defList, const char *namspace,
                 value = defGetString(def);
             else
                 value = "true";
+
             len = VARHDRSZ + strlen(def->defname) + 1 + strlen(value);
             /* +1 leaves room for sprintf's trailing null */
             t = (text *)palloc(len + 1);
             SET_VARSIZE(t, len);
             rc = sprintf_s(VARDATA(t), len + 1, "%s=%s", def->defname, value);
+            securec_check_ss(rc, "\0", "\0");
+            astate = accumArrayResult(astate, PointerGetDatum(t), false, TEXTOID, CurrentMemoryContext);
+        }
+    }
+
+    /* we did not specify a storage type for toast, so use the same storage type as its parent */
+    if (namspace != NULL && pg_strcasecmp(namspace, "toast") == 0 && !toastStorageTypeSet) {
+        if (storageType != NULL) {
+            Size len = VARHDRSZ + strlen("storage_type") + 1 + strlen(storageType);
+            /* +1 leaves room for sprintf's trailing null */
+            text *t = (text *)palloc(len + 1);
+            SET_VARSIZE(t, len);
+            errno_t rc = sprintf_s(VARDATA(t), len + 1, "%s=%s", "storage_type", storageType);
             securec_check_ss(rc, "\0", "\0");
             astate = accumArrayResult(astate, PointerGetDatum(t), false, TEXTOID, CurrentMemoryContext);
         }
@@ -1360,6 +1440,145 @@ void fillRelOptions(void *rdopts, Size basesize, relopt_value *options, int numo
 }
 
 /*
+ * @Description: fill options for TDE(Transparent Data Encryption) relations
+ * @Param[IN] options: input user options.
+ */
+void fillTdeRelOptions(List *options, char relkind)
+{
+    ListCell *listptr1 = NULL;
+    bool spec_encrypt = false;
+    bool algo_flag = false;
+    bool dek_flag = false;
+    bool cmk_flag = false;
+    DefElem *opt_dek = makeNode(DefElem);
+    DefElem *opt_cmk = makeNode(DefElem);
+    DefElem *opt_algo = makeNode(DefElem);
+
+    foreach(listptr1, options) {
+        DefElem *defs = reinterpret_cast<DefElem *>(lfirst(listptr1));
+        if (pg_strcasecmp(defs->defname, "enable_tde") == 0) {
+            if (t_thrd.proc->workingVersionNum < TDE_VERSION_NUM) {
+                ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("create TDE table failed"),
+                        errdetail("current version does not support TDE feature"),
+                        errcause("TDE feature is not supported for current version"),
+                        erraction("check database version about create TDE table")));
+            }
+            if (relkind == RELKIND_MATVIEW) {
+                ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("create matview with TDE failed"),
+                        errdetail("materialized views do not support TDE feature"),
+                        errcause("TDE feature is not supported for Create materialized views"),
+                        erraction("check CREATE syntax about create the materialized views")));
+            }
+            spec_encrypt = true;
+            continue;
+        }
+
+        if (pg_strcasecmp(defs->defname, "encrypt_algo") == 0) {
+            if (defs->arg == NULL) {
+                ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("set relation option %s failed", defs->defname),
+                    errdetail("%s requires a string parameter", defs->defname)));
+            }
+            algo_flag = true;
+            continue;
+        }
+
+        if (pg_strcasecmp(defs->defname, "dek_cipher") == 0) {
+            if (defs->arg == NULL) {
+                ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("set relation option %s failed", defs->defname),
+                    errdetail("%s requires a string parameter", defs->defname)));
+            }
+            dek_flag = true;
+            continue;
+        }
+
+        if (pg_strcasecmp(defs->defname, "cmk_id") == 0) {
+            if (defs->arg == NULL) {
+                ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("set relation option %s failed", defs->defname),
+                    errdetail("%s requires a string parameter", defs->defname)));
+            }
+            cmk_flag = true;
+            continue;
+        }
+    }
+
+    if (!spec_encrypt && (dek_flag || cmk_flag)) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("set relation option failed"),
+            errdetail("enable_tde must be set when cmk_id or dek_cipher is set")));
+        return;
+    }
+
+    if (dek_flag != cmk_flag) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("create TDE table failed"),
+            errdetail("should not set cmk_id or dek_cipher only to enable TDE feature")));
+        return;
+    }
+
+    if (!g_instance.attr.attr_security.enable_tde && spec_encrypt) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("set relation option enable_tde failed"),
+            errdetail("guc parameter enable_tde must be set to on to enable TDE feature")));
+        return;
+    }
+
+    if (algo_flag && !spec_encrypt) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("set relation option encrypt_algo failed"), 
+            errdetail("enable_tde option must be set when encrypt_algo is set")));
+        return;
+    }
+
+    if (spec_encrypt) {
+        if (!dek_flag && !cmk_flag) {
+            const TDEData* tde_data = NULL;
+            TDEKeyManager* tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
+            tde_key_manager->init();
+            tde_data = tde_key_manager->create_dek();
+            char* dek_cipher = (char *)palloc0(strlen(tde_data->dek_cipher) + 1); /* should not free in this function */
+            char* cmk_id = (char *)palloc0(strlen(tde_data->cmk_id) + 1); /* should not free in this function */
+            errno_t rc = EOK;
+            rc = strcpy_s(dek_cipher, strlen(tde_data->dek_cipher) + 1, tde_data->dek_cipher);
+            securec_check(rc, "\0", "\0");
+            rc = strcpy_s(cmk_id, strlen(tde_data->cmk_id) + 1, tde_data->cmk_id);
+            securec_check(rc, "\0", "\0");
+
+            opt_dek->type = T_DefElem;
+            opt_dek->defnamespace = NULL;
+            opt_dek->defname = "dek_cipher";
+            opt_dek->defaction = DEFELEM_UNSPEC;
+            opt_dek->arg = reinterpret_cast<Node *>(makeString(dek_cipher));
+            options = lappend(options, opt_dek);
+
+            opt_cmk->type = T_DefElem;
+            opt_cmk->defnamespace = NULL;
+            opt_cmk->defname = "cmk_id";
+            opt_cmk->defaction = DEFELEM_UNSPEC;
+            opt_cmk->arg = reinterpret_cast<Node *>(makeString(cmk_id));
+            options = lappend(options, opt_cmk);
+            if (IS_PGXC_DATANODE) {
+                tde_key_manager->save_key(tde_data);
+            }
+            DELETE_EX2(tde_key_manager);
+        }
+
+        if (!algo_flag) {
+            opt_algo->type = T_DefElem;
+            opt_algo->defnamespace = NULL;
+            opt_algo->defname = "encrypt_algo";
+            opt_algo->defaction = DEFELEM_UNSPEC;
+            opt_algo->arg = reinterpret_cast<Node *>(makeString("AES_128_CTR"));
+            options = lappend(options, opt_algo);
+        }
+    } 
+}
+
+/*
  * @Description: check compression option for row relation
  * @Param[IN] options: input user options.
  * @See also:
@@ -1390,6 +1609,57 @@ void RowTblCheckCompressionOption(List *options)
             break;
         }
     }
+}
+
+void RowTblCheckHashBucketOption(List* options, StdRdOptions* std_opt)
+{
+    int  bucketcnt  = std_opt->bucketcnt;
+    bool hashbucket = std_opt->hashbucket;
+    bool segment    = std_opt->segment;
+    ListCell *opt = NULL;
+
+    if (options == NULL) {
+        return; /* nothing to do */
+    }
+
+    bool check_hashbucket = (bucketcnt != 0 && hashbucket == false);
+    bool check_segment = ((segment == false) && (bucketcnt != 0 || hashbucket == true));
+
+    if (check_hashbucket || check_segment) {
+        bool set_hashbucket = false;
+        bool set_segment = false;
+        foreach (opt, options) {
+            DefElem *def = (DefElem *)lfirst(opt);
+
+            if (pg_strcasecmp(def->defname, "hashbucket") == 0) {
+                set_hashbucket = true;
+            } else if (pg_strcasecmp(def->defname, "segment") == 0) {
+                set_segment = true;
+            }
+        }
+
+        if ((check_segment && set_segment) || (check_hashbucket && set_hashbucket)) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                     errmsg("Please Check the setting of [hashbucket] [segment] and [bucketcnt] options"),
+                     errdetail("Their dependencies are as follow [bucketcnt =>] hashbucket[on] => segment[on]")));
+        }
+    }
+
+    if (!hashbucket && bucketcnt != 0) {
+        ereport(NOTICE,
+            (errmsg("bucketcnt can only used for hashbucket table, set hashbucket to on by default")));
+        hashbucket = true;
+    }
+
+    if (hashbucket && !segment) {
+        ereport(NOTICE,
+            (errmsg("hashbucket table need segment storage, set segment to on by default")));
+        segment = true;
+    }
+
+    std_opt->hashbucket = hashbucket;
+    std_opt->segment = segment;
 }
 
 /*
@@ -1473,10 +1743,59 @@ void ForbidToSetOptionsForColTbl(List *options)
         "enable_tsdb_delta",
         "tsdb_deltamerge_interval",
         "tsdb_deltamerge_threshold",
-        "tsdb_deltainsert_threshold"
+        "tsdb_deltainsert_threshold",
+        "enable_tde",
+        "encrypt_algo",
+        "dek_cipher",
+        "cmk_id"
     };
 
     ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "column relation");
+}
+
+/*
+ * @Description: check relation options for non-tde table
+ * @Param[IN] options: input user options
+ */
+void ForbidToSetTdeOptionsForNonTdeTbl(List *options)
+{
+    static const char *unsupported[] = {
+        "enable_tde",
+        "dek_cipher",
+        "cmk_id",
+        "encrypt_algo"
+    };
+
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "Non-TDE relation");
+}
+
+/*
+ * @Description: not allowed to alter "dek_cipher" and "cmk_id" by user directly.
+ * @Param[IN] options: input user options
+ */
+void ForbidToAlterOptionsForTdeTbl(List *options)
+{
+    static const char *unsupported[] = {
+        "dek_cipher",
+        "cmk_id"
+    };
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "tde relation");
+}
+
+/*
+ * @Description: check relation options for ustore table
+ * @Param[IN] options: input user options
+ */
+void ForbidToSetOptionsForUstoreTbl(List *options)
+{
+    static const char *unsupported[] = {
+        "enable_tde",
+        "dek_cipher",
+        "cmk_id",
+        "encrypt_algo"
+    };
+
+    ForbidUserToSetUnsupportedOptions(options, unsupported, lengthof(unsupported), "ustore relation");
 }
 
 /*
@@ -1580,8 +1899,9 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "partial_cluster_rows", RELOPT_TYPE_INT, offsetof(StdRdOptions, partial_cluster_rows) },
         { "internal_mask", RELOPT_TYPE_INT, offsetof(StdRdOptions, internalMask) },
         { "orientation", RELOPT_TYPE_STRING, offsetof(StdRdOptions, orientation) },
+        { "indexsplit", RELOPT_TYPE_STRING, offsetof(StdRdOptions, indexsplit) },
         { "compression", RELOPT_TYPE_STRING, offsetof(StdRdOptions, compression) },
-        {"table_access_method", RELOPT_TYPE_STRING, offsetof(StdRdOptions, table_access_method)},
+        { "storage_type", RELOPT_TYPE_STRING, offsetof(StdRdOptions, storage_type) },
         { "ttl", RELOPT_TYPE_STRING, offsetof(StdRdOptions, ttl) },
         { "period", RELOPT_TYPE_STRING, offsetof(StdRdOptions, period) },
         { "string_optimize", RELOPT_TYPE_STRING, offsetof(StdRdOptions, string_optimize) },
@@ -1596,14 +1916,24 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "append_mode", RELOPT_TYPE_STRING, offsetof(StdRdOptions, append_mode) },
         { "merge_list", RELOPT_TYPE_STRING, offsetof(StdRdOptions, merge_list) },
         { "rel_cn_oid", RELOPT_TYPE_INT, offsetof(StdRdOptions, rel_cn_oid) },
+        { "init_td", RELOPT_TYPE_INT, offsetof(StdRdOptions, initTd) },
         { "append_mode_internal", RELOPT_TYPE_INT, offsetof(StdRdOptions, append_mode_internal) },
         { "start_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, start_ctid_internal) },
         { "end_ctid_internal", RELOPT_TYPE_STRING, offsetof(StdRdOptions, end_ctid_internal) },
         { "user_catalog_table", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, user_catalog_table) },
         { "hashbucket", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hashbucket) },
+        { "segment", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, segment) }, 
         { "primarynode", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, primarynode) },
         { "on_commit_delete_rows", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, on_commit_delete_rows)},
-        { "wait_clean_gpi", RELOPT_TYPE_STRING, offsetof(StdRdOptions, wait_clean_gpi)}
+        { "wait_clean_gpi", RELOPT_TYPE_STRING, offsetof(StdRdOptions, wait_clean_gpi)},
+        { "bucketcnt", RELOPT_TYPE_INT, offsetof(StdRdOptions, bucketcnt)},
+        { "parallel_workers", RELOPT_TYPE_INT, offsetof(StdRdOptions, parallel_workers)},
+        { "crossbucket", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, crossbucket)},
+        { "wait_clean_cbi", RELOPT_TYPE_STRING, offsetof(StdRdOptions, wait_clean_cbi)},
+        { "dek_cipher", RELOPT_TYPE_STRING, offsetof(StdRdOptions, dek_cipher)},
+        { "cmk_id", RELOPT_TYPE_STRING, offsetof(StdRdOptions, cmk_id)},
+        { "encrypt_algo", RELOPT_TYPE_STRING, offsetof(StdRdOptions, encrypt_algo)},
+        { "enable_tde", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, enable_tde)},
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
@@ -1778,6 +2108,22 @@ static void ValidateStrOptOrientation(const char *val)
         0 != pg_strncasecmp(val, ORIENTATION_ORC, strlen(val))) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"ORIENTATION\" option"),
                         errdetail("Valid string are \"column\", \"row\", \"timeseries\", \"orc\".")));
+    }
+}
+
+/*
+ * Brief        : Check the orientation option Validity.
+ * Input        : val, the version option value.
+ * Output       : None.
+ * Return Value : None.
+ * Notes        : None.
+ */
+static void ValidateStrOptIndexsplit(const char *val)
+{
+    if (pg_strncasecmp(val, INDEXSPLIT_OPT_DEFAULT, strlen(val)) != 0 &&
+        pg_strncasecmp(val, INDEXSPLIT_OPT_INSERTPT, strlen(val)) != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid string for  \"INDEXSPLIT\" option"),
+            errdetail("Valid string are \"default\", \"insertpt\".")));
     }
 }
 
@@ -1971,6 +2317,20 @@ void CheckWaitCleanGpi(const char* value)
     }
 }
 
+/*
+ * check parameter of wait_clean_cbi . Allows "y", "n"
+ * and "auto" values.
+ */
+void CheckWaitCleanCbi(const char* value)
+{
+    if (value == NULL || (strcmp(value, "y") != 0 && strcmp(value, "n") != 0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid value for \"wait_clean_cbi\" option"),
+                errdetail("Valid values are \"y\", \"n\".")));
+    }
+}
+
 
 /*
  * Brief        : Check the compression mode for tablespace.
@@ -2001,11 +2361,11 @@ static void ValidateStrOptCompression(const char *val)
  */
 static void ValidateStrOptTableAccessMethod(const char* val)
 {
-    if (pg_strcasecmp(val, TABLE_ACCESS_METHOD_HEAP) != 0 && pg_strcasecmp(val, TABLE_ACCESS_METHOD_USTORE) != 0)
+    if (pg_strcasecmp(val, TABLE_ACCESS_METHOD_ASTORE) != 0 && pg_strcasecmp(val, TABLE_ACCESS_METHOD_USTORE) != 0)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Invalid string for \"TABLE_ACCESS_METHOD\" option."),
-                errdetail("Valid strings are \"HEAP\", \"USTORE\"")));
+                errdetail("Valid strings are \"ASTORE\", \"USTORE\"")));
 }
 
 /*
@@ -2082,6 +2442,49 @@ static void ValidateStrOptStringOptimize(const char *val)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid interval string for  \"string_optimize\" option"),
             errdetail("Valid string_optimize string in contview.")));
+    }
+}
+
+/*
+ * Brief        : Check the encrypt_algo option Validity.
+ * Input        : val, the encrypt_algo option value for tde.
+ */
+static void ValidateStrOptEncryptAlgo(const char *val)
+{
+    if (pg_strcasecmp(val, "AES_128_CTR") != 0 && pg_strcasecmp(val, "SM4_CTR") != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Invalid string for \"encrypt_algo\" option"),
+                        errdetail("Valid string are \"AES_128_CTR\", \"SM4_CTR\".")));
+    }
+}
+
+/*
+ * Brief        : Check the dek_cipher option Validity.
+ * Input        : val, the dek_cipher option value for tde.
+ */
+static void ValidateStrOptDekCipher(const char *val)
+{
+    /* The max length of dek_cipher is 312 for AES256, and 280 for AES128 and SE4 */
+    const int dek_cipher_len_min = 280;
+    const int dek_cipher_len_max = 312;
+    if (strlen(val) < dek_cipher_len_min || strlen(val) > dek_cipher_len_max) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Invalid string for \"dek_cipher\" option"),
+                        errdetail("Valid string should be taken from kms.")));
+    }
+}
+
+/*
+ * Brief        : Check the cmk_id option Validity.
+ * Input        : val, the cmk_id option value for tde.
+ */
+static void ValidateStrOptCmkId(const char *val)
+{
+    const int cmk_id_len = 36; /* The length of cmk_id is 36 */
+    if (strlen(val) != cmk_id_len) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Invalid string for \"cmk_id\" option"),
+                        errdetail("Valid string should be taken from kms and set to the tde_cmk_id guc parameter.")));
     }
 }
 
@@ -2165,7 +2568,7 @@ int8 heaprel_get_compresslevel_from_modes(int16 modes)
 void ForbidUserToSetDefinedOptions(List *options)
 {
     /* the following option must be in tab[] of default_reloptions(). */
-    static const char *unchangedOpt[] = {"orientation"};
+    static const char *unchangedOpt[] = {"orientation", "hashbucket", "bucketcnt", "segment", "encrypt_algo"};
 
     int firstInvalidOpt = -1;
     if (FindInvalidOption(options, unchangedOpt, lengthof(unchangedOpt), &firstInvalidOpt)) {
@@ -2194,6 +2597,19 @@ void ForbidOutUsersToSetInnerOptions(List *userOptions)
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Un-support feature"),
                             errdetail("Forbid to set or change inner option \"%s\"", innnerOpts[firstInvalidOpt])));
         }
+    }
+}
+
+void ForbidUserToSetDefinedIndexOptions(List *options)
+{
+    /* the following option must be in tab[] of default_reloptions(). */
+    static const char *unchangedOpt[] = {"crossbucket"};
+
+    int firstInvalidOpt = -1;
+    if (FindInvalidOption(options, unchangedOpt, lengthof(unchangedOpt), &firstInvalidOpt)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("Un-support feature"),
+                         errdetail("Option \"%s\" doesn't allow ALTER", unchangedOpt[firstInvalidOpt]))));
     }
 }
 
@@ -2310,5 +2726,140 @@ List* RemoveRelOption(List* options, const char* optName, bool* removed)
     }
 
     return options;
+}
+
+/*
+ * determine the final crossbucket option value based on the combination of various factors:
+ * 
+ * default_index_kind (kind): { 0, 1, 2 }, represented by 2 bits
+ *     0: denotes turning off multiple nodes GPI feature
+ *     1: denotes creating local index by default
+ *     2: denotes creating global index by default
+ * stmtoptcbi (cbi): { -1, 0, 1 }, represented by 2 bits after + 1
+ *    -1: denotes no crossbucket option is specified in CREATE INDEX statement
+ *     0: denotes crossbucket=off is specified
+ *     1: denotes crossbucket=on is specified
+ * stmtoptgpi (gpi): { 0, 1 }, represented by 1 bit
+ *     0: denotes stmt->isGlobal is false
+ *     1: denotes stmt->isGlobal is true
+ * 
+ * combine above three items from high to low to one 5 bits value:
+ * 
+ *     kind cbi gpi  bits  res
+ *     00   00  0  = 0x0   0
+ *     00   00  1  = 0x1  -1
+ *     00   01  0  = 0x2   0
+ *     00   01  1  = 0x3  -1
+ *     00   10  0  = 0x4   1
+ *     00   10  1  = 0x5  -1
+ *     01   00  0  = 0x8   0
+ *     01   00  1  = 0x9   1
+ *     01   01  0  = 0xA   0
+ *     01   01  1  = 0xB  -1
+ *     01   10  0  = 0xC   1
+ *     01   10  1  = 0xD   1
+ *     10   00  0  = 0x10  1
+ *     10   00  1  = 0x11  1
+ *     10   01  0  = 0x12  0
+ *     10   01  1  = 0x13 -1
+ *     10   10  0  = 0x14  1
+ *     10   10  1  = 0x15  1
+ * 
+ * return values:
+ *    -1: invalid combination
+ *     0: the determined crossbucket option is false
+ *     1: the determined crossbucket option is true
+ */
+static int map_crossbucket_option(const int default_index_kind, const int stmtoptcbi, const bool stmtoptgpi)
+{
+    const uint8 width = 2;
+    uint8 bits = default_index_kind & 0xFF;
+    uint8 cbi = (stmtoptcbi + 1) & 0xFF;
+    uint8 gpi = stmtoptgpi ? 1 : 0;
+    int res = -1;
+
+    bits <<= width;
+    bits |= cbi;
+    bits <<= 1;
+    bits |= gpi;
+
+    switch (bits) {
+        case 0x0:
+        case 0x2:
+        case 0x8:
+        case 0xA:
+        case 0x12:
+            res = 0;
+            break;
+        case 0x4:
+        case 0x9:
+        case 0xC:
+        case 0xD:
+        case 0x10:
+        case 0x11:
+        case 0x14:
+        case 0x15:
+            res = 1;
+            break;
+        default:
+            break;
+    }
+
+    return res;
+}
+
+/* caller must make sure it gets called for hashbucket-enabled relation */
+bool get_crossbucket_option(List **options_ptr, bool stmtoptgpi, char *accessmethod, int *crossbucketopt)
+{
+    ListCell *cell = NULL;
+    int stmtoptcbi = -1; /* -1 means the SQL statement doesn't contain crossbucket option */
+    int res;
+
+    Assert(options_ptr != NULL);
+
+    foreach (cell, *options_ptr) {
+        DefElem *elem = (DefElem *)lfirst(cell);
+        if (strcmp(elem->defname, "crossbucket") == 0) {
+            stmtoptcbi = defGetBoolean(elem) ? 1 : 0;
+            break;
+        }
+    }
+
+    if (crossbucketopt != NULL) {
+        *crossbucketopt = stmtoptcbi;
+    }
+
+    res = map_crossbucket_option(u_sess->attr.attr_storage.default_index_kind, stmtoptcbi, stmtoptgpi);
+    if (res < 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                errmsg("Invalid crossbucket setting for global partitioned index with hashbucket enabled.")));
+    }
+    if (res > 0 && stmtoptcbi == -1) {
+        if (accessmethod != NULL && pg_strcasecmp(accessmethod, "btree") != 0) {
+            /* skip non-btree index and return false */
+            return false;
+        } else {
+            /* 
+             * The above logic determined crossbucket option should be true, but the
+             * statement didn't contain it, so append it here to make it persistent.
+             */
+            *options_ptr = lappend(*options_ptr, makeDefElem("crossbucket", (Node*)makeString("on")));
+        }
+    }
+
+    return ((res <= 0) ? false : true);
+}
+bool is_contain_crossbucket(List *defList)
+{
+    ListCell *lc = NULL;
+    /* Scan list to see if orientation was ROW store. */
+    foreach (lc, defList) {
+        DefElem* def = (DefElem*)lfirst(lc);
+        if (pg_strcasecmp(def->defname, "crossbucket") == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 

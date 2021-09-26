@@ -16,7 +16,7 @@
  * stmt_processor.cpp
  *
  * IDENTIFICATION
- *	  src\common\interfaces\libpq\client_logic_processor\stmt_processor.cpp
+ *      src\common\interfaces\libpq\client_logic_processor\stmt_processor.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -32,6 +32,7 @@
 #include "client_logic_cache/cached_column_setting.h"
 #include "client_logic_cache/column_hook_executors_list.h"
 #include "client_logic_common/client_logic_utils.h"
+#include "client_logic_expressions/column_ref_data.h"
 #include "client_logic/cstrings_map.h"
 #include "raw_value.h"
 #include "raw_values_cont.h"
@@ -53,20 +54,17 @@
 #include "client_logic_expressions/expr_processor.h"
 #include "encryption_pre_process.h"
 #include "client_logic_expressions/expr_parts_list.h"
+#include "client_logic_expressions/pg_functions_support.h"
 #include "catalog/pg_class.h"
+#include "func_processor.h"
 
 #include <iostream>
-
-#define RETURN_IF(errorOK)      \
-    if (errorOK) {              \
-        return false;           \
-    }
 
 bool Processor::run_pre_update_statement_set(const UpdateStmt * const update_stmt, StatementData *statement_data)
 {
     /* get column configuration from cache (for every column in query) */
     CachedColumns cached_columns;
-    bool ret = ICachedColumnManager::get_instance().get_cached_columns(update_stmt, &cached_columns);
+    bool ret = statement_data->GetCacheManager()->get_cached_columns(update_stmt, &cached_columns);
     if (!ret || cached_columns.is_empty()) {
         return true;
     }
@@ -97,7 +95,7 @@ bool Processor::run_pre_update_statement_where(const UpdateStmt * const update_s
     /* get all columns relevant for this query's where clause */
     bool is_op_forbidden(false);
     CachedColumns cached_columns;
-    bool ret = ICachedColumnManager::get_instance().get_cached_columns(update_stmt->relation, &where_expr_parts_list,
+    bool ret = statement_data->GetCacheManager()->get_cached_columns(update_stmt->relation, &where_expr_parts_list,
         is_op_forbidden, &cached_columns);
     if (is_op_forbidden) {
         printfPQExpBuffer(&statement_data->conn->errorMessage,
@@ -142,7 +140,7 @@ bool Processor::run_pre_update_statement(const UpdateStmt * const update_stmt,
     StatementData *statement_data, ICachedColumns* cached_columns)
 {
     /* check if feature is used */
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
     }
 
@@ -160,8 +158,9 @@ bool Processor::run_pre_update_statement(const UpdateStmt * const update_stmt,
     }
     /* update c1 set col1 =  ... returning [] */
     CachedColumns cached_column_temp;
-    ICachedColumnManager::get_instance().get_cached_columns(update_stmt->relation, &cached_column_temp);
-    if (!run_pre_returning_list_statement(update_stmt->returningList, &cached_column_temp, cached_columns)) {
+    statement_data->GetCacheManager()->get_cached_columns(update_stmt->relation, &cached_column_temp);
+    if (!run_pre_returning_list_statement(update_stmt->returningList, &cached_column_temp, cached_columns,
+        statement_data)) {
         return false;
     }
     return true;
@@ -169,15 +168,16 @@ bool Processor::run_pre_update_statement(const UpdateStmt * const update_stmt,
 
 /* update/insert/delete returning []  the returning CacheColumn is useful for (with cte as... ) */
 bool Processor::run_pre_returning_list_statement(const List *return_list, ICachedColumns *cached_columns_from,
-    ICachedColumns *cached_columns)
+    ICachedColumns *cached_columns, StatementData *statement_data)
 {
     if (cached_columns != NULL && return_list != NULL && !cached_columns_from->is_empty()) {
         CStringsMap returning_list;
-        if (!get_column_names_from_target_list(return_list, &returning_list)) {
+        if (!get_column_names_from_target_list(return_list, &returning_list, statement_data)) {
             return false;
         }
         for (size_t i = 0; i < cached_columns_from->size(); i++) {
-            if (find_in_name_map(returning_list, cached_columns_from->at(i)->get_col_name())) {
+            const ICachedColumn *cached_column = cached_columns_from->at(i);
+            if (cached_column != NULL && find_in_name_map(returning_list, cached_column->get_col_name())) {
                 CachedColumn *return_cached = new (std::nothrow) CachedColumn(cached_columns_from->at(i));
                 if (return_cached == NULL) {
                     fprintf(stderr, "failed to new CachedColumn object\n");
@@ -194,33 +194,32 @@ bool Processor::run_pre_returning_list_statement(const List *return_list, ICache
 bool Processor::run_pre_insert_statement(const InsertStmt * const insert_stmt, 
     StatementData *statement_data, ICachedColumns* cached_columns)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty())
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
-
-    if (insert_stmt == nullptr) {
-        return false;
     }
+
+    RETURN_IF(insert_stmt == NULL, false);
 
     /* get column configuration from cache (for every column in query) */
     CachedColumns cached_columns_temp;
-    bool ret = ICachedColumnManager::get_instance().get_cached_columns(insert_stmt, &cached_columns_temp);
+    bool ret = statement_data->GetCacheManager()->get_cached_columns(insert_stmt, &cached_columns_temp);
     if (!ret) {
         return true;
     }
     CachedColumns cached_column_insert(false, true);
     if (insert_stmt->withClause) {
-        if (!run_pre_with_list_statement(insert_stmt->withClause->ctes, statement_data, &cached_column_insert)) {
-            return false;
-        }
+        ret = run_pre_with_list_statement(insert_stmt->withClause->ctes, statement_data, &cached_column_insert);
+        RETURN_IF(!ret, false);
     }
     SelectStmt *select_stmt = (SelectStmt *)(insert_stmt->selectStmt);
     if (select_stmt != nullptr && select_stmt->fromClause != nullptr && select_stmt->targetList != nullptr) {
         SetOperation set_operation(SETOP_NONE);
         bool all(false);
         CachedColumns cached_columns_select(false, true);
-        if (!run_pre_select_statement(select_stmt, set_operation, all, statement_data, &cached_columns_select, &cached_column_insert)) {
-            return false;
-        }
+        ret = run_pre_select_statement(select_stmt, set_operation, all, statement_data, 
+            &cached_columns_select, &cached_column_insert);
+        RETURN_IF(!ret, false);
+        
         if (cached_columns_select.size() != cached_columns_temp.not_null_size()) {
             if (cached_columns_select.size() < cached_columns_temp.size()) {
                 printfPQExpBuffer(&statement_data->conn->errorMessage,
@@ -231,9 +230,26 @@ bool Processor::run_pre_insert_statement(const InsertStmt * const insert_stmt,
             }
             return false;
         }
-        for (size_t i = 0; i < cached_columns_select.size(); ++i) {
-            ColumnHookExecutor *select_exe = cached_columns_select.at(i)->get_column_hook_executors()->at(0);
-            ColumnHookExecutor *insert_exe = cached_columns_temp.at(i)->get_column_hook_executors()->at(0);
+
+        size_t i = 0;
+        size_t j = 0;
+        ColumnHookExecutor *select_exe = NULL;
+        ColumnHookExecutor *insert_exe = NULL;
+
+        /* 
+         * if a column is unencrypted, we push nothing in the 'cached_columns_select'
+         * but, we need to push a 'NULL' in the 'cached_columns_temp' to reserve the position of this column
+         */
+        for (; i < cached_columns_select.size(); i++, j++) {
+            select_exe = cached_columns_select.at(i)->get_column_hook_executors()->at(0);
+
+            for (; j < cached_columns_temp.size(); j++) {
+                if (cached_columns_temp.at(j) != NULL) {
+                    break;
+                }
+            }
+
+            insert_exe = cached_columns_temp.at(j)->get_column_hook_executors()->at(0);
             if (insert_exe != select_exe) {
                 printfPQExpBuffer(&statement_data->conn->errorMessage,
                     "ERROR(CLIENT): encrypted data should not be inserted into encrypted column with different keys\n");
@@ -258,19 +274,19 @@ bool Processor::run_pre_insert_statement(const InsertStmt * const insert_stmt,
 
     /* check that if columns were retrieved in a list from the query, then the number of raw values equals (modulo) */
     if (insert_stmt->cols && !cached_columns_temp.is_divisor(raw_values_list.size())) {
-        Assert(false);
-        return false;
+        return true;
     }
     /* insert c1 values () returning [] */
-    if (!run_pre_returning_list_statement(insert_stmt->returningList, &cached_columns_temp, cached_columns)) {
-        return false;
-    }
+    ret = run_pre_returning_list_statement(insert_stmt->returningList, &cached_columns_temp, cached_columns,
+        statement_data);
+    RETURN_IF(!ret, false);
 
     return ValuesProcessor::process_values(statement_data, &cached_columns_temp, list_length(select_stmt->valuesLists),
         &raw_values_list);
 }
 
-bool Processor::deal_order_by_statement(const SelectStmt * const select_stmt, ICachedColumns *select_cached_columns)
+bool Processor::deal_order_by_statement(const SelectStmt * const select_stmt, ICachedColumns *select_cached_columns,
+        StatementData *statement_data)
 {
     if (select_stmt == NULL || select_cached_columns == NULL || !select_cached_columns->is_to_process()) {
         return true;
@@ -294,8 +310,8 @@ bool Processor::deal_order_by_statement(const SelectStmt * const select_stmt, IC
                         if (select_cached_columns->at(i) && select_cached_columns->at(i)->get_col_name()) {
                             if (strcmp(select_cached_columns->at(i)->get_col_name(),
                                 NameStr(column_ref_data.m_column_name)) == 0) {
-                                fprintf(stderr,
-                                    "ERROR(CLIENT): could not support order by operator for column encryption\n");
+                                printfPQExpBuffer(&statement_data->conn->errorMessage, libpq_gettext(
+                                    "ERROR(CLIENT): could not support order by operator for column encryption\n"));
                                 return false;
                             }
                         }
@@ -321,7 +337,6 @@ bool Processor::run_pre_cached_global_setting(PGconn *conn, const char *stmt_nam
 
     PreparedStatement *prepared_statement = conn->client_logic->pendingStatements->get_or_create(stmt_name);
     if (!prepared_statement) {
-        Assert(false);
         return false;
     }
 
@@ -336,32 +351,26 @@ bool Processor::run_pre_cached_global_setting(PGconn *conn, const char *stmt_nam
      */
     size_t existing_global_hook_executors_size(0);
     const GlobalHookExecutor **existing_global_hook_executors =
-        CacheLoader::get_instance().get_global_hook_executors(existing_global_hook_executors_size);
+        conn->client_logic->m_cached_column_manager->get_global_hook_executors(existing_global_hook_executors_size);
     bool ret = HooksManager::GlobalSettings::pre_create(*conn->client_logic, function_name, string_args,
         existing_global_hook_executors, existing_global_hook_executors_size);
     if (existing_global_hook_executors) {
         free(existing_global_hook_executors);
     }
 
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-    errno_t rc = 0;
-
-    if (ret) {
-        conn->client_logic->query_type = CE_CREATE_CMK;
-        const char *cmk_key_path = string_args.find("key_path");
-        rc = strcpy_s(conn->client_logic->query_args, sizeof(conn->client_logic->query_args), cmk_key_path);
-        securec_check_c(rc, "", "");
-    }
-#endif
     return ret;
 }
 
 bool Processor::run_pre_column_setting_statement(PGconn *conn, const char *stmt_name,
     CreateClientLogicColumn *client_logic_column, const char *query, PGClientLogicParams &params)
 {
-    if (!ICachedColumnManager::get_instance().has_global_setting()) {
-        printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): no client master key found in local cache\n");
-        return false;
+    if (!conn->client_logic->m_cached_column_manager->has_global_setting()) {
+        conn->client_logic->cacheRefreshType |= CacheRefreshType::GLOBAL_SETTING;
+        conn->client_logic->m_cached_column_manager->load_cache(conn); 
+        if (!conn->client_logic->m_cached_column_manager->has_global_setting()) {
+            printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): no global setting found in local cache\n");
+            return false;
+        }
     }
 
     int location = 0;
@@ -384,11 +393,11 @@ bool Processor::run_pre_column_setting_statement(PGconn *conn, const char *stmt_
     StringArgs new_strings_args;
 
     const CachedGlobalSetting *global_setting =
-        CacheLoader::get_instance().get_global_setting_by_fqdn(global_key_name);
+        conn->client_logic->m_cached_column_manager->get_global_setting_by_fqdn(global_key_name);
     if (global_setting == NULL) {
-        conn->client_logic->cacheRefreshType = CacheRefreshType::ALL;
-        ICachedColumnManager::get_instance().load_cache(conn);
-        global_setting = CacheLoader::get_instance().get_global_setting_by_fqdn(global_key_name);
+        conn->client_logic->cacheRefreshType = CacheRefreshType::CACHE_ALL;
+        conn->client_logic->m_cached_column_manager->load_cache(conn);
+        global_setting = conn->client_logic->m_cached_column_manager->get_global_setting_by_fqdn(global_key_name);
         if (global_setting == NULL) {
             if (strlen(global_key_name) == 0) {
                 printfPQExpBuffer(&conn->errorMessage,
@@ -449,7 +458,8 @@ bool Processor::is_set_operation_allowed_on_datatype(const ICachedColumns *cache
     return true;
 }
 
-bool Processor::get_column_names_from_target_list(const List *target_list, CStringsMap *col_alias_map)
+bool Processor::get_column_names_from_target_list(const List* target_list, CStringsMap* col_alias_map,
+    StatementData* statement_data)
 {
     ListCell *tl = NULL;
     if (target_list) {
@@ -472,7 +482,6 @@ bool Processor::get_column_names_from_target_list(const List *target_list, CStri
 
                     ColumnRefData column_ref_data;
                     if (!exprProcessor::expand_column_ref(cr, column_ref_data)) {
-                        Assert(false);
                         return false;
                     }
                     if (strcmp(alias_name, "") != 0) {
@@ -482,6 +491,18 @@ bool Processor::get_column_names_from_target_list(const List *target_list, CStri
                         /* hack for not having empty map as it needed for is_set_operation_allowed_on_datatype */
                         col_alias_map->set(column_ref_data.m_alias_fqdn, column_ref_data.m_alias_fqdn,
                             strlen(column_ref_data.m_alias_fqdn));
+                    }
+                } else if IsA (rt->val, FuncCall) {
+                    FuncCall* fc = (FuncCall*)rt->val;
+                    func_name_data func_name;
+                    exprProcessor::expand_function_name(fc, func_name);
+                    CachedProc* cached_proc =
+                        statement_data->GetCacheManager()->get_cached_proc(NameStr(func_name.m_catalogName),
+                        NameStr(func_name.m_schemaName), NameStr(func_name.m_functionName));
+                    if (cached_proc) {
+                        const char* fname =
+                            alias_name && strlen(alias_name) > 0 ? alias_name : func_name.m_functionName.data;
+                        statement_data->conn->client_logic->insert_function(fname, cached_proc);
                     }
                 }
             }
@@ -495,7 +516,7 @@ bool Processor::is_set_operation_allowed(const SelectStmt * const select_stmt, c
 {
     /* check whether operations on sets are allowed on this data type (UNION,INTERSECT,ETC) */
     CStringsMap col_alias_map;
-    if (!get_column_names_from_target_list(select_stmt->targetList, &col_alias_map)) {
+    if (!get_column_names_from_target_list(select_stmt->targetList, &col_alias_map, statement_data)) {
         return false;
     }
 
@@ -518,6 +539,35 @@ bool Processor::run_pre_from_list_statement(const List * const from_list, Statem
         Node *n = (Node *)lfirst(fl);
         if (!run_pre_from_item_statement(n, statement_data, cached_columns, cached_columns_parents)) {
             return false;
+        }
+    }
+    return true;
+}
+
+bool Processor::run_pre_range_statement(const RangeVar * const range_var, StatementData *statement_data,
+    ICachedColumns *cached_columns, const ICachedColumns* cached_columns_parents)
+{
+    CachedColumns cached_column_range(false);
+    statement_data->conn->client_logic->m_cached_column_manager->get_cached_columns(range_var, &cached_column_range);
+    for (size_t i = 0; i < cached_column_range.size(); i++) {
+        CachedColumn *range_cached = new (std::nothrow) CachedColumn(cached_column_range.at(i));
+        if (range_cached == NULL) {
+            fprintf(stderr, "failed to new CachedColumn object\n");
+            return false;
+        }
+        cached_columns->push(range_cached);
+    }
+    if (cached_columns_parents != NULL) {
+        for (size_t i = 0; i < cached_columns_parents->size(); i++) {
+            if (range_var->relname != NULL &&
+                strcmp(cached_columns_parents->at(i)->get_table_name(), range_var->relname) == 0) {
+                CachedColumn *range_cached = new (std::nothrow) CachedColumn(cached_columns_parents->at(i));
+                if (range_cached == NULL) {
+                    fprintf(stderr, "failed to new CachedColumn object\n");
+                    return false;
+                }
+                cached_columns->push(range_cached);
+            }
         }
     }
     return true;
@@ -546,35 +596,23 @@ bool Processor::run_pre_from_item_statement(const Node * const from_item, Statem
             return false;
         }
     } else if (IsA(from_item, RangeVar)) {
-        RangeVar *rangeVar = (RangeVar *)from_item;
-        if (rangeVar == NULL) {
+        RangeVar *range_var = (RangeVar *)from_item;
+        if (range_var == NULL) {
             return false;
         }
-        CachedColumns cached_column_range(false);
-        ICachedColumnManager::get_instance().get_cached_columns(rangeVar, &cached_column_range);
-        if (rangeVar->alias != NULL) {
+        if (range_var->alias != NULL) {
             if_alias = true;
-            alias_name = rangeVar->alias->aliasname;
+            alias_name = range_var->alias->aliasname;
         }
-        for (size_t i = 0; i < cached_column_range.size(); i++) {
-            CachedColumn *range_cached = new (std::nothrow) CachedColumn(cached_column_range.at(i));
-            if (range_cached == NULL) {
-                fprintf(stderr, "failed to new CachedColumn object\n");
-                return false;
-            }
-            cached_column_temp.push(range_cached);
+        if (!run_pre_range_statement(range_var, statement_data, &cached_column_temp, cached_columns_parents)) {
+            return false;
         }
-        if (cached_columns_parents != NULL) {
-            for (size_t i = 0; i < cached_columns_parents->size(); i++) {
-                if (rangeVar->relname != NULL &&
-                    strcmp(cached_columns_parents->at(i)->get_table_name(), rangeVar->relname) == 0) {
-                    CachedColumn *range_cached = new (std::nothrow) CachedColumn(cached_columns_parents->at(i));
-                    if (range_cached == NULL) {
-                        fprintf(stderr, "failed to new CachedColumn object\n");
-                        return false;
-                    }
-                    cached_column_temp.push(range_cached);
-                }
+    } else if (IsA(from_item, RangeFunction)) {
+        RangeFunction* range_func = (RangeFunction*)from_item;
+        ExprPartsList func_expr_parts_list;
+        if (range_func->funccallnode) {
+            if (handle_func_call((const FuncCall*)range_func->funccallnode, &func_expr_parts_list, statement_data)) {
+                func_processor::process(&func_expr_parts_list, statement_data);
             }
         }
     }
@@ -670,8 +708,8 @@ bool Processor::run_pre_join_statement(const JoinExpr * const join_stmt, Stateme
         }
 
         bool is_operator_forbidden(false);
-        ICachedColumnManager::get_instance().filter_cached_columns(cached_columns, &equal_clause,
-            is_operator_forbidden, &cached_euqal);
+        statement_data->conn->client_logic->m_cached_column_manager->filter_cached_columns(cached_columns, 
+            &equal_clause, is_operator_forbidden, &cached_euqal);
         if (is_operator_forbidden) {
             printfPQExpBuffer(&statement_data->conn->errorMessage,
                 "ERROR(CLIENT): euqal operator is not allowed on datatype of this column\n");
@@ -735,6 +773,33 @@ bool Processor::join_with_same_key(List *usingClause, ICachedColumns *cached_lar
     return true;
 }
 
+bool Processor::process_res_target(ResTarget* resTarget, StatementData* statementData, ExprPartsList* funcExprPartsList)
+{
+    if (resTarget) {
+        if (nodeTag(resTarget->val) == T_FuncCall) {
+            return handle_func_call((FuncCall*)resTarget->val, funcExprPartsList, statementData);
+        }
+    }
+    return true;
+}
+
+bool Processor::run_pre_select_target_list(List* targetList, StatementData* statementData,
+    ExprPartsList* funcExprPartsList)
+{
+    ListCell* listNode = NULL;
+    if (targetList) {
+        foreach (listNode, targetList) {
+            Node* n = (Node*)lfirst(listNode);
+            if (nodeTag(n) == T_ResTarget) {
+                if (!process_res_target((ResTarget*)n, statementData, funcExprPartsList)) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
 bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, StatementData *statement_data)
 {
     SetOperation set_operation(SETOP_NONE);
@@ -746,26 +811,37 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, S
 }
 
 bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, const SetOperation &parent_set_operation,
-    const bool &parent_all, StatementData *statement_data, ICachedColumns *cached_columns, ICachedColumns *cached_columns_parents)
+    const bool &parent_all, StatementData *statement_data, ICachedColumns *cached_columns, 
+    ICachedColumns *cached_columns_parents)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
     }
     bool select_res = false;
     /* recurse over SELECT's for SET operations such as UNION/INTERSECT/ETC. */
     if (select_stmt->op != SETOP_NONE) {
         select_res = process_select_set_operation(select_stmt, statement_data, cached_columns);
-        RETURN_IF(!select_res);
+        RETURN_IF(!select_res, false);
+    }
+
+    /* Handle function calls */
+    ExprPartsList func_expr_parts_list;
+    if (!run_pre_select_target_list(select_stmt->targetList, statement_data, &func_expr_parts_list)) {
+        return false;
+    }
+    /* procees fuction calls */
+    if (!func_processor::process(&func_expr_parts_list, statement_data)) {
+        return false;
     }
 
     /* handle single WHERE and HAVING statement */
     ExprPartsList where_expr_parts_list;
     select_res = exprProcessor::expand_expr(select_stmt->whereClause, statement_data, &where_expr_parts_list);
-    RETURN_IF(!select_res);
+    RETURN_IF(!select_res, false);
 
     ExprPartsList having_expr_vec;
     select_res = exprProcessor::expand_expr(select_stmt->havingClause, statement_data, &having_expr_vec);
-    RETURN_IF(!select_res);
+    RETURN_IF(!select_res, false);
     /*
      *  filtered_cached_where get all columns relevant for this query's where clause
      *  filtered_cached_having get all columns relevant for this query's haing clause
@@ -778,8 +854,8 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
     CachedColumns cached_columns_from(false, true);
     /* get target list */
     CStringsMap target_list;
-    select_res = get_column_names_from_target_list(select_stmt->targetList, &target_list);
-    RETURN_IF(!select_res);
+    select_res = get_column_names_from_target_list(select_stmt->targetList, &target_list, statement_data);
+    RETURN_IF(!select_res, false);
 
     /* from (select *) */
     if (select_stmt->withClause) {
@@ -789,17 +865,17 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
     }
     select_res = run_pre_from_list_statement(select_stmt->fromClause, statement_data, &cached_columns_from,
         cached_columns_parents);
-    RETURN_IF(!select_res);
+    RETURN_IF(!select_res, false);
     
-    ICachedColumnManager::get_instance().filter_cached_columns(&cached_columns_from, &where_expr_parts_list,
-        is_operator_forbidden, &filtered_cached_where);
+    statement_data->conn->client_logic->m_cached_column_manager->filter_cached_columns(&cached_columns_from, 
+        &where_expr_parts_list, is_operator_forbidden, &filtered_cached_where);
     if (is_operator_forbidden) {
         printfPQExpBuffer(&statement_data->conn->errorMessage,
             "ERROR(CLIENT): operator is not allowed on datatype of this column\n");
         return false;
     }
-    ICachedColumnManager::get_instance().filter_cached_columns(&cached_columns_from, &having_expr_vec,
-        is_operator_forbidden, &filtered_cached_where);
+    statement_data->conn->client_logic->m_cached_column_manager->filter_cached_columns(&cached_columns_from, 
+        &having_expr_vec, is_operator_forbidden, &filtered_cached_where);
     if (is_operator_forbidden) {
         printfPQExpBuffer(&statement_data->conn->errorMessage,
             "ERROR(CLIENT): operator is not allowed on datatype of this column\n");
@@ -829,17 +905,17 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
     if (!is_set_operation_allowed(select_stmt, cached_columns, parent_set_operation, parent_all, statement_data)) {
         return false;
     }
-    if (!deal_order_by_statement(select_stmt, cached_columns)) {
+    if (!deal_order_by_statement(select_stmt, cached_columns, statement_data)) {
         return false;
     }
     if (!select_stmt->whereClause && !select_stmt->havingClause) {
         return true;
     }
     /* rewrite WHERE statement clause and having clause the query */
-    if (!WhereClauseProcessor::process(&cached_columns_from, &where_expr_parts_list, statement_data)) {
+    if (!WhereClauseProcessor::process(&cached_columns_from, &where_expr_parts_list, statement_data, &target_list)) {
         return false;
     }
-    if (!WhereClauseProcessor::process(&cached_columns_from, &having_expr_vec, statement_data)) {
+    if (!WhereClauseProcessor::process(&cached_columns_from, &having_expr_vec, statement_data, &target_list)) {
         return false;
     }
     return true;
@@ -900,7 +976,7 @@ bool Processor::run_pre_delete_statement(const DeleteStmt *delete_stmt, Statemen
     ICachedColumns *cached_columns)
 {
     /* checking if featue is in use */
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true; // nothing to do
     }
     /* handle single WHERE statement */
@@ -914,7 +990,7 @@ bool Processor::run_pre_delete_statement(const DeleteStmt *delete_stmt, Statemen
     CachedColumns cached_column_temp(false, true);
     CachedColumns filter_cached_columns_temp(false);
     CachedColumns filter_cached_columns(false, true);
-    bool ret = ICachedColumnManager::get_instance().get_cached_columns(delete_stmt, &where_expr_parts_list,
+    bool ret = statement_data->GetCacheManager()->get_cached_columns(delete_stmt, &where_expr_parts_list,
         is_operator_forbidden, &cached_column_temp);
     if (is_operator_forbidden) {
         printfPQExpBuffer(&statement_data->conn->errorMessage,
@@ -926,11 +1002,12 @@ bool Processor::run_pre_delete_statement(const DeleteStmt *delete_stmt, Statemen
     }
 
     /* return list is useful for with cte as () */
-    if (!run_pre_returning_list_statement(delete_stmt->returningList, &cached_column_temp, cached_columns)) {
+    if (!run_pre_returning_list_statement(delete_stmt->returningList, &cached_column_temp, cached_columns,
+        statement_data)) {
         return false;
     }
 
-    ret = ICachedColumnManager::get_instance().filter_cached_columns(&cached_column_temp, &where_expr_parts_list,
+    ret = statement_data->GetCacheManager()->filter_cached_columns(&cached_column_temp, &where_expr_parts_list,
         is_operator_forbidden, &filter_cached_columns_temp);
 
     if (is_operator_forbidden) {
@@ -966,7 +1043,7 @@ bool Processor::run_pre_delete_statement(const DeleteStmt *delete_stmt, Statemen
 
 bool Processor::run_pre_prepare_statement(const PrepareStmt *prepare_stmt, StatementData *statement_data)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty())
+    if (statement_data->GetCacheManager()->is_cache_empty())
         return true;
 
     /*
@@ -981,13 +1058,12 @@ bool Processor::run_pre_prepare_statement(const PrepareStmt *prepare_stmt, State
 
 bool Processor::run_pre_execute_statement(const ExecuteStmt * const execute_stmt, StatementData *statement_data)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty())
+    if (statement_data->GetCacheManager()->is_cache_empty())
         return true;
 
     PreparedStatement *prepares_statement =
         statement_data->conn->client_logic->preparedStatements->get_or_create(execute_stmt->name);
     if (!prepares_statement) {
-        Assert(false);
         return false;
     }
 
@@ -1009,7 +1085,7 @@ bool Processor::run_pre_execute_statement(const ExecuteStmt * const execute_stmt
 bool Processor::run_pre_declare_cursor_statement(const DeclareCursorStmt * const declareCursorStmt,
     StatementData *statement_data)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
     }
 
@@ -1019,7 +1095,7 @@ bool Processor::run_pre_declare_cursor_statement(const DeclareCursorStmt * const
 bool Processor::run_pre_copy_statement(const CopyStmt * const copy_stmt, StatementData *statement_data)
 {
     /* checking if feature is in use */
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true; /* nothing to do */
     }
 
@@ -1054,7 +1130,7 @@ bool Processor::run_pre_copy_statement(const CopyStmt * const copy_stmt, Stateme
             prepared_statement =
                 statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
             if (!prepared_statement) {
-                Assert(false);
+                fprintf(stderr, "failed to get PreparedStatement object\n");
                 return false;
             }
 
@@ -1065,7 +1141,7 @@ bool Processor::run_pre_copy_statement(const CopyStmt * const copy_stmt, Stateme
                     return false;
                 }
             }
-            ICachedColumnManager::get_instance().get_cached_columns(copy_stmt, prepared_statement->cached_copy_columns);
+            statement_data->GetCacheManager()->get_cached_columns(copy_stmt, prepared_statement->cached_copy_columns);
             prepared_statement->partial_csv_column_size = 0;
         }
     } else {
@@ -1080,7 +1156,6 @@ bool Processor::run_pre_copy_statement(const CopyStmt * const copy_stmt, Stateme
 
     if (!prepared_statement) {
         return false;
-        Assert(false);
     }
     delete_copy_state(prepared_statement->copy_state);
     prepared_statement->copy_state = pre_copy(copy_stmt, statement_data->query);
@@ -1091,7 +1166,7 @@ bool Processor::run_pre_alter_table_statement(const AlterTableStmt *stmt, Statem
 {
     const List *cmds = reinterpret_cast<const AlterTableStmt * const>(stmt)->cmds;
     CachedColumns cached_columns;
-    if (!ICachedColumnManager::get_instance().get_cached_columns(stmt->relation, &cached_columns)) {
+    if (!statement_data->GetCacheManager()->get_cached_columns(stmt->relation, &cached_columns)) {
         return false;
     }
     ListCell *iter = NULL;
@@ -1121,12 +1196,12 @@ bool Processor::run_pre_alter_table_statement(const AlterTableStmt *stmt, Statem
                     rc = memset_s(object_fqdn, NAMEDATALEN * NAME_CNT, 0, NAMEDATALEN * NAME_CNT);
                     securec_check_c(rc, "\0", "\0");
                     size_t object_fqdn_size =
-                        CacheLoader::get_instance().get_object_fqdn(column_key_name, false, object_fqdn);
+                        statement_data->GetCacheManager()->get_object_fqdn(column_key_name, false, object_fqdn);
                     if (object_fqdn_size == 0) {
-                        statement_data->conn->client_logic->cacheRefreshType = CacheRefreshType::ALL;
-                        ICachedColumnManager::get_instance().load_cache(statement_data->conn);
+                        statement_data->conn->client_logic->cacheRefreshType = CacheRefreshType::CACHE_ALL;
+                        statement_data->GetCacheManager()->load_cache(statement_data->conn);
                         object_fqdn_size = 
-                            CacheLoader::get_instance().get_object_fqdn(column_key_name, false, object_fqdn);
+                            statement_data->GetCacheManager()->get_object_fqdn(column_key_name, false, object_fqdn);
                         if (object_fqdn_size == 0) {
                             fprintf(stderr,
                                 "ERROR(CLIENT): error while trying to retrieve column encryption key from cache\n");
@@ -1139,7 +1214,7 @@ bool Processor::run_pre_alter_table_statement(const AlterTableStmt *stmt, Statem
                     bool error = false;
                     RawValue *raw_value = createStmtProcessor::trans_column_definition(def, &expr_vec, &cached_columns,
                         &cached_columns_for_replace, statement_data, object_fqdn, error);
-                    RETURN_IF(error);
+                    RETURN_IF(error, false);
                     if (raw_value) {
                         PreparedStatement *prepared_statement =
                             statement_data->conn->client_logic->pendingStatements->get_or_create(
@@ -1157,16 +1232,30 @@ bool Processor::run_pre_alter_table_statement(const AlterTableStmt *stmt, Statem
                     RawValuesList raw_values_list;
                     bool res =
                         RawValues::get_raw_values_from_consts_vec(&expr_vec, statement_data, 0, &raw_values_list);
-                    RETURN_IF(!res);
+                    RETURN_IF(!res, false);
                     res = ValuesProcessor::process_values(statement_data, &cached_columns_for_replace, 1,
                         &raw_values_list);
-                    RETURN_IF(!res);
+                    RETURN_IF(!res, false);
                 }
                 continue;
             }
+            case AT_DropColumn:{
+                const ICachedColumn *cached_column = statement_data->GetCacheManager()->get_cached_column(
+                    stmt->relation->catalogname, stmt->relation->schemaname, stmt->relation->relname, cmd->name);
+                if (!cached_column) {
+                    continue;
+                }
+                PreparedStatement *prepared_statement =
+                    statement_data->conn->client_logic->pendingStatements->get_or_create(
+                        statement_data->stmtName);
+                if (prepared_statement) {
+                    prepared_statement->cacheRefresh |= CacheRefreshType::COLUMNS;
+                }
+                break;
+            }
             case AT_ColumnDefault: {
                 ExprPartsList expr_vec;
-                const ICachedColumn *cached_column = ICachedColumnManager::get_instance().get_cached_column(
+                const ICachedColumn *cached_column = statement_data->GetCacheManager()->get_cached_column(
                     stmt->relation->catalogname, stmt->relation->schemaname, stmt->relation->relname, cmd->name);
                 if (!cached_column) {
                     continue;
@@ -1174,17 +1263,17 @@ bool Processor::run_pre_alter_table_statement(const AlterTableStmt *stmt, Statem
                 CachedColumns cached_columns;
                 cached_columns.push(cached_column);
                 bool expr_res = exprProcessor::expand_expr(cmd->def, statement_data, &expr_vec);
-                RETURN_IF(!expr_res);
+                RETURN_IF(!expr_res, false);
                 if (expr_vec.empty()) {
                     continue;
                 }
                 RawValuesList raw_values_list;
                 expr_res = RawValues::get_raw_values_from_consts_vec(&expr_vec, statement_data, 0, &raw_values_list);
-                RETURN_IF(!expr_res);
+                RETURN_IF(!expr_res, false);
                 return ValuesProcessor::process_values(statement_data, &cached_columns, 1, &raw_values_list);
             }
             case AT_AddConstraint: {
-                if (!alter_add_constraint(cmd, &cached_columns)) {
+                if (!alter_add_constraint(cmd, &cached_columns, statement_data)) {
                     return false;
                 }
                 break;
@@ -1197,7 +1286,8 @@ bool Processor::run_pre_alter_table_statement(const AlterTableStmt *stmt, Statem
 }
 
 
-bool Processor::alter_add_constraint(const AlterTableCmd *cmd, ICachedColumns *cached_columns)
+bool Processor::alter_add_constraint(const AlterTableCmd *cmd, ICachedColumns *cached_columns, 
+    StatementData *statement_data)
 {
     if (IsA(cmd->def, Constraint)) {
         Constraint * constraint = (Constraint *)cmd->def;
@@ -1209,13 +1299,13 @@ bool Processor::alter_add_constraint(const AlterTableCmd *cmd, ICachedColumns *c
                     if (cached_columns->at(i)->get_col_name() != NULL && 
                         strcmp(cached_columns->at(i)->get_col_name(), ikname) == 0 &&
                         !createStmtProcessor::check_constraint(constraint, cached_columns->at(i)->get_data_type(),
-                            ikname, cached_columns)) {
+                            ikname, cached_columns, statement_data)) {
                         return false;
                     }
                 }
             }
         } else if (constraint->raw_expr != NULL) {
-            if (!createStmtProcessor::transform_expr(constraint->raw_expr, "", cached_columns)) {
+            if (!createStmtProcessor::transform_expr(constraint->raw_expr, "", cached_columns, statement_data)) {
                 return false;
             }
         }
@@ -1257,7 +1347,7 @@ bool Processor::run_pre_drop_table_statement(const DropStmt *stmt, StatementData
                 fprintf(stderr, "ERROR(CLIENT): improper relation name (too many dotted names): %s\n", full_table_name);
                 break;
         }
-        if (ICachedColumnManager::get_instance().has_cached_columns(catalogname, schemaname, relname)) {
+        if (statement_data->GetCacheManager()->has_cached_columns(catalogname, schemaname, relname)) {
             need_refresh = true;
         }
     }
@@ -1265,7 +1355,6 @@ bool Processor::run_pre_drop_table_statement(const DropStmt *stmt, StatementData
         PreparedStatement *prepared_statement =
             statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
         if (!prepared_statement) {
-            Assert(false);
             return false;
         }
         prepared_statement->cacheRefresh |= CacheRefreshType::COLUMNS;
@@ -1316,7 +1405,7 @@ bool Processor::run_pre_drop_schema_statement(const DropStmt *stmt, StatementDat
                        ->droppedSchemas[statement_data->conn->client_logic->droppedSchemas_size]),
             schema_name, strlen(schema_name)));
         ++statement_data->conn->client_logic->droppedSchemas_size;
-        if (ICachedColumnManager::get_instance().is_schema_contains_objects(schema_name)) {
+        if (statement_data->GetCacheManager()->is_schema_contains_objects(schema_name)) {
             is_schema_contains_objects = true;
             break;
         }
@@ -1332,7 +1421,6 @@ bool Processor::run_pre_drop_schema_statement(const DropStmt *stmt, StatementDat
     if (!prepared_statement) {
         return false;
     }
-    prepared_statement->cacheRefresh |= CacheRefreshType::GLOBAL_SETTING;
     prepared_statement->cacheRefresh |= CacheRefreshType::GLOBAL_SETTING;
     prepared_statement->cacheRefresh |= CacheRefreshType::COLUMN_SETTING;
     prepared_statement->cacheRefresh |= CacheRefreshType::COLUMNS;
@@ -1350,6 +1438,8 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
         ListCell *cell = NULL;
         char object_name[NAMEDATALEN * NAME_CNT];
         errno_t rc = EOK;
+        ObjName *to_drop_cmk_list = NULL;
+
         rc = memset_s(object_name, NAMEDATALEN * NAME_CNT, 0, NAMEDATALEN * NAME_CNT);
         securec_check_c(rc, "\0", "\0");
         foreach (cell, stmt->objects) {
@@ -1361,45 +1451,24 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
             char object_fqdn[NAMEDATALEN * NAME_CNT];
             rc = memset_s(object_fqdn, NAMEDATALEN * NAME_CNT, 0, NAMEDATALEN * NAME_CNT);
             securec_check_c(rc, "\0", "\0");
-            size_t object_fqdn_size = CacheLoader::get_instance().get_object_fqdn(object_name, true, object_fqdn);
+            size_t object_fqdn_size = 
+                statement_data->GetCacheManager()->get_object_fqdn(object_name, true, object_fqdn);
             /* skip if the object doesn't exist */
             if (object_fqdn_size == 0) {
                 continue;
             }
             check_strncpy_s(strncpy_s(object_name, NAMEDATALEN * NAME_CNT, object_fqdn, strlen(object_fqdn)));
 
+            to_drop_cmk_list = obj_list_append(to_drop_cmk_list, object_name);
+            if (to_drop_cmk_list == NULL) {
+                return false;
+            }
+            
             if (stmt->behavior == DROP_CASCADE) {
-                /* extend array if required */
-                if (statement_data->conn->client_logic->droppedGlobalSettings_size + 1 >
-                    statement_data->conn->client_logic->droppedGlobalSettings_allocated) {
-                    statement_data->conn->client_logic->droppedGlobalSettings =
-                        (ObjectFqdn *)libpq_realloc(statement_data->conn->client_logic->droppedGlobalSettings,
-                        sizeof(*statement_data->conn->client_logic->droppedGlobalSettings) *
-                        statement_data->conn->client_logic->droppedGlobalSettings_size,
-                        sizeof(*statement_data->conn->client_logic->droppedGlobalSettings) *
-                        (statement_data->conn->client_logic->droppedGlobalSettings_size + 1));
-                    if (statement_data->conn->client_logic->droppedGlobalSettings == NULL) {
-                        return false;
-                    }
-                    statement_data->conn->client_logic->droppedGlobalSettings_allocated =
-                        statement_data->conn->client_logic->droppedGlobalSettings_size + 1;
-                }
-
-                /* copy object name */
-                check_strncpy_s(strncpy_s(
-                    statement_data->conn->client_logic
-                        ->droppedGlobalSettings[statement_data->conn->client_logic->droppedGlobalSettings_size]
-                        .data,
-                    sizeof(statement_data->conn->client_logic
-                                ->droppedGlobalSettings[statement_data->conn->client_logic->droppedGlobalSettings_size]
-                                .data),
-                    object_name, strlen(object_name)));
-                ++statement_data->conn->client_logic->droppedGlobalSettings_size;
-
                 /* add dependant column settings */
                 size_t column_settings_list_size(0);
                 const CachedColumnSetting **depened_column_settings =
-                    CacheLoader::get_instance().get_column_setting_by_global_setting_fqdn(object_name,
+                    statement_data->GetCacheManager()->get_column_setting_by_global_setting_fqdn(object_name,
                         column_settings_list_size);
 
                 /*
@@ -1415,6 +1484,7 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
                         (statement_data->conn->client_logic->droppedColumnSettings_size + column_settings_list_size));
                     if (statement_data->conn->client_logic->droppedColumnSettings == NULL) {
                         libpq_free(depened_column_settings);
+                        free_obj_list(to_drop_cmk_list);
                         return false;
                     }
                     statement_data->conn->client_logic->droppedColumnSettings_allocated =
@@ -1435,33 +1505,15 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
                 libpq_free(depened_column_settings);
                 statement_data->conn->client_logic->droppedColumnSettings_size += column_settings_list_size;
             }
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-            const CachedGlobalSetting *cached_global_setting =
-                CacheLoader::get_instance().get_global_setting_by_fqdn(object_name);
-            if (cached_global_setting == NULL) {
-                return false;
-            }
-
-            GlobalHookExecutor *global_hook_executor = cached_global_setting->get_executor();
-            if (global_hook_executor == NULL) {
-                return false;
-            }
-
-            statement_data->conn->client_logic->query_type = CE_DROP_CMK;
-            if (!HooksManager::GlobalSettings::get_key_path_by_cmk_name(global_hook_executor,
-                statement_data->conn->client_logic->query_args,
-                sizeof(statement_data->conn->client_logic->query_args))) {
-                    return false;
-            }    
-#endif
         }
 
         PreparedStatement *prepared_statement =
             statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
         if (!prepared_statement) {
-            Assert(false);
+            free_obj_list(to_drop_cmk_list);
             return false;
         }
+        statement_data->conn->client_logic->droppedGlobalSettings = to_drop_cmk_list;
 
         prepared_statement->cacheRefresh |= CacheRefreshType::GLOBAL_SETTING;
         if (stmt->behavior == DROP_CASCADE) {
@@ -1472,7 +1524,6 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
         PreparedStatement *prepared_statement =
             statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
         if (!prepared_statement) {
-            Assert(false);
             return false;
         }
         prepared_statement->cacheRefresh |= CacheRefreshType::COLUMN_SETTING;
@@ -1492,7 +1543,8 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
             errno_t rc = EOK;
             rc = memset_s(object_fqdn, NAMEDATALEN * NAME_CNT, 0, NAMEDATALEN * NAME_CNT);
             securec_check_c(rc, "\0", "\0");
-            size_t object_fqdn_size = CacheLoader::get_instance().get_object_fqdn(object_name, false, object_fqdn);
+            size_t object_fqdn_size = 
+                statement_data->GetCacheManager()->get_object_fqdn(object_name, false, object_fqdn);
             /* skip if the object doesn't exist */
             if (object_fqdn_size == 0) {
                 continue;
@@ -1535,6 +1587,13 @@ bool Processor::run_pre_drop_statement(const DropStmt *stmt, StatementData *stat
         run_pre_drop_table_statement(stmt, statement_data);
     } else if (stmt->removeType == OBJECT_SCHEMA) {
         run_pre_drop_schema_statement(stmt, statement_data);
+    } else if (stmt->removeType == OBJECT_FUNCTION) {
+        PreparedStatement* prepared_statement = 
+            statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
+        if (!prepared_statement) {
+            return false;
+        }
+        prepared_statement->cacheRefresh |= CacheRefreshType::PROCEDURES;
     }
     return true;
 }
@@ -1626,7 +1685,7 @@ bool Processor::run_pre_rlspolicy_using(const Node *stmt, StatementData *stateme
     */
     bool is_operation_forbidden(false);
     CachedColumns cached_columns;
-    bool ret = ICachedColumnManager::get_instance().get_cached_columns(relation, &using_expr_parts_list,
+    bool ret = statement_data->GetCacheManager()->get_cached_columns(relation, &using_expr_parts_list,
         is_operation_forbidden, &cached_columns);
     if (is_operation_forbidden) {
         printfPQExpBuffer(&statement_data->conn->errorMessage,
@@ -1660,8 +1719,8 @@ bool Processor::run_pre_rlspolicy_using(const Node *stmt, StatementData *stateme
 bool Processor::process_clause_value(StatementData *statement_data)
 {
     PGClientLogicParams tmp_params(statement_data->params);
-    if (tmp_params.copy_sizes) {
-        return false;
+    if (!tmp_params.copy_sizes) {
+        return true;
     }
     for (size_t i = 0; i < statement_data->nParams; ++i) {
         if (tmp_params.new_param_values != NULL && tmp_params.new_param_values[i]) {
@@ -1681,27 +1740,9 @@ bool Processor::process_clause_value(StatementData *statement_data)
     return true;
 }
 
-bool Processor::run_pre_create_function_stmt(const CreateFunctionStmt *stmt)
-{
-    if (stmt->parameters == NULL) {
-        return true;
-    }
-
-    foreach_cell (lc, stmt->parameters) {
-        FunctionParameter* fp  = (FunctionParameter*) lfirst(lc);
-        const char* p_name =  strVal(llast(fp->argType->names));
-        if (strcmp(p_name, "byteawithoutordercol") == 0 || strcmp(p_name, "byteawithoutorderwithequalcol") == 0) {
-            fprintf(stderr, "ERROR(CLIENT): could not support functions when full encryption is on.\n");
-            return false;
-        }
-    }
-
-    return true;
-}
-
 bool Processor::run_pre_create_rlspolicy_stmt(const CreateRlsPolicyStmt *stmt, StatementData *statement_data)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
     }
 
@@ -1720,7 +1761,7 @@ bool Processor::run_pre_create_rlspolicy_stmt(const CreateRlsPolicyStmt *stmt, S
 
 bool Processor::run_pre_alter_rlspolicy_stmt(const AlterRlsPolicyStmt *stmt, StatementData *statement_data)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
     }
     /*
@@ -1832,12 +1873,12 @@ bool Processor::run_pre_set_statement(const VariableSetStmt *set_stmt, Statement
         statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
     if (set_stmt->kind == VAR_RESET_ALL) {
         if (current_statement == NULL) {
-            Assert(false);
             return false;
         }
         current_statement->cacheRefresh |= CacheRefreshType::SEARCH_PATH;
     } else if (set_stmt->kind == VAR_SET_ROLEPWD) {
         statement_data->conn->client_logic->val_to_update |= updateGucValues::GUC_ROLE;
+        current_statement->cacheRefresh |= CacheRefreshType::CACHE_ALL;
         statement_data->conn->client_logic->tmpGucParams.role = strVal(&((A_Const *)(linitial(set_stmt->args)))->val);
     } else if (set_stmt->name &&
         (pg_strcasecmp(set_stmt->name, "search_path") == 0 || pg_strcasecmp(set_stmt->name, "current_schema") == 0)) {
@@ -1851,10 +1892,9 @@ bool Processor::run_pre_set_statement(const VariableSetStmt *set_stmt, Statement
     } else if (set_stmt->name &&
         (pg_strcasecmp(set_stmt->name, "role") == 0 || pg_strcasecmp(set_stmt->name, "session_authorization") == 0)) {
         if (current_statement == NULL) {
-            Assert(false);
             return false;
         }
-        current_statement->cacheRefresh |= CacheRefreshType::ALL;
+        current_statement->cacheRefresh |= CacheRefreshType::CACHE_ALL;
     }
     return true;
 }
@@ -1868,7 +1908,6 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
     PreparedStatement *current_statement =
         statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
     if (!current_statement) {
-        Assert(false);
         return false;
     }
     switch (nodeTag(stmt)) {
@@ -1893,7 +1932,7 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
             return run_pre_alter_table_statement((AlterTableStmt *)stmt, statement_data);
         case T_AlterRoleStmt:
             if (((AlterRoleStmt *)stmt)->options != NIL) {
-                current_statement->cacheRefresh |= CacheRefreshType::ALL;
+                current_statement->cacheRefresh |= CacheRefreshType::CACHE_ALL;
             }
             break;
         case T_CreateStmt: {
@@ -1927,7 +1966,7 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
             break;
         case T_TransactionStmt:
             if (((TransactionStmt *)stmt)->kind == TRANS_STMT_ROLLBACK) {
-                current_statement->cacheRefresh |= CacheRefreshType::ALL;
+                current_statement->cacheRefresh |= CacheRefreshType::CACHE_ALL;
             }
             break;
         case T_ExecDirectStmt:
@@ -1937,11 +1976,19 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
         case T_AlterRlsPolicyStmt:
             return run_pre_alter_rlspolicy_stmt((AlterRlsPolicyStmt *)stmt, statement_data);
         case T_CreateFunctionStmt:
-            return run_pre_create_function_stmt((CreateFunctionStmt*)stmt);
+            current_statement->cacheRefresh |= CacheRefreshType::PROCEDURES;
+            return func_processor::run_pre_create_function_stmt(((CreateFunctionStmt*)stmt)->options, statement_data);
+        case T_DoStmt:
+            return func_processor::run_pre_create_function_stmt(((DoStmt*)stmt)->args, statement_data, true);
         case T_MergeStmt:
             return run_pre_merge_stmt((MergeStmt *)stmt, statement_data);
         case T_RenameStmt:
             current_statement->cacheRefresh |= CacheRefreshType::COLUMNS;
+            break;
+        case T_DropRoleStmt:
+            if (((DropRoleStmt *)stmt)->behavior == DROP_CASCADE) {
+                current_statement->cacheRefresh |= CacheRefreshType::GLOBAL_SETTING;
+            }
             break;
         default:
             break;
@@ -1951,22 +1998,22 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
 
 bool Processor::run_pre_merge_stmt(const MergeStmt *stmt, StatementData *statement_data)
 {
-    if (ICachedColumnManager::get_instance().is_cache_empty()) {
+    if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
     }
-    RETURN_IF(stmt == nullptr);
+    RETURN_IF(stmt == NULL, false);
     CachedColumns cached_columns(false, true);
     RangeVar *target_relation = (RangeVar *)stmt->relation;
     RangeVar *source_relation = (RangeVar *)stmt->source_relation;
     CachedColumns target_cached_columns;
     bool ret = true;
-    ret = ICachedColumnManager::get_instance().get_cached_columns(target_relation->catalogname, 
+    ret = statement_data->GetCacheManager()->get_cached_columns(target_relation->catalogname, 
         target_relation->schemaname, target_relation->relname, &target_cached_columns);
-    RETURN_IF(!ret);
+    RETURN_IF(!ret, false);
     CachedColumns source_cached_columns;
-    ret = ICachedColumnManager::get_instance().get_cached_columns(source_relation->catalogname, 
+    ret = statement_data->GetCacheManager()->get_cached_columns(source_relation->catalogname, 
         source_relation->schemaname, source_relation->relname, &source_cached_columns);
-    RETURN_IF(!ret);
+    RETURN_IF(!ret, false);
     for (size_t col_index = 0; col_index < target_cached_columns.size(); col_index++) {
         CachedColumn *target_alias_cached = new (std::nothrow) CachedColumn(target_cached_columns.at(col_index));
         if (target_alias_cached == NULL) {
@@ -1989,17 +2036,17 @@ bool Processor::run_pre_merge_stmt(const MergeStmt *stmt, StatementData *stateme
     ExprPartsList join_condition_expr;
     /* no-support merge into operator when column using different keys to encrypt */
     ret = exprProcessor::expand_condition_expr(stmt->join_condition, &join_condition_expr);
-    RETURN_IF(!ret);
+    RETURN_IF(!ret, false);
     CachedColumns v_res;
     bool is_source_found = false;
     bool is_target_found = false;
     size_t join_exprs_list_size = join_condition_expr.size();
     for (size_t i = 0; i < join_exprs_list_size; i++) {
         const ExprParts *expr_part = join_condition_expr.at(i);
-        RETURN_IF(expr_part == NULL);
+        RETURN_IF(expr_part == NULL, false);
         ColumnRefData column_ref_data;
         ret = exprProcessor::expand_column_ref(expr_part->column_ref, column_ref_data);
-        RETURN_IF(!ret);
+        RETURN_IF(!ret, false);
 
         size_t source_cached_columns_size = source_cached_columns.size();
         if (!is_target_found) {
@@ -2051,14 +2098,14 @@ bool Processor::run_pre_merge_stmt(const MergeStmt *stmt, StatementData *stateme
         MergeWhenClause *mergeWhenClause = (MergeWhenClause*)lfirst(l);
         ExprPartsList where_expr_list;
         ret = exprProcessor::expand_expr(mergeWhenClause->condition, statement_data, &where_expr_list);
-        RETURN_IF(!ret);
+        RETURN_IF(!ret, false);
         ret = WhereClauseProcessor::process(&cached_columns, &where_expr_list, statement_data);
-        RETURN_IF(!ret);
+        RETURN_IF(!ret, false);
     }
     return true;
 }
 
-bool Processor::run_pre_query(StatementData *statement_data)
+bool Processor::run_pre_query(StatementData *statement_data, bool is_inner_query, bool *failed_to_parse)
 {
     PGconn *conn = statement_data->conn;
     Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
@@ -2086,7 +2133,19 @@ bool Processor::run_pre_query(StatementData *statement_data)
         }
     }
     statement_data->replace_raw_values();
-    free_memory();
+    if (!is_inner_query) {
+        free_memory();
+    } else { 
+        statement_data->conn->client_logic->rawValuesForReplace->clear();
+    }
+    /* some callers may want to know if the batch query passed was parsed successfully by the bison parser */
+    if (failed_to_parse != NULL) { 
+        if (stmts != NULL) { 
+            *failed_to_parse = false;
+        } else {
+            *failed_to_parse = true;
+        }
+    }
     return true;
 }
 
@@ -2101,7 +2160,6 @@ bool Processor::run_pre_exec(StatementData *statement_data)
     PreparedStatement *prepares_statement =
         statement_data->conn->client_logic->preparedStatements->get_or_create(statement_data->stmtName);
     if (!prepares_statement) {
-        Assert(false);
         return prepares_statement;
     }
 
@@ -2149,31 +2207,35 @@ void Processor::remove_dropped_column_settings(PGconn *conn, const bool is_succe
 
     for (size_t i = 0; i < conn->client_logic->droppedColumnSettings_size; ++i) {
         const char *object_name = conn->client_logic->droppedColumnSettings[i].data;
-        HooksManager::ColumnSettings::set_deletion_expected(object_name, false);
+        HooksManager::ColumnSettings::set_deletion_expected(*conn->client_logic, object_name, false);
     }
     conn->client_logic->droppedColumnSettings_size = 0;
 }
 
-const bool Processor::remove_droppend_global_settings(PGconn *conn, const bool is_success)
+void Processor::remove_dropped_global_settings(PGconn *conn, const bool is_success)
 {
+    ObjName *cur_cmk = conn->client_logic->droppedGlobalSettings;
+    ObjName *to_free = NULL;
+    
     Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
-    if (conn->client_logic->droppedGlobalSettings_size == 0) {
-        return true;
+    if (cur_cmk == NULL) {
+        return;
     }
 
     if (!is_success) {
-        conn->client_logic->droppedGlobalSettings_size = 0;
-        return true;
+        free_obj_list(conn->client_logic->droppedGlobalSettings);
+        conn->client_logic->droppedGlobalSettings = NULL;
+        return;
     }
 
-    for (size_t i = 0; i < conn->client_logic->droppedGlobalSettings_size; ++i) {
-        const char *object_name = conn->client_logic->droppedGlobalSettings[i].data;
-        HooksManager::GlobalSettings::set_deletion_expected(object_name, false);
-        /* func : remove al depended column settings */
+    while (cur_cmk != NULL) {
+        HooksManager::GlobalSettings::set_deletion_expected(*conn->client_logic, cur_cmk->obj_name, false);
+        to_free = cur_cmk;
+        cur_cmk = cur_cmk->next;
+        free(to_free);
+        to_free = NULL;
     }
-    conn->client_logic->droppedGlobalSettings_size = 0;
-
-    return true;
+    conn->client_logic->droppedGlobalSettings = NULL;
 }
 
 const bool Processor::remove_droppend_schemas(PGconn *conn, const bool is_success)
@@ -2190,9 +2252,9 @@ const bool Processor::remove_droppend_schemas(PGconn *conn, const bool is_succes
 
     for (size_t i = 0; i < conn->client_logic->droppedSchemas_size; ++i) {
         const char *object_name = conn->client_logic->droppedSchemas[i].data;
-        HooksManager::GlobalSettings::set_deletion_expected(object_name, true);
-        HooksManager::ColumnSettings::set_deletion_expected(object_name, true);
-        CacheLoader::get_instance().remove_schema(object_name);
+        HooksManager::GlobalSettings::set_deletion_expected(*conn->client_logic, object_name, true);
+        HooksManager::ColumnSettings::set_deletion_expected(*conn->client_logic, object_name, true);
+        conn->client_logic->m_cached_column_manager->remove_schema(object_name);
     }
     conn->client_logic->droppedSchemas_size = 0;
     return true;
@@ -2216,12 +2278,13 @@ void handle_post_set_stmt(PGconn *conn, const bool is_success)
         return;
     }
     if (conn->client_logic->val_to_update & updateGucValues::GUC_ROLE) {
-        CacheLoader::get_instance().set_user_schema(conn->client_logic->tmpGucParams.role.c_str());
+        conn->client_logic->m_cached_column_manager->set_user_schema(conn->client_logic->tmpGucParams.role.c_str());
         conn->client_logic->gucParams.role = conn->client_logic->tmpGucParams.role;
         conn->client_logic->val_to_update ^= updateGucValues::GUC_ROLE;
     }
     if (conn->client_logic->val_to_update & updateGucValues::SEARCH_PATH) {
-        CacheLoader::get_instance().load_search_path(conn->client_logic->tmpGucParams.searchpathStr.c_str(),
+        conn->client_logic->m_cached_column_manager->load_search_path(
+            conn->client_logic->tmpGucParams.searchpathStr.c_str(),
             conn->client_logic->gucParams.role.c_str());
         conn->client_logic->val_to_update ^= updateGucValues::SEARCH_PATH;
     }
@@ -2268,11 +2331,13 @@ bool Processor::run_post_query(PGconn *conn)
     conn->client_logic->m_lastResultStatus = PGRES_EMPTY_QUERY;
 
     bool is_success = (last_result == PGRES_COMMAND_OK);
+
     accept_pending_statements(conn, is_success);
     remove_droppend_schemas(conn, is_success);
-    remove_droppend_global_settings(conn, is_success);
+    remove_dropped_global_settings(conn, is_success);
     remove_dropped_column_settings(conn, is_success);
     handle_post_set_stmt(conn, is_success);
+    conn->client_logic->clear_functions_list();
     if (!is_success || (conn->queryclass != PGQUERY_SIMPLE && conn->queryclass != PGQUERY_EXTENDED)) {
         /* we only want to process successful queries that were actually executed */
         return true;
@@ -2280,9 +2345,14 @@ bool Processor::run_post_query(PGconn *conn)
 
     PreparedStatement *prepared_statement = conn->client_logic->preparedStatements->get_or_create(last_stmt_name);
     if (!prepared_statement) {
-        Assert(false);
         return false;
     }
+
+    if (!is_success || (conn->queryclass != PGQUERY_SIMPLE && conn->queryclass != PGQUERY_EXTENDED)) {
+        /* we only want to process successful queries that were actually executed */
+        return true;
+    }
+
     if ((prepared_statement->cacheRefresh & CacheRefreshType::GLOBAL_SETTING) == CacheRefreshType::GLOBAL_SETTING &&
         prepared_statement->m_function_name[0] != '\0') {
         /*
@@ -2303,7 +2373,7 @@ bool Processor::run_post_query(PGconn *conn)
      * otherwise, the cacheRefreshType is filled with the value from the getReadyForQuery
      */
     conn->client_logic->cacheRefreshType = prepared_statement->cacheRefresh;
-    prepared_statement->cacheRefresh = CacheRefreshType::NONE;
-    ICachedColumnManager::get_instance().load_cache(conn);
+    prepared_statement->cacheRefresh = CacheRefreshType::CACHE_NONE;
+    conn->client_logic->m_cached_column_manager->load_cache(conn);
     return true;
 }

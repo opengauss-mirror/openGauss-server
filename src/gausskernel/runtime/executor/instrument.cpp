@@ -52,7 +52,7 @@
 #include "optimizer/streamplan.h"
 #include "parser/parsetree.h"
 #include "utils/lsyscache.h"
-#include "executor/execdesc.h"
+#include "executor/exec/execdesc.h"
 #include "libpq/pqformat.h"
 
 extern const char* GetStreamType(Stream* node);
@@ -2534,6 +2534,11 @@ bool StreamInstrumentation::IsSend(int idx, int planId, int smpId)
     }
 
     int* m_instr_array_map = thread_instr->m_instrArrayMap;
+
+    /* m_instr_array_map[planId - 1] = -1 means plannode is initialized but not execute */
+    if (m_instr_array_map[planId - 1] == -1) {
+        return false;
+    }
 
     InstrStreamPlanData* instr = &thread_instr->m_instrArray[m_instr_array_map[planId - 1]].instr;
 

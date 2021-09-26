@@ -1,5 +1,5 @@
 /*
- * PostgreSQL type definitions for chkpass
+ * openGauss type definitions for chkpass
  * Written by D'Arcy J.M. Cain
  * darcy@druid.net
  * http://www.druid.net/darcy/

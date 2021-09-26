@@ -44,7 +44,7 @@
 #include "utils/timestamp.h"
 #include "utils/bytea.h"
 #include "mb/pg_wchar.h"
-#include "executor/nodeFunctionscan.h"
+#include "executor/node/nodeFunctionscan.h"
 
 #include "odbc_bridge.h"
 #include "odbc_connector.h"

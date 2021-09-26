@@ -711,7 +711,7 @@ static bool foreign_expr_walker(Node *node, foreign_glob_cxt *glob_cxt, foreign_
 }
 
 /*
- * Return true if given object is one of PostgreSQL's built-in objects.
+ * Return true if given object is one of openGauss's built-in objects.
  *
  * We use FirstBootstrapObjectId as the cutoff, so that we only consider
  * objects with hand-assigned OIDs to be "built in", not for instance any
@@ -1800,7 +1800,7 @@ static void printRemoteParam(int paramindex, Oid paramtype, int32 paramtypmod, d
  * want the remote planner to generate a plan that depends on such a value
  * anyway.  Thus, we can't do something simple like "$1::paramtype".
  * Instead, we emit "((SELECT null::paramtype)::paramtype)".
- * In all extant versions of Postgres, the planner will see that as an unknown
+ * In all extant versions of openGauss, the planner will see that as an unknown
  * constant value, which is what we want.  This might need adjustment if we
  * ever make the planner flatten scalar subqueries.  Note: the reason for the
  * apparently useless outer cast is to ensure that the representation as a

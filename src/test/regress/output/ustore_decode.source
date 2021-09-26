@@ -1,0 +1,101 @@
+SELECT 'init' FROM pg_create_logical_replication_slot('ustore_slot', 'mppdb_decoding');
+ ?column? 
+----------
+ init
+(1 row)
+
+create table t1 (a int, b text) with (storage_type = ustore);
+insert into t1 values (generate_series(1, 10), 'abc');
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*data
+--?.*
+--?.*BEGIN ?.*
+--?.*COMMIT ?.* CSN ?.*
+--?.*BEGIN ?.*
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["1","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["2","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["3","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["4","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["5","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["6","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["7","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["8","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["9","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["10","'abc'"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+--?.*COMMIT ?.* CSN ?.*
+(14 rows)
+
+update t1 set b = 'bcd' where a = 1;
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*data
+--?.*
+--?.*BEGIN ?.*
+ {"table_name":"public.t1","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","text"],"columns_val":["1","'bcd'"],"old_keys_name":["a","b"],"old_keys_type":["integer","text"],"old_keys_val":["1","'abc'"]}
+--?.*COMMIT ?.* CSN ?.*
+(3 rows)
+
+delete from t1 where a = 2;
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*data
+--?.*
+--?.*BEGIN ?.*
+ {"table_name":"public.t1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","text"],"old_keys_val":["2","'abc'"]}
+--?.*COMMIT ?.* CSN ?.*
+(3 rows)
+
+alter table t1 add column c int;
+insert into t1 values (generate_series(11, 20), 'efg', 1);
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*data
+--?.*
+--?.*BEGIN ?.*
+--?.*COMMIT ?.* CSN ?.*
+--?.*BEGIN ?.*
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["11","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["12","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["13","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["14","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["15","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["16","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["17","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["18","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["19","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t1","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["20","'efg'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+--?.*COMMIT ?.* CSN ?.*
+(14 rows)
+
+delete from t1 where a = 3;
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*data
+--?.*
+--?.*BEGIN ?.*
+ {"table_name":"public.t1","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","text"],"old_keys_val":["3","'abc'"]}
+--?.*COMMIT ?.* CSN ?.*
+(3 rows)
+
+create table t2 (a int, b text, c int) with (storage_type = ustore);
+COPY t2 from '@abs_srcdir@/data/ustore_decode.data';
+SELECT data FROM pg_logical_slot_get_changes('ustore_slot', NULL, NULL);
+--?.*data
+--?.*
+--?.*BEGIN ?.*
+--?.*COMMIT ?.* CSN ?.*
+--?.*BEGIN ?.*
+ {"table_name":"public.t2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["1","'abcde'","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["2","'cdefg'","2"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["3","'efghi'","3"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["4","'ghijk'","4"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.t2","op_type":"INSERT","columns_name":["a","b","c"],"columns_type":["integer","text","integer"],"columns_val":["5","'ijklm'","5"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+--?.*COMMIT ?.* CSN ?.*
+(9 rows)
+
+SELECT * FROM pg_drop_replication_slot('ustore_slot');
+WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
+WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+drop table t1;
+drop table t2;

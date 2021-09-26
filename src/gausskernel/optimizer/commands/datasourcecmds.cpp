@@ -44,7 +44,7 @@
 #include "parser/parse_func.h"
 #include "parser/parser.h"
 #include "pgxc/pgxc.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"

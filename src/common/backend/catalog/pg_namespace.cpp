@@ -41,7 +41,7 @@
  * schema to become part of the extension.)
  * ---------------
  */
-Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp)
+Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp, bool hasBlockChain)
 {
     Relation nspdesc;
     HeapTuple tup;
@@ -69,6 +69,7 @@ Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp)
     (void)namestrcpy(&nname, nspName);
     values[Anum_pg_namespace_nspname - 1] = NameGetDatum(&nname);
     values[Anum_pg_namespace_nspowner - 1] = ObjectIdGetDatum(ownerId);
+    values[Anum_pg_namespace_nspblockchain - 1] = hasBlockChain;
     if (IS_PGXC_DATANODE && !isSingleMode && !isRestoreMode && !u_sess->attr.attr_common.xc_maintenance_mode &&
         (isTempNamespaceName(nspName) || isToastTempNamespaceName(nspName)))
         values[Anum_pg_namespace_nsptimeline - 1] = get_controlfile_timeline();
@@ -115,4 +116,26 @@ Oid NamespaceCreate(const char* nspName, Oid ownerId, bool isTemp)
     InvokeObjectAccessHook(OAT_POST_CREATE, NamespaceRelationId, nspoid, 0, NULL);
 
     return nspoid;
+}
+
+bool IsLedgerNameSpace(Oid nspOid)
+{
+    if (!OidIsValid(nspOid)) {
+        return false;
+    }
+    HeapTuple tuple;
+    bool is_nspblockchain = false;
+
+    tuple = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(nspOid));
+    if (HeapTupleIsValid(tuple)) {
+        bool is_null = true;
+        Datum datum = SysCacheGetAttr(NAMESPACEOID, tuple, Anum_pg_namespace_nspblockchain, &is_null);
+        if (!is_null) {
+            is_nspblockchain = DatumGetBool(datum);
+        }
+        ReleaseSysCache(tuple);
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema of oid \"%u\" does not exist", nspOid)));
+    }
+    return is_nspblockchain;
 }

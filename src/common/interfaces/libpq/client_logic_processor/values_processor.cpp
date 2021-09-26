@@ -58,12 +58,14 @@ static void process_prepare_state(const RawValue *raw_value, StatementData *stat
             statement_data->params.copy_sizes = (size_t *)calloc(sizeof(size_t), statement_data->nParams);
             statement_data->params.nParams = statement_data->nParams;
         }
+        Assert(!statement_data->params.new_param_values[raw_value->m_location]);
         statement_data->params.new_param_values[raw_value->m_location] = (unsigned char *)malloc(copy_size);
         if (statement_data->params.new_param_values[raw_value->m_location] == NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when processing state\n");
             return;
         }
         statement_data->params.copy_sizes[raw_value->m_location] = copy_size;
+        /* 1. new_query_value get value */
         check_memcpy_s(memcpy_s(statement_data->params.new_param_values[raw_value->m_location], copy_size,
             raw_value->m_processed_data, copy_size));
         if (raw_value->m_location < statement_data->nParams) {
@@ -76,9 +78,15 @@ static void process_prepare_state(const RawValue *raw_value, StatementData *stat
                 }
                 statement_data->params.nParams = statement_data->nParams;
             }
-            Assert(!statement_data->params.new_param_values[raw_value->m_location]);
-            statement_data->params.adjusted_param_values[raw_value->m_location] =
+            
+            if (statement_data->params.new_param_values[raw_value->m_location] != NULL) {
+                statement_data->params.adjusted_param_values[raw_value->m_location] = 
+                    (const char*)statement_data->params.new_param_values[raw_value->m_location];
+            } else {
+                statement_data->params.adjusted_param_values[raw_value->m_location] =
                 (const char *)statement_data->params.new_param_values[raw_value->m_location];
+            }
+            
             if (!statement_data->params.adjusted_param_lengths) {
                 statement_data->params.adjusted_param_lengths = (int *)malloc(statement_data->nParams * sizeof(int));
                 if (statement_data->params.adjusted_param_lengths == NULL) {
@@ -255,6 +263,7 @@ bool ValuesProcessor::process_values(StatementData *statement_data, const ICache
     if (is_any_relevant) {
         statement_data->params.adjusted_query = statement_data->params.new_query;
     }
+
     return true;
 }
 
@@ -262,6 +271,9 @@ DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned cha
     size_t processed_data_size, int original_typeid, int format, unsigned char **plain_text, size_t &plain_text_size,
     bool is_default)
 {
+    if (!processed_data || processed_data_size <= 0) {
+        return DEC_DATA_ERR;
+    }
     /* unescape data from its BYTEA format */
     size_t unescaped_processed_data_size = 0;
     unsigned char *unescaped_processed_data = NULL;
@@ -345,7 +357,6 @@ DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned cha
         libpq_free(unescaped_processed_data);
         return DEC_DATA_SUCCEED;
     }
-
     libpq_free(unescaped_processed_data);
     if (plain_text_size_tmp < 0 || !(*plain_text)) {
         return DEC_DATA_SUCCEED;
@@ -362,11 +373,14 @@ DecryptDataRes ValuesProcessor::deprocess_value(PGconn *conn, const unsigned cha
         securec_check_c(rc, "\0", "\0");
         unsigned char *result =
             Format::restore_binary(*plain_text, plain_text_size, original_typeid, 0, -1, &result_size, err_msg);
+        if (result == NULL) { 
+            return DEC_DATA_ERR;
+        }
         libpq_free(*plain_text);
         *plain_text = (unsigned char *)malloc(result_size + 1);
         if (*plain_text == NULL) {
             fprintf(stderr, "ERROR(CLIENT): out of memory when decrypting data\n");
-            libpq_free(unescaped_processed_data);
+            libpq_free(result);
             return CLIENT_HEAP_ERR;
         }
         rc = memcpy_s(*plain_text, result_size + 1, result, result_size);

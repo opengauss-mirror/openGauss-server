@@ -177,42 +177,6 @@ partition by range(a)
 
 select * from pg_get_tabledef('test_range_tsp_3');
 
---test list partition table
-create table test_list(m int, n int)
-partition by list(m)
-(
-	PARTITION p1 VALUES (110, 111, 112, 113, 114, 115, 116, 117, 118, 119),
-	PARTITION p2 VALUES (200, 201, 202, 203, 204, 205, 206),
-	PARTITION p3 VALUES (300, 301, 302, 303, 404, 505, 606)
-);
-
-select * from pg_get_tabledef('test_list');
-
---test hash partition table
-create table test_hash(p_id int, p_name varchar, p_age int)
-partition by hash(p_id)
-(       
-        partition part_1,
-        partition part_2,
-        partition part_3
-);
-
-select * from pg_get_tabledef('test_hash');
-
---test interval partition table
-create table test_interval(c_id integer not null, c_date DATE, c_info varchar(20) not null)
-partition by range(c_date)
-interval('2 day')
-(
-    partition p1 values less than ('2021-06-01 00:00:00'),
-    partition p2 values less than ('2021-06-03 00:00:00'),
-    partition p3 values less than ('2021-06-05 00:00:00'),
-    partition p4 values less than ('2021-06-07 00:00:00'),
-    partition p5 values less than ('2021-06-09 00:00:00')
-);
-
-select * from pg_get_tabledef('test_interval');
-
 --test collate
  CREATE   TABLE  collate_test1 (             
          a integer,                                

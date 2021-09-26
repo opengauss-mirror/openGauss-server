@@ -115,6 +115,13 @@ static void ParseCompressionOption(int compression, CompressionAlgorithm* alg, i
         *level = compression;
 }
 
+#ifdef ENABLE_UT
+void uttest_ParseCompressionOption(int compression, CompressionAlgorithm* alg, int* level)
+{
+    ParseCompressionOption(compression, alg, level);
+}
+#endif
+
 /* Public interface routines */
 /* Allocate a new compressor */
 CompressorState* AllocateCompressor(int compression, WriteFunc writeF)

@@ -18,14 +18,11 @@ set(TGT_executor_INC
     ${ZLIB_INCLUDE_PATH}
 )
 set(executor_DEF_OPTIONS ${MACRO_OPTIONS})
-set(executor_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${SECURE_OPTIONS} ${CHECK_OPTIONS})
-list(REMOVE_ITEM executor_COMPILE_OPTIONS -fPIC)
+set(executor_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS})
 if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64")
-    set(executor_COMPILE_OPTIONS ${executor_COMPILE_OPTIONS} -std=c++14 -fPIE -mavx)
-else()
-    set(executor_COMPILE_OPTIONS ${executor_COMPILE_OPTIONS} -std=c++14 -fPIE)
+    set(executor_COMPILE_OPTIONS ${executor_COMPILE_OPTIONS} -mavx)
 endif()
-set(executor_LINK_OPTIONS ${OPTIMIZE_OPTIONS} ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${SECURE_OPTIONS} ${CHECK_OPTIONS})
+set(executor_LINK_OPTIONS ${BIN_LINK_OPTIONS})
 add_static_objtarget(gausskernel_db4ai_executor TGT_executor_SRC TGT_executor_INC "${executor_DEF_OPTIONS}" "${executor_COMPILE_OPTIONS}" "${executor_LINK_OPTIONS}")
 
 add_subdirectory(gd)

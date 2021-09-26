@@ -46,13 +46,13 @@ select 1 where 'vasya' = (select 'vasya' as col1 where col1 <> 'aaa');
 (1 row)
 
 explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) order by col1;
-                     QUERY PLAN                     
-----------------------------------------------------
+--?.*
+--?.*
  Sort
-   Output: (pg_typeof(col1)), col1, (false), (true)
+   Output: (pg_typeof(__unnamed_subquery__.col1)), __unnamed_subquery__.col1, (false), (true)
    Sort Key: __unnamed_subquery__.col1
    ->  Subquery Scan on __unnamed_subquery__
-         Output: pg_typeof(col1), col1, false, true
+         Output: pg_typeof(__unnamed_subquery__.col1), __unnamed_subquery__.col1, false, true
          ->  Result
                Output: 'vasya'::text
 (7 rows)
@@ -78,10 +78,10 @@ explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknow
 (5 rows)
 
 explain (verbose on, costs off) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) where col1 <> 'aaa';
-                  QUERY PLAN                  
-----------------------------------------------
+--?.*
+--?.*
  Subquery Scan on __unnamed_subquery__
-   Output: pg_typeof(col1), col1, false, true
+   Output: pg_typeof(__unnamed_subquery__.col1), __unnamed_subquery__.col1, false, true
    ->  Result
          Output: 'vasya'::text
 (4 rows)
@@ -111,10 +111,10 @@ select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (sele
 (1 row)
 
 explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
-                  QUERY PLAN                   
------------------------------------------------
+--?.*
+--?.*
  CTE Scan on t
-   Output: pg_typeof(col1), col1, false, true
+   Output: pg_typeof(t.col1), t.col1, false, true
    Filter: (substr(t.col1, 1, 2) <> 'a'::text)
    CTE t
      ->  Result
@@ -122,10 +122,10 @@ explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typ
 (6 rows)
 
 explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
-                  QUERY PLAN                  
-----------------------------------------------
+--?.*
+--?.*
  CTE Scan on t
-   Output: pg_typeof(col1), col1, false, true
+   Output: pg_typeof(t.col1), t.col1, false, true
    Filter: (t.col1 <> 'aaa'::text)
    CTE t
      ->  Result

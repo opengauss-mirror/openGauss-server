@@ -112,9 +112,12 @@ bool create_or_index_quals(PlannerInfo* root, RelOptInfo* rel)
 
             orpaths = generate_bitmap_or_paths(root, rel, list_make1(rinfo), rel->baserestrictinfo, true);
 
-            if (rel->isPartitionedTable) {
+            IndexFeature indexFeature = getIndexFeature(rel->isPartitionedTable, (rel->bucketInfo != NULL));
+            if (indexFeature != NONFEATURED_INDEX) {
                 orpaths = list_concat(
-                    orpaths, GenerateBitmapOrPathsUseGPI(root, rel, list_make1(rinfo), rel->baserestrictinfo, true));
+                    orpaths,
+                    GenerateBitmapOrPathsWithFeaturedIndex(root, rel, list_make1(rinfo), rel->baserestrictinfo, true,
+                        indexFeature));
             }
 
             /* Locate the cheapest OR path */

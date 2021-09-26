@@ -2,7 +2,7 @@
  *
  * xlogutils.cpp
  *
- * PostgreSQL transaction log manager utility routines
+ * openGauss transaction log manager utility routines
  *
  * This file contains support routines that are used by XLOG replay functions.
  * None of this code is used during normal system operation.
@@ -30,13 +30,15 @@
 #include "access/multi_redo_api.h"
 #include "access/parallel_recovery/dispatcher.h"
 #include "catalog/catalog.h"
+#include "catalog/storage_xlog.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 #include "replication/catchup.h"
 #include "replication/datasender.h"
 #include "replication/walsender.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/rel.h"
@@ -63,27 +65,37 @@ typedef struct xl_invalid_page_key {
 typedef struct xl_invalid_page {
     xl_invalid_page_key key; /* hash key ... must be first */
     InvalidPageType type;    /* invalid page type */
+    XLogRecPtr lsn;          /* first xlog when the invalid page found */
+    XLogPhyBlock pblk;       /* physical location for segment-page storage */
 } xl_invalid_page;
 
 /* Report a reference to an invalid page */
-static void report_invalid_page(int elevel, const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, InvalidPageType type)
+static void report_invalid_page(int elevel, xl_invalid_page *invalid_page)
 {
-    char *path = relpathperm(node, forkno);
+    char *path = relpathperm(invalid_page->key.node, invalid_page->key.forkno);
 
-    if (type == NOT_INITIALIZED) {
+    if (invalid_page->type == NOT_INITIALIZED)
         ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                         errmsg("page %u of relation %s is uninitialized", blkno, path)));
+                        errmsg("page %u (lsn: %lx) of relation %s (%u/%u) is uninitialized", invalid_page->key.blkno,
+                            invalid_page->lsn, path, invalid_page->pblk.relNode, invalid_page->pblk.block)));
+    else if (invalid_page->type == NOT_PRESENT) {
+        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("page %u (lsn: %lx) of relation %s (%u/%u) does not exist", invalid_page->key.blkno,
+                                invalid_page->lsn, path, invalid_page->pblk.relNode, invalid_page->pblk.block)));
+    } else if (invalid_page->type == LSN_CHECK_ERROR) {
+        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("page %u (lsn: %lx) of relation %s (%u/%u) lsn check error", invalid_page->key.blkno,
+                                invalid_page->lsn, path, invalid_page->pblk.relNode, invalid_page->pblk.block)));
+    } else if (invalid_page->type == SEGPAGE_LSN_CHECK_ERROR) {
+        ereport(elevel,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                 errmsg("segment page %u (lsn: %lx) of relation %s (%u/%u) lsn check error", invalid_page->key.blkno,
+                        invalid_page->lsn, path, invalid_page->pblk.relNode, invalid_page->pblk.block)));
+    } else {
+        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                            errmsg("page %u (lsn: %lx) of relation %s (%u/%u) unkown error", invalid_page->key.blkno,
+                                invalid_page->lsn, path, invalid_page->pblk.relNode, invalid_page->pblk.block)));
     }
-    else if (type == NOT_PRESENT) {
-        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                                errmsg("page %u of relation %s does not exist", blkno, path)));
-    } else if (type == LSN_CHECK_ERROR) {
-        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                            errmsg("page %u of relation %s lsn check error", blkno, path)));
-    }
-    else
-        ereport(elevel, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                         errmsg("page %u of relation %s unkown error", blkno, path)));
     pfree(path);
 }
 
@@ -110,13 +122,28 @@ void closeXLogRead()
     t_thrd.xlog_cxt.sendFile = -1;
 }
 
+static inline XLogRecPtr GetCurrentXLogLSN()
+{
+    return t_thrd.xlog_cxt.current_redo_xlog_lsn;
+}
+
+static inline void SetCurrentXLogLSN(XLogRecPtr lsn)
+{
+    t_thrd.xlog_cxt.current_redo_xlog_lsn = lsn;
+}
+
 /* Log a reference to an invalid page */
-void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, InvalidPageType type)
+void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber blkno, InvalidPageType type,
+                      const XLogPhyBlock *pblk)
 {
     xl_invalid_page_key key;
     xl_invalid_page *hentry = NULL;
     bool found = false;
     errno_t errorno = EOK;
+
+    key.node = node;
+    key.forkno = forkno;
+    key.blkno = blkno;
 
     MemoryContext oldCtx = NULL;
     if (IsMultiThreadRedoRunning()) {
@@ -127,8 +154,9 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
      * tracing of the cause (note the ereport context mechanism will tell us
      * something about the XLOG record that generated the reference).
      */
+    xl_invalid_page new_invalid_page = {.key = key, .type = type, .lsn = GetCurrentXLogLSN() };
     if (log_min_messages <= DEBUG1 || client_min_messages <= DEBUG1)
-        report_invalid_page(LOG, node, forkno, blkno, type);
+        report_invalid_page(LOG, &new_invalid_page);
 
     if (t_thrd.xlog_cxt.invalid_page_tab == NULL) {
         /* create hash table when first needed */
@@ -149,16 +177,18 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
     }
 
     /* we currently assume xl_invalid_page_key contains no padding */
-    key.node = node;
-    key.forkno = forkno;
-    key.blkno = blkno;
     hentry = (xl_invalid_page *)hash_search(t_thrd.xlog_cxt.invalid_page_tab, (void *)&key, HASH_ENTER, &found);
 
     if (!found) {
         /* hash_search already filled in the key */
         hentry->type = type;
-    } else {
-        /* repeat reference ... leave "present" as it was */
+        hentry->lsn = GetCurrentXLogLSN();
+        if (pblk) {
+            hentry->pblk = *pblk;
+        } else {
+            hentry->pblk.relNode = EXTENT_INVALID;
+            hentry->pblk.block = InvalidBlockNumber;
+        }
     }
 
     if (IsMultiThreadRedoRunning()) {
@@ -166,8 +196,27 @@ void log_invalid_page(const RelFileNode &node, ForkNumber forkno, BlockNumber bl
     }
 }
 
-/* Forget any invalid pages >= minblkno, because they've been dropped */
-static void forget_invalid_pages(const RelFileNode &node, ForkNumber forkno, BlockNumber minblkno)
+static bool single_invalid_page_match(xl_invalid_page *invalid_page, const RelFileNode &node, ForkNumber forkno,
+    BlockNumber minblkno, bool segment_shrink)
+{
+    if (segment_shrink) {
+        RelFileNode rnode = invalid_page->key.node;
+        rnode.relNode = invalid_page->pblk.relNode;
+        bool node_equal = RelFileNodeRelEquals(node, rnode);
+        return node_equal && invalid_page->key.forkno == forkno && invalid_page->pblk.block >= minblkno;
+    } else {
+        bool node_equal = IsBucketFileNode(node) ? RelFileNodeEquals(node, invalid_page->key.node)
+                                                 : RelFileNodeRelEquals(node, invalid_page->key.node);
+        return node_equal && invalid_page->key.forkno == forkno && invalid_page->key.blkno >= minblkno;
+    }
+}
+
+/*
+ * Forget any invalid pages >= minblkno, because they've been dropped
+ *
+ * If segment_shrink is true, use physical location to match.
+ */
+static void forget_invalid_pages(const RelFileNode &node, ForkNumber forkno, BlockNumber minblkno, bool segment_shrink)
 {
     HASH_SEQ_STATUS status;
     xl_invalid_page *hentry = NULL;
@@ -183,8 +232,7 @@ static void forget_invalid_pages(const RelFileNode &node, ForkNumber forkno, Blo
     hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
 
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-        if (BucketRelFileNodeEquals(node, hentry->key.node) && hentry->key.forkno == forkno &&
-            hentry->key.blkno >= minblkno) {
+        if (single_invalid_page_match(hentry, node, forkno, minblkno, segment_shrink)) {
             if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
                 char *path = relpathperm(hentry->key.node, forkno);
 
@@ -203,8 +251,19 @@ static void forget_invalid_pages(const RelFileNode &node, ForkNumber forkno, Blo
     }
 }
 
-/* Forget any invalid pages in a whole database */
-static void forget_invalid_pages_db(Oid dbid)
+static inline bool invalid_page_match(RelFileNode *rnode, Oid spcNode, Oid dbNode)
+{
+    if (OidIsValid(spcNode) && rnode->spcNode != spcNode) {
+        return false;
+    }
+    if (OidIsValid(dbNode) && rnode->dbNode != dbNode) {
+        return false;
+    }
+    return true;
+}
+
+/* Forget any invalid pages in a whole database or space */
+static void forget_invalid_pages_batch(Oid spcNode, Oid dbNode)
 {
     HASH_SEQ_STATUS status;
     xl_invalid_page *hentry = NULL;
@@ -219,7 +278,7 @@ static void forget_invalid_pages_db(Oid dbid)
     hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
 
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-        if (hentry->key.node.dbNode == dbid) {
+        if (invalid_page_match(&hentry->key.node, spcNode, dbNode)) {
             if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
                 char *path = relpathperm(hentry->key.node, hentry->key.forkno);
 
@@ -244,7 +303,7 @@ void PrintInvalidPage()
         xl_invalid_page *hentry = NULL;
         hash_seq_init(&status, t_thrd.xlog_cxt.invalid_page_tab);
         while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-            report_invalid_page(LOG, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->type);
+            report_invalid_page(LOG, hentry);
         }
     }
 }
@@ -262,6 +321,9 @@ bool XLogHaveInvalidPages(void)
             PrintInvalidPage();
         }
         return true;
+    } else if (t_thrd.xlog_cxt.invalid_page_tab != NULL) {
+        hash_destroy(t_thrd.xlog_cxt.invalid_page_tab);
+        t_thrd.xlog_cxt.invalid_page_tab = NULL;
     }
     return false;
 }
@@ -298,7 +360,7 @@ static bool XLogCheckInvalidPages_ForSingle(void)
      * only PANIC after we've dumped all the available info.
      */
     while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-        report_invalid_page(WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno, hentry->type);
+        report_invalid_page(WARNING, hentry);
         t_thrd.xlog_cxt.invaildPageCnt++;
         foundone = true;
     }
@@ -358,8 +420,7 @@ void XLogCheckInvalidPages(void)
                  * only PANIC after we've dumped all the available info.
                  */
                 while ((hentry = (xl_invalid_page *)hash_seq_search(&status)) != NULL) {
-                    report_invalid_page(WARNING, hentry->key.node, hentry->key.forkno, hentry->key.blkno,
-                                        hentry->type);
+                    report_invalid_page(WARNING, hentry);
                     t_thrd.xlog_cxt.invaildPageCnt++;
                     foundone = true;
                 }
@@ -375,7 +436,7 @@ void XLogCheckInvalidPages(void)
         /* can't use t_thrd.xlog_cxt.isIgoreCleanup to judge here, because of scenario: */
         /* after XLogCheckInvalidPages finishes with isIgoreCleanup on, then DN crash and restart, */
         /* and then we get here again with isIgoreCleanup off, we have to ignore again. */
-        if (!force_finish_enabled()) {
+        if (!FORCE_FINISH_ENABLED) {
             ereport(PANIC, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                             errmsg("[REDO_LOG_TRACE]WAL contains references to invalid pages, count:%u",
                                    t_thrd.xlog_cxt.invaildPageCnt)));
@@ -440,6 +501,11 @@ void XLogInitBufferForRedo(XLogReaderState *record, uint8 block_id, RedoBufferIn
     XLogReadBufferForRedoExtended(record, block_id, RBM_ZERO_AND_LOCK, false, bufferinfo);
 }
 
+static bool SegmentNeedAdvancedLSNCheck(RelFileNode &rnode, ForkNumber forknum, ReadBufferMode mode)
+{
+    return IsSegmentFileNode(rnode) && !IsSegmentPhysicalRelNode(rnode) && forknum == MAIN_FORKNUM &&
+           mode == RBM_NORMAL;
+}
 /*
  * XLogReadBufferForRedoExtended
  *     Like XLogReadBufferForRedo, but with extra options.
@@ -455,9 +521,13 @@ void XLogInitBufferForRedo(XLogReaderState *record, uint8 block_id, RedoBufferIn
  * If 'get_cleanup_lock' is true, a "cleanup lock" is acquired on the buffer
  * using LockBufferForCleanup(), instead of a regular exclusive lock.
  */
-XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBufferMode mode, 
-    bool get_cleanup_lock, RedoBufferInfo *redobufferinfo, XLogRecPtr xloglsn, ReadBufferMethod readmethod)
+XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBufferMode mode, bool get_cleanup_lock,
+                                                RedoBufferInfo *redobufferinfo, XLogRecPtr xloglsn, XLogRecPtr last_lsn,
+                                                bool willinit, ReadBufferMethod readmethod, bool tde)
 {
+    SetCurrentXLogLSN(xloglsn);
+
+    XLogPhyBlock *pblk = (redoblock->pblk.relNode != InvalidOid) ? &redoblock->pblk : NULL;
     bool pageisvalid = false;
     Page page;
     Buffer buf;
@@ -471,7 +541,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         if (readmethod == WITH_LOCAL_CACHE)
             buf = XLogReadBufferExtendedWithLocalBuffer(redoblock->rnode, redoblock->forknum, redoblock->blkno, mode);
         else
-            buf = XLogReadBufferExtended(redoblock->rnode, redoblock->forknum, redoblock->blkno, mode);
+            buf = XLogReadBufferExtended(redoblock->rnode, redoblock->forknum, redoblock->blkno, mode, pblk, tde);
         pageisvalid = BufferIsValid(buf);
         if (pageisvalid) {
             if (readmethod != WITH_LOCAL_CACHE) {
@@ -493,9 +563,23 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
         redobufferinfo->buf = buf;
         redobufferinfo->pageinfo.page = page;
         redobufferinfo->pageinfo.pagesize = pagesize;
+
         if (XLByteLE(xloglsn, PageGetLSN(page)))
             return BLK_DONE;
         else {
+            if (SegmentNeedAdvancedLSNCheck(redoblock->rnode, redoblock->forknum, mode)) {
+                /*
+                 * For segment-page storage, before returning BLK_NEEDS_REDO, we need checking LSN. Illegal LSN may be
+                 * caused by dropping table and invalidating buffer. So the page can not be replayed on. The xlog can
+                 * be skipped, as later commit xlog will remove the invalid page
+                 */
+                /* If lsn check fails, return invalidate buffer */
+                if (!DoLsnCheck(redobufferinfo, willinit, last_lsn, pblk)) {
+                    redobufferinfo->buf = InvalidBuffer;
+                    UnlockReleaseBuffer(buf);
+                    return BLK_NOTFOUND;
+                }
+            }
             return BLK_NEEDS_REDO;
         }
     } else {
@@ -513,8 +597,10 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
     RedoBufferTag blockinfo;
     XLogRedoAction redoaction;
     bool xloghasblockimage = false;
+    bool tde = false;
 
-    if (!XLogRecGetBlockTag(record, block_id, &(blockinfo.rnode), &(blockinfo.forknum), &(blockinfo.blkno))) {
+    if (!XLogRecGetBlockTag(record, block_id, &(blockinfo.rnode), &(blockinfo.forknum), &(blockinfo.blkno),
+        &(blockinfo.pblk))) {
         /* Caller specified a bogus block_id */
         ereport(PANIC, (errmsg("failed to locate backup block with ID %d", block_id)));
     }
@@ -523,7 +609,7 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
      * Make sure that if the block is marked with WILL_INIT, the caller is
      * going to initialize it. And vice versa.
      */
-    zeromode = (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK);
+    zeromode = (mode == RBM_ZERO || mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK);
     willinit = (record->blocks[block_id].flags & BKPBLOCK_WILL_INIT) != 0;
     if (willinit && !zeromode)
         ereport(PANIC, (errmsg("block with WILL_INIT flag in WAL record must be zeroed by redo routine")));
@@ -536,8 +622,14 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
     if (xloghasblockimage) {
         mode = get_cleanup_lock ? RBM_ZERO_AND_CLEANUP_LOCK : RBM_ZERO_AND_LOCK;
     }
+
+    if (record->isTde) {
+        tde = StandbyTdeTableEncryptionInsert(record->blocks[block_id].tdeinfo, blockinfo.rnode);
+        pfree_ext(record->blocks[block_id].tdeinfo);
+    }
+
     redoaction = XLogReadBufferForRedoBlockExtend(&blockinfo, mode, get_cleanup_lock, bufferinfo, record->EndRecPtr,
-                                                  readmethod);
+                                                  record->blocks[block_id].last_lsn, willinit, readmethod, tde);
     if (redoaction == BLK_NOTFOUND) {
         return BLK_NOTFOUND;
     }
@@ -552,7 +644,6 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
                             errmsg("XLogReadBufferForRedoExtended failed to restore block image")));
         RestoreBlockImage(imagedata, hole_offset, hole_length, (char *)bufferinfo->pageinfo.page);
         XlogUpdateFullPageWriteLsn(bufferinfo->pageinfo.page, bufferinfo->lsn);
-        PageSetJustAfterFullPageWrite(bufferinfo->pageinfo.page);
         if (readmethod == WITH_NORMAL_CACHE) {
             MarkBufferDirty(bufferinfo->buf);
             if (bufferinfo->blockinfo.forknum == INIT_FORKNUM)
@@ -561,11 +652,15 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
         return BLK_RESTORED;
     } else if (BLK_NEEDS_REDO == redoaction) {
         if (EnalbeWalLsnCheck && bufferinfo->blockinfo.forknum == MAIN_FORKNUM) {
-            XLogRecPtr lastLsn;
+            XLogRecPtr lastLsn = InvalidXLogRecPtr;
             if (!XLogRecGetBlockLastLsn(record, block_id, &lastLsn)) {
-                ereport(PANIC, (errmsg("can not get xlog lsn from record page block %u lsn %lu", block_id, lastLsn)));
+                ereport(PANIC, (errmsg("can not get xlog lsn from record page block %u", block_id)));
             }
-            DoLsnCheck(bufferinfo, willinit, lastLsn);
+            bool notSkip = DoLsnCheck(bufferinfo, willinit, lastLsn, 
+                (blockinfo.pblk.relNode != InvalidOid) ? &blockinfo.pblk : NULL);
+            if (!notSkip) {
+                return BLK_DONE;
+            }
         }
         PageClearJustAfterFullPageWrite(bufferinfo->pageinfo.page);
     }
@@ -589,7 +684,7 @@ Buffer XLogReadBufferExtendedWithLocalBuffer(RelFileNode rnode, ForkNumber forkn
         buffer = ReadBuffer_common_for_localbuf(rnode, RELPERSISTENCE_PERMANENT, forknum, blkno, mode, NULL, &hit);
     } else {
         if (mode == RBM_NORMAL) {
-            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT);
+            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT, NULL);
             return InvalidBuffer;
         }
         if (mode == RBM_NORMAL_NO_LOG)
@@ -620,7 +715,7 @@ Buffer XLogReadBufferExtendedWithLocalBuffer(RelFileNode rnode, ForkNumber forkn
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
             ReleaseBuffer(buffer);
-            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED);
+            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, NULL);
             return InvalidBuffer;
         }
     }
@@ -654,7 +749,7 @@ Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum
         buffer = ReadBuffer_common_for_direct(rnode, RELPERSISTENCE_PERMANENT, forknum, blkno, mode);
     } else {
         if (mode == RBM_NORMAL) {
-            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT);
+            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT, NULL);
             return InvalidBuffer;
         }
         if (mode == RBM_NORMAL_NO_LOG)
@@ -685,12 +780,78 @@ Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
             XLogRedoBufferReleaseFunc(buffer);
-            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED);
+            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, NULL);
             return InvalidBuffer;
         }
     }
     if (t_thrd.xlog_cxt.startup_processing && t_thrd.xlog_cxt.server_mode == STANDBY_MODE && PageIsLogical(page))
         PageClearLogical(page);
+    return buffer;
+}
+
+Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode,
+    const XLogPhyBlock *pblk, bool tde)
+{
+    if (IsSegmentPhysicalRelNode(rnode)) {
+        SegmentCheck(IsSegmentFileNode(rnode));
+        SegmentCheck(pblk == NULL);
+        return XLogReadBufferExtendedForSegpage(rnode, forknum, blkno, mode);
+    } else {
+        SegmentCheck(IsSegmentFileNode(rnode) == PointerIsValid(pblk));
+        SegmentCheck(!PointerIsValid(pblk) || PhyBlockIsValid(*pblk));
+        return XLogReadBufferExtendedForHeapDisk(rnode, forknum, blkno, mode, pblk, tde);
+    }
+}
+
+/* The target block number exceeds the smgrnblocks */
+static Buffer XLogReadBufferExceedFileRange(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blkno,
+                                            ReadBufferMode mode, const XLogPhyBlock *pblk)
+{
+    Buffer buffer;
+    /* hm, page doesn't exist in file */
+    if (mode == RBM_NORMAL) {
+        log_invalid_page(rnode, forknum, blkno, NOT_PRESENT, pblk);
+        return InvalidBuffer;
+    }
+    if (mode == RBM_NORMAL_NO_LOG)
+        return InvalidBuffer;
+
+    if (IsSegmentFileNode(rnode)) {
+        SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, true);
+        /* 1. ensure the data file created */
+        spc_datafile_create(spc, pblk->relNode, forknum);
+        /* 2. extend to the aimed size */
+        spc_extend_file(spc, pblk->relNode, forknum, pblk->block + 1);
+        buffer = ReadBufferWithoutRelcache(rnode, forknum, blkno, mode, NULL, pblk);
+    } else {
+        /*
+         * OK to extend the file
+         * Data replication writer maybe conflicts with us. lock relation extension first.
+         */
+        Assert(t_thrd.xlog_cxt.InRecovery);
+        buffer = InvalidBuffer;
+
+        LockRelFileNodeForExtension(rnode, ExclusiveLock);
+        do {
+            if (buffer != InvalidBuffer) {
+                if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK)
+                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+                ReleaseBuffer(buffer);
+            }
+            buffer = ReadBufferWithoutRelcache(rnode, forknum, P_NEW, mode, NULL, NULL);
+        } while (BufferGetBlockNumber(buffer) < blkno);
+        UnlockRelFileNodeForExtension(rnode, ExclusiveLock);
+    }
+
+    /* Handle the corner case that P_NEW returns non-consecutive pages */
+    if (BufferGetBlockNumber(buffer) != blkno) {
+        if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK)
+            LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        ReleaseBuffer(buffer);
+        Assert(!IsSegmentFileNode(rnode));
+        buffer = ReadBufferWithoutRelcache(rnode, forknum, blkno, mode, NULL, NULL);
+    }
+
     return buffer;
 }
 
@@ -720,9 +881,9 @@ Buffer XLogReadBufferExtendedWithoutBuffer(RelFileNode rnode, ForkNumber forknum
  * they will be invisible to tools that that need to know which pages are
  * modified.
  */
-Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blkno, ReadBufferMode mode)
+Buffer XLogReadBufferExtendedForHeapDisk(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blkno,
+    ReadBufferMode mode, const XLogPhyBlock *pblk, bool tde)
 {
-    BlockNumber lastblock;
     Buffer buffer;
     Page page;
     SMgrRelation smgr;
@@ -740,46 +901,40 @@ Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, Bloc
      * filesystem loses an inode during a crash.  Better to write the data
      * until we are actually told to delete the file.)
      */
-    smgrcreate(smgr, forknum, true);
+    bool pageExistsInFile;
+    if (IsSegmentFileNode(rnode)) {
+        SegmentCheck(pblk != NULL);
+        SegmentCheck(XLogRecPtrIsValid(pblk->lsn));
 
-    lastblock = smgrnblocks(smgr, forknum);
-    if (blkno < lastblock) {
-        /* page exists in file */
-        buffer = ReadBufferWithoutRelcache(rnode, forknum, blkno, mode, NULL);
+        SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, false);
+        if (spc == NULL || !spc_datafile_exist(spc, pblk->relNode, forknum)) {
+            pageExistsInFile = false;
+        } else {
+            pageExistsInFile = seg_fork_exists(spc, smgr, forknum, pblk);
+        }
     } else {
-        /* hm, page doesn't exist in file */
-        if (mode == RBM_NORMAL) {
-            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT);
-            return InvalidBuffer;
+        smgrcreate(smgr, forknum, true);
+        BlockNumber lastblock = smgrnblocks(smgr, forknum);
+        pageExistsInFile = blkno < lastblock;
+    }
+
+    smgr->encrypt = tde;
+    
+    if (pageExistsInFile) {
+        /* page exists in file */
+        buffer = ReadBufferWithoutRelcache(rnode, forknum, blkno, mode, NULL, pblk);
+    } else {
+        buffer = XLogReadBufferExceedFileRange(rnode, forknum, blkno, mode, pblk);
+        if (BufferIsInvalid(buffer)) {
+            // can not read
+            return buffer;
         }
-        if (mode == RBM_NORMAL_NO_LOG)
-            return InvalidBuffer;
+    }
 
-        /*
-         * OK to extend the file
-         * Data replication writer maybe conflicts with us. lock relation extension first.
-         */
-        Assert(t_thrd.xlog_cxt.InRecovery);
-        buffer = InvalidBuffer;
-
-        LockRelFileNodeForExtension(rnode, ExclusiveLock);
-        do {
-            if (buffer != InvalidBuffer) {
-                if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK)
-                    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-                ReleaseBuffer(buffer);
-            }
-            buffer = ReadBufferWithoutRelcache(rnode, forknum, P_NEW, mode, NULL);
-        } while (BufferGetBlockNumber(buffer) < blkno);
-        UnlockRelFileNodeForExtension(rnode, ExclusiveLock);
-
-        /* Handle the corner case that P_NEW returns non-consecutive pages */
-        if (BufferGetBlockNumber(buffer) != blkno) {
-            if (mode == RBM_ZERO_AND_LOCK || mode == RBM_ZERO_AND_CLEANUP_LOCK)
-                LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
-            ReleaseBuffer(buffer);
-            buffer = ReadBufferWithoutRelcache(rnode, forknum, blkno, mode, NULL);
-        }
+    if (buffer == InvalidBuffer) {
+        ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("block is invalid %u/%u/%u %d %u", rnode.spcNode, rnode.dbNode, rnode.relNode,
+                                   forknum, blkno)));
     }
 
     page = BufferGetPage(buffer);
@@ -793,7 +948,7 @@ Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, Bloc
         if (PageIsNew(page)) {
             Assert(!PageIsLogical(page));
             ReleaseBuffer(buffer);
-            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED);
+            log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, pblk);
             return InvalidBuffer;
         }
     }
@@ -801,6 +956,58 @@ Buffer XLogReadBufferExtended(const RelFileNode &rnode, ForkNumber forknum, Bloc
     if (t_thrd.xlog_cxt.startup_processing && t_thrd.xlog_cxt.server_mode == STANDBY_MODE && PageIsLogical(page))
         PageClearLogical(page);
 
+    return buffer;
+}
+
+Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber forknum, BlockNumber blkno,
+    ReadBufferMode mode)
+{
+    Assert(IsSegmentPhysicalRelNode(rnode));
+
+    Buffer buffer;
+    BlockNumber spc_nblocks = 0;
+    SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, true);
+    spc_datafile_create(spc, rnode.relNode, forknum);
+
+    spc_nblocks = spc_size(spc, rnode.relNode, forknum);
+
+    if (blkno < spc_nblocks) {
+        buffer = ReadBufferFast(spc, rnode, forknum, blkno, mode);
+    } else {
+        if (mode == RBM_NORMAL) {
+            ereport(
+                LOG,
+                (errmsg("XLogReadBufferForSegpage, rnode/forknumber/blocknum: <%u, %u, %u, %u>/%d/%u, but there is %d "
+                        "blocks in the file.",
+                        rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, forknum, blkno, spc_nblocks)));
+
+            /* As segpage use physical block number, we do not have to set pblk */
+            log_invalid_page(rnode, forknum, blkno, NOT_PRESENT, NULL);
+            return InvalidBuffer;
+        }
+
+        spc_extend_file(spc, rnode.relNode, forknum, blkno + 1);
+        buffer = ReadBufferFast(spc, rnode, forknum, blkno, mode);
+    }
+
+    if (BufferIsValid(buffer)) {
+        Page page = BufferGetPage(buffer);
+        if (mode == RBM_NORMAL) {
+            if (PageIsNew(page)) {
+                SegmentCheck(XLogRecPtrIsInvalid(PageGetLSN(page)));
+                SegReleaseBuffer(buffer);
+                log_invalid_page(rnode, forknum, blkno, NOT_INITIALIZED, NULL);
+                return InvalidBuffer;
+            }
+        }
+        if (t_thrd.xlog_cxt.startup_processing && t_thrd.xlog_cxt.server_mode == STANDBY_MODE && PageIsLogical(page)) {
+            PageClearLogical(page);
+        }
+    } else {
+        ereport(ERROR, (errcode_for_file_access(),
+                            errmsg("block is invalid %u/%u/%u %d %u", rnode.spcNode, rnode.dbNode, rnode.relNode,
+                                   forknum, blkno)));
+    }
     return buffer;
 }
 
@@ -925,10 +1132,31 @@ void XlogDropRowReation(RelFileNode rnode)
     smgrclosenode(rbnode);
 }
 
+void XLogDropBktRowRelation(XLogRecParseState *redoblockstate)
+{
+    Assert(redoblockstate->blockparse.blockhead.block_valid == BLOCK_DATA_DDL_TYPE);
+    RelFileNode rnode;
+    rnode.spcNode = redoblockstate->blockparse.blockhead.spcNode;
+    rnode.dbNode = redoblockstate->blockparse.blockhead.dbNode;
+    rnode.relNode = redoblockstate->blockparse.blockhead.relNode;
+
+    uint32 *bktmap = (uint32 *)redoblockstate->blockparse.extra_rec.blockddlrec.mainData;
+    for (uint32 bktNode = 0; bktNode < MAX_BUCKETMAPLEN; bktNode++) {
+        if (!GET_BKT_MAP_BIT(bktmap, bktNode)) {
+            continue;
+        }
+        
+        rnode.bucketNode = bktNode;
+        XlogDropRowReation(rnode);
+    }
+}
+
 void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
 {
     XLogBlockDdlParse *ddlrecparse = &(redoblockstate->blockparse.extra_rec.blockddlrec);
-    if (ddlrecparse->blockddltype == BLOCK_DDL_DROP_RELNODE) {
+    if (redoblockstate->blockparse.extra_rec.blockddlrec.blockddltype == BLOCK_DDL_DROP_BKTLIST) {
+        XLogDropBktRowRelation(redoblockstate);
+    } else if (ddlrecparse->blockddltype == BLOCK_DDL_DROP_RELNODE) {
         if (redoblockstate->blockparse.blockhead.forknum <= MAX_FORKNUM) {
             RelFileNode relNode;
             relNode.spcNode = redoblockstate->blockparse.blockhead.spcNode;
@@ -948,6 +1176,20 @@ void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
     }
 }
 
+void XLogDropSpaceShrink(XLogRecParseState *redoblockstate)
+{
+    RelFileNode rnode = {
+        .spcNode = redoblockstate->blockparse.blockhead.spcNode,
+        .dbNode = redoblockstate->blockparse.blockhead.dbNode,
+        .relNode = redoblockstate->blockparse.blockhead.relNode,
+        .bucketNode = redoblockstate->blockparse.blockhead.bucketNode
+    };
+    ForkNumber forknum = redoblockstate->blockparse.blockhead.forknum;
+    BlockNumber target_size = redoblockstate->blockparse.blockhead.blkno;
+
+    XLogTruncateRelation(rnode, forknum, target_size);
+    XLogTruncateSegmentSpace(rnode, forknum, target_size);
+}
 /*
  * Drop a relation during XLOG replay
  *
@@ -956,7 +1198,7 @@ void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
  */
 void XLogDropRelation(const RelFileNode &rnode, ForkNumber forknum)
 {
-    forget_invalid_pages(rnode, forknum, 0);
+    forget_invalid_pages(rnode, forknum, 0, false);
 }
 
 bool IsDataBaseDrop(XLogReaderState *record)
@@ -981,6 +1223,24 @@ bool IsTableSpaceCreate(XLogReaderState *record)
              (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_TBLSPC_RELATIVE_CREATE));
 }
 
+bool IsSegPageShrink(XLogReaderState *record)
+{
+    return (XLogRecGetRmid(record) == RM_SEGPAGE_ID &&
+            (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_SEG_SPACE_SHRINK);
+}
+
+bool IsSegPageDropSpace(XLogReaderState *record)
+{
+    return (XLogRecGetRmid(record) == RM_SEGPAGE_ID &&
+            (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_SEG_SPACE_DROP);
+}
+
+bool IsBarrierCreate(XLogReaderState *record)
+{
+    return (XLogRecGetRmid(record) == RM_BARRIER_ID &&
+            (XLogRecGetInfo(record) & ~XLR_INFO_MASK) == XLOG_BARRIER_CREATE);
+}
+
 /*
  * Drop a whole database during XLOG replay
  *
@@ -996,7 +1256,15 @@ void XLogDropDatabase(Oid dbid)
      */
     smgrcloseall();
 
-    forget_invalid_pages_db(dbid);
+    forget_invalid_pages_batch(InvalidOid, dbid);
+}
+
+/*
+ * Drop a segment-page space
+ */
+void XLogDropSegmentSpace(Oid spcNode, Oid dbNode)
+{
+    forget_invalid_pages_batch(spcNode, dbNode);
 }
 
 /*
@@ -1006,12 +1274,17 @@ void XLogDropDatabase(Oid dbid)
  */
 void XLogTruncateRelation(XLogReaderState *record, const RelFileNode &rnode, ForkNumber forkNum, BlockNumber nblocks)
 {
-    forget_invalid_pages(rnode, forkNum, nblocks);
+    forget_invalid_pages(rnode, forkNum, nblocks, false);
 }
 
 void XLogTruncateRelation(RelFileNode rnode, ForkNumber forkNum, BlockNumber nblocks)
 {
-    forget_invalid_pages(rnode, forkNum, nblocks);
+    forget_invalid_pages(rnode, forkNum, nblocks, false);
+}
+
+void XLogTruncateSegmentSpace(RelFileNode rnode, ForkNumber forkNum, BlockNumber nblocks)
+{
+    forget_invalid_pages(rnode, forkNum, nblocks, true);
 }
 
 /*

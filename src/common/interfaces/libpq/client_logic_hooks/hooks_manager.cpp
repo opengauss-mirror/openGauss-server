@@ -37,6 +37,7 @@
 #include "encryption_column_hook_executor.h"
 #include "encryption_global_hook_executor.h"
 #include "client_logic_processor/values_processor.h"
+#include "client_logic_cache/cached_column_manager.h"
 
 /* DDL */
 GlobalHookExecutorSptr HooksManager::GlobalSettings::create_global_hook_executor(const char *function_name,
@@ -77,6 +78,22 @@ bool HooksManager::GlobalSettings::post_create(PGClientLogic &client_logic, cons
     if (!global_hook_executor) {
         return false;
     }
+    bool ret = global_hook_executor->post_create(args);
+    delete_global_hook_executor(global_hook_executor);
+    return ret;
+}
+
+bool HooksManager::GlobalSettings::deprocess_column_setting(const unsigned char *processed_data, 
+    size_t processed_data_size, const char *key_store, const char *key_path, const char *key_algo, unsigned char **data,
+    size_t *data_size)
+{
+    PGClientLogic client_logic(NULL, NULL, NULL);
+    GlobalHookExecutor *global_hook_executor = create_global_hook_executor("encryption", client_logic);
+    if (!global_hook_executor) {
+        return false;
+    }
+    global_hook_executor->deprocess_column_setting(processed_data, processed_data_size, key_store, key_path,
+        key_algo, data, data_size);
     delete_global_hook_executor(global_hook_executor);
     return true;
 }
@@ -177,9 +194,9 @@ DecryptDataRes HooksManager::deprocess_data(PGClientLogic &client_logic, const u
 
         /* column hook executor */
         ColumnHookExecutor *column_hook_executor =
-            CacheLoader::get_instance().get_column_hook_executor(column_setting_oid);
+            client_logic.m_cached_column_manager->get_column_hook_executor(column_setting_oid);
         if (!column_hook_executor) {
-            return CLIENT_HEAP_ERR;
+            return CLIENT_CACHE_ERR;
         }
 
         /* deprocess */
@@ -229,15 +246,17 @@ bool HooksManager::is_set_operation_allowed(const ICachedColumn *ce)
     return true;
 }
 
-bool HooksManager::GlobalSettings::set_deletion_expected(const char *object_name, bool is_schema)
+bool HooksManager::GlobalSettings::set_deletion_expected(PGClientLogic& clientLogic, 
+    const char *object_name, const bool is_schema)
 {
     const CachedGlobalSetting **global_settings(NULL);
     size_t global_settings_size(0);
     if (is_schema) {
         global_settings =
-            CacheLoader::get_instance().get_global_settings_by_schema_name(object_name, global_settings_size);
+            clientLogic.m_cached_column_manager->get_global_settings_by_schema_name(object_name, global_settings_size);
     } else {
-        const CachedGlobalSetting *globalSetting = CacheLoader::get_instance().get_global_setting_by_fqdn(object_name);
+        const CachedGlobalSetting *globalSetting = 
+            clientLogic.m_cached_column_manager->get_global_setting_by_fqdn(object_name);
         global_settings = (const CachedGlobalSetting **)libpq_realloc(global_settings,
             sizeof(CachedGlobalSetting *) * global_settings_size,
             sizeof(CachedGlobalSetting *) * (global_settings_size + 1));
@@ -258,15 +277,17 @@ bool HooksManager::GlobalSettings::set_deletion_expected(const char *object_name
     }
     return true;
 }
-bool HooksManager::ColumnSettings::set_deletion_expected(const char *object_name, bool is_schema)
+bool HooksManager::ColumnSettings::set_deletion_expected(PGClientLogic& clientLogic, 
+    const char *object_name, const bool is_schema)
 {
     const CachedColumnSetting **column_settings(NULL);
     size_t column_settings_size(0);
     if (is_schema) {
         column_settings =
-            CacheLoader::get_instance().get_column_setting_by_schema_name(object_name, column_settings_size);
+            clientLogic.m_cached_column_manager->get_column_setting_by_schema_name(object_name, column_settings_size);
     } else {
-        const CachedColumnSetting *columnSetting = CacheLoader::get_instance().get_column_setting_by_fqdn(object_name);
+        const CachedColumnSetting *columnSetting = 
+            clientLogic.m_cached_column_manager->get_column_setting_by_fqdn(object_name);
         column_settings = (const CachedColumnSetting **)malloc(sizeof(CachedColumnSetting *) * 1);
         if (column_settings == NULL) {
             fprintf(stderr, "out of memory when setting deleted objects\n");
@@ -282,11 +303,3 @@ bool HooksManager::ColumnSettings::set_deletion_expected(const char *object_name
     libpq_free(column_settings);
     return true;
 }
-
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-bool HooksManager::GlobalSettings::get_key_path_by_cmk_name(GlobalHookExecutor *global_hook_executor,
-    char *key_path_buf, size_t buf_len)
-{
-    return global_hook_executor->get_key_path_by_cmk_name(key_path_buf, buf_len);
-}
-#endif

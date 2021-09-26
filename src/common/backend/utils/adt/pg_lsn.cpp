@@ -1,6 +1,6 @@
 /* -----------------------------------------------------------------------
  *
- * PostgreSQL locale utilities
+ * openGauss locale utilities
  *
  * Portions Copyright (c) 2002-2012, PostgreSQL Global Development Group
  *

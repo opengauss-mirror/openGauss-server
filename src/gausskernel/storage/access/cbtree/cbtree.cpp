@@ -36,7 +36,7 @@
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "tcop/tcopprot.h"
 #include "miscadmin.h"
 #include "utils/aiomem.h"
@@ -55,7 +55,7 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     IndexInfo *indexInfo = (IndexInfo *)PG_GETARG_POINTER(2);
 
     IndexBuildResult *result = NULL;
-    double reltuples = 0;
+    double reltuples;
     BTBuildState buildstate;
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
@@ -93,7 +93,7 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     buildstate.spool = NULL;
     buildstate.spool2 = NULL;
     buildstate.indtuples = 0;
-    buildstate.spool = _bt_spoolinit(indexRel, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
+    buildstate.spool = _bt_spoolinit(heapRel, indexRel, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
 
     /* 3. scan heap table and insert tuple into btree */
     if (RelationIsDfsStore(heapRel)) {
@@ -222,7 +222,7 @@ static void InsertToBtree(VectorBatch *vecScanBatch, BTBuildState &buildstate, I
  * @IN param values: values uesd to form index tuple
  * @IN param isull: isull used to form index tuple
  */
-void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, bool* isnull)
+void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, const bool* isnull)
 {
     bool is_unique = false;
     ScanKey itup_scankey;
@@ -246,7 +246,7 @@ void CheckUniqueOnOtherIdx(Relation index, Relation heapRel, Datum* values, bool
     }
 
     BTCheckElement element;
-    is_unique = SearchBufferAndCheckUnique(index, itup, UNIQUE_CHECK_YES, heapRel, NULL, cudescScan, &element);
+    is_unique = SearchBufferAndCheckUnique(index, itup, UNIQUE_CHECK_YES, heapRel, NULL, NULL, cudescScan, &element);
 
     buf = element.buffer;
     stack = element.btStack;

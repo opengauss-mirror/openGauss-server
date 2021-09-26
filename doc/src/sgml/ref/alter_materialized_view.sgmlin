@@ -1,0 +1,31 @@
+<!--
+doc/src/sgml/ref/alter_materialized_view.sgml
+PostgreSQL documentation
+-->
+
+<refentry id="SQL-ALTERMATERIALIZEDVIEW">
+ <refmeta>
+  <refentrytitle>ALTER MATERIALIZED VIEW</refentrytitle>
+  <manvolnum>7</manvolnum>
+  <refmiscinfo>SQL - Language Statements</refmiscinfo>
+ </refmeta>
+
+ <refnamediv>
+  <refname>ALTER MATERIALIZED VIEW</refname>
+  <refpurpose>replace the contents of a materialized view</refpurpose>
+ </refnamediv>
+
+ <indexterm zone="sql-altermaterializedview">
+  <primary>ALTER MATERIALIZED VIEW</primary>
+ </indexterm>
+
+ <refsynopsisdiv>
+<synopsis>
+ALTER MATERIALIZED VIEW [ IF EXISTS ] mv_name
+    OWNER TO new_owner;
+ALTER MATERIALIZED VIEW [ IF EXISTS ] mv_name
+    RENAME [COLUMN] column_name to new_column_name;
+ALTER MATERIALIZED VIEW [ IF EXISTS ] mv_name
+    RENAME TO new_name;
+</synopsis>
+</refentry>

@@ -1,0 +1,2 @@
+--run
+\! @abs_srcdir@/snapshots_test/test.sh -r -p @portstring@ -d regression

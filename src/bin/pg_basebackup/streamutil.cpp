@@ -217,6 +217,7 @@ PGconn* GetConnection(void)
             dbpassword = simple_prompt(_("Password: "), PASSWDLEN, false);
             keywords[argcount - 1] = "password";
             values[argcount - 1] = dbpassword;
+            dbgetpassword = -1;
         }
 
         tmpconn = PQconnectdbParams(keywords, values, true);
@@ -225,7 +226,6 @@ PGconn* GetConnection(void)
          * and PQconnectdbParams returns NULL, we call exit(1) directly.
          */
         CheckConnectionHost(tmpconn);
-
         if (PQstatus(tmpconn) == CONNECTION_BAD && PQconnectionNeedsPassword(tmpconn) && dbgetpassword != -1) {
             dbgetpassword = 1; /* ask for password next time */
             ClearAndFreePasswd();

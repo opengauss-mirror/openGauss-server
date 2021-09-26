@@ -1,0 +1,26 @@
+#!/bin/bash
+#############################################################################
+# Copyright (c): 2012-2021, Huawei Tech. Co., Ltd.
+# FileName     : remote_commander
+# Version      : GaussDB Kernel V500R001
+# Date         : 2021-03-01
+# Description  : Remote execute script
+#############################################################################
+
+cmd=$*
+read -p "password: " password
+timer=120
+func_remote_execute_cmd()
+{
+   expect -c "
+    set timeout ${timer}
+    spawn bash -c \"$cmd\";
+    expect {
+            \"Are you sure you want to continue connecting (yes/no)?\"
+            {send \"yes\n\";expect \"assword:\";send \"$password\n\"; exp_continue}
+            \"assword:\" {send $password\n; exp_continue}
+                }
+        catch wait result;
+        exit [lindex \$result 3]"
+}
+func_remote_execute_cmd

@@ -237,7 +237,7 @@ void setAZPriority()
     g_az_arbiter = priorities[++zeroIndex];
 }
 
-int read_config_file(const char* file_path, int* err_no)
+int read_config_file(const char* file_path, int* err_no, bool inReload, int mallocByNodeNum)
 {
     FILE* fd = NULL;
     uint32 ii = 0;
@@ -248,6 +248,11 @@ int read_config_file(const char* file_path, int* err_no)
     uint32 datanodeMirrorID = 0;
     int rcs = 0;
     char configFilePath[MAX_PATH_LEN];
+    uint32 cmServerNum = 0;
+    uint32 gtmNum = 0;
+    uint32 dnReplicationNum = 0;
+    uint32 etcdNum = 0;
+    uint32 cnNum = 0;
 
     header_size = sizeof(staticConfigHeader);
     header_aglinment_size =
@@ -289,13 +294,12 @@ int read_config_file(const char* file_path, int* err_no)
     FREAD(&g_nodeHeader.nodeCount, 1, sizeof(uint32), fd);
     FREAD(&g_nodeHeader.node, 1, sizeof(uint32), fd);
 
-    if (g_node != NULL) {
+    if (g_node != NULL && !inReload) {
         free(g_node);
         g_node = NULL;
     }
 
-    g_node_num = g_nodeHeader.nodeCount;
-    if (g_node_num > CM_NODE_MAXNUM) {
+    if (g_nodeHeader.nodeCount > CM_NODE_MAXNUM || g_nodeHeader.nodeCount == 0) {
         fclose(fd);
         return READ_FILE_ERROR;
     }
@@ -303,20 +307,34 @@ int read_config_file(const char* file_path, int* err_no)
     if (fseek(fd, (off_t)(header_aglinment_size), SEEK_SET) != 0)
         goto read_failed;
 
-    g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_node_num);
-    if (g_node == NULL) {
-        fclose(fd);
-        return OUT_OF_MEMORY;
+    if (!inReload) {
+        if (mallocByNodeNum == MALLOC_BY_NODE_NUM) {
+            g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_nodeHeader.nodeCount);
+        } else {
+            g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * CM_NODE_MAXNUM);
+        }
+        if (g_node == NULL) {
+            fclose(fd);
+            return OUT_OF_MEMORY;
+        }
+
+        /* g_node size may be larger than SECUREC_STRING_MAX_LEN in large cluster.*/
+        if (mallocByNodeNum == MALLOC_BY_NODE_NUM) {
+            rcs = memset_s(g_node, sizeof(staticNodeConfig) * g_nodeHeader.nodeCount, 0,
+                           sizeof(staticNodeConfig) * g_nodeHeader.nodeCount);
+        } else {
+            rcs = memset_s(g_node, sizeof(staticNodeConfig) * CM_NODE_MAXNUM, 0,
+                           sizeof(staticNodeConfig) * CM_NODE_MAXNUM);
+        }
+        if (rcs != EOK && rcs != ERANGE) {
+            printf("ERROR at %s : %d : Initialize is failed, error num is: %d.\n", __FILE__, __LINE__, rcs);
+            fclose(fd);
+            free(g_node);
+            exit(1);
+        }
     }
 
-    /* g_node size may be larger than SECUREC_STRING_MAX_LEN in large cluster.*/
-    rcs = memset_s(g_node, sizeof(staticNodeConfig) * g_node_num, 0, sizeof(staticNodeConfig) * g_node_num);
-    if (rcs != EOK && rcs != ERANGE) {
-        printf("ERROR at %s : %d : Initialize is failed, error num is: %d.\n", __FILE__, __LINE__, rcs);
-        exit(1);
-    }
-
-    for (ii = 0; ii < g_node_num; ii++) {
+    for (ii = 0; ii < g_nodeHeader.nodeCount; ii++) {
         uint32 jj = 0;
         uint32 kk = 0;
         uint32 body_aglinment_size = 0;
@@ -364,7 +382,7 @@ int read_config_file(const char* file_path, int* err_no)
         /* read CMServer info */
         FREAD(&g_node[ii].cmServerId, 1, sizeof(uint32), fd);
         if (g_node[ii].cmServerId != 0) {
-            g_cm_server_num++;
+            cmServerNum++;
         }
         FREAD(&g_node[ii].cmServerMirrorId, 1, sizeof(uint32), fd);
         FREAD(g_node[ii].cmDataPath, 1, CM_PATH_LENGTH, fd);
@@ -428,7 +446,7 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].gtmMirrorId, 1, sizeof(uint32), fd);
         FREAD(&g_node[ii].gtm, 1, sizeof(uint32), fd);
         if (g_node[ii].gtm == 1) {
-            g_gtm_num++;
+            gtmNum++;
         }
 
         /* g_cluster_total_instance_group_num: current total instance number in cluster includeing cn dn and gtm */
@@ -536,9 +554,9 @@ int read_config_file(const char* file_path, int* err_no)
             if (!datanodeMirrorIDInit) {
                 datanodeMirrorIDInit = true;
                 datanodeMirrorID = g_node[ii].datanode[kk].datanodeMirrorId;
-                g_dn_replication_num++;
+                dnReplicationNum++;
             } else if (datanodeMirrorID == g_node[ii].datanode[kk].datanodeMirrorId) {
-                g_dn_replication_num++;
+                dnReplicationNum++;
             }
             FREAD(g_node[ii].datanode[kk].datanodeLocalDataPath, 1, CM_PATH_LENGTH, fd);
             g_node[ii].datanode[kk].datanodeLocalDataPath[CM_PATH_LENGTH - 1] = '\0';
@@ -633,12 +651,12 @@ int read_config_file(const char* file_path, int* err_no)
         FREAD(&g_node[ii].etcd, 1, sizeof(uint32), fd);
 
         if (g_node[ii].etcd == 1) {
-            g_etcd_num++;
+            etcdNum++;
         }
 
         /* calculate coordinate group number */
         if (g_node[ii].coordinate == 1) {
-            g_coordinator_num++;
+            cnNum++;
             g_cluster_total_instance_group_num++;
         }
 
@@ -690,21 +708,25 @@ int read_config_file(const char* file_path, int* err_no)
         }
     }
 
+    g_node_num = g_nodeHeader.nodeCount;
+    g_cm_server_num = cmServerNum;
+    g_gtm_num = gtmNum;
+    g_dn_replication_num = dnReplicationNum;
+    g_etcd_num = etcdNum;
+    g_coordinator_num = cnNum;
     setAZPriority();
     fclose(fd);
     return 0;
 read_failed:
+    fclose(fd);
+    *err_no = errno;
+    if (inReload) {
+        return READ_FILE_ERROR;
+    }
     if (g_node != NULL) {
         free(g_node);
         g_node = NULL;
     }
-    fclose(fd);
-    g_node_num = 0;
-    g_etcd_num = 0;
-    g_cm_server_num = 0;
-    g_dn_replication_num = 0;
-    g_gtm_num = 0;
-    *err_no = errno;
     /* test only dn cluster */
     g_multi_az_cluster = false;
     g_one_master_multi_slave = false;

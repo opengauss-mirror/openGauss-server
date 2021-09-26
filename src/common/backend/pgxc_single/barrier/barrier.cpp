@@ -123,7 +123,7 @@ void ProcessCreateBarrierEnd(const char* id)
  * WAL buffers to disk before returning to the caller. Writing the WAL record
  * does not guarantee successful completion of the barrier command.
  */
-void ProcessCreateBarrierExecute(const char* id)
+void ProcessCreateBarrierExecute(const char* id, bool isSwitchoverBarrier)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -131,6 +131,16 @@ void ProcessCreateBarrierExecute(const char* id)
 #else
 
     StringInfoData buf;
+
+    if (isSwitchoverBarrier == true) {
+        ereport(LOG, (errmsg("Handling DISASTER RECOVERY SWITCHOVER BARRIER.")));        
+        // The access of all users is not blocked temporarily.
+        /*
+         * Force a checkpoint before starting the switchover. This will force dirty
+         * buffers out to disk, to ensure source database is up-to-date on disk
+         */
+        RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
+    }
 
     if (!IsConnFromCoord())
         ereport(ERROR,
@@ -146,7 +156,7 @@ void ProcessCreateBarrierExecute(const char* id)
         rdata[0].buffer = InvalidBuffer;
         rdata[0].next = NULL;
 
-        recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata);
+        recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata, isSwitchoverBarrier);
         XLogWaitFlush(recptr);
     }
 
@@ -157,7 +167,7 @@ void ProcessCreateBarrierExecute(const char* id)
 #endif
 }
 
-void RequestBarrier(const char* id, char* completionTag)
+void RequestBarrier(const char* id, char* completionTag, bool isSwitchoverBarrier)
 {
 #ifndef ENABLE_MULTIPLE_NODES
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
@@ -217,35 +227,10 @@ void RequestBarrier(const char* id, char* completionTag)
 #endif
 }
 
-static void WaitBarrierArchived()
-{
-    int cnt = 0;
-    ereport(LOG,
-            (errmsg("Query barrier lsn: 0x%lx", g_instance.archive_obs_cxt.barrierLsn)));
-    do {
-        if (NULL == getObsReplicationSlot()) {
-            ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), errmsg("Archived thread shut down.")));
-        }
-        if (XLByteLE(pg_atomic_read_u64(&g_instance.archive_obs_cxt.barrierLsn),
-            pg_atomic_read_u64(&g_instance.archive_obs_cxt.archive_task.targetLsn))) {
-            break;
-        }
-        CHECK_FOR_INTERRUPTS();
-        pg_usleep(100000L);
-        cnt++;
-        /* timeout 10 minute */
-        if (cnt > WAIT_ARCHIVE_TIMEOUT) {
-            ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), errmsg("Wait archived timeout.")));
-        }
-    } while (1);
-    ereport(LOG,
-            (errmsg("Query archive lsn: 0x%lx", g_instance.archive_obs_cxt.archive_task.targetLsn)));
-}
-
-
-void DisasterRecoveryRequestBarrier(const char* id)
+void DisasterRecoveryRequestBarrier(const char* id, bool isSwitchoverBarrier)
 {
     XLogRecPtr recptr;
+    errno_t rc = 0;
     ereport(LOG, (errmsg("DISASTER RECOVERY CREATE BARRIER <%s> request received", id)));
     /*
      * Ensure that we are a DataNode 
@@ -258,20 +243,30 @@ void DisasterRecoveryRequestBarrier(const char* id)
     ereport(DEBUG1, (errmsg("DISASTER RECOVERY CREATE BARRIER <%s>", id)));
 
     LWLockAcquire(BarrierLock, LW_EXCLUSIVE);
+    if (isSwitchoverBarrier == true) {
+        ereport(LOG, (errmsg("This is DISASTER RECOVERY SWITCHOVER BARRIER.")));
+        // The access of all users is not blocked temporarily.
+        /*
+         * Force a checkpoint before starting the switchover. This will force dirty
+         * buffers out to disk, to ensure source database is up-to-date on disk
+         */
+        RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
+    }
 
     XLogBeginInsert();
     XLogRegisterData((char*)id, strlen(id) + 1);
 
-    recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE);
+    recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, false, InvalidBktId, isSwitchoverBarrier);
     XLogWaitFlush(recptr);
 
+    SpinLockAcquire(&g_instance.archive_obs_cxt.barrier_lock);
     pg_atomic_init_u64(&g_instance.archive_obs_cxt.barrierLsn, recptr);
+    rc = memcpy_s(g_instance.archive_obs_cxt.barrierName, MAX_BARRIER_ID_LENGTH, id, strlen(id));
+    securec_check(rc, "\0", "\0");
+    SpinLockRelease(&g_instance.archive_obs_cxt.barrier_lock);
 
     LWLockRelease(BarrierLock);
-
-    WaitBarrierArchived();
 }
-
 
 static void barrier_redo_pause()
 {
@@ -280,11 +275,25 @@ static void barrier_redo_pause()
     while (IS_DISASTER_RECOVER_MODE) {
         RedoInterruptCallBack();
         if (strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryTargetBarrierId) < 0 ||
-            strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryStopBarrierId) == 0) {
+            strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryStopBarrierId) == 0 ||
+            strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoverySwitchoverBarrierId) == 0) {
             break;
         } else {
             pg_usleep(1000L);
             update_recovery_barrier();
+            ereport(DEBUG4, ((errmodule(MOD_REDO), errcode(ERRCODE_LOG), 
+                    errmsg("Sleeping to get a new target global barrier %s;"
+                            "lastRecoveredBarrierId is %s; lastRecoveredBarrierLSN is %X/%X;"
+                            "local minRecoveryPoint %X/%X; recoveryStopBarrierId is %s;"
+                            "recoverySwitchoverBarrierId is %s",
+                            (char *)walrcv->recoveryTargetBarrierId,
+                            (char *)walrcv->lastRecoveredBarrierId,
+                            (uint32)(walrcv->lastRecoveredBarrierLSN >> 32),
+                            (uint32)(walrcv->lastRecoveredBarrierLSN),
+                            (uint32)(t_thrd.xlog_cxt.minRecoveryPoint >> 32),
+                            (uint32)(t_thrd.xlog_cxt.minRecoveryPoint),
+                            (char *)walrcv->recoveryStopBarrierId,
+                            (char *)walrcv->recoverySwitchoverBarrierId))));
         }
     }
 }
@@ -298,6 +307,11 @@ void barrier_redo(XLogReaderState* record)
     XLogRecPtr barrierLSN = record->EndRecPtr;
     char* barrierId = XLogRecGetData(record);
     walrcv->lastRecoveredBarrierLSN = barrierLSN;
+    if (strcmp(barrierId, (char *)walrcv->lastRecoveredBarrierId) <= 0) {
+            ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("The new redo barrier is smaller than the last one.")));
+    } 
+
     rc = strncpy_s((char *)walrcv->lastRecoveredBarrierId, MAX_BARRIER_ID_LENGTH, barrierId, MAX_BARRIER_ID_LENGTH - 1);
     securec_check_ss(rc, "\0", "\0");
     barrier_redo_pause();

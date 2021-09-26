@@ -566,7 +566,12 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
                 pfree(ii);
 #endif
             }
+            /* CommProxy Interface Support */
+#ifndef WIN32
+            comm_closesocket(sock);
+#else
             closesocket(sock);
+#endif
             errno = ENOMEM;
             return -1;
         }
@@ -577,7 +582,13 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
             error = WSAGetLastError();
             if (error == WSAEFAULT || error == WSAENOBUFS)
                 continue; /* need to make the buffer bigger */
+
+            /* CommProxy Interface Support */
+#ifndef WIN32
+            comm_closesocket(sock);
+#else
             closesocket(sock);
+#endif
 #ifdef FRONTEND
             free(ii);
 #else
@@ -592,8 +603,12 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
     for (i = 0; i < length / sizeof(INTERFACE_INFO); ++i)
         run_ifaddr_callback(callback, cb_data, (struct sockaddr*)&ii[i].iiAddress, (struct sockaddr*)&ii[i].iiNetmask);
 
+    /* CommProxy Interface Support */
+#ifndef WIN32
+    comm_closesocket(sock);
+#else
     closesocket(sock);
-
+#endif
 #ifdef FRONTEND
     free(ii);
 #else
@@ -676,7 +691,12 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
 #endif
     int i, total;
 
+    /* CommProxy Interface Support */
+#ifndef WIN32
+    sock = comm_socket(AF_INET, SOCK_DGRAM, 0);
+#else
     sock = socket(AF_INET, SOCK_DGRAM, 0);
+#endif
     if (sock == -1)
         return -1;
 
@@ -698,7 +718,12 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
 #else
             pfree(buffer);
 #endif
+            /* CommProxy Interface Support */
+#ifndef WIN32
+            comm_close(sock);
+#else
             close(sock);
+#endif
             errno = ENOMEM;
             return -1;
         }
@@ -718,7 +743,12 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
 #else
             pfree(buffer);
 #endif
+            /* CommProxy Interface Support */
+#ifndef WIN32
+            comm_close(sock);
+#else
             close(sock);
+#endif
             return -1;
         }
 
@@ -733,14 +763,24 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
 
 #ifdef HAVE_IPV6
     /* We'll need an IPv6 socket too for the SIOCGLIFNETMASK ioctls */
+    /* CommProxy Interface Support */
+#ifndef WIN32
+    sock6 = comm_socket(AF_INET6, SOCK_DGRAM, 0);
+#else
     sock6 = socket(AF_INET6, SOCK_DGRAM, 0);
+#endif
     if (sock6 == -1) {
 #ifdef FRONTEND
         free(buffer);
 #else
         pfree(buffer);
 #endif
+        /* CommProxy Interface Support */
+#ifndef WIN32
+        comm_close(sock);
+#else
         close(sock);
+#endif
         return -1;
     }
 #endif
@@ -769,9 +809,17 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
     pfree(buffer);
 #endif
 
+#ifndef WIN32
+    comm_close(sock);  /* CommProxy Interface Support */
+#else
     close(sock);
+#endif
 #ifdef HAVE_IPV6
-    close(sock6);
+#ifndef WIN32
+    comm_close(sock6); /* CommProxy Interface Support */
+#else
+    close(sock);
+#endif
 #endif
     return 0;
 }
@@ -815,8 +863,11 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
     size_t n_buffer = 1024;
     int sock;
     int rcs = 0;
-
+#ifndef WIN32
+    sock = comm_socket(AF_INET, SOCK_DGRAM, 0); /* CommProxy Interface Support */
+#else
     sock = socket(AF_INET, SOCK_DGRAM, 0);
+#endif
     if (sock == -1)
         return -1;
 
@@ -834,7 +885,11 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
 #else
             pfree(buffer);
 #endif
+#ifndef WIN32
+            comm_close(sock);  /* CommProxy Interface Support */
+#else
             close(sock);
+#endif
             errno = ENOMEM;
             return -1;
         }
@@ -853,7 +908,12 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
 #else
             pfree(buffer);
 #endif
+#ifndef WIN32
+            /* CommProxy Interface Support */
+            comm_close(sock);  
+#else
             close(sock);
+#endif
             return -1;
         }
 
@@ -882,7 +942,11 @@ int pg_foreach_ifaddr(PgIfAddrCallback callback, void* cb_data)
 #else
     pfree(buffer);
 #endif
+#ifndef WIN32
+    comm_close(sock);  /* CommProxy Interface Support */
+#else
     close(sock);
+#endif
     return 0;
 }
 #else /* !defined(SIOCGIFCONF) */

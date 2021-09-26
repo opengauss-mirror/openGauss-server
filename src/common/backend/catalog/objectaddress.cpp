@@ -38,6 +38,7 @@
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_rlspolicy.h"
 #include "catalog/pg_tablespace.h"
@@ -101,6 +102,7 @@ static THR_LOCAL const ObjectPropertyType ObjectProperty[] = {{CastRelationId, C
     {ForeignDataWrapperRelationId, ForeignDataWrapperOidIndexId, FOREIGNDATAWRAPPEROID, InvalidAttrNumber},
     {ForeignServerRelationId, ForeignServerOidIndexId, FOREIGNSERVEROID, InvalidAttrNumber},
     {ProcedureRelationId, ProcedureOidIndexId, PROCOID, Anum_pg_proc_pronamespace},
+    {PackageRelationId, PackageOidIndexId, PACKAGEOID, Anum_gs_package_pkgnamespace},
     {
         LanguageRelationId,
         LanguageOidIndexId,
@@ -172,6 +174,7 @@ ObjectAddress get_object_address(
     ObjectAddress old_address = {InvalidOid, InvalidOid, 0};
     Relation relation = NULL;
     uint64 inval_count;
+    List* objargs_agg = NULL;
 
     /* Some kind of lock must be taken. */
     Assert(lockmode != NoLock);
@@ -225,16 +228,26 @@ ObjectAddress get_object_address(
             case OBJECT_AGGREGATE:
                 /* Given ordered set aggregate with no direct args, aggr_args variable is modified in gram.y.
                    So the parse of aggr_args should be changed. See gram.y for detail. */
-                objargs = (List*)linitial(objargs);
+                objargs_agg = (List*)linitial(objargs);
 
                 address.classId = ProcedureRelationId;
-                address.objectId = LookupAggNameTypeNames(objname, objargs, missing_ok);
+                address.objectId = LookupAggNameTypeNames(objname, objargs_agg, missing_ok);
                 address.objectSubId = 0;
                 break;
             case OBJECT_FUNCTION:
                 address.classId = ProcedureRelationId;
                 address.objectId = LookupFuncNameOptTypeNames(objname, objargs, missing_ok);
                 address.objectSubId = 0;
+                break;
+            case OBJECT_PACKAGE:
+                address.classId = PackageRelationId;
+                address.objectId = PackageNameListGetOid(objname, missing_ok);
+                address.objectSubId = 0;
+                break;
+            case OBJECT_PACKAGE_BODY:
+                address.classId = PackageRelationId;
+                address.objectId = PackageNameListGetOid(objname, missing_ok);
+                address.objectSubId = (int32)address.objectId; /* same as objectId for package body */
                 break;
             case OBJECT_OPERATOR:
                 Assert(list_length(objargs) == 2);
@@ -635,7 +648,7 @@ static ObjectAddress get_object_address_relobject(ObjectType objtype, List* objn
 
         /* Extract relation name and open relation, here allow it is synonym object. */
         relname = list_truncate(list_copy(objname), nnames - 1);
-        relation = heap_openrv_extended(makeRangeVarFromNameList(relname), AccessShareLock, false, true);
+        relation = HeapOpenrvExtended(makeRangeVarFromNameList(relname), AccessShareLock, false, true);
         reloid = RelationGetRelid(relation);
 
         switch (objtype) {
@@ -837,6 +850,11 @@ void check_object_ownership(
         case OBJECT_FUNCTION:
             if (!pg_proc_ownercheck(address.objectId, roleid))
                 aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PROC, NameListToString(objname));
+            break;
+        case OBJECT_PACKAGE:
+        case OBJECT_PACKAGE_BODY:
+            if (!pg_package_ownercheck(address.objectId, roleid))
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_PACKAGE, NameListToString(objname));
             break;
         case OBJECT_OPERATOR:
             if (!pg_oper_ownercheck(address.objectId, roleid))

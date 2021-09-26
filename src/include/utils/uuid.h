@@ -31,4 +31,15 @@ typedef struct pg_uuid_t pg_uuid_t;
 #define PG_GETARG_UUID_P(X) DatumGetUUIDP(PG_GETARG_DATUM(X))
 
 Datum uuid_hash(PG_FUNCTION_ARGS);
+
+#define HASH32_LEN 16
+struct hash32_t {
+    unsigned char data[HASH32_LEN];
+};
+
+#define HASH32GetDatum(X) PointerGetDatum(X)
+#define DatumGetHASH32(X) ((hash32_t *)DatumGetPointer(X))
+#define PG_RETURN_HASH32_P(X) return HASH32GetDatum(X)
+#define PG_GETARG_HASH32_P(X) DatumGetHASH32(PG_GETARG_DATUM(X))
+
 #endif /* UUID_H */

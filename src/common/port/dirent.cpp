@@ -26,6 +26,7 @@
 #include "securec_check.h"
 #endif
 
+#if defined(WIN32) && !defined(_MINGW32)
 struct DIR {
     char* dirname;
     struct dirent ret; /* Used to return to caller */
@@ -143,3 +144,4 @@ int closedir(DIR* d)
 #endif
     return 0;
 }
+#endif

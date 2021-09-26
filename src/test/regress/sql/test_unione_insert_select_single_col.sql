@@ -1,0 +1,347 @@
+set enable_default_ustore_table = on;
+
+create schema test_unione_insert_select_single_col;
+set current_schema='test_unione_insert_select_single_col';
+
+-- create type
+create type composite_type as (c1 int, c2 boolean);
+create type composite_type_complex as (col_int integer, col_decimal decimal, col_bool boolean, col_money money, col_text text, col_date date, col_geo point, col_net cidr, col_circle circle);
+
+-- create tables
+create table name (c1 name) with (storage_type=USTORE);
+create table blob (c1 blob) with (storage_type=USTORE);
+create table macaddr (c1 macaddr) with (storage_type=USTORE);
+create table uuid (c1 uuid) with (storage_type=USTORE);
+create table box (c1 box) with (storage_type=USTORE);
+create table raw_table (c1 raw) with (storage_type=USTORE);
+create table point (c1 point) with (storage_type=USTORE);
+create table lseg (c1 lseg) with (storage_type=USTORE);
+create table polygon (c1 polygon) with (storage_type=USTORE);
+create table path (c1 path) with (storage_type=USTORE);
+create table circle (c1 circle) with (storage_type=USTORE);
+create table tsvector (c1 tsvector) with (storage_type=USTORE);
+create table tsquery (c1 tsquery) with (storage_type=USTORE);
+create table intvector (c1 int[][]) with (storage_type=USTORE);
+create table intarray (c1 int[]) with (storage_type=USTORE); 
+create table composite (c1 composite_type) with (storage_type=USTORE); 
+create table composite_complex (c1 composite_type_complex) with (storage_type=USTORE); 
+
+create table i_name (c1 name) with (storage_type=USTORE);
+create table i_blob (c1 blob) with (storage_type=USTORE);
+create table i_macaddr (c1 macaddr) with (storage_type=USTORE);
+create table i_uuid (c1 uuid) with (storage_type=USTORE);
+create table i_box (c1 box) with (storage_type=USTORE);
+create table i_raw_table (c1 raw) with (storage_type=USTORE);
+create table i_point (c1 point) with (storage_type=USTORE);
+create table i_lseg (c1 lseg) with (storage_type=USTORE);
+create table i_polygon (c1 polygon) with (storage_type=USTORE);
+create table i_path (c1 path) with (storage_type=USTORE);
+create table i_circle (c1 circle) with (storage_type=USTORE);
+create table i_tsvector (c1 tsvector) with (storage_type=USTORE);
+create table i_tsquery (c1 tsquery) with (storage_type=USTORE);
+create table i_intvector (c1 int[][]) with (storage_type=USTORE);
+create table i_intarray (c1 int[]) with (storage_type=USTORE);
+create table i_composite (c1 composite_type) with (storage_type=USTORE); 
+create table i_composite_complex (c1 composite_type_complex) with (storage_type=USTORE); 
+
+-- create tables for data verification
+create table v_name (c1 name) with (orientation=row);
+create table v_blob (c1 blob) with (orientation=row);
+create table v_macaddr (c1 macaddr) with (orientation=row);
+create table v_uuid (c1 uuid) with (orientation=row);
+create table v_box (c1 box) with (orientation=row);
+create table v_raw (c1 raw) with (orientation=row);
+create table v_point (c1 point) with (orientation=row);
+create table v_lseg (c1 lseg) with (orientation=row);
+create table v_polygon (c1 polygon) with (orientation=row);
+create table v_path (c1 path) with (orientation=row);
+create table v_circle (c1 circle) with (orientation=row);
+create table v_tsvector (c1 tsvector) with (orientation=row);
+create table v_tsquery (c1 tsquery) with (orientation=row);
+create table v_intvector (c1 int[][]) with (orientation=row);
+create table v_intarray (c1 int[]) with (orientation=row);
+create table v_composite (c1 composite_type) with (orientation=row);
+create table v_composite_complex (c1 composite_type_complex) with (orientation=row);
+
+create table i_v_name (c1 name) with (orientation=row);
+create table i_v_blob (c1 blob) with (orientation=row);
+create table i_v_macaddr (c1 macaddr) with (orientation=row);
+create table i_v_uuid (c1 uuid) with (orientation=row);
+create table i_v_box (c1 box) with (orientation=row);
+create table i_v_raw (c1 raw) with (orientation=row);
+create table i_v_point (c1 point) with (orientation=row);
+create table i_v_lseg (c1 lseg) with (orientation=row);
+create table i_v_polygon (c1 polygon) with (orientation=row);
+create table i_v_path (c1 path) with (orientation=row);
+create table i_v_circle (c1 circle) with (orientation=row);
+create table i_v_tsvector (c1 tsvector) with (orientation=row);
+create table i_v_tsquery (c1 tsquery) with (orientation=row);
+create table i_v_intvector (c1 int[][]) with (orientation=row);
+create table i_v_intarray (c1 int[]) with (orientation=row);
+create table i_v_composite (c1 composite_type) with (orientation=row);
+create table i_v_composite_complex (c1 composite_type_complex) with (orientation=row);
+
+-- insert into table
+insert into name values ('AAAAAA');
+insert into name values ('BBBBBB');
+insert into v_name values ('AAAAAA');
+insert into v_name values ('BBBBBB');
+
+insert into blob values ('aaaaaaaaaaa');
+insert into blob values ('bbbbbbbbbbb');
+insert into v_blob values ('aaaaaaaaaaa');
+insert into v_blob values ('bbbbbbbbbbb');
+
+insert into macaddr values ('08:00:2b:01:02:03');
+insert into macaddr values ('08:00:2a:01:02:03');
+insert into v_macaddr values ('08:00:2b:01:02:03');
+insert into v_macaddr values ('08:00:2a:01:02:03');
+
+insert into uuid values ('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+insert into v_uuid values ('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+
+insert into box values ('(0,0,100,100)');
+insert into box values ('(5,5,100,100)');
+insert into v_box values ('(0,0,100,100)');
+insert into v_box values ('(5,5,100,100)');
+
+insert into raw_table values ('DEADBEEF');
+insert into raw_table values ('BEEFBEEF');
+insert into v_raw values ('DEADBEEF');
+insert into v_raw values ('BEEFBEEF');
+
+insert into point values ('(0.0000009,0.0000009)');
+insert into point values ('(0.0000018,0.0000018)');
+insert into v_point values ('(0.0000009,0.0000009)');
+insert into v_point values ('(0.0000018,0.0000018)');
+
+insert into lseg values ('((0.0000009,0.0000009),(0.0000018,0.0000018))');
+insert into lseg values ('((0.0000018,0.0000018),(0.0000027,0.0000027))');
+insert into v_lseg values ('((0.0000009,0.0000009),(0.0000018,0.0000018))');
+insert into v_lseg values ('((0.0000018,0.0000018),(0.0000027,0.0000027))');
+
+insert into polygon values ('(2.0,0.0),(2.0,4.0),(0.0,0.0)');
+insert into polygon values ('(1.0,0.0),(1.0,4.0),(0.5,0.5)');
+insert into v_polygon values ('(2.0,0.0),(2.0,4.0),(0.0,0.0)');
+insert into v_polygon values ('(1.0,0.0),(1.0,4.0),(0.5,0.5)');
+
+insert into path values ('((1,1),(2,2),(3,3))');
+insert into path values ('((1,1),(2,2),(3,3))');
+insert into path values ('[(0,2),(-1,0),(-10,1)]');
+insert into path values ('[(0,2),(-1,0),(-10,1)]');
+insert into v_path values ('((1,1),(2,2),(3,3))');
+insert into v_path values ('((1,1),(2,2),(3,3))');
+insert into v_path values ('[(0,2),(-1,0),(-10,1)]');
+insert into v_path values ('[(0,2),(-1,0),(-10,1)]');
+
+insert into circle values ('<(250,250),250>');
+insert into circle values ('<(500,500),500>');
+insert into v_circle values ('<(250,250),250>');
+insert into v_circle values ('<(500,500),500>');
+
+insert into tsvector values (' a:1 s:2 d g');
+insert into tsvector values (' a:2 s:2 d g');
+insert into v_tsvector values (' a:1 s:2 d g');
+insert into v_tsvector values (' a:2 s:2 d g');
+
+insert into tsquery values ('1|2|4|5|6');
+insert into tsquery values ('1|2|4|5|7');
+insert into v_tsquery values ('1|2|4|5|6');
+insert into v_tsquery values ('1|2|4|5|7');
+
+insert into intvector values ('{{1},{2}}');
+insert into intvector values ('{{1},{3}}');
+insert into v_intvector values ('{{1},{2}}');
+insert into v_intvector values ('{{1},{3}}');
+
+insert into intarray values ('{1,2,3}');
+insert into intarray values ('{2,3,4}');
+insert into v_intarray values ('{1,2,3}');
+insert into v_intarray values ('{2,3,4}');
+
+insert into composite values(row(1,true));
+insert into composite values(row(2,false));
+insert into v_composite values(row(1,true));
+insert into v_composite values(row(2,false));
+
+insert into composite_complex values (row(214748,12345.122,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'));
+insert into composite_complex values (row(21478,135.2468,true,2000,'helloo','2020-09-04','(0.0000039,0.0000039)','192.168.1','<(500,500),500>'));
+insert into v_composite_complex values (row(214748,12345.122,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'));
+insert into v_composite_complex values (row(21478,135.2468,true,2000,'helloo','2020-09-04','(0.0000039,0.0000039)','192.168.1','<(500,500),500>'));
+
+
+-- insert select
+insert into i_name select * from name;
+insert into i_blob select * from blob;
+insert into i_macaddr select * from macaddr;
+insert into i_uuid select * from uuid;
+insert into i_raw_table select * from raw_table;
+insert into i_tsvector select * from tsvector;
+insert into i_tsquery select * from tsquery;
+insert into i_intvector select * from intvector;
+insert into i_intarray select * from intarray;
+insert into i_composite select * from composite;
+insert into i_composite_complex select * from composite_complex;
+
+insert into i_v_name select * from v_name;
+insert into i_v_blob select * from v_blob;
+insert into i_v_macaddr select * from v_macaddr;
+insert into i_v_uuid select * from v_uuid;
+insert into i_v_raw select * from v_raw;
+insert into i_v_tsvector select * from v_tsvector;
+insert into i_v_tsquery select * from v_tsquery;
+insert into i_v_intvector select * from v_intvector;
+insert into i_v_intarray select * from v_intarray;
+insert into i_v_composite select * from v_composite;
+insert into i_v_composite_complex select * from v_composite_complex;
+
+-- data verification
+create view view_name as (
+select * from i_name except select * from i_v_name);
+
+create view view_blob as (
+select * from i_blob except select * from i_v_blob);
+
+create view view_macaddr as (
+select * from i_macaddr except select * from i_v_macaddr);
+
+create view view_uuid as (
+select * from i_uuid except select * from i_v_uuid);
+
+create view view_raw as (
+select * from i_raw_table except select * from i_v_raw);
+
+create view view_tsvector as (
+select * from i_tsvector except select * from i_v_tsvector);
+
+create view view_tsquery as (
+select * from i_tsquery except select * from i_v_tsquery);
+
+create view view_intvector as (
+select * from i_intvector except select * from i_v_intvector);
+
+create view view_intarray as (
+select * from i_intarray except select * from i_v_intarray);
+
+create view view_composite as (
+select * from i_composite except select * from i_v_composite);
+
+select * from i_box;
+select * from i_v_box;
+
+select * from i_point;
+select * from i_v_point;
+
+select * from i_lseg;
+select * from i_v_lseg;
+
+select * from i_circle;
+select * from i_v_circle;
+
+select * from i_path;
+select * from i_v_path;
+
+select * from i_polygon;
+select * from i_v_polygon;
+
+select * from i_composite_complex;
+select * from i_v_composite_complex;
+
+
+select * from view_name;
+select * from view_blob;
+select * from view_macaddr;
+select * from view_uuid;
+select * from view_raw;
+select * from view_tsvector;
+select * from view_tsquery;
+select * from view_intvector;
+select * from view_intarray;
+select * from view_composite;
+
+-- drop table and views
+drop view view_name;
+drop view view_blob;
+drop view view_macaddr;
+drop view view_uuid;
+drop view view_raw;
+drop view view_tsvector;
+drop view view_tsquery;
+drop view view_intvector;
+drop view view_intarray;
+drop view view_composite;
+
+drop table name;
+drop table blob;
+drop table macaddr;
+drop table uuid;
+drop table box;
+drop table raw_table;
+drop table point;
+drop table lseg;
+drop table polygon;
+drop table circle;
+drop table path;
+drop table tsvector;
+drop table tsquery;
+drop table intvector;
+drop table intarray;
+drop table composite;
+drop table composite_complex;
+
+drop table i_name;
+drop table i_blob;
+drop table i_macaddr;
+drop table i_uuid;
+drop table i_box;
+drop table i_raw_table;
+drop table i_point;
+drop table i_lseg;
+drop table i_polygon;
+drop table i_circle;
+drop table i_path;
+drop table i_tsvector;
+drop table i_tsquery;
+drop table i_intvector;
+drop table i_intarray;
+drop table i_composite;
+drop table i_composite_complex;
+
+drop table v_name;
+drop table v_blob;
+drop table v_macaddr;
+drop table v_uuid;
+drop table v_box;
+drop table v_raw;
+drop table v_point;
+drop table v_lseg;
+drop table v_polygon;
+drop table v_path;
+drop table v_circle;
+drop table v_tsvector;
+drop table v_tsquery;
+drop table v_intvector;
+drop table v_intarray;
+drop table v_composite;
+drop table v_composite_complex;
+
+drop table i_v_name;
+drop table i_v_blob;
+drop table i_v_macaddr;
+drop table i_v_uuid;
+drop table i_v_box;
+drop table i_v_raw;
+drop table i_v_point;
+drop table i_v_lseg;
+drop table i_v_polygon;
+drop table i_v_path;
+drop table i_v_circle;
+drop table i_v_tsvector;
+drop table i_v_tsquery;
+drop table i_v_intvector;
+drop table i_v_intarray;
+drop table i_v_composite;
+drop table i_v_composite_complex;
+
+drop type composite_type;
+drop type composite_type_complex;

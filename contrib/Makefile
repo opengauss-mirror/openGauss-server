@@ -55,7 +55,6 @@ SUBDIRS = \
 		tsearch2	\
 		unaccent	\
 		vacuumlo	\
-		gsredistribute \
 		security_plugin
 
 ifeq ($(with_openssl),yes)
@@ -75,11 +74,6 @@ SUBDIRS += sepgsql
 else
 ALWAYS_SUBDIRS += sepgsql
 endif
-
-ifeq ($(enable_multiple_nodes), yes)
-SUBDIRS += carbondata
-endif
-
 
 $(recurse)
 $(recurse_always)

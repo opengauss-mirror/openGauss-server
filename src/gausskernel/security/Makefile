@@ -8,6 +8,6 @@ subdir = src/gausskernel/security
 top_builddir = ../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = keymanagement iprange gs_policy
+SUBDIRS     = iprange gs_policy gs_ledger tde_key_management
 
 include $(top_srcdir)/src/gausskernel/common.mk

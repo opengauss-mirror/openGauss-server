@@ -34,7 +34,7 @@ typedef union PLyTypeInput {
     PLyTupleToOb r;
 } PLyTypeInput;
 
-/* convert PyObject to a Postgresql Datum or tuple.
+/* convert PyObject to a openGauss Datum or tuple.
  * output from Python
  */
 struct PLyObToDatum;
@@ -62,7 +62,7 @@ typedef union PLyTypeOutput {
     PLyObToTuple r;
 } PLyTypeOutput;
 
-/* all we need to move Postgresql data to Python objects,
+/* all we need to move openGauss data to Python objects,
  * and vice versa
  */
 typedef struct PLyTypeInfo {

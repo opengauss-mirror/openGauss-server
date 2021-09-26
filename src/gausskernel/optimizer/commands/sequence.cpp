@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * sequence.cpp
- *	  PostgreSQL sequences support code.
+ *	  openGauss sequences support code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -38,7 +38,8 @@
 #include "nodes/makefuncs.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -132,13 +133,14 @@ static void ResetvalGlobal(Oid relid);
 static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, int64 minv, int64 fetch,
     int64 log, int64 incby, int64 rescnt, bool is_cycled, int64 cache, Relation seqrel);
 #ifdef ENABLE_MULTIPLE_NODES
-static void sendUpdateSequenceMsgToDn(char* seqname, int64 last_value);
+static void sendUpdateSequenceMsgToDn(char* dbname, char* schemaname, char* seqname, int64 last_value);
 static void CheckUpdateSequenceMsgStatus(PGXCNodeHandle* exec_handle, const char* seqname, const int64 last_value);
 #endif
 static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel, 
                                     int64 result);
 static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequence seq, HeapTupleData seqtuple, 
     Buffer buf, int64* rangemax, SeqTable elm, GTM_UUID uuid);
+static char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname);
 
 /*
  * Sequence concurrent improvements
@@ -1198,6 +1200,8 @@ void AlterSequence(AlterSeqStmt* stmt)
         return;
     }
 
+    TrForbidAccessRbObject(RelationRelationId, relid, stmt->sequence->relname);
+
     init_sequence(relid, &elm, &seqrel);
 
     /* Must be owner or have alter privilege of the sequence. */
@@ -1355,6 +1359,8 @@ static int64 nextval_internal(Oid relid)
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
 
+    TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
+
     if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_USAGE) != ACLCHECK_OK &&
         pg_class_aclcheck(elm->relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
         ereport(ERROR,
@@ -1414,6 +1420,8 @@ Datum currval_oid(PG_FUNCTION_ARGS)
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
+
+    TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
     if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_SELECT) != ACLCHECK_OK &&
         pg_class_aclcheck(elm->relid, GetUserId(), ACL_USAGE) != ACLCHECK_OK)
@@ -1500,6 +1508,8 @@ static void do_setval(Oid relid, int64 next, bool iscalled)
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
+
+    TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
     if (pg_class_aclcheck(elm->relid, GetUserId(), ACL_UPDATE) != ACLCHECK_OK)
         ereport(ERROR,
@@ -1887,7 +1897,7 @@ static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, 
     HeapTupleCopyBaseFromPage(seqtuple, page);
 
     /*
-     * Previous releases of Postgres neglected to prevent SELECT FOR UPDATE on
+     * Previous releases of openGauss neglected to prevent SELECT FOR UPDATE on
      * a sequence, which would leave a non-frozen XID in the sequence tuple's
      * xmax, which eventually leads to clog access failures or worse. If we
      * see this has happened, clean up after it.  We treat this like a hint
@@ -1990,12 +2000,14 @@ static void check_value_min_max(int64 value, int64 min_value, int64 max_value)
             /* isInit is true for DefineSequence, false for AlterSequence, we use it
              * to differentiate them
              */
-            if (strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0
+            bool isDefOwnedAndMaxValue =
+                strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0
 #ifndef ENABLE_MULTIPLE_NODES
-                && strcmp(defel->defname, "cache") != 0) {
+                && strcmp(defel->defname, "cache") != 0;
 #else
-                ) {
+                ;
 #endif
+            if (isDefOwnedAndMaxValue) {
                 ereport(
                     ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ALTER SEQUENCE is not yet supported.")));
             }
@@ -2210,6 +2222,31 @@ char* GetGlobalSeqName(Relation seqrel, const char* new_seqname, const char* new
     pfree_ext(schemaname);
 
     return seqname;
+}
+
+static char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname)
+{
+    char* relname = NULL;
+
+    *dbname = get_database_name(seqrel->rd_node.dbNode);
+    
+    if (*dbname == NULL) {
+        ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for database %u", seqrel->rd_node.dbNode)));
+    }
+
+    *schemaname = get_namespace_name(RelationGetNamespace(seqrel));
+    
+    if (*schemaname == NULL) {
+        ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for schema %u", RelationGetNamespace(seqrel))));
+    }
+
+    relname = RelationGetRelationName(seqrel);
+
+    return relname;
 }
 
 /*
@@ -2633,7 +2670,7 @@ void drop_sequence_cb(GTMEvent event, void* args)
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
-static void sendUpdateSequenceMsgToDn(char* seqname, int64 last_value)
+static void sendUpdateSequenceMsgToDn(char* dbname, char* schemaname, char* seqname, int64 last_value)
 {
     List* dataNodeList = NULL;
     PGXCNodeAllHandles* conn_handles = NULL;
@@ -2673,11 +2710,13 @@ static void sendUpdateSequenceMsgToDn(char* seqname, int64 last_value)
             (errcode(ERRCODE_OPERATE_FAILED),
                 errmsg("Failed to send sendUpdateSequenceMsgToDn request "
                        "to the node")));
-
+    int dbname_len = strlen(dbname) + 1;
+    int schemaname_len = strlen(schemaname) + 1;
+    int seqname_len = strlen(seqname) + 1;
     msglen = 4; /* for the length itself */
     msglen +=  1; /* for signed */
     msglen += sizeof(int64);
-    msglen += strlen(seqname) + 1;
+    msglen += dbname_len + schemaname_len + seqname_len;
 
     /* msgType + msgLen */
     ensure_out_buffer_capacity(1 + msglen, handle);
@@ -2707,11 +2746,21 @@ static void sendUpdateSequenceMsgToDn(char* seqname, int64 last_value)
     rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &low, sizeof(low));
     securec_check(rc, "\0", "\0");
     handle->outEnd += sizeof(low);
+    
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
+        dbname, dbname_len);
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += dbname_len;
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
+        schemaname, schemaname_len);
+    securec_check(rc, "\0", "\0");
+    handle->outEnd += schemaname_len;
 
     rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
-        seqname, strlen(seqname) + 1);
+        seqname, seqname_len);
     securec_check(rc, "\0", "\0");
-    handle->outEnd += strlen(seqname) + 1;
+    handle->outEnd += seqname_len;
+
     handle->state = DN_CONNECTION_STATE_QUERY;
     pgxc_node_flush(handle);
     CheckUpdateSequenceMsgStatus(exec_handle, seqname, last_value);
@@ -2719,15 +2768,13 @@ static void sendUpdateSequenceMsgToDn(char* seqname, int64 last_value)
 }
 #endif // ENABLE_MULTIPLE_NODES
 
-void  processUpdateSequenceMsg(const char* seqname, int64 lastvalue)
+void  processUpdateSequenceMsg(List* nameList, int64 lastvalue)
 {
     StringInfoData retbuf;
     RangeVar* sequence = NULL;
     Oid relid;
     Form_pg_sequence seq;
     HeapTupleData seqtuple;
-    text *seqname_text = cstring_to_text(seqname);
-    List* nameList = textToQualifiedNameList(seqname_text);
     sequence = makeRangeVarFromNameList(nameList);
     GTM_UUID uuid;
     Buffer buf;
@@ -2745,7 +2792,7 @@ void  processUpdateSequenceMsg(const char* seqname, int64 lastvalue)
     list_free_deep(nameList);
     if (!OidIsValid(relid)) {
         ereport(
-            WARNING, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Failed to find relation %s for sequence update", seqname)));
+            WARNING, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Failed to find relation %s for sequence update", sequence->relname)));
         goto SEND_SUCCESS_MSG;
     }
     /* open and lock sequence */
@@ -2840,13 +2887,16 @@ static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTuple
     */
     if (need_wal && IS_PGXC_COORDINATOR) {
         if (!IsConnFromCoord()) {
+            char* dbname = NULL;
+            char* schemaname = NULL;
             MemoryContext curr;
-            seqname = GetGlobalSeqName(seqrel, NULL, NULL);
+            seqname = GetGlobalSeqNameForUpdate(seqrel, &dbname, &schemaname);
             curr = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-            u_sess->xact_cxt.send_seqname = pstrdup(seqname);
+            u_sess->xact_cxt.sendSeqDbName = pstrdup(dbname);
+            u_sess->xact_cxt.sendSeqSchmaName = pstrdup(schemaname);
+            u_sess->xact_cxt.sendSeqName = pstrdup(seqname);
             u_sess->xact_cxt.send_result = result;
             MemoryContextSwitchTo(curr);
-            pfree_ext(seqname);
         } else {
             /* nexval execute direct on cn will not notify dn */
             ereport(WARNING,
@@ -2934,9 +2984,12 @@ static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequen
 void checkAndDoUpdateSequence()
 {
 #ifdef ENABLE_MULTIPLE_NODES
-    if(u_sess->xact_cxt.send_seqname != NULL) {
-        sendUpdateSequenceMsgToDn(u_sess->xact_cxt.send_seqname, u_sess->xact_cxt.send_result);
-        pfree_ext(u_sess->xact_cxt.send_seqname);
+    if(u_sess->xact_cxt.sendSeqName != NULL) {
+        sendUpdateSequenceMsgToDn(u_sess->xact_cxt.sendSeqDbName, u_sess->xact_cxt.sendSeqSchmaName, 
+            u_sess->xact_cxt.sendSeqName, u_sess->xact_cxt.send_result);
+        pfree_ext(u_sess->xact_cxt.sendSeqDbName);
+        pfree_ext(u_sess->xact_cxt.sendSeqSchmaName);
+        pfree_ext(u_sess->xact_cxt.sendSeqName);
     }
 #endif 
 }

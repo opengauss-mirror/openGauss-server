@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * inval.h
- *	  POSTGRES cache invalidation dispatcher definitions.
+ *	  openGauss cache invalidation dispatcher definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -27,7 +27,7 @@ typedef void (*PartcacheCallbackFunction)(Datum arg, Oid partid);
  * assumes there won't be very many of these at once; could improve if needed.
  */
 
-#define MAX_SYSCACHE_CALLBACKS 20
+#define MAX_SYSCACHE_CALLBACKS 30
 #define MAX_RELCACHE_CALLBACKS 5
 #define MAX_PARTCACHE_CALLBACKS 5
 

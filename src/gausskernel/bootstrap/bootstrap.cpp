@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * bootstrap.c
- *	  routines to support running postgres in 'bootstrap' mode
+ *	  routines to support running openGauss in 'bootstrap' mode
  *	bootstrap mode is used to create the initial template database
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -38,7 +38,6 @@
 #include "postmaster/bgwriter.h"
 #include "postmaster/pagewriter.h"
 #include "postmaster/cbmwriter.h"
-#include "postmaster/remoteservice.h"
 #include "postmaster/startup.h"
 #include "postmaster/twophasecleaner.h"
 #include "postmaster/licensechecker.h"
@@ -53,6 +52,7 @@
 #include "threadpool/threadpool.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
+#include "utils/guc_storage.h"
 #include "utils/memutils.h"
 #include "utils/plog.h"
 #include "utils/postinit.h"
@@ -130,6 +130,7 @@ static const struct typinfo TypInfo[] = {{"bool", BOOLOID, 0, 1, true, 'c', 'p',
         F_PG_NODE_TREE_OUT},
     {"int2vector", INT2VECTOROID, INT2OID, -1, false, 'i', 'p', InvalidOid, F_INT2VECTORIN, F_INT2VECTOROUT},
     {"oidvector", OIDVECTOROID, OIDOID, -1, false, 'i', 'p', InvalidOid, F_OIDVECTORIN, F_OIDVECTOROUT},
+    {"_int2", INT2ARRAYOID, INT2OID, -1, false, 'i', 'x', InvalidOid, F_ARRAY_IN, F_ARRAY_OUT},
     {"_int4", INT4ARRAYOID, INT4OID, -1, false, 'i', 'x', InvalidOid, F_ARRAY_IN, F_ARRAY_OUT},
     {"_text", 1009, TEXTOID, -1, false, 'i', 'x', DEFAULT_COLLATION_OID, F_ARRAY_IN, F_ARRAY_OUT},
     {"_oid", 1028, OIDOID, -1, false, 'i', 'x', InvalidOid, F_ARRAY_IN, F_ARRAY_OUT},
@@ -145,7 +146,17 @@ static const struct typinfo TypInfo[] = {{"bool", BOOLOID, 0, 1, true, 'c', 'p',
         'x',
         InvalidOid,
         F_OIDVECTORIN_EXTEND,
-        F_OIDVECTOROUT_EXTEND}};
+        F_OIDVECTOROUT_EXTEND},
+    {"int2vector_extend",
+        INT2VECTOREXTENDOID,
+        INT2OID,
+        -1,
+        false,
+        'i',
+        'x',
+        InvalidOid,
+        F_INT2VECTORIN,
+        F_INT2VECTOROUT}};
 
 static const int n_types = sizeof(TypInfo) / sizeof(struct typinfo);
 
@@ -223,8 +234,9 @@ void BootStrapProcessMain(int argc, char* argv[])
      * process command arguments
      */
     /* Set defaults, to be overriden by explicit options below */
-    if (!IsUnderPostmaster)
+    if (!IsUnderPostmaster) {
         InitializeGUCOptions();
+    }
 
     /* Ignore the initial --boot argument, if present */
     if (argc > 1 && strcmp(argv[1], "--boot") == 0) {
@@ -303,7 +315,6 @@ void BootStrapProcessMain(int argc, char* argv[])
         if (!SelectConfigFiles(userDoption, progName)) {
             proc_exit(1);
         }
-
         InitializeNumLwLockPartitions();
     }
 
@@ -479,7 +490,8 @@ void boot_openrel(char* relname)
         rel = heap_open(TypeRelationId, NoLock);
         scan = tableam_scan_begin(rel, SnapshotNow, 0, NULL);
         i = 0;
-		while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL)
+
+        while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL)
             ++i;
         tableam_scan_end(scan);
         app = t_thrd.bootstrap_cxt.Typ = ALLOC(struct typmap*, i + 1);
@@ -689,7 +701,7 @@ void InsertOneTuple(Oid objectid)
         RelationGetForm(t_thrd.bootstrap_cxt.boot_reldesc)->relhasoids,
         t_thrd.bootstrap_cxt.attrtypes,
         t_thrd.bootstrap_cxt.boot_reldesc->rd_tam_type);
-	tuple =  (HeapTuple) tableam_tops_form_tuple(tupDesc, values, Nulls, HEAP_TUPLE);
+    tuple = (HeapTuple) tableam_tops_form_tuple(tupDesc, values, Nulls, HEAP_TUPLE);
     if (objectid != (Oid)0)
         HeapTupleSetOid(tuple, objectid);
     pfree(tupDesc); /* just free's tupDesc, not the attrtypes */

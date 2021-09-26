@@ -1699,6 +1699,28 @@ bool list_is_subset(List* list1, List* list2)
 }
 
 /*
+ * @Description: is list1 subset of list2.
+ * @in list1: Sub int list.
+ * @in list2: Over int list.
+ * @return: If list1 is subset of list2 return true else return false.
+ */
+bool list_is_subset_int(List* list1, List* list2)
+{
+    ListCell* cell = NULL;
+
+    Assert(IsIntegerList(list1));
+    Assert(IsIntegerList(list2));
+
+    foreach (cell, list1) {
+        if (!list_member_int(list2, lfirst_int(cell))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/*
  * Merge sort two sorted and unique int list.
  *
  * @param[IN] list1: sorted list.

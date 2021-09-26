@@ -83,11 +83,16 @@ void ScalarVector::Serialize(StringInfo buf, int idx)
     if (NOT_NULL(m_flag[idx])) {
         Datum val = m_vals[idx];
         if (m_desc.encoded) {
-            Size data_len = VARSIZE_ANY(val);
+            Size dataLen = 0;
+            if (m_desc.typeId == NAMEOID) {
+                dataLen = datumGetSize(val, false, -2);
+            } else {
+                dataLen = VARSIZE_ANY(val);
+            }
             /* varLen must be valid */
-            Assert(data_len > 0);
-            Assert(AllocSizeIsValid(data_len));
-            appendBinaryStringInfo(buf, DatumGetPointer(val), data_len);
+            Assert(dataLen > 0);
+            Assert(AllocSizeIsValid(dataLen));
+            appendBinaryStringInfo(buf, DatumGetPointer(val), dataLen);
         } else
             pq_sendbytes(buf, (char*)(&val), sizeof(ScalarValue));
     }
@@ -100,17 +105,21 @@ void ScalarVector::Serialize(StringInfo buf)
 
     if (m_desc.encoded) {
         Datum val = (Datum)0;
-        Size data_len = 0;
+        Size dataLen = 0;
         for (int i = 0; i < m_rows; i++) {
             if (IsNull(i))
                 continue;
 
             val = Decode(m_vals[i]);
-            data_len = VARSIZE_ANY(val);
+            if (m_desc.typeId == NAMEOID) {
+                dataLen = datumGetSize(val, false, -2);
+            } else {
+                dataLen = VARSIZE_ANY(val);
+            }
             /* varLen must be valid */
-            Assert(data_len > 0);
-            Assert(AllocSizeIsValid(data_len));
-            appendBinaryStringInfo(buf, DatumGetPointer(val), data_len);
+            Assert(dataLen > 0);
+            Assert(AllocSizeIsValid(dataLen));
+            appendBinaryStringInfo(buf, DatumGetPointer(val), dataLen);
         }
     } else
         pq_sendbytes(buf, (char*)m_vals, sizeof(ScalarValue) * m_rows);
@@ -141,7 +150,11 @@ char* ScalarVector::Deserialize(char* msg, size_t len)
         for (int i = 0; i < m_rows; i++) {
             if (IsNull(i))
                 continue;
-            var_len = VARSIZE_ANY(msg);
+            if (m_desc.typeId == NAMEOID) {
+                var_len = datumGetSize(PointerGetDatum(msg), false, -2);
+            } else {
+                var_len = VARSIZE_ANY(msg);
+            }
             /* var_len must be valid */
             Assert(var_len > 0);
             Assert(AllocSizeIsValid(var_len));
@@ -695,7 +708,13 @@ char* ScalarVector::AddVars(const char* src, int length)
 
 Datum ScalarVector::AddVarWithHeader(Datum data)
 {
-    Datum val = PointerGetDatum(m_buf->Append(DatumGetPointer(data), VARSIZE_ANY(data)));
+    int typlen = 0;
+    if (m_desc.typeId == NAMEOID) {
+        typlen = datumGetSize(data, false, -2);
+    } else {
+        typlen = VARSIZE_ANY(data);
+    }
+    Datum val = PointerGetDatum(m_buf->Append(DatumGetPointer(data), typlen));
     return val;
 }
 

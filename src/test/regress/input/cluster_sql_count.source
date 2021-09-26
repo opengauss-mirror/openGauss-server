@@ -9,23 +9,23 @@ SET track_sql_count=off;
 /* test 1 : track_activities is on but track_sql_count is off */
 SHOW track_activities;
 SHOW track_sql_count;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 2 : track_activities is off but track_sql_count is on */
 SET track_activities=off;
 SET track_sql_count=on;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 3 : track_activities is off but track_sql_count is off */
 SET track_activities=off;
 SET track_sql_count=off;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 4 : track_activities is on but track_sql_count is on */
 SET track_activities=on;
 SET track_sql_count=on;
-SELECT * FROM gs_sql_count;
-SELECT * FROM pgxc_sql_count order by node_name;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
+SELECT * FROM pgxc_sql_count WHERE user_name !~ '^gs_' order by node_name;
 
 /* QPS sql ddl count test . 
  */
@@ -38,7 +38,7 @@ GRANT INSERT on TABLE t to qps;
 GRANT SELECT on TABLE t to qps;
 GRANT UPDATE on TABLE t to qps;
 GRANT DELETE on TABLE t to qps;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* QPS sql dml count test .
  */
@@ -46,29 +46,29 @@ SELECT * FROM gs_sql_count;
 SET track_sql_count=on;
 SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';
 INSERT INTO t values(generate_series(1, 10), generate_series(1,10));
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 7 :track_sql_count is on, dml-select */
 SELECT * FROM t order by a;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 8 : track_sql_count is on, dml-update */
 update t set b = 11 where b = 1;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 9 : track_sql_count is on, dml-delete */
 delete from t where b =11;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 10 : doesn`t count if dml error */
 INSERT INTO t1 values(generate_series(1, 10), generate_series(1,10));
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* QPS user test .
  */ 
 /* test 11 : superuer and ordinary user */
 SELECT * FROM pgxc_sql_count;
-SELECT * FROM gs_sql_count;
+SELECT * FROM gs_sql_count WHERE user_name !~ '^gs_role_';
 
 /* test 12 : ordinary user can not set */
 SET SESSION SESSION AUTHORIZATION qps PASSWORD 'GAUSS@123';

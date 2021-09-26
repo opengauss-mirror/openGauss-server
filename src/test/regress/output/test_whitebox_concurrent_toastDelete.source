@@ -1,0 +1,410 @@
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8a
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8a';
+-- case 8a: concurrent toast delete and insert; second insert is delayed for 0.5 seconds
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (10,10,'e','d'); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\]  10 | 10
+--?.* \[terminal 2\] \(5 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] DELETE 3
+select c1, c2 from t1;
+WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+ c1 | c2 
+----+----
+  3 |  9
+ 10 | 10
+(2 rows)
+
+-- case 8b: concurrent toast delete and multi-insert; multi-insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8b
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8b';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); \copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_toastDelete.data' delimiter '|'; select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\]   1 | 15
+--?.* \[terminal 2\]   6 | 12
+--?.* \[terminal 2\]  15 |  4
+--?.* \[terminal 2\] \(7 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] DELETE 3
+select c1, c2 from t1;
+WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+ c1 | c2 
+----+----
+  3 |  9
+  1 | 15
+  6 | 12
+ 15 |  4
+(4 rows)
+
+-- case 8c: concurrent toast delete and delete; delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8c
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8c';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c2=6;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] DELETE 1
+--?.* \[terminal 1\] WARNING:  UHeapDelete returned 4
+--?.* \[terminal 1\] DELETE 2
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  3 |  9
+(1 row)
+
+-- case 8d: concurrent toast delete and update; update is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8d
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8d
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8d';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c1=1 where c1=3;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] UPDATE 1
+--?.* \[terminal 1\] DELETE 3
+select c1, c2 from t1;
+WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+ c1 | c2 
+----+----
+  1 |  9
+(1 row)
+
+-- case 8e: concurrent toast delete and lock; lock is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8e
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8e
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8e';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000; select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\] \(4 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] WARNING:  UHeapDelete returned 3
+--?.* \[terminal 1\] WARNING:  UHeapDelete returned 5
+--?.* \[terminal 1\] DELETE 3
+select c1, c2 from t1;
+WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+ c1 | c2 
+----+----
+  3 |  9
+(1 row)
+
+-- case 8f: concurrent toast delete and fetch; fetch is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8f
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8f';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\] \(4 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] DELETE 3
+select c1, c2 from t1;
+WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+ c1 | c2 
+----+----
+  3 |  9
+(1 row)
+
+-- case 8g: concurrent toast delete and page prune; page prune is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8g
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8g
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8g';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c4 = 'abcabcabc' where c2 >= 6;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] UPDATE 2
+--?.* \[terminal 1\] WARNING:  UHeapDelete returned 3
+--?.* \[terminal 1\] WARNING:  UHeapDelete returned 5
+--?.* \[terminal 1\] DELETE 3
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  3 |  9
+(1 row)
+
+-- case 8h: concurrent toast delete and toast delete; toast delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8h
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8h';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+insert into t1 values (3,15,'abcdef','xyz');
+insert into t1 values (4,4,'abc','xyzxyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+  3 | 15
+  4 |  4
+(6 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=3;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] DELETE 3
+--?.* \[terminal 1\] DELETE 2
+select c1, c2 from t1;
+WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+ c1 | c2 
+----+----
+  4 |  4
+(1 row)
+
+-- case 8i: concurrent toast delete and toast insert; toast insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8i
+\! echo "UHeapGetPage_Before_LockBuffer,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastDelete_8i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastDelete_8i';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (3,15,repeat('e',10000),repeat('d',10000)); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\]   3 | 15
+--?.* \[terminal 2\] \(5 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] DELETE 3
+select c1, c2 from t1;
+WARNING:  Suspending at breakpoint UHeapGetPage_Before_LockBuffer timeout=10000000
+ c1 | c2 
+----+----
+  3 |  9
+  3 | 15
+(2 rows)
+
+-- drop all tables
+drop table t1;
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8a
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8b
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8c
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8d
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8e
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8f
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8g
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8h
+\! rm -f @abs_srcdir@/concurrent_uheap_toastDelete_8i

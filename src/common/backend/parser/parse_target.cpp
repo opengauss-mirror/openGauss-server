@@ -33,6 +33,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/typcache.h"
+#include "gs_ledger/ledger_utils.h"
 
 static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var, int levelsup);
 static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, const char* targetName,
@@ -297,6 +298,7 @@ static void markTargetListOrigin(ParseState* pstate, TargetEntry* tle, Var* var,
             break;
         case RTE_FUNCTION:
         case RTE_VALUES:
+        case RTE_RESULT:
             /* not a simple relation, leave it unmarked */
             break;
         case RTE_CTE:
@@ -366,7 +368,13 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
     Relation rd = pstate->p_target_relation;
 
     AssertEreport(rd != NULL, MOD_OPT, "");
-    if (attrno <= 0) {
+    /*
+     * for relation not in ledger schema, only attrno is system column,
+     * for relation in ledger schema, the "hash" column is reserved for system.
+     * for "hash" column of table in ledger schema, we forbid insert and update
+     */
+    bool is_system_column = (attrno <= 0 || (rd->rd_isblockchain && strcmp(colname, "hash") == 0));
+    if (is_system_column) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("cannot assign to system column \"%s\"", colname),
@@ -466,8 +474,10 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
          * could be insert to target column successful.
          * For nvarchar2 type is not support to be truncated automaticlly.
          */
-        if (pstate->p_is_td_compatible_truncation && (attrtype == BPCHAROID || attrtype == VARCHAROID) &&
-            ((type_mod > 0 && attrtypmod < type_mod) || type_mod < 0)) {
+        bool is_all_satisfied = pstate->p_is_td_compatible_truncation &&
+            (attrtype == BPCHAROID || attrtype == VARCHAROID) &&
+            ((type_mod > 0 && attrtypmod < type_mod) || type_mod < 0);
+        if (is_all_satisfied) {
             expr = (Expr*)coerce_to_target_type(
                 pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_EXPLICIT_CAST, -1);
             pstate->tdTruncCastStatus = TRUNC_CAST_QUERY;
@@ -475,7 +485,16 @@ Expr* transformAssignedExpr(ParseState* pstate, Expr* expr, char* colname, int a
             expr = (Expr*)coerce_to_target_type(
                 pstate, orig_expr, type_id, attrtype, attrtypmod, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
         }
-
+        if (expr == NULL) {
+            /* if we are in create proc - change input parameter type  */
+            if (IsClientLogicType(attrtype) && IsA(orig_expr, Param) && pstate->p_create_proc_insert_hook != NULL) {
+                int param_no = ((Param*)orig_expr)->paramid - 1;
+                pstate->p_create_proc_insert_hook(pstate, param_no, attrtype, RelationGetRelid(rd), colname);
+                type_id = attrtype;
+                expr = (Expr*)coerce_to_target_type(pstate, orig_expr, type_id, attrtype, attrtypmod,
+                    COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+            }
+        }
         if (expr == NULL) {
             bool invalid_encrypted_column = 
                 ((attrtype == BYTEAWITHOUTORDERWITHEQUALCOLOID || attrtype == BYTEAWITHOUTORDERCOLOID) &&
@@ -662,6 +681,13 @@ static Node* transformAssignmentIndirection(ParseState* pstate, Node* basenode, 
                         errmsg("cannot assign to system column \"%s\"", strVal(n)),
                         parser_errposition(pstate, location)));
             }
+            /* for "hash" column of table in ledger schema, we forbid insert and update */
+            if (strcmp(strVal(n), "hash") == 0 && is_ledger_usertable(typrelid)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cannot assign to system column \"%s\"", strVal(n)),
+                        parser_errposition(pstate, location)));
+            }
             get_atttypetypmodcoll(typrelid, attnum, &fieldTypeId, &fieldTypMod, &fieldCollation);
 
             /* recurse to create appropriate RHS for field assign */
@@ -798,6 +824,7 @@ static Node* transformAssignmentSubscripts(ParseState* pstate, Node* basenode, c
 List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
 {
     *attrnos = NIL;
+    bool is_blockchain_rel = false;
 
     if (cols == NIL) {
         /*
@@ -813,6 +840,7 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
         Form_pg_attribute* attr = pstate->p_target_relation->rd_att->attrs;
         int numcol = RelationGetNumberOfAttributes(pstate->p_target_relation);
         int i;
+        is_blockchain_rel = pstate->p_target_relation->rd_isblockchain;
 
         for (i = 0; i < numcol; i++) {
             ResTarget* col = NULL;
@@ -827,6 +855,9 @@ List* checkInsertTargets(ParseState* pstate, List* cols, List** attrnos)
 
             col = makeNode(ResTarget);
             col->name = pstrdup(NameStr(attr[i]->attname));
+            if (is_blockchain_rel && strcmp(col->name, "hash") == 0) {
+                continue;
+            }
             col->indirection = NIL;
             col->val = NULL;
             col->location = -1;
@@ -1298,7 +1329,7 @@ TupleDesc expandRecordVariable(ParseState* pstate, Var* var, int levelsup)
     switch (rte->rtekind) {
         case RTE_RELATION:
         case RTE_VALUES:
-
+        case RTE_RESULT:
             /*
              * This case should not occur: a column of a table or values list
              * shouldn't have type RECORD.  Fall through and fail (most

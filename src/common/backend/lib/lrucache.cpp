@@ -146,7 +146,7 @@ void LRUCache::AddToTail(RefNode* x)
         len++;
     } else if (pg_atomic_sub_fetch_u64(&temp->refcount, 1) == 0) {
         temp->Destroy();
-        temp = NULL;
+        pfree_ext(temp);
     }
     return;
 }
@@ -172,7 +172,7 @@ void LRUCache::Remove(DllNode* x)
     len--;
     if (pg_atomic_sub_fetch_u64(&temp->refcount, 1) == 0) {
         temp->Destroy();
-        temp = NULL;
+        pfree_ext(temp);
     }
     return;
 }

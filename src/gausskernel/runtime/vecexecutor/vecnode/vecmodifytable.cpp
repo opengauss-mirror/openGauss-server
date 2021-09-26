@@ -31,7 +31,7 @@
 #include "access/dfs/dfs_insert.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "executor/executor.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #ifdef PGXC
 #include "parser/parsetree.h"
 #include "pgxc/execRemote.h"
@@ -48,6 +48,7 @@
 #include "tsdb/storage/ts_store_delete.h"
 #include "tsdb/cache/tags_cachemgr.h"
 #include "tsdb/cache/queryid_cachemgr.h"
+#include "storage/lmgr.h"
 #endif   /* ENABLE_MULTIPLE_NODES */
 
 extern void ExecVecConstraints(ResultRelInfo* result_rel_info, VectorBatch* batch, EState* estate);
@@ -214,8 +215,8 @@ bool checkPartitionBoundary(Relation insert_rel, Relation scan_rel)
     }
 
     for (int seq = 0; seq < scan_rel_range_num; ++seq) {
-        List* insert_rel_each_boundary = getPartitionBoundaryList(insert_rel, seq);
-        List* scan_rel_each_boundary = getPartitionBoundaryList(scan_rel, seq);
+        List* insert_rel_each_boundary = getRangePartitionBoundaryList(insert_rel, seq);
+        List* scan_rel_each_boundary = getRangePartitionBoundaryList(scan_rel, seq);
 
         insert_rel_boundary = list_concat(insert_rel_boundary, insert_rel_each_boundary);
         scan_rel_boundary = list_concat(scan_rel_boundary, scan_rel_each_boundary);
@@ -447,6 +448,12 @@ void CheckTsOperation(const Relation relation, const VecModifyTableState* node)
         ereport(LOG, (errmodule(MOD_TIMESERIES), errcode(ERRCODE_LOG), 
                 errmsg("Set delete query id(%lu)", u_sess->debug_query_id)));           
         Tsdb::TableStatus::GetInstance().add_query(u_sess->debug_query_id);
+        // add a level 5 lock to relation for compaciton Concurrency control
+        LockRelationOid(relation->rd_id, ShareLock);
+        // once indelete we mast refresh snapshot after we get lock incase compaction delete file
+        PopActiveSnapshot();
+        Snapshot tsDerleteSnapshot = GetTransactionSnapshot();
+        PushActiveSnapshot(tsDerleteSnapshot);
     }
 #endif   /* ENABLE_MULTIPLE_NODES */    
     return;  

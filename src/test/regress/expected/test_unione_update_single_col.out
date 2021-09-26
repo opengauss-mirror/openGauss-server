@@ -1,0 +1,372 @@
+set enable_default_ustore_table = on;
+create schema test_unione_update_single_col;
+set current_schema='test_unione_update_single_col';
+-- create type
+create type composite_type as (c1 int, c2 boolean);
+create type composite_type_complex as (col_int integer, col_decimal decimal, col_bool boolean, col_money money, col_text text, col_date date, col_geo point, col_net cidr, col_circle circle);
+-- create tables
+create table name (c1 name) with (storage_type=USTORE);
+create table blob (c1 blob) with (storage_type=USTORE);
+create table macaddr (c1 macaddr) with (storage_type=USTORE);
+create table uuid (c1 uuid) with (storage_type=USTORE);
+create table box (c1 box) with (storage_type=USTORE);
+create table raw_table (c1 raw) with (storage_type=USTORE);
+create table point (c1 point) with (storage_type=USTORE);
+create table lseg (c1 lseg) with (storage_type=USTORE);
+create table polygon (c1 polygon) with (storage_type=USTORE);
+create table path (c1 path) with (storage_type=USTORE);
+create table circle (c1 circle) with (storage_type=USTORE);
+create table tsvector (c1 tsvector) with (storage_type=USTORE);
+create table tsquery (c1 tsquery) with (storage_type=USTORE);
+create table intvector (c1 int[][]) with (storage_type=USTORE);
+create table intarray (c1 int[]) with (storage_type=USTORE); 
+create table composite (c1 composite_type) with (storage_type=USTORE);
+create table composite_complex (c1 composite_type_complex) with (storage_type=USTORE); 
+-- create tables for data verification
+create table v_name (c1 name) with (orientation=row);
+create table v_blob (c1 blob) with (orientation=row);
+create table v_macaddr (c1 macaddr) with (orientation=row);
+create table v_uuid (c1 uuid) with (orientation=row);
+create table v_box (c1 box) with (orientation=row);
+create table v_raw (c1 raw) with (orientation=row);
+create table v_point (c1 point) with (orientation=row);
+create table v_lseg (c1 lseg) with (orientation=row);
+create table v_polygon (c1 polygon) with (orientation=row);
+create table v_path (c1 path) with (orientation=row);
+create table v_circle (c1 circle) with (orientation=row);
+create table v_tsvector (c1 tsvector) with (orientation=row);
+create table v_tsquery (c1 tsquery) with (orientation=row);
+create table v_intvector (c1 int[][]) with (orientation=row);
+create table v_intarray (c1 int[]) with (orientation=row);
+create table v_composite (c1 composite_type) with (orientation=row);
+create table v_composite_complex (c1 composite_type_complex) with (orientation=row);
+-- insert into table
+insert into name values ('AAAAAA');
+insert into name values ('BBBBBB');
+insert into v_name values ('AAAAAA');
+insert into v_name values ('BBBBBB');
+insert into blob values ('aaaaaaaaaaa');
+insert into blob values ('bbbbbbbbbbb');
+insert into v_blob values ('aaaaaaaaaaa');
+insert into v_blob values ('bbbbbbbbbbb');
+insert into macaddr values ('08:00:2b:01:02:03');
+insert into macaddr values ('08:00:2a:01:02:03');
+insert into v_macaddr values ('08:00:2b:01:02:03');
+insert into v_macaddr values ('08:00:2a:01:02:03');
+insert into uuid values ('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+insert into v_uuid values ('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11');
+insert into box values ('(0,0,100,100)');
+insert into box values ('(5,5,100,100)');
+insert into v_box values ('(0,0,100,100)');
+insert into v_box values ('(5,5,100,100)');
+insert into raw_table values ('DEADBEEF');
+insert into raw_table values ('BEEFBEEF');
+insert into v_raw values ('DEADBEEF');
+insert into v_raw values ('BEEFBEEF');
+insert into point values ('(0.0000009,0.0000009)');
+insert into point values ('(0.0000018,0.0000018)');
+insert into v_point values ('(0.0000009,0.0000009)');
+insert into v_point values ('(0.0000018,0.0000018)');
+insert into lseg values ('((0.0000009,0.0000009),(0.0000018,0.0000018))');
+insert into lseg values ('((0.0000018,0.0000018),(0.0000027,0.0000027))');
+insert into v_lseg values ('((0.0000009,0.0000009),(0.0000018,0.0000018))');
+insert into v_lseg values ('((0.0000018,0.0000018),(0.0000027,0.0000027))');
+insert into polygon values ('(2.0,0.0),(2.0,4.0),(0.0,0.0)');
+insert into polygon values ('(1.0,0.0),(1.0,4.0),(0.5,0.5)');
+insert into v_polygon values ('(2.0,0.0),(2.0,4.0),(0.0,0.0)');
+insert into v_polygon values ('(1.0,0.0),(1.0,4.0),(0.5,0.5)');
+insert into path values ('((1,1),(2,2),(3,3))');
+insert into path values ('((1,1),(2,2),(3,3))');
+insert into path values ('[(0,2),(-1,0),(-10,1)]');
+insert into path values ('[(0,2),(-1,0),(-10,1)]');
+insert into v_path values ('((1,1),(2,2),(3,3))');
+insert into v_path values ('((1,1),(2,2),(3,3))');
+insert into v_path values ('[(0,2),(-1,0),(-10,1)]');
+insert into v_path values ('[(0,2),(-1,0),(-10,1)]');
+insert into circle values ('<(250,250),250>');
+insert into circle values ('<(500,500),500>');
+insert into v_circle values ('<(250,250),250>');
+insert into v_circle values ('<(500,500),500>');
+insert into tsvector values (' a:1 s:2 d g');
+insert into tsvector values (' a:2 s:2 d g');
+insert into v_tsvector values (' a:1 s:2 d g');
+insert into v_tsvector values (' a:2 s:2 d g');
+insert into tsquery values ('1|2|4|5|6');
+insert into tsquery values ('1|2|4|5|7');
+insert into v_tsquery values ('1|2|4|5|6');
+insert into v_tsquery values ('1|2|4|5|7');
+insert into intvector values ('{{1},{2}}');
+insert into intvector values ('{{1},{3}}');
+insert into v_intvector values ('{{1},{2}}');
+insert into v_intvector values ('{{1},{3}}');
+insert into intarray values ('{1,2,3}');
+insert into intarray values ('{2,3,4}');
+insert into v_intarray values ('{1,2,3}');
+insert into v_intarray values ('{2,3,4}');
+insert into composite values(row(1,true));
+insert into composite values(row(2,false));
+insert into v_composite values(row(1,true));
+insert into v_composite values(row(2,false));
+insert into composite_complex values (row(214748,12345.122,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'));
+insert into composite_complex values (row(21478,135.2468,true,2000,'helloo','2020-09-04','(0.0000039,0.0000039)','192.168.1','<(500,500),500>'));
+insert into v_composite_complex values (row(214748,12345.122,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>'));
+insert into v_composite_complex values (row(21478,135.2468,true,2000,'helloo','2020-09-04','(0.0000039,0.0000039)','192.168.1','<(500,500),500>'));
+-- update
+update name set c1='CCCCCC' where c1='AAAAAA';
+update v_name set c1='CCCCCC' where c1='AAAAAA';
+update blob set c1='ccccccccccc' where c1='aaaaaaaaaaa';
+update v_blob set c1='ccccccccccc' where c1='aaaaaaaaaaa';
+update macaddr set c1='08:00:2b:01:02:02' where c1='08:00:2b:01:02:03';
+update v_macaddr set c1='08:00:2b:01:02:02' where c1='08:00:2b:01:02:03';
+update uuid set c1='a0eebc999c0b4ef8bb6d6bb9bd380a11' where c1='A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11';
+update v_uuid set c1='a0eebc999c0b4ef8bb6d6bb9bd380a11' where c1='A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11';
+update box set c1='(0,0,50,50)' where c1='(0,0,100,100)';
+update v_box set c1='(0,0,50,50)' where c1='(0,0,100,100)';
+update raw_table set c1='DEADDEAD' where c1='DEADBEEF';
+update v_raw set c1='DEADDEAD' where c1='DEADBEEF';
+update point set c1='(0.0000029,0.0000029)'::point where c1~='(0.0000009,0.0000009)'::point;
+update v_point set c1='(0.0000029,0.0000029)'::point where c1~='(0.0000009,0.0000009)'::point;
+update lseg set c1='((0.0000059,0.0000059),(0.0000018,0.0000018))' where c1='((0.0000009,0.0000009),(0.0000018,0.0000018))';
+update v_lseg set c1='((0.0000059,0.0000059),(0.0000018,0.0000018))' where c1='((0.0000009,0.0000009),(0.0000018,0.0000018))';
+update polygon set c1='(3.0,0.0),(3.0,4.0),(0.5,0.0)'::polygon where c1~='(2.0,0.0),(2.0,4.0),(0.0,0.0)'::polygon;
+update v_polygon set c1='(3.0,0.0),(3.0,4.0),(0.5,0.0)'::polygon where c1~='(2.0,0.0),(2.0,4.0),(0.0,0.0)'::polygon;
+update path set c1='((1,3),(2,4),(3,6))' where c1='((1,1),(2,2),(3,3))';
+update v_path set c1='((1,3),(2,4),(3,6))' where c1='((1,1),(2,2),(3,3))';
+update circle set c1='<(450,500),500>' where c1='<(250,250),250>';
+update v_circle set c1='<(450,500),500>' where c1='<(250,250),250>';
+update tsvector set c1=' a:3 s:1 d g' where c1=' a:1 s:2 d g';
+update v_tsvector set c1=' a:3 s:1 d g' where c1=' a:1 s:2 d g';
+update tsquery set c1='1|2|5|7|9' where c1='1|2|4|5|6';
+update v_tsquery set c1='1|2|5|7|9' where c1='1|2|4|5|6';
+update intvector set c1='{{1},{3}}' where c1='{{1},{2}}';
+update v_intvector set c1='{{1},{3}}' where c1='{{1},{2}}';
+update intarray set c1='{2,5,9}' where c1='{1,2,3}';
+update v_intarray set c1='{2,5,9}' where c1='{1,2,3}';
+update composite set c1=row(10,false) where (composite.c1).c1=1;
+update v_composite set c1=row(10,false) where (v_composite.c1).c1=1;
+update composite_complex set c1=row(214748,2468.1357,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>');
+update composite_complex set c1=row(214748,2468.1357,true,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>') where (composite_complex.c1).col_text='hello';
+update composite_complex set c1.col_bool=true;
+update v_composite_complex set c1=row(214748,2468.1357,false,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>');
+update v_composite_complex set c1=row(214748,2468.1357,true,2000,'hello','2020-09-04','(0.0000009,0.0000009)','192.168.1','<(250,250),250>') where (v_composite_complex.c1).col_text='hello';
+update v_composite_complex set c1.col_bool=true;
+-- data verification
+create view view_name as (
+select * from name except select * from v_name);
+create view view_blob as (
+select * from blob except select * from v_blob);
+create view view_macaddr as (
+select * from macaddr except select * from v_macaddr);
+create view view_uuid as (
+select * from uuid except select * from v_uuid);
+create view view_raw as (
+select * from raw_table except select * from v_raw);
+create view view_tsvector as (
+select * from tsvector except select * from v_tsvector);
+create view view_tsquery as (
+select * from tsquery except select * from v_tsquery);
+create view view_intvector as (
+select * from intvector except select * from v_intvector);
+create view view_intarray as (
+select * from intarray except select * from v_intarray);
+create view view_composite as (
+select * from composite except select * from v_composite);
+select * from box;
+       c1        
+-----------------
+ (50,50),(0,0)
+ (100,100),(5,5)
+(2 rows)
+
+select * from v_box;
+       c1        
+-----------------
+ (50,50),(0,0)
+ (100,100),(5,5)
+(2 rows)
+
+select * from point;
+        c1         
+-------------------
+ (2.9e-06,2.9e-06)
+ (2.9e-06,2.9e-06)
+(2 rows)
+
+select * from v_point;
+        c1         
+-------------------
+ (2.9e-06,2.9e-06)
+ (2.9e-06,2.9e-06)
+(2 rows)
+
+select * from lseg;
+                  c1                   
+---------------------------------------
+ [(5.9e-06,5.9e-06),(1.8e-06,1.8e-06)]
+ [(5.9e-06,5.9e-06),(1.8e-06,1.8e-06)]
+(2 rows)
+
+select * from v_lseg;
+                  c1                   
+---------------------------------------
+ [(5.9e-06,5.9e-06),(1.8e-06,1.8e-06)]
+ [(5.9e-06,5.9e-06),(1.8e-06,1.8e-06)]
+(2 rows)
+
+select * from circle;
+       c1        
+-----------------
+ <(450,500),500>
+ <(500,500),500>
+(2 rows)
+
+select * from v_circle;
+       c1        
+-----------------
+ <(450,500),500>
+ <(500,500),500>
+(2 rows)
+
+select * from path;
+         c1          
+---------------------
+ ((1,3),(2,4),(3,6))
+ ((1,3),(2,4),(3,6))
+ ((1,3),(2,4),(3,6))
+ ((1,3),(2,4),(3,6))
+(4 rows)
+
+select * from v_path;
+         c1          
+---------------------
+ ((1,3),(2,4),(3,6))
+ ((1,3),(2,4),(3,6))
+ ((1,3),(2,4),(3,6))
+ ((1,3),(2,4),(3,6))
+(4 rows)
+
+select * from polygon;
+           c1            
+-------------------------
+ ((3,0),(3,4),(0.5,0))
+ ((1,0),(1,4),(0.5,0.5))
+(2 rows)
+
+select * from v_polygon;
+           c1            
+-------------------------
+ ((3,0),(3,4),(0.5,0))
+ ((1,0),(1,4),(0.5,0.5))
+(2 rows)
+
+select * from composite_complex;
+                                                         c1                                                         
+--------------------------------------------------------------------------------------------------------------------
+ (214748,2468.1357,t,"$2,000.00",hello,"Fri Sep 04 00:00:00 2020","(9e-07,9e-07)",192.168.1.0/24,"<(250,250),250>")
+ (214748,2468.1357,t,"$2,000.00",hello,"Fri Sep 04 00:00:00 2020","(9e-07,9e-07)",192.168.1.0/24,"<(250,250),250>")
+(2 rows)
+
+select * from v_composite_complex;
+                                                         c1                                                         
+--------------------------------------------------------------------------------------------------------------------
+ (214748,2468.1357,t,"$2,000.00",hello,"Fri Sep 04 00:00:00 2020","(9e-07,9e-07)",192.168.1.0/24,"<(250,250),250>")
+ (214748,2468.1357,t,"$2,000.00",hello,"Fri Sep 04 00:00:00 2020","(9e-07,9e-07)",192.168.1.0/24,"<(250,250),250>")
+(2 rows)
+
+select * from view_name;
+ c1 
+----
+(0 rows)
+
+select * from view_blob;
+ c1 
+----
+(0 rows)
+
+select * from view_macaddr;
+ c1 
+----
+(0 rows)
+
+select * from view_uuid;
+ c1 
+----
+(0 rows)
+
+select * from view_raw;
+ c1 
+----
+(0 rows)
+
+select * from view_tsvector;
+ c1 
+----
+(0 rows)
+
+select * from view_tsquery;
+ c1 
+----
+(0 rows)
+
+select * from view_intvector;
+ c1 
+----
+(0 rows)
+
+select * from view_intarray;
+ c1 
+----
+(0 rows)
+
+select * from view_composite;
+ c1 
+----
+(0 rows)
+
+-- drop table and views
+drop view view_name;
+drop view view_blob;
+drop view view_macaddr;
+drop view view_uuid;
+drop view view_raw;
+drop view view_tsvector;
+drop view view_tsquery;
+drop view view_intvector;
+drop view view_intarray;
+drop view view_composite;
+drop table name;
+drop table blob;
+drop table macaddr;
+drop table uuid;
+drop table box;
+drop table raw_table;
+drop table point;
+drop table lseg;
+drop table polygon;
+drop table circle;
+drop table path;
+drop table tsvector;
+drop table tsquery;
+drop table intvector;
+drop table intarray;
+drop table composite;
+drop table composite_complex;
+drop table v_name;
+drop table v_blob;
+drop table v_macaddr;
+drop table v_uuid;
+drop table v_box;
+drop table v_raw;
+drop table v_point;
+drop table v_lseg;
+drop table v_polygon;
+drop table v_path;
+drop table v_circle;
+drop table v_tsvector;
+drop table v_tsquery;
+drop table v_intvector;
+drop table v_intarray;
+drop table v_composite;
+drop table v_composite_complex;
+drop type composite_type;
+drop type composite_type_complex;

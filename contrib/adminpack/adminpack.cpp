@@ -23,7 +23,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "postmaster/syslogger.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "utils/builtins.h"
 #include "utils/datetime.h"
 

@@ -48,9 +48,10 @@
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
 #include "storage/lock/lwlock.h"
+#include "storage/smgr/knl_usync.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "storage/spin.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
@@ -113,10 +114,8 @@
  * ----------
  */
 typedef struct {
-    RelFileNode rnode;
-    ForkNumber forknum;
-    BlockNumber segno; /* see md.c for special values */
-                       /* might add a real request-type field later; not needed yet */
+    SyncRequestType type;   /* request type */
+    FileTag ftag;           /* file identifier */
 } CheckpointerRequest;
 
 typedef struct CheckpointerShmemStruct {
@@ -124,6 +123,7 @@ typedef struct CheckpointerShmemStruct {
     slock_t ckpt_lck;          /* protects all the ckpt_* fields */
     int64 fsync_start;
     int64 fsync_done;
+    int64 fsync_request;
 
     int ckpt_started; /* advances when checkpoint starts */
     int ckpt_done;    /* advances when checkpoint done */
@@ -226,7 +226,8 @@ void CheckpointerMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Checkpointer", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Checkpointer",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -250,6 +251,11 @@ void CheckpointerMain(void)
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
         gstrace_tryblock_exit(true, oldTryCounter);
+        /*
+         * Close all open files after any error.  This is helpful on Windows,
+         * where holding deleted files open causes various strange errors.
+         * It's not clear we need it elsewhere, but shouldn't hurt.
+         */
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
@@ -318,13 +324,6 @@ void CheckpointerMain(void)
          * fast as we can.
          */
         pg_usleep(1000000L);
-
-        /*
-         * Close all open files after any error.  This is helpful on Windows,
-         * where holding deleted files open causes various strange errors.
-         * It's not clear we need it elsewhere, but shouldn't hurt.
-         */
-        smgrcloseall();
     }
     oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
 
@@ -520,7 +519,7 @@ void CheckpointerMain(void)
                 if (u_sess->attr.attr_common.log_checkpoints) {
                     ereport(LOG, (errmsg("file sync checkpoint is trigger.")));
                 }
-                smgrsync_with_absorption();
+                CheckPointSyncWithAbsorption();
             } else if (!do_restartpoint) {
                 CreateCheckPoint(flags);
                 ckpt_performed = true;
@@ -582,11 +581,7 @@ void CheckpointerMain(void)
          */
         now = (pg_time_t)time(NULL);
         elapsed_secs = now - t_thrd.checkpoint_cxt.last_checkpoint_time;
-
-        if (elapsed_secs < 0) {
-            elapsed_secs = 0;
-        }
-
+        elapsed_secs = (elapsed_secs < 0) ? 0 : elapsed_secs;
         if (elapsed_secs >= u_sess->attr.attr_storage.CheckPointTimeout)
             continue; /* no sleep for us ... */
 
@@ -723,7 +718,7 @@ void CheckpointWriteDelay(int flags, double progress)
         }
 
         AbsorbFsyncRequests();
-        t_thrd.checkpoint_cxt.absorb_counter = WRITES_PER_ABSORB;
+        t_thrd.checkpoint_cxt.absorbCounter = WRITES_PER_ABSORB;
 
         CheckArchiveTimeout();
 
@@ -739,14 +734,14 @@ void CheckpointWriteDelay(int flags, double progress)
          * Sleep.
          */
         pg_usleep(100000L);
-    } else if (--t_thrd.checkpoint_cxt.absorb_counter <= 0) {
+    } else if (--t_thrd.checkpoint_cxt.absorbCounter <= 0) {
         /*
          * Absorb pending fsync requests after each WRITES_PER_ABSORB write
          * operations even when we don't sleep, to prevent overflow of the
          * fsync request queue.
          */
         AbsorbFsyncRequests();
-        t_thrd.checkpoint_cxt.absorb_counter = WRITES_PER_ABSORB;
+        t_thrd.checkpoint_cxt.absorbCounter = WRITES_PER_ABSORB;
     }
 }
 
@@ -919,7 +914,7 @@ Size CheckpointerShmemSize(void)
      * NBuffers.  This may prove too large or small ...
      */
     size = offsetof(CheckpointerShmemStruct, requests);
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(CheckpointerRequest)));
+    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(CheckpointerRequest)));
 
     return size;
 }
@@ -942,9 +937,10 @@ void CheckpointerShmemInit(void)
          * requests array; this is so that CompactCheckpointerRequestQueue
          * can assume that any pad bytes in the request structs are zeroes.
          */
-        MemsetHugeMem((char*)t_thrd.checkpoint_cxt.CheckpointerShmem, size);
+        /* The memory of the memset sometimes exceeds 2 GB. so, memset_s cannot be used. */
+        MemSet((char*)t_thrd.checkpoint_cxt.CheckpointerShmem, 0, size);
         SpinLockInit(&t_thrd.checkpoint_cxt.CheckpointerShmem->ckpt_lck);
-        t_thrd.checkpoint_cxt.CheckpointerShmem->max_requests = g_instance.attr.attr_storage.NBuffers;
+        t_thrd.checkpoint_cxt.CheckpointerShmem->max_requests = TOTAL_BUFFER_NUM;
     }
 }
 
@@ -1117,8 +1113,8 @@ void RequestCheckpoint(int flags)
 }
 
 /*
- * ForwardFsyncRequest
- *		Forward a file-fsync request from a backend to the checkpointer
+ * ForwardSyncRequest
+ *      Forward a file-fsync request from a backend to the checkpointer
  *
  * Whenever a backend is compelled to write directly to a relation
  * (which should be seldom, if the background writer is getting its job done),
@@ -1126,43 +1122,37 @@ void RequestCheckpoint(int flags)
  * is dirty and must be fsync'd before next checkpoint.  We also use this
  * opportunity to count such writes for statistical purposes.
  *
- * This functionality is only supported for regular (not backend-local)
- * relations, so the rnode argument is intentionally RelFileNode not
- * RelFileNodeBackend.
- *
- * segno specifies which segment (not block!) of the relation needs to be
- * fsync'd.  (Since the valid range is much less than BlockNumber, we can
- * use high values for special flags; that's all internal to md.c, which
- * see for details.)
- *
  * To avoid holding the lock for longer than necessary, we normally write
  * to the requests[] queue without checking for duplicates.  The checkpointer
  * will have to eliminate dups internally anyway.  However, if we discover
  * that the queue is full, we make a pass over the entire queue to compact
- * it.	This is somewhat expensive, but the alternative is for the backend
+ * it.  This is somewhat expensive, but the alternative is for the backend
  * to perform its own fsync, which is far more expensive in practice.  It
  * is theoretically possible a backend fsync might still be necessary, if
  * the queue is full and contains no duplicate entries.  In that case, we
  * let the backend know by returning false.
  */
-bool ForwardFsyncRequest(const RelFileNode rnode, ForkNumber forknum, BlockNumber segno)
+bool ForwardSyncRequest(const FileTag *ftag, SyncRequestType type)
 {
     CheckpointerRequest* request = NULL;
     bool too_full = false;
 
-    if (!IsUnderPostmaster)
-        return false; /* probably shouldn't even get here */
+    if (!IsUnderPostmaster) {
+        return false;           /* probably shouldn't even get here */
+    }
 
-    if (AmCheckpointerProcess())
+    if (AmCheckpointerProcess()) {
         ereport(ERROR,
             (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION),
                 errmsg("ForwardFsyncRequest must not be called in checkpointer")));
+    }
 
     LWLockAcquire(CheckpointerCommLock, LW_EXCLUSIVE);
 
     /* Count all backend writes regardless of if they fit in the queue */
-    if (!AmBackgroundWriterProcess())
+    if (!AmBackgroundWriterProcess() || !AmMulitBackgroundWriterProcess() || !AmPageWriterProcess()) {
         t_thrd.checkpoint_cxt.CheckpointerShmem->num_backend_writes++;
+    }
 
     /*
      * If the checkpointer isn't running or the request queue is full, the
@@ -1171,14 +1161,15 @@ bool ForwardFsyncRequest(const RelFileNode rnode, ForkNumber forknum, BlockNumbe
      */
     if (t_thrd.checkpoint_cxt.CheckpointerShmem->checkpointer_pid == 0 ||
         (t_thrd.checkpoint_cxt.CheckpointerShmem->num_requests >=
-                t_thrd.checkpoint_cxt.CheckpointerShmem->max_requests &&
-            !CompactCheckpointerRequestQueue())) {
+        t_thrd.checkpoint_cxt.CheckpointerShmem->max_requests &&
+        !CompactCheckpointerRequestQueue())) {
         /*
          * Count the subset of writes where backends have to do their own
          * fsync
          */
-        if (!AmBackgroundWriterProcess())
+        if (!AmBackgroundWriterProcess() || !AmMulitBackgroundWriterProcess() || !AmPageWriterProcess()) {
             t_thrd.checkpoint_cxt.CheckpointerShmem->num_backend_fsync++;
+        }
 
         LWLockRelease(CheckpointerCommLock);
         return false;
@@ -1187,9 +1178,8 @@ bool ForwardFsyncRequest(const RelFileNode rnode, ForkNumber forknum, BlockNumbe
     /* OK, insert request */
     request =
         &t_thrd.checkpoint_cxt.CheckpointerShmem->requests[t_thrd.checkpoint_cxt.CheckpointerShmem->num_requests++];
-    request->rnode = rnode;
-    request->forknum = forknum;
-    request->segno = segno;
+    request->ftag = *ftag;
+    request->type = type;
 
     /* If queue is more than half full, nudge the checkpointer to empty it */
     too_full = (t_thrd.checkpoint_cxt.CheckpointerShmem->num_requests >=
@@ -1198,11 +1188,13 @@ bool ForwardFsyncRequest(const RelFileNode rnode, ForkNumber forknum, BlockNumbe
     LWLockRelease(CheckpointerCommLock);
 
     /* ... but not till after we release the lock */
-    if (too_full && g_instance.proc_base->checkpointerLatch)
+    if (too_full && g_instance.proc_base->checkpointerLatch) {
         SetLatch(g_instance.proc_base->checkpointerLatch);
+    }
 
     return true;
 }
+
 
 /*
  * CompactCheckpointerRequestQueue
@@ -1378,12 +1370,12 @@ void AbsorbFsyncRequests(void)
 
     LWLockRelease(CheckpointerCommLock);
 
-    for (request = requests; n > 0; request++, n--)
-        RememberFsyncRequest(request->rnode, request->forknum, request->segno);
-
-    if (requests != NULL)
+    for (request = requests; n > 0; request++, n--) {
+        RememberSyncRequest(&request->ftag, request->type);
+    }
+    if (requests != NULL) {
         pfree(requests);
-
+    }
     END_CRIT_SECTION();
 }
 
@@ -1451,17 +1443,17 @@ void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn)
 #endif
 
 /*
- * smgrsync_for_dw() -- File sync before dw file can be truncated or recycled.
+ * CheckPointSyncForDw() -- File sync before dw file can be truncated or recycled.
  * Normally, file sync operation is solely handled by checkpointer process. When pagewriter finds short of
  * dw file space, it simply requests a 'fake' file-sync checkpoint.
  * For standalone backends, as well as for startup process performing dw init, they can handle fsync request
  * themselves since no other concurrent pagewriter process should be present.
  */
-void smgrsync_for_dw(void)
+void CheckPointSyncForDw(void)
 {
-    if (u_sess->storage_cxt.pendingOpsTable) {
+    if (u_sess->storage_cxt.pendingOps) {
         Assert(!IsUnderPostmaster || AmStartupProcess() || AmCheckpointerProcess());
-        smgrsync();
+        ProcessSyncRequests();
     } else {
         int64 old_fsync_start = 0;
         int64 new_fsync_start = 0;
@@ -1469,6 +1461,7 @@ void smgrsync_for_dw(void)
         volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;
         SpinLockAcquire(&cps->ckpt_lck);
         old_fsync_start = cps->fsync_start;
+        cps->fsync_request++;
         SpinLockRelease(&cps->ckpt_lck);
 
         RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FILE_SYNC);
@@ -1508,9 +1501,9 @@ void smgrsync_for_dw(void)
 }
 
 /*
- *	smgrsync_with_absorption() -- Sync files to disk and reset fsync flags.
+ *  CheckPointSyncWithAbsorption() -- Sync files to disk and reset fsync flags.
  */
-void smgrsync_with_absorption(void)
+void CheckPointSyncWithAbsorption(void)
 {
     volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;
 
@@ -1518,9 +1511,20 @@ void smgrsync_with_absorption(void)
     cps->fsync_start++;
     SpinLockRelease(&cps->ckpt_lck);
 
-    smgrsync();
+    ProcessSyncRequests();
 
     SpinLockAcquire(&cps->ckpt_lck);
     cps->fsync_done = cps->fsync_start;
     SpinLockRelease(&cps->ckpt_lck);
 }
+
+int64 CheckPointGetFsyncRequset()
+{
+    volatile CheckpointerShmemStruct* cps = t_thrd.checkpoint_cxt.CheckpointerShmem;
+    SpinLockAcquire(&cps->ckpt_lck);
+    int64 request = cps->fsync_request;
+    SpinLockRelease(&cps->ckpt_lck);
+
+    return request;
+}
+

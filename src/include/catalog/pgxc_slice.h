@@ -78,7 +78,4 @@ extern void PgxcSliceCreate(const char* relname, Oid relid, DistributeBy* distri
     TupleDesc desc, const Oid* nodeoids, uint32 nodenum, uint32 startpos);
 extern void RemovePgxcSlice(Oid relid);
 
-extern void UpdateSliceForRedisTable(Oid tabOid1, Oid tabOid2);
-
 #endif  /* PGXC_SLICE_H */
-

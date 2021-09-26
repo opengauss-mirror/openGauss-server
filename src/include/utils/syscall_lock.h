@@ -34,7 +34,11 @@
 #else
 #define _WINSOCKAPI_
 #include <windows.h>
+#ifndef _MINGW32
 #include "pthread-win32.h"
+#else
+#include "libpq/libpq-int.h"
+#endif
 #endif
 
 typedef pthread_mutex_t syscalllock;

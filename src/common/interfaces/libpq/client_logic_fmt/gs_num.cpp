@@ -45,7 +45,8 @@
  * int1_bin -
  * convert string to integer
  */
-unsigned char *int1_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *int1_bin(const PGconn* conn, const char *text, Oid typelem, int atttypmod,
+    size_t *binary_size, char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
     if (binary == NULL) {
@@ -54,7 +55,7 @@ unsigned char *int1_bin(const char *text, Oid typelem, int atttypmod, size_t *bi
     errno_t rc = EOK;
     rc = memset_s(binary, sizeof(int64), 0, sizeof(int64));
     securec_check_c(rc, "\0", "\0");
-    if (!fe_pg_atoi8(text, (int8 *)binary, err_msg)) {
+    if (!fe_pg_atoi8(conn, text, (int8 *)binary, err_msg)) {
         free(binary);
         return NULL;
     }
@@ -118,7 +119,8 @@ unsigned char *int1_brestore(const unsigned char *binary_in, size_t size, Oid ty
  * int2_bin -
  * Convert input string to a signed 16 bit integer.
  */
-unsigned char *int2_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *int2_bin(const PGconn *conn, const char *text, Oid typelem, int atttypmod, size_t *binary_size,
+    char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
     if (binary == NULL) {
@@ -127,7 +129,7 @@ unsigned char *int2_bin(const char *text, Oid typelem, int atttypmod, size_t *bi
     errno_t rc = EOK;
     rc = memset_s(binary, sizeof(int64), 0, sizeof(int64));
     securec_check_c(rc, "\0", "\0");
-    if (!fe_pg_strtoint16(text, (int16 *)binary, err_msg)) {
+    if (!fe_pg_strtoint16(conn, text, (int16 *)binary, err_msg)) {
         free(binary);
         return NULL;
     }
@@ -193,7 +195,8 @@ unsigned char *int2_brestore(const unsigned char *binary, size_t size, Oid typel
  * int4_bin -
  * Convert input string to a signed 32 bit integer.
  */
-unsigned char *int4_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *int4_bin(const PGconn *conn, const char *text, Oid typelem, int atttypmod, size_t *binary_size,
+    char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
     if (binary == NULL) {
@@ -202,7 +205,7 @@ unsigned char *int4_bin(const char *text, Oid typelem, int atttypmod, size_t *bi
     errno_t rc = EOK;
     rc = memset_s(binary, sizeof(int64), 0, sizeof(int64));
     securec_check_c(rc, "\0", "\0");
-    if (!fe_pg_strtoint32(text, (int32 *)binary, err_msg)) {
+    if (!fe_pg_strtoint32(conn, text, (int32 *)binary, err_msg)) {
         free(binary);
         return NULL;
     }
@@ -269,7 +272,8 @@ unsigned char *int4_brestore(const unsigned char *binary, size_t size, Oid typel
  * int8_bin -
  * try to parse a string into an 64-bit integer.
  */
-unsigned char *int8_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *int8_bin(const PGconn *conn, const char *text, Oid typelem, int atttypmod, size_t *binary_size,
+    char *err_msg)
 {
     unsigned char *binary = (unsigned char *)malloc(sizeof(int64));
     if (binary == NULL) {
@@ -278,7 +282,7 @@ unsigned char *int8_bin(const char *text, Oid typelem, int atttypmod, size_t *bi
     errno_t rc = EOK;
     rc = memset_s(binary, sizeof(int64), 0, sizeof(int64));
     securec_check_c(rc, "\0", "\0");
-    if (!scanint8(text, false, (int64 *)binary, err_msg)) {
+    if (!scanint8(conn, text, false, (int64 *)binary, err_msg)) {
         free(binary);
         return NULL;
     }
@@ -313,9 +317,10 @@ char *int8_bout(const unsigned char *binary, size_t size, Oid typelem, int attty
  * because how the data is saved in disk and how the client/application expects to retrieve it
  * are different, change the endianess
  */
-unsigned char *int8_badjust(unsigned char *binary, const size_t *binary_size, 
+unsigned char *int8_badjust(unsigned char *binary, size_t *binary_size, 
     Oid typelem, int atttypmod, const char *err_msg)
 {
+    *binary_size = sizeof(int64);
     long &n = *(long *)binary;
     n = be64toh(n);
     return binary;
@@ -436,9 +441,10 @@ char *float8_bout(const unsigned char *binary, size_t size, Oid typelem, int att
  * converts a numeric data type string to
  * a NumericChoice struct(binary array)
  */
-unsigned char *numeric_bin(const char *text, Oid typelem, int atttypmod, size_t *binary_size, char *err_msg)
+unsigned char *numeric_bin(const PGconn* conn, const char *text, Oid typelem, int atttypmod, 
+    size_t *binary_size, char *err_msg)
 {
-    return scan_numeric(text, atttypmod, binary_size, err_msg);
+    return scan_numeric(conn, text, atttypmod, binary_size, err_msg);
 }
 
 /*

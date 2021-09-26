@@ -678,7 +678,7 @@ Datum timestamp_transform(PG_FUNCTION_ARGS)
 
 /* timestamp_scale()
  * Adjust time type for specified scale factor.
- * Used by PostgreSQL type system to stuff columns.
+ * Used by openGauss type system to stuff columns.
  */
 Datum timestamp_scale(PG_FUNCTION_ARGS)
 {
@@ -897,7 +897,7 @@ Datum timestamptztypmodout(PG_FUNCTION_ARGS)
 
 /* timestamptz_scale()
  * Adjust time type for specified scale factor.
- * Used by PostgreSQL type system to stuff columns.
+ * Used by openGauss type system to stuff columns.
  */
 Datum timestamptz_scale(PG_FUNCTION_ARGS)
 {
@@ -1257,7 +1257,7 @@ Datum interval_transform(PG_FUNCTION_ARGS)
 
 /* interval_scale()
  * Adjust interval type for specified fields.
- * Used by PostgreSQL type system to stuff columns.
+ * Used by openGauss type system to stuff columns.
  */
 Datum interval_scale(PG_FUNCTION_ARGS)
 {
@@ -1569,7 +1569,7 @@ bool TimestampDifferenceExceeds(TimestampTz start_time, TimestampTz stop_time, i
 /*
  * Convert a time_t to TimestampTz.
  *
- * We do not use time_t internally in Postgres, but this is provided for use
+ * We do not use time_t internally in openGauss, but this is provided for use
  * by functions that need to interpret, say, a stat(2) result.
  *
  * To avoid having the function's ABI vary depending on the width of time_t,
@@ -5778,13 +5778,15 @@ void WalReplicationTimestampToString(WalReplicationTimestampInfo *timeStampInfo,
     TimestampTz timeout, TimestampTz lastTimestamp, TimestampTz heartbeat)
 {
     // timestamptz_to_str returns char[MAXTIMESTAMPLEN + 1]
-    errno_t rc;
-    rc = memcpy_s(timeStampInfo->nowTimeStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(nowtime), MAXTIMESTAMPLEN + 1);
-    securec_check(rc, "\0", "\0");    
+    errno_t rc = memcpy_s(timeStampInfo->nowTimeStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(nowtime),
+                          MAXTIMESTAMPLEN + 1);
+    securec_check(rc, "\0", "\0");
     rc = memcpy_s(timeStampInfo->timeoutStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(timeout), MAXTIMESTAMPLEN + 1);
-    securec_check(rc, "\0", "\0");    
-    rc = memcpy_s(timeStampInfo->lastRecStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(lastTimestamp), MAXTIMESTAMPLEN + 1);
-    securec_check(rc, "\0", "\0");    
-    rc = memcpy_s(timeStampInfo->heartbeatStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(heartbeat), MAXTIMESTAMPLEN + 1);
-    securec_check(rc, "\0", "\0");    
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(timeStampInfo->lastRecStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(lastTimestamp),
+                  MAXTIMESTAMPLEN + 1);
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(timeStampInfo->heartbeatStamp, MAXTIMESTAMPLEN + 1, timestamptz_to_str(heartbeat),
+                  MAXTIMESTAMPLEN + 1);
+    securec_check(rc, "\0", "\0");
 }

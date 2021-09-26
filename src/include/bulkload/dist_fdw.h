@@ -31,7 +31,7 @@
 #include "nodes/nodes.h"
 #include "nodes/pg_list.h"
 #include "storage/buf/block.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "nodes/parsenodes.h"
 #include "bulkload/importerror.h"
 

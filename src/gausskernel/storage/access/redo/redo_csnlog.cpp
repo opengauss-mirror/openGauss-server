@@ -35,6 +35,7 @@
 #include "pgxc/pgxc.h"
 #include "utils/snapmgr.h"
 #include "storage/barrier.h"
+#include "storage/smgr/fd.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/access_gstrace.h"
 
@@ -55,6 +56,7 @@ XLogRecParseState *XactXlogCsnlogParseToBlock(XLogReaderState *record, uint32 *b
     XLogRecParseState *blockstate = NULL;
     BlockNumber lowblknum;
     ForkNumber forknum;
+    RelFileNodeForkNum filenode;
     uint16 offset[MAX_BLOCK_XID_NUMS];
     uint16 xidnum;
     TransactionId pagestartxid;
@@ -75,7 +77,8 @@ XLogRecParseState *XactXlogCsnlogParseToBlock(XLogReaderState *record, uint32 *b
     forknum = (ForkNumber)(pageno >> LOW_BLOKNUMBER_BITS);
     lowblknum = (BlockNumber)(pageno & LOW_BLOKNUMBER_MASK);
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_CSNLOG_TYPE, forknum, lowblknum, NULL, blockstate);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_CSNLOG_TYPE, filenode, blockstate);
     xidnum = 0;
     pagestartxid = CSNLogPageNoToStartXactId(pageno);
 
@@ -97,7 +100,8 @@ XLogRecParseState *XactXlogCsnlogParseToBlock(XLogReaderState *record, uint32 *b
 
             forknum = (ForkNumber)(pageno >> LOW_BLOKNUMBER_BITS);
             lowblknum = (BlockNumber)(pageno & LOW_BLOKNUMBER_MASK);
-            XLogRecSetBlockCommonState(record, BLOCK_DATA_CSNLOG_TYPE, forknum, lowblknum, NULL, blockstate);
+            filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+            XLogRecSetBlockCommonState(record, BLOCK_DATA_CSNLOG_TYPE, filenode, blockstate);
         }
 
         offset[xidnum] = (subxids[i] - pagestartxid);

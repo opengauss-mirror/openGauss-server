@@ -27,10 +27,12 @@
 #include <string>
 #include "postgres_fe.h"
 
+typedef struct pg_conn PGconn;
+
 class Format {
 public:
-    static unsigned char *text_to_binary(const char *text, Oid type, Oid typelem, int atttypmod, size_t *binary_size,
-        char *err_msg);
+    static unsigned char *text_to_binary(const PGconn* conn, const char *text, Oid type, Oid typelem, int atttypmod,
+        size_t *binary_size, char *err_msg);
     static char *binary_to_text(const unsigned char *binary, size_t size, Oid type, Oid typelem, int atttypmod,
         size_t *result_size);
     static unsigned char *verify_and_adjust_binary(unsigned char *binary, size_t *binary_size, Oid type, Oid typelem,

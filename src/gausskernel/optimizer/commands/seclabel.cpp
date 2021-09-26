@@ -24,6 +24,7 @@
 #include "catalog/pg_shseclabel.h"
 #include "commands/seclabel.h"
 #include "miscadmin.h"
+#include "storage/tcap.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
@@ -84,6 +85,8 @@ void ExecSecLabelStmt(SecLabelStmt* stmt)
      */
     address =
         get_object_address(stmt->objtype, stmt->objname, stmt->objargs, &relation, ShareUpdateExclusiveLock, false);
+
+    TrForbidAccessRbObject(address.classId, address.objectId);
 
     /* Require ownership of the target object. */
     check_object_ownership(GetUserId(), stmt->objtype, address, stmt->objname, stmt->objargs, relation);

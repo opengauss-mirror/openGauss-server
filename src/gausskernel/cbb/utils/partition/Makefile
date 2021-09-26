@@ -30,6 +30,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = partitionkey.o partitionmap.o
+OBJS = partitionkey.o partitionmap.o partitionlocate.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * itemid.h
- *	  Standard POSTGRES buffer page item identifier definitions.
+ *	  Standard openGauss buffer page item identifier definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -37,6 +37,8 @@ typedef ItemIdData* ItemId;
 #define LP_NORMAL 1   /* used (should always have lp_len>0) */
 #define LP_REDIRECT 2 /* HOT redirect (should have lp_len=0) */
 #define LP_DEAD 3     /* dead, may or may not have storage */
+
+#define LP_INDEX_FROZEN 2 /* index tuple's xmin is frozen (used for multi-version btree index only) */
 
 /*
  * Item offsets and lengths are represented by these types when
@@ -97,6 +99,12 @@ typedef uint16 ItemLength;
 #define ItemIdIsRedirected(itemId) ((itemId)->lp_flags == LP_REDIRECT)
 
 /*
+ * IndexItemIdIsFrozen
+ *		True iff item identifier is in state INDEX_FROZEN.
+ */
+#define IndexItemIdIsFrozen(itemId) ((itemId)->lp_flags == LP_INDEX_FROZEN)
+
+/*
  * ItemIdIsDead
  *		True iff item identifier is in state DEAD.
  */
@@ -130,6 +138,19 @@ typedef uint16 ItemLength;
  */
 #define ItemIdSetRedirect(itemId, link) \
     ((itemId)->lp_flags = LP_REDIRECT, (itemId)->lp_off = (link), (itemId)->lp_len = 0)
+
+/*
+ * IndexItemIdSetFrozen
+ *		Set the item identifier to be INDEX_FROZEN.
+ */
+#define IndexItemIdSetFrozen(itemId) ((itemId)->lp_flags = LP_INDEX_FROZEN)
+
+/*
+ * ItemIdIsDeleted
+ *              True iff item identifier is in state REDIRECT.
+ */
+#define ItemIdIsDeleted(itemId) \
+        ((itemId)->lp_flags == LP_REDIRECT)
 
 /*
  * ItemIdSetDead

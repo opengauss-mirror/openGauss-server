@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * parser.c
- * 		Main entry point/driver for PostgreSQL grammar
+ * 		Main entry point/driver for openGauss grammar
  *
  * Note that the grammar is not allowed to perform any table access
  * (since we need to be able to do basic parsing even while inside an

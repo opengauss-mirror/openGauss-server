@@ -51,9 +51,13 @@
 #include "access/htup.h"
 #include "access/itup.h"
 #include "access/nbtree.h"
+#include "access/ubtree.h"
 #include "access/slru.h"
 #include "access/twophase_rmgr.h"
 #include "access/double_write.h"
+#include "access/ustore/knl_upage.h"
+#include "access/ustore/knl_utuple.h"
+#include "access/ustore/knl_uundorecord.h"
 #include "access/double_write_basic.h"
 #include "catalog/pg_control.h"
 #include "catalog/pg_attribute.h"
@@ -69,10 +73,12 @@
 #include "commands/dbcommands.h"
 #include "replication/slot.h"
 #include "storage/buf/bufpage.h"
+#include "storage/fsm_internals.h"
 #include "storage/lock/lock.h"
 #include "storage/proc.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "storage/sinval.h"
+#include "storage/smgr/segment.h"
 #include "replication/bcm.h"
 #include "utils/datetime.h"
 #include "utils/memutils.h"
@@ -80,7 +86,9 @@
 #include "utils/timestamp.h"
 #include "cstore.h"
 #include "common/build_query/build_query.h"
+#ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/utils/constant_def.h"
+#endif
 
 /* Max number of pg_class oid, currently about 4000 */
 #define MAX_PG_CLASS_ID 10000
@@ -134,6 +142,9 @@ static void ParsePgAmTupleData(binary tupdata, int len, binary nullBitmap, int n
 static void ParsePgstatisticTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
 static void ParseToastTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
 
+/* UStore */
+static void ParseTDSlot(const char *page);
+
 static void ParseToastIndexTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
 
 static ParseHeapTupleData PgHeapRelTupleParser[] = {
@@ -167,6 +178,7 @@ bool write_back = false;
 bool dirty_page = false;
 int start_item = 1;
 int num_item = 0;
+int SegNo = 0;
 
 bool vm_cache[BLCKSZ] = {false};
 
@@ -775,11 +787,6 @@ void ExceptionalCondition(const char* conditionName, const char* errorType, cons
     abort();
 }
 
-// see to relmappper.cpp
-//
-#define MAX_MAPPINGS 62 /* 62 * 8 + 16 = 512 */
-#define RELMAPPER_FILENAME "pg_filenode.map"
-#define RELMAPPER_FILEMAGIC 0x592717     /* version ID value */
 #define RELCACHE_INIT_FILEMAGIC 0x573266 /* version ID value */
 
 typedef struct PgClass_table {
@@ -836,6 +843,8 @@ typedef struct TwoPhaseFileHeader {
 
 typedef enum HackingType {
     HACKING_HEAP,  /* heap page */
+    HACKING_FSM,   /* fsm page */
+    HACKING_UHEAP, /* uheap page */
     HACKING_INDEX, /* index page */
     HACKING_UNDO,  /* undo page */
     HACKING_FILENODE,
@@ -849,11 +858,20 @@ typedef enum HackingType {
     HACKING_STATE,
     HACKING_DW,
     HACKING_DW_SINGLE,
+    HACKING_UNDO_ZONE_META,
+    HACKING_UNDO_SPACE_META,
+    HACKING_UNDO_SLOT_SPACE_META,
+    HACKING_UNDO_SLOT,
+    HACKING_UNDO_RECORD,
+    HACKING_UNDO_FIX,
+    HACKING_SEGMENT,
     NUM_HACKINGTYPE
 } HackingType;
 
 static HackingType hackingtype = HACKING_HEAP;
 static const char* HACKINGTYPE[] = {"heap",
+    "fsm",
+    "uheap",
     "btree_index",
     "undo",
     "filenode_map",
@@ -866,9 +884,17 @@ static const char* HACKINGTYPE[] = {"heap",
     "csnlog",
     "gaussdb_state",
     "double_write",
-    "dw_single_flush_file"};
+    "dw_single_flush_file",
+    "undo_zone",
+    "undo_space",
+    "undo_slot_space",
+    "undo_slot",
+    "undo_record",
+    "undo_fix",
+    "segment"
+};
 
-typedef enum SegmentType { SEG_HEAP, SEG_INDEX_BTREE, SEG_UNDO, SEG_UNKNOWN } SegmentType;
+typedef enum SegmentType { SEG_HEAP, SEG_FSM, SEG_UHEAP, SEG_INDEX_BTREE, SEG_UNDO, SEG_UNKNOWN } SegmentType;
 
 const char* PageTypeNames[] = {"DATA", "FSM", "VM"};
 
@@ -902,6 +928,27 @@ static const char HexCharMaps[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', 
 #define TransactionIdToPgIndex(xid) ((xid) % (TransactionId)CLOG_XACTS_PER_PAGE)
 #define TransactionIdToByte(xid) (TransactionIdToPgIndex(xid) / CLOG_XACTS_PER_BYTE)
 #define TransactionIdToBIndex(xid) ((xid) % (TransactionId)CLOG_XACTS_PER_BYTE)
+
+/*
+ * The internal FSM routines work on a logical addressing scheme. Each
+ * level of the tree can be thought of as a separately addressable file.
+ */
+typedef struct FSMAddress {
+    uint level;     /* level */
+    uint logpageno; /* page number within the level */
+} FSMAddress;
+/*
+ * Depth of the on-disk tree. We need to be able to address 2^32-1 blocks,
+ * and 1626 is the smallest number that satisfies X^3 >= 2^32-1. Likewise,
+ * 216 is the smallest number that satisfies X^4 >= 2^32-1. In practice,
+ * this means that 4096 bytes is the smallest BLCKSZ that we can get away
+ * with a 3-level tree, and 512 is the smallest we support.
+ */
+#define FSM_TREE_DEPTH ((SlotsPerFSMPage >= 1626) ? 3 : 4)
+#define FSM_ROOT_LEVEL (FSM_TREE_DEPTH - 1)
+const int FSM_BOTTOM_LEVEL = 0;
+
+using namespace undo;
 
 static void formatBytes(unsigned char* start, int len)
 {
@@ -1012,6 +1059,8 @@ static void usage(const char* progname)
            "  -N set the number slots need change in one page \n"
            "  -w write the change to file\n"
            "  -d only for test, use 0xFF to fill the last half page[4k]\n"
+           "  -z only for undo space/group meta, dump the specified space/group\n"
+           "  -S heap file segment number\n"
            "\nCommon options:\n"
            "  --help, -h       show this help, then exit\n"
            "  --version, -V    output version information, then exit\n");
@@ -1216,10 +1265,12 @@ static void ParsePgCudescXXTupleData(binary tupdata, int len, binary nullBitmap,
 
 static void ParseTsCudescXXTupleData(binary tupdata, int len, binary nullBitmap, int nattrs)
 {
+#ifdef ENABLE_MULTIPLE_NODES
     if (nattrs != TsCudesc::MAX_ATT_NUM) {
         fprintf(stdout, "invalid attributes number, expected %d, result %d", TsCudesc::MAX_ATT_NUM, nattrs);
         exit(1);
     }
+#endif
 
     int datlen = 0;
     int j = 0;
@@ -2356,6 +2407,55 @@ static void ParsePgAttributeTupleData(binary tupdata, int len, binary nullBitmap
     fprintf(stdout, "\n");
 }
 
+static void parse_uheap_item(const Item item, unsigned len, int blkno, int lineno)
+{
+    binary content;
+    char buffer[128];
+    int savedIndentLevel = indentLevel;
+    UHeapDiskTuple utuple = (UHeapDiskTuple)item;
+
+    indentLevel = 3;
+
+    errno_t rc = snprintf_s(buffer, 128, 127, "\t\t\txid:%d, td:%d locker_td:%d\n",
+                            utuple->xid, utuple->td_id, utuple->locker_td_id);
+    securec_check(rc, "\0", "\0");
+    fprintf(stdout, "%s", buffer);
+    fprintf(stdout, "\t\t\tNumber of columns: %d\n", UHeapTupleHeaderGetNatts(utuple));
+    fprintf(stdout, "\t\t\tFlag: %d\n", utuple->flag);
+
+    fprintf(stdout, "%sdata:", indents[indentLevel]);
+    content = ((unsigned char *)(utuple) + utuple->t_hoff);
+    len -= utuple->t_hoff;
+    formatBytes(content, len);
+
+    indentLevel = savedIndentLevel;
+}
+
+/*
+ * Returns the value of given slot on page.
+ *
+ * Since this is just a read-only access of a single byte, the page doesn't
+ * need to be locked.
+ */
+uint8 fsm_get_avail(Page page, uint slot)
+{
+    FSMPage fsmpage = (FSMPage)PageGetContents(page);
+    Assert((slot) < LeafNodesPerPage);
+    return fsmpage->fp_nodes[NonLeafNodesPerPage + slot];
+}
+
+/*
+ * Returns the value at the root of a page.
+ *
+ * Since this is just a read-only access of a single byte, the page doesn't
+ * need to be locked.
+ */
+uint8 fsm_get_max_avail(Page page)
+{
+    FSMPage fsmpage = (FSMPage)PageGetContents(page);
+    return fsmpage->fp_nodes[0];
+}
+
 static void parse_heap_item(const Item item, unsigned len, int blkno, int lineno)
 {
     HeapTupleHeader tup = (HeapTupleHeader)item;
@@ -2478,12 +2578,25 @@ static void parse_btree_index_item(const Item item, unsigned len, int blkno, int
 
     indentLevel = 3;
 
-    fprintf(stdout,
-        "%s Heap Tid: block %u/%u, offset %u\n",
-        indents[indentLevel],
-        itup->t_tid.ip_blkid.bi_hi,
-        itup->t_tid.ip_blkid.bi_lo,
-        itup->t_tid.ip_posid);
+    if (tuplen != len) {
+        /* there are xmin/xmax */
+        UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
+        fprintf(stdout,
+            "%s xmin:%d xmax:%d Heap Tid: block %u/%u, offset %u\n",
+            indents[indentLevel],
+            uxid->xmin,
+            uxid->xmax,
+            itup->t_tid.ip_blkid.bi_hi,
+            itup->t_tid.ip_blkid.bi_lo,
+            itup->t_tid.ip_posid);
+    } else {
+        fprintf(stdout,
+            "%s Heap Tid: block %u/%u, offset %u\n",
+            indents[indentLevel],
+            itup->t_tid.ip_blkid.bi_hi,
+            itup->t_tid.ip_blkid.bi_lo,
+            itup->t_tid.ip_posid);
+    }
 
     fprintf(stdout, "%s Length: %u", indents[indentLevel], tuplen);
     if (itup->t_info & INDEX_VAR_MASK)
@@ -2511,6 +2624,10 @@ static void parse_one_item(const Item item, unsigned len, int blkno, int lineno,
             parse_heap_item(item, len, blkno, lineno);
             break;
 
+        case SEG_UHEAP:
+            parse_uheap_item(item, len, blkno, lineno);
+            break;
+
         case SEG_INDEX_BTREE:
             parse_btree_index_item(item, len, blkno, lineno);
             break;
@@ -2520,10 +2637,56 @@ static void parse_one_item(const Item item, unsigned len, int blkno, int lineno,
     }
 }
 
-static void parse_page_header(const PageHeader page, int blkno, int blknum)
+static void ParseHeapPageHeader(const PageHeader page, int blkno, int blknum)
 {
     bool checksum_matched = false;
-    if (!PageIsNew(page) && PageIsChecksumByFNV1A(page)) {
+    if (CheckPageZeroCases(page)) {
+        uint16 checksum = pg_checksum_page((char*)page, (BlockNumber)blkno + (SegNo * ((BlockNumber)RELSEG_SIZE)));
+        checksum_matched = (checksum == page->pd_checksum);
+    }
+    fprintf(stdout, "page information of block %d/%d\n", blkno, blknum);
+    fprintf(stdout, "\tpd_lsn: %X/%X\n", (uint32)(PageGetLSN(page) >> 32), (uint32)PageGetLSN(page));
+    fprintf(stdout, "\tpd_checksum: 0x%X, verify %s\n", page->pd_checksum, checksum_matched ? "success" : "fail");
+
+    fprintf(stdout, "\tpd_flags: ");
+    if (PageHasFreeLinePointers(page))
+        fprintf(stdout, "PD_HAS_FREE_LINES ");
+    if (PageIsFull(page))
+        fprintf(stdout, "PD_PAGE_FULL ");
+    if (PageIsAllVisible(page))
+        fprintf(stdout, "PD_ALL_VISIBLE ");
+    if (PageIsCompressed(page))
+        fprintf(stdout, "PD_COMPRESSED_PAGE ");
+    if (PageIsLogical(page))
+        fprintf(stdout, "PD_LOGICAL_PAGE ");
+    if (PageIsEncrypt(page))
+        fprintf(stdout, "PD_ENCRYPT_PAGE ");
+    fprintf(stdout, "\n");
+    fprintf(stdout, "\tpd_lower: %u, %s\n", page->pd_lower, PageIsEmpty(page) ? "empty" : "non-empty");
+    fprintf(stdout, "\tpd_upper: %u, %s\n", page->pd_upper, PageIsNew(page) ? "new" : "old");
+    fprintf(stdout, "\tpd_special: %u, size %u\n", page->pd_special, PageGetSpecialSize(page));
+    fprintf(stdout,
+        "\tPage size & version: %u, %u\n",
+        (uint16)PageGetPageSize(page),
+        (uint16)PageGetPageLayoutVersion(page));
+    if (true) {
+        fprintf(stdout,
+            "\tpd_xid_base: %lu, pd_multi_base: %lu\n",
+            ((HeapPageHeader)(page))->pd_xid_base,
+            ((HeapPageHeader)(page))->pd_multi_base);
+        fprintf(stdout,
+            "\tpd_prune_xid: %lu\n",
+            ((HeapPageHeader)(page))->pd_prune_xid + ((HeapPageHeader)(page))->pd_xid_base);
+    } else
+        fprintf(stdout, "\tpd_prune_xid: %u\n", page->pd_prune_xid);
+    return;
+}
+
+
+static void ParseUHeapPageHeader(const PageHeader page, int blkno, int blknum)
+{
+    bool checksum_matched = false;
+    if (CheckPageZeroCases(page)) {
         uint16 checksum = pg_checksum_page((char*)page, (BlockNumber)blkno);
         checksum_matched = (checksum == page->pd_checksum);
     }
@@ -2544,8 +2707,6 @@ static void parse_page_header(const PageHeader page, int blkno, int blknum)
         fprintf(stdout, "PD_LOGICAL_PAGE ");
     if (PageIsEncrypt(page))
         fprintf(stdout, "PD_ENCRYPT_PAGE ");
-    if (PageIsChecksumByFNV1A(page))
-        fprintf(stdout, "PD_CHECKSUM_FNV1A ");
     fprintf(stdout, "\n");
     fprintf(stdout, "\tpd_lower: %u, %s\n", page->pd_lower, PageIsEmpty(page) ? "empty" : "non-empty");
     fprintf(stdout, "\tpd_upper: %u, %s\n", page->pd_upper, PageIsNew(page) ? "new" : "old");
@@ -2554,22 +2715,36 @@ static void parse_page_header(const PageHeader page, int blkno, int blknum)
         "\tPage size & version: %u, %u\n",
         (uint16)PageGetPageSize(page),
         (uint16)PageGetPageLayoutVersion(page));
-    if (PageIs8BXidHeapVersion(page)) {
-        fprintf(stdout,
+
+    fprintf(stdout, "\tpotential_freespace: %u\n", ((UHeapPageHeaderData *)(page))->potential_freespace);
+    fprintf(stdout, "\ttd_count: %u\n", ((UHeapPageHeaderData *)(page))->td_count);
+    fprintf(stdout, "\tpd_prune_xid: %lu\n", ((UHeapPageHeaderData *)(page))->pd_prune_xid);
+    fprintf(stdout,
             "\tpd_xid_base: %lu, pd_multi_base: %lu\n",
-            ((HeapPageHeader)(page))->pd_xid_base,
-            ((HeapPageHeader)(page))->pd_multi_base);
-        fprintf(stdout,
-            "\tpd_prune_xid: %lu\n",
-            ((HeapPageHeader)(page))->pd_prune_xid + ((HeapPageHeader)(page))->pd_xid_base);
-    } else
-        fprintf(stdout, "\tpd_prune_xid: %u\n", page->pd_prune_xid);
+            ((UHeapPageHeaderData *)(page))->pd_xid_base,
+            ((UHeapPageHeaderData *)(page))->pd_multi_base);
+
+
     return;
+}
+
+static void ParsePageHeader(const PageHeader page, int blkno, int blknum, SegmentType type = SEG_HEAP)
+{
+
+    switch (type) {
+        case SEG_UHEAP:
+            ParseUHeapPageHeader(page, blkno, blknum);
+            break;
+        default:
+            ParseHeapPageHeader(page, blkno, blknum);
+            break;
+    }
+
 }
 
 static void parse_special_data(const char* buffer, SegmentType type)
 {
-    const PageHeader page = (const PageHeader)buffer;
+    PageHeader page = (PageHeader)buffer;
 
     if (SEG_HEAP == type) {
         if (!PageIsCompressed(page)) {
@@ -2586,8 +2761,12 @@ static void parse_special_data(const char* buffer, SegmentType type)
         fprintf(stdout, "\n");
     } else if (SEG_INDEX_BTREE == type) {
         BTPageOpaqueInternal opaque;
+        UBTPageOpaqueInternal uopaque = NULL;
 
         opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
+        if (PageGetSpecialSize(page) > MAXALIGN(sizeof(BTPageOpaqueData))) {
+            uopaque = (UBTPageOpaqueInternal)opaque;
+        }
         fprintf(stdout, "\nbtree index special information:\n");
         fprintf(stdout, "\tbtree left sibling: %u\n", opaque->btpo_prev);
         fprintf(stdout, "\tbtree right sibling: %u\n", opaque->btpo_next);
@@ -2595,13 +2774,19 @@ static void parse_special_data(const char* buffer, SegmentType type)
             fprintf(stdout, "\tbtree tree level: %u\n", opaque->btpo.level);
         else {
             if (PageIs4BXidVersion(page))
-                fprintf(stdout, "\tnext txid (deleted): %u\n", opaque->btpo.xact_old);
-            else
-                fprintf(stdout, "\tnext txid (deleted): %lu\n", ((BTPageOpaque)opaque)->xact);
+                fprintf(stdout, "\tnext txid_old (deleted): %u\n", opaque->btpo.xact_old);
+            else {
+                if (uopaque)
+                    fprintf(stdout, "\tnext txid (deleted): %lu\n", ((UBTPageOpaque)uopaque)->xact);
+                else
+                    fprintf(stdout, "\tnext txid (deleted): %lu\n", ((BTPageOpaque)opaque)->xact);
+            }
         }
         fprintf(stdout, "\tbtree flag: ");
         if (P_ISLEAF(opaque))
             fprintf(stdout, "BTP_LEAF ");
+        else
+            fprintf(stdout, "BTP_INTERNAL ");
         if (P_ISROOT(opaque))
             fprintf(stdout, "BTP_ROOT ");
         if (P_ISDELETED(opaque))
@@ -2613,6 +2798,11 @@ static void parse_special_data(const char* buffer, SegmentType type)
         fprintf(stdout, "\n");
 
         fprintf(stdout, "\tbtree cycle ID: %u\n", opaque->btpo_cycleid);
+        if (uopaque) {
+            fprintf(stdout, "\tubtree active tuples: %d\n", uopaque->activeTupleCount);
+        }
+    } else if (SEG_UHEAP == type) {
+        ParseTDSlot(buffer);
     }
 }
 
@@ -2673,22 +2863,75 @@ static bool parse_bcm_page(const char* buffer, int blkno, int blknum)
     return true;
 }
 
-static bool parse_data_page(const char* buffer, int blkno, int blknum, SegmentType type)
+static void ParseTDSlot(const char *page)
+{
+    TD *thistrans;
+    unsigned short tdCount;
+    UHeapPageTDData *tdPtr;
+    UHeapPageHeaderData *uheapPage = (UHeapPageHeaderData *)page;
+
+    tdPtr = (UHeapPageTDData *)PageGetTDPointer(page);
+    tdCount = uheapPage->td_count;
+    fprintf(stdout, "\n\n\tUHeap Page TD information, nTDSlots = %hu\n", tdCount);
+    for (int i = 0; i < tdCount; i++) {
+        thistrans = &tdPtr->td_info[i];
+        fprintf(stdout, "\n\t\t TD Slot #%d, xid:%ld, urp:%ld\n",
+                i + 1, thistrans->xactid, thistrans->undo_record_ptr);
+    }
+}
+
+static void parse_heap_or_index_page(const char* buffer, int blkno, SegmentType type)
 {
     const PageHeader page = (const PageHeader)buffer;
     int i;
     int nline, nstorage, nunused, nnormal, ndead;
     ItemId lp;
     Item item;
+    RowPtr *rowptr;
 
-    if (only_vm || only_bcm) {
-        return true;
-    }
-
-    nline = PageGetMaxOffsetNumber((Page)page);
     nstorage = 0;
     nunused = nnormal = ndead = 0;
-    if (type == SEG_HEAP || type == SEG_INDEX_BTREE) {
+    if (type == SEG_UHEAP) {
+        UHeapPageHeaderData *upghdr = (UHeapPageHeaderData *)buffer;
+        if (upghdr->pd_lower <= SizeOfUHeapPageHeaderData)
+            nline = 0;
+        else
+            nline =
+                (upghdr->pd_lower - (SizeOfUHeapPageHeaderData + SizeOfUHeapTDData(upghdr))) / sizeof(RowPtr);
+
+        fprintf(stdout, "\n\tUHeap tuple information on this page\n");
+        for (i = FirstOffsetNumber; i <= nline; i++) {
+            rowptr = UPageGetRowPtr(buffer, i);
+            if (RowPtrIsUsed(rowptr)) {
+                if (RowPtrHasStorage(rowptr))
+                    nstorage++;
+
+                if (RowPtrIsNormal(rowptr)) {
+                    fprintf(stdout, "\n\t\tTuple #%d is normal: length %u, offset %u\n", i, RowPtrGetLen(rowptr),
+                        RowPtrGetOffset(rowptr));
+                    nnormal++;
+
+                    item = UPageGetRowData(page, rowptr);
+                    HeapTupleCopyBaseFromPage(&dummyTuple, page);
+                    parse_one_item(item, RowPtrGetLen(rowptr), blkno, i, type);
+                } else if (RowPtrIsDead(rowptr)) {
+                    fprintf(stdout, "\n\t\tTuple #%d is dead: length %u, offset %u", i, RowPtrGetLen(rowptr),
+                        RowPtrGetOffset(rowptr));
+                    ndead++;
+                } else {
+                    fprintf(stdout, "\n\t\tTuple #%d is redirected: length %u, offset %u", i, RowPtrGetLen(rowptr),
+                        RowPtrGetOffset(rowptr));
+                }
+            } else {
+                nunused++;
+                fprintf(stdout, "\n\t\tTuple #%d is unused\n", i);
+            }
+        }
+        fprintf(stdout, "\tSummary (%d total): %d unused, %d normal, %d dead\n", nline, nunused, nnormal, ndead);
+
+        parse_special_data(buffer, type);
+    } else if (type == SEG_HEAP || type == SEG_INDEX_BTREE) {
+        nline = PageGetMaxOffsetNumber((Page)page);
         fprintf(stdout, "\n\tHeap tuple information on this page\n");
         for (i = FirstOffsetNumber; i <= nline; i++) {
             lp = PageGetItemId(page, i);
@@ -2696,12 +2939,17 @@ static bool parse_data_page(const char* buffer, int blkno, int blknum, SegmentTy
                 if (ItemIdHasStorage(lp))
                     nstorage++;
 
-                if (ItemIdIsNormal(lp)) {
-                    fprintf(stdout,
-                        "\n\t\tTuple #%d is normal: length %u, offset %u\n",
-                        i,
-                        ItemIdGetLength(lp),
-                        ItemIdGetOffset(lp));
+                if (ItemIdIsNormal(lp) || (type == SEG_INDEX_BTREE && blkno != 0 && IndexItemIdIsFrozen(lp))) {
+                    if (ItemIdIsNormal(lp)) {
+                        fprintf(stdout,
+                                "\n\t\tTuple #%d is normal: length %u, offset %u\n",
+                                i,
+                                ItemIdGetLength(lp),
+                                ItemIdGetOffset(lp));
+                    } else {
+                        fprintf(stdout, "\n\t\tTuple #%d is frozen: length %u, offset %u\n", i, ItemIdGetLength(lp),
+                            ItemIdGetOffset(lp));
+                    }
                     nnormal++;
 
                     item = PageGetItem(page, lp);
@@ -2728,12 +2976,87 @@ static bool parse_data_page(const char* buffer, int blkno, int blknum, SegmentTy
         }
         fprintf(stdout, "\tSummary (%d total): %d unused, %d normal, %d dead\n", nline, nunused, nnormal, ndead);
 
-        // compress meta data
-        //
+        /* compress meta data or index special data */
         parse_special_data(buffer, type);
     }
 
     fprintf(stdout, "\n");
+    return;
+}
+
+const int MAX_OUTPUT_ONELINE = 40;
+static void parse_fsm_page(const char *buffer, int blkno)
+{
+    FSMAddress addr;
+    FSMPage fsmpage;
+    uint cur_index = 0;
+    uint i = 0;
+    uint j = 0;
+    uint cu = 0;
+    uint slot;
+    uint8 cat;
+    uint8 max_cat;
+    PageHeader page = (PageHeader)buffer;
+
+    for (i = 0; i < FSM_TREE_DEPTH; i++) {
+        cu = cu * SlotsPerFSMPage + 1;
+    }
+
+    for (i = FSM_ROOT_LEVEL; i > 0; i--) {
+        if (blkno == 0) {
+            break;
+        }
+        cur_index = blkno / cu;
+        if (blkno % cu == 0) {
+            blkno = 0;
+            break;
+        } else {
+            blkno -= cur_index + 1;
+        }
+        cu = (cu - 1) / SlotsPerFSMPage;
+    }
+    if (i > 0) {
+        addr.logpageno = cur_index;
+    } else {
+        addr.logpageno = blkno;
+    }
+    addr.level = i;
+    /* Print fsm info */
+    max_cat = fsm_get_max_avail((Page)buffer);
+    fsmpage = (FSMPage)PageGetContents(page);
+
+    fprintf(stdout, "fsm page [%u,%u]\n", addr.level, addr.logpageno);
+    fprintf(stdout, "max avail %d fp_next_slot %d\n", max_cat, fsmpage->fp_next_slot);
+
+    if (addr.level == FSM_BOTTOM_LEVEL) {
+        fprintf(stdout, "heap page range %lu-%lu :\n", addr.logpageno * SlotsPerFSMPage,
+            addr.logpageno * SlotsPerFSMPage + SlotsPerFSMPage - 1);
+    } else {
+        fprintf(stdout, "fsm page level %u, range %lu-%lu :\n", addr.level - 1, addr.logpageno * SlotsPerFSMPage,
+            addr.logpageno * SlotsPerFSMPage + SlotsPerFSMPage - 1);
+    }
+
+    for (slot = 0; slot < SlotsPerFSMPage; slot++) {
+        j++;
+        cat = fsm_get_avail((Page)buffer, slot);
+        fprintf(stdout, "%3d ", cat);
+        if (j % MAX_OUTPUT_ONELINE == 0) {
+            fprintf(stdout, "\n");
+        }
+    }
+    fprintf(stdout, "\n");
+}
+
+static bool parse_data_page(const char *buffer, int blkno, SegmentType type)
+{
+    if (only_vm || only_bcm) {
+        return true;
+    }
+    if (type == SEG_HEAP || type == SEG_UHEAP || type == SEG_INDEX_BTREE) {
+        parse_heap_or_index_page(buffer, blkno, type);
+    } else if (type == SEG_FSM) {
+        parse_fsm_page(buffer, blkno);
+    }
     return true;
 }
 
@@ -2744,6 +3067,7 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
 
     if (PageIsNew(page)) {
         fprintf(stdout, "Page information of block %d/%d : new page\n\n", blkno, blknum);
+        ParseHeapPageHeader(page, blkno, blknum);
         return true;
     }
 
@@ -2761,10 +3085,10 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
     if (only_bcm) {
         parse_bcm_page(buffer, blkno, blknum);
     } else if (!only_vm) {
-        parse_page_header(page, blkno, blknum);
+        ParsePageHeader(page, blkno, blknum, type);
     }
 
-    parse_data_page(buffer, blkno, blknum, type);
+    parse_data_page(buffer, blkno, type);
 
     return true;
 }
@@ -3179,6 +3503,35 @@ read_failed:
     return result;
 }
 
+static int ReadOldVersionRelmapFile(char *buffer, FILE *fd)
+{
+    errno_t rc;
+    char oldMapCache[RELMAP_SIZE_OLD];
+    int readByte = fread(oldMapCache, 1, RELMAP_SIZE_OLD, fd);
+    rc = memcpy_s(buffer, sizeof(RelMapFile), oldMapCache, MAPPING_LEN_OLDMAP_HEAD);
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(
+        buffer + offsetof(RelMapFile, crc), MAPPING_LEN_TAIL, oldMapCache + MAPPING_LEN_OLDMAP_HEAD, MAPPING_LEN_TAIL);
+    securec_check(rc, "\0", "\0");
+    return readByte;
+}
+
+static void DoRelMapCrcCheck(const RelMapFile* mapfile, int32 magicNum)
+{
+    pg_crc32 crc;
+    /* verify the CRC */
+    INIT_CRC32(crc);
+    if (IS_NEW_RELMAP(magicNum)) {
+        COMP_CRC32(crc, (char*)mapfile, offsetof(RelMapFile, crc));
+    } else {
+        COMP_CRC32(crc, (char*)mapfile, MAPPING_LEN_OLDMAP_HEAD);
+    }
+    FIN_CRC32(crc);
+    if (!EQ_CRC32(crc, (pg_crc32)(mapfile->crc))) {
+        fprintf(stdout, "WARNING: relmap crc check failed!");
+    }
+}
+
 static int parse_filenodemap_file(char* filename)
 {
     char buffer[sizeof(RelMapFile)];
@@ -3189,6 +3542,9 @@ static int parse_filenodemap_file(char* filename)
     char* pg_class_map[MAX_PG_CLASS_ID];
     char* pg_class = NULL;
     int i = 0;
+    int32 magicNum;
+    int32 relmapSize;
+    int32 relmapMaxMappings;
 
     for (i = 0; i < MAX_PG_CLASS_ID; i++) {
         pg_class_map[i] = NULL;
@@ -3203,17 +3559,34 @@ static int parse_filenodemap_file(char* filename)
     fseek(fd, 0, SEEK_END);
     size = ftell(fd);
     rewind(fd);
-    result = fread(buffer, 1, sizeof(RelMapFile), fd);
-    if (sizeof(RelMapFile) != result) {
+
+    result = fread(&magicNum, 1, sizeof(int32), fd);
+    rewind(fd);
+    if (result != sizeof(int32)) {
+        fprintf(stderr, "Reading magic error");
+        return false;
+    }
+
+    if (IS_NEW_RELMAP(magicNum)) {
+        result = fread(buffer, 1, sizeof(RelMapFile), fd);
+        relmapSize = RELMAP_SIZE_NEW;
+        relmapMaxMappings = MAX_MAPPINGS_4K;
+    } else {
+        result = ReadOldVersionRelmapFile(buffer, fd);
+        relmapSize = RELMAP_SIZE_OLD;
+        relmapMaxMappings = MAX_MAPPINGS;
+    }
+    if ((size_t)relmapSize != result) {
         fprintf(stderr, "Reading error");
         return false;
     }
 
     mapfile = (RelMapFile*)buffer;
+    DoRelMapCrcCheck(mapfile, magicNum);
     fprintf(stdout, "Magic number: 0x%x\n", mapfile->magic);
     fprintf(stdout, "Number of mappings: %u\n", mapfile->num_mappings);
     fprintf(stdout, "Mapping pairs:\n");
-    for (i = 0; i < MAX_MAPPINGS; i++) {
+    for (i = 0; i < relmapMaxMappings; i++) {
         if (0 == mapfile->mappings[i].mapoid && 0 == mapfile->mappings[i].mapfilenode)
             break;
 
@@ -3765,24 +4138,19 @@ static uint16 parse_batch_data_pages(dw_batch_t* curr_head, uint16 page_num)
     uint16 i;
     char* page_start;
     BufferTag* buf_tag;
+    BufferTagFirstVer* bufTagOrig;
+    bool isHashbucket = ((curr_head->page_num & IS_HASH_BKT_SEGPAGE_MASK) != 0);
+
     fprintf(stdout,
         "batch_head[page_id %u, dwn %u, page_num %u]\n",
         curr_head->head.page_id,
         curr_head->head.dwn,
-        curr_head->page_num);
+        GET_REL_PGAENUM(curr_head->page_num));
     page_start = (char*)curr_head + BLCKSZ;
     page_num--;
-    for (i = 0; i < curr_head->page_num && page_num > 0; i++, page_num--) {
-        buf_tag = &curr_head->buf_tag[i];
-        if (buf_tag->rnode.bucketNode == -1) {
-            fprintf(stdout,
-                "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
-                buf_tag->rnode.spcNode,
-                buf_tag->rnode.dbNode,
-                buf_tag->rnode.relNode,
-                buf_tag->blockNum,
-                buf_tag->forkNum);
-        } else {
+    for (i = 0; i < GET_REL_PGAENUM(curr_head->page_num) && page_num > 0; i++, page_num--) {
+        if (isHashbucket) {
+            buf_tag = &curr_head->buf_tag[i];
             fprintf(stdout,
                 "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
                 buf_tag->rnode.spcNode,
@@ -3791,8 +4159,18 @@ static uint16 parse_batch_data_pages(dw_batch_t* curr_head, uint16 page_num)
                 buf_tag->rnode.bucketNode,
                 buf_tag->blockNum,
                 buf_tag->forkNum);
+            (void)parse_a_page(page_start, buf_tag->blockNum, i, SEG_UNKNOWN);
+        } else {
+            bufTagOrig = &((dw_batch_first_ver *)curr_head)->buf_tag[i];
+            fprintf(stdout,
+                "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
+                bufTagOrig->rnode.spcNode,
+                bufTagOrig->rnode.dbNode,
+                bufTagOrig->rnode.relNode,
+                bufTagOrig->blockNum,
+                bufTagOrig->forkNum);
+            (void)parse_a_page(page_start, bufTagOrig->blockNum, i, SEG_UNKNOWN);
         }
-        parse_a_page(page_start, buf_tag->blockNum, i, SEG_UNKNOWN);
         page_start += BLCKSZ;
     }
     return page_num;
@@ -3803,25 +4181,25 @@ static uint16 calc_reading_pages(dw_batch_t** curr_head, char* start_buf, uint16
     uint16 buf_page_id;
     errno_t rc;
     dw_batch_t* batch_head = *curr_head;
-    int reading_pages = (batch_head->page_num + DW_EXTRA_FOR_ONE_BATCH) - read_pages;
+    int readingPages = (GET_REL_PGAENUM(batch_head->page_num) + DW_EXTRA_FOR_ONE_BATCH) - read_pages;
     /* next batch is already im memory, no need read */
-    if (reading_pages <= 0) {
-        reading_pages = 0;
+    if (readingPages <= 0) {
+        readingPages = 0;
     } else {
         /* buffer capacity less than uint16, cast to shorter is safe */
         buf_page_id = (uint16)dw_page_distance(batch_head, start_buf);
         /* buf size not enough, move the read pages to the start_buf */
         /* all 3 variable less than (DW_BUF_MAX * 2), sum not overflow uint16 */
-        if (buf_page_id + read_pages + reading_pages >= DW_BUF_MAX) {
+        if (buf_page_id + read_pages + readingPages >= DW_BUF_MAX) {
             rc = memmove_s(start_buf, (read_pages * BLCKSZ), batch_head, (read_pages * BLCKSZ));
             securec_check(rc, "\0", "\0");
             *curr_head = (dw_batch_t*)start_buf;
         }
     }
 
-    Assert((char*)(*curr_head) + (read_pages + reading_pages) * BLCKSZ <= start_buf + DW_BUF_MAX * BLCKSZ);
-    Assert(file_page_id + read_pages + reading_pages <= DW_FILE_PAGE);
-    return (uint16)reading_pages;
+    Assert((char*)(*curr_head) + (read_pages + readingPages) * BLCKSZ <= start_buf + DW_BUF_MAX * BLCKSZ);
+    Assert(file_page_id + read_pages + readingPages <= DW_FILE_PAGE);
+    return (uint16)readingPages;
 }
 
 static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint16 page_num)
@@ -3838,7 +4216,7 @@ static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint1
     start_buf = buf;
     curr_head = (dw_batch_t*)start_buf;
     read_pages = 0;
-    reading_pages = Min(DW_BATCH_MAX, (DW_FILE_PAGE - file_page_id));
+    reading_pages = Min(DW_BATCH_MAX_FOR_NOHBK, (DW_FILE_PAGE - file_page_id));
     flush_pages = 0;
 
     for (;;) {
@@ -3862,10 +4240,10 @@ static void parse_dw_batch(char* buf, FILE* fd, dw_file_head_t* file_head, uint1
         }
 
         /* discard the first batch. including head page and data pages */
-        flush_pages += (1 + curr_head->page_num);
-        read_pages -= (1 + curr_head->page_num);
+        flush_pages += (1 + GET_REL_PGAENUM(curr_head->page_num));
+        read_pages -= (1 + GET_REL_PGAENUM(curr_head->page_num));
         curr_head = dw_batch_tail_page(curr_head);
-        if (curr_head->page_num == 0) {
+        if (GET_REL_PGAENUM(curr_head->page_num) == 0) {
             fprintf(stdout, "double write batch parsed: pages %u\n", flush_pages);
             break;
         }
@@ -3886,7 +4264,7 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
         fprintf(stderr, "%s: %s\n", file_name, strerror(errno));
         return false;
     }
-    buf = (char*)malloc(BLCKSZ * DW_BUF_MAX);
+    buf = (char*)malloc(BLCKSZ * DW_BUF_MAX_FOR_NOHBK);
     if (buf == NULL) {
         fclose(fd);
         fprintf(stderr, "out of memory\n");
@@ -3925,11 +4303,134 @@ static bool parse_dw_file(const char* file_name, uint32 start_page, uint32 page_
     return true;
 }
 
-static bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
+/* forkNames in catalog.cpp can not be linked. Thus we define a new ForkNames here */
+static const char* ForkNames[] = {
+    "main", /* MAIN_FORKNUM */
+    "fsm",  /* FSM_FORKNUM */
+    "vm",   /* VISIBILITYMAP_FORKNUM */
+    "bcm",  /* BCM_FORKNUM */
+    "init"  /* INIT_FORKNUM */
+};
+static bool parse_normal_table(SegmentHead *seg_head, BlockNumber head)
 {
-    if (item->data_page_idx == 0 || item->dwn != dwn) {
+    fprintf(stdout,
+        "Normal segment table (Head %u), nblocks: %u, nextents: %u, total "
+        "blocks: %u\n",
+        head, seg_head->nblocks, seg_head->nextents, seg_head->total_blocks);
+
+    for (int i = 0; i < int(SEGMENT_MAX_FORKNUM); i++) {
+        BlockNumber fhead = seg_head->fork_head[i];
+        if (BlockNumberIsValid(fhead)) {
+            fprintf(stdout, "\tFork (%s) segment head: %u\n", ForkNames[i], fhead);
+        } else {
+            fprintf(stdout, "\tFork (%s) segment head: NIL\n", ForkNames[i]);
+        }
+    }
+
+    fprintf(stdout, "Extents (level 0):\n");
+    for (int i = 0; i < (int)seg_head->nextents && i < BMT_HEADER_LEVEL0_SLOTS; i++) {
+        BlockNumber ext_st = seg_head->level0_slots[i];
+        fprintf(stdout, "\t%u-%u\n", ext_st, ext_st + ExtentSizeByCount(i));
+    }
+
+    for (uint32 i = 0; i < seg_head->nextents; i++) {
+        if (RequireNewLevel0Page(i)) {
+            int id = ExtentIdToLevel1Slot(i);
+            fprintf(stdout, "Extents (level 1 slots): %u\n", seg_head->level1_slots[id]);
+        }
+    }
+
+    return true;
+}
+
+static bool parse_bucket_table(char *head_buf, BlockNumber head, int fd, char *filename)
+{
+    fprintf(stdout, "Bucket segment table (Head %u), LSN (%X/%X)\n", head, (uint32)(PageGetLSN(head_buf) >> 32),
+            (uint32)PageGetLSN(head_buf));
+    BktMainHead *bkt_head = (BktMainHead *)PageGetContents(head_buf);
+    char *buf = (char *)malloc(BLCKSZ);
+    if (buf == NULL) {
+        fprintf(stderr, "out of memory\n");
         return false;
     }
+
+    uint32 total_segments = 0;
+    for (uint32 i = 0; i < BktMapBlockNumber; i++) {
+        BlockNumber map_blocknum = bkt_head->bkt_map[i];
+        off_t offset = 1LLU * map_blocknum * BLCKSZ;
+        offset = offset % (RELSEG_SIZE * BLCKSZ);
+        ssize_t nread = pread(fd, buf, BLCKSZ, offset);
+        if (nread != BLCKSZ) {
+            fprintf(stderr, "Failed to read %s: %s\n", filename, strerror(errno));
+            return false;
+        }
+
+        BktHeadMapBlock *mapblock = (BktHeadMapBlock *)PageGetContents(buf);
+        for (uint32 j = 0; j < BktMapEntryNumberPerBlock; j++) {
+            if (mapblock->head_block[j] != InvalidBlockNumber) {
+                uint32 index = total_segments + j;
+                int fork = index / MAX_BUCKETMAPLEN;
+                int bktNode = index % MAX_BUCKETMAPLEN;
+                fprintf(stdout, "\t\t\tBucket Node (%d, %s) Segment head: %u\n", bktNode, ForkNames[fork],
+                        mapblock->head_block[j]);
+            }
+        }
+
+        total_segments += BktMapEntryNumberPerBlock;
+    }
+    return true;
+}
+
+static bool parse_segment_head(char *filename, uint32 start_page)
+{
+    char *buf = (char*) malloc(BLCKSZ);
+    if (buf == NULL) {
+        fprintf(stderr, "out of memory\n");
+        return false;
+    }
+
+    bool result;
+
+    int fd = open(filename, O_RDONLY);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open %s: %s\n", filename, strerror(errno));
+        free(buf);
+        return false;
+    }
+
+    off_t offset = 1LLU * start_page * BLCKSZ;
+    ssize_t nread = pread(fd, buf, BLCKSZ, offset);
+    if (nread != BLCKSZ) {
+        fprintf(stderr, "Failed to read %s: %s\n", filename, strerror(errno));
+        free(buf);
+        close(fd);
+        return false;
+    }
+
+    SegmentHead *seg_head = (SegmentHead *)PageGetContents(buf);
+    switch (seg_head->magic) {
+        case SEGMENT_HEAD_MAGIC:
+            result = parse_normal_table(seg_head, start_page);
+            break;
+        case BUCKET_SEGMENT_MAGIC:
+            result = parse_bucket_table(buf, start_page, fd, filename);
+            break;
+        default:
+            result = false;
+            break;
+    }
+
+    free(buf);
+    close(fd);
+    return result;
+}
+
+static bool dw_verify_item(const dw_single_flush_item* item, uint16 dwn)
+{
+    if (item->dwn != dwn) {
+        return false;
+    }
+
     pg_crc32c crc;
     /* Contents are protected with a CRC */
     INIT_CRC32C(crc);
@@ -3995,39 +4496,37 @@ static bool parse_dw_single_flush_file(const char* file_name)
         for (int j = i * batch_size; j < (i + 1) * batch_size; j++) {
             offset = BLCKSZ * i + j % SINGLE_BLOCK_TAG_NUM * sizeof(dw_single_flush_item);
             temp = (dw_single_flush_item*)((char*)buf + offset);
-            if (temp->data_page_idx != 0) {
+            fprintf(stdout,
+                "flush_item[data_page_idx %u, dwn %u, crc %u]\n",
+                temp->data_page_idx,
+                temp->dwn,
+                temp->crc);
+            if (!dw_verify_item(temp, head_dwn)) {
+                fprintf(stdout, "flush item check failed, not need recovery \n");
+            } else {
+                item[num].data_page_idx = temp->data_page_idx;
+                item[num].dwn = temp->dwn;
+                item[num].buf_tag = temp->buf_tag;
+                item[num].crc = temp->crc;
+                num++;
+            }
+            if (temp->buf_tag.rnode.bucketNode == -1) {
                 fprintf(stdout,
-                    "flush_item[data_page_idx %u, dwn %u, crc %u]\n",
-                    temp->data_page_idx,
-                    temp->dwn,
-                    temp->crc);
-                if (!dw_verify_item(temp, head_dwn)) {
-                    fprintf(stdout, "flush item check failed, not need recovery \n");
-                } else {
-                    item[num].data_page_idx = temp->data_page_idx;
-                    item[num].dwn = temp->dwn;
-                    item[num].buf_tag = temp->buf_tag;
-                    item[num].crc = temp->crc;
-                    num++;
-                }
-                if (temp->buf_tag.rnode.bucketNode == -1) {
-                    fprintf(stdout,
-                        "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
-                        temp->buf_tag.rnode.spcNode,
-                        temp->buf_tag.rnode.dbNode,
-                        temp->buf_tag.rnode.relNode,
-                        temp->buf_tag.blockNum,
-                        temp->buf_tag.forkNum);
-                } else {
-                    fprintf(stdout,
-                        "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
-                        temp->buf_tag.rnode.spcNode,
-                        temp->buf_tag.rnode.dbNode,
-                        temp->buf_tag.rnode.relNode,
-                        temp->buf_tag.rnode.bucketNode,
-                        temp->buf_tag.blockNum,
-                        temp->buf_tag.forkNum);
-                }
+                    "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
+                    temp->buf_tag.rnode.spcNode,
+                    temp->buf_tag.rnode.dbNode,
+                    temp->buf_tag.rnode.relNode,
+                    temp->buf_tag.blockNum,
+                    temp->buf_tag.forkNum);
+            } else {
+                fprintf(stdout,
+                    "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
+                    temp->buf_tag.rnode.spcNode,
+                    temp->buf_tag.rnode.dbNode,
+                    temp->buf_tag.rnode.relNode,
+                    temp->buf_tag.rnode.bucketNode,
+                    temp->buf_tag.blockNum,
+                    temp->buf_tag.forkNum);
             }
         }
     }
@@ -4062,13 +4561,379 @@ static bool parse_dw_single_flush_file(const char* file_name)
                     item[i].buf_tag.blockNum,
                     item[i].buf_tag.forkNum);
             }
-        parse_a_page(dw_block, item[i].buf_tag.blockNum, item[i].buf_tag.blockNum % 131072, SEG_UNKNOWN);
+        (void)parse_a_page(dw_block, item[i].buf_tag.blockNum, item[i].buf_tag.blockNum % 131072, SEG_UNKNOWN);
     }
 
     free(item);
     free(unaligned_buf);
     free(unaligned_buf2);
     fclose(fd);
+    return true;
+}
+
+void CheckCRC(pg_crc32 comCrcVal, pg_crc32 pageCrcVal, const uint64 readSize, char* uspMetaBuffer)
+{
+    INIT_CRC32C(comCrcVal);
+    COMP_CRC32C(comCrcVal, (void *) uspMetaBuffer, readSize);
+    FIN_CRC32C(comCrcVal);
+
+    if (!EQ_CRC32C(pageCrcVal, comCrcVal)) {
+        fprintf(stderr, 
+                "Undo meta CRC calculated(%u) is different from CRC recorded(%u) in page.\n", comCrcVal, pageCrcVal);
+        return;
+    }
+}
+
+static int ParseUndoZoneMeta(const char *filename, int zid)
+{
+    errno_t rc = EOK;
+    int zoneId = INVALID_ZONE_ID;
+    uint32 ret = 0;
+    uint64 readSize = 0;
+    uint32 totalPageCnt = 0;
+    pg_crc32 pageCrcVal = 0;       /* CRC store in undo meta page */
+    pg_crc32 comCrcVal = 0;        /* calculating CRC current */
+    UndoZoneMetaInfo *uspMetaInfo = NULL;
+    char uspMetaBuffer[UNDO_META_PAGE_SIZE] = {'\0'};
+    int fd = open(filename, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
+
+    if (fd < 0) {
+        fprintf(stderr, "Open file(%s), return code desc(%s).\n", UNDO_META_FILE, strerror(errno));
+        return false;
+    }
+
+    UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
+
+    /* Ensure read at start posistion of file. */
+    lseek(fd, 0, SEEK_SET);
+
+    for (uint32 loop = 1; loop <= totalPageCnt; loop++) {
+        rc = memset_s(uspMetaBuffer, UNDO_META_PAGE_SIZE, 0, UNDO_META_PAGE_SIZE);
+        securec_check(rc, "\0", "\0");
+
+        if (loop != totalPageCnt) {
+            readSize = UNDOZONE_COUNT_PER_PAGE * sizeof(UndoZoneMetaInfo);
+        } else {
+            readSize = (PERSIST_ZONE_COUNT - (totalPageCnt - 1) * UNDOZONE_COUNT_PER_PAGE) * sizeof(UndoZoneMetaInfo);
+        }
+
+        /* Read one page(4K), store in uspMetaBuffer. */
+        ret = read(fd, (char *) uspMetaBuffer, UNDO_META_PAGE_SIZE);
+        if (ret != UNDO_META_PAGE_SIZE) {
+            close(fd);
+            fprintf(stderr, "Read undo meta page failed, expect size(%u), real size(%u).\n", UNDO_META_PAGE_SIZE, ret);
+            return false;
+        }
+
+        /* Get page CRC from uspMetaBuffer. */
+        pageCrcVal = *(pg_crc32 *) (uspMetaBuffer + readSize);
+
+        /* 
+         * Calculate the CRC value based on all undospace meta information stored on the page. 
+         * Then compare with pageCrcVal.
+         */
+        CheckCRC(comCrcVal, pageCrcVal, readSize, uspMetaBuffer);
+        /* Set attribute values of undospace stored in shared memory. */
+        for (uint32 offset = 0; offset < (readSize / sizeof(UndoZoneMetaInfo)); offset++) {
+            zoneId = (loop - 1) * UNDOZONE_COUNT_PER_PAGE + offset;
+            uspMetaInfo = (UndoZoneMetaInfo *) (uspMetaBuffer + offset * sizeof(UndoZoneMetaInfo));
+            if ((zid == INVALID_ZONE_ID) || (zid != INVALID_ZONE_ID && zid == zoneId)) {
+                fprintf(stdout,
+                    "zid=%d, insert=%lu, discard=%lu, forcediscard=%lu, allocate=%lu, recycle=%lu, recyclexid=%lu, "
+                    "lsn=%lu.\n",
+                    zoneId, UNDO_PTR_GET_OFFSET(uspMetaInfo->insert), UNDO_PTR_GET_OFFSET(uspMetaInfo->discard),
+                    UNDO_PTR_GET_OFFSET(uspMetaInfo->forceDiscard), UNDO_PTR_GET_OFFSET(uspMetaInfo->allocate),
+                    UNDO_PTR_GET_OFFSET(uspMetaInfo->recycle), uspMetaInfo->recycleXid, uspMetaInfo->lsn);
+
+                if (zid != INVALID_ZONE_ID) {
+                    break;
+                }
+            }
+        }
+    }
+    close(fd);
+    return true;
+}
+
+static int ParseUndoSpaceMeta(const char *filename, int zid, UndoSpaceType type)
+{
+    errno_t rc = EOK;
+    int zoneId = INVALID_ZONE_ID;
+    uint32 ret = 0;
+    uint64 readSize = 0;
+    uint32 totalPageCnt = 0;
+    pg_crc32 pageCrcVal = 0;       /* CRC store in undo meta page */
+    pg_crc32 comCrcVal = 0;        /* calculating CRC current */
+    UndoSpaceMetaInfo *uspSpaceInfo = NULL;
+    char uspMetaBuffer[UNDO_META_PAGE_SIZE] = {'\0'};
+    int fd = open(filename, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
+
+    if (fd < 0) {
+        fprintf(stderr, "Open file(%s), return code desc(%s).\n", UNDO_META_FILE, strerror(errno));
+        return false;
+    }
+    
+    if (type == UNDO_LOG_SPACE) {
+        UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
+        lseek(fd, totalPageCnt * UNDO_META_PAGE_SIZE, SEEK_SET);
+    } else {
+        UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalPageCnt);
+        uint32 seek = totalPageCnt * UNDO_META_PAGE_SIZE;
+        UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalPageCnt);
+        seek += totalPageCnt * UNDO_META_PAGE_SIZE;
+        lseek(fd, seek, SEEK_SET);
+    }
+    UNDOSPACE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalPageCnt);
+
+    for (uint32 loop = 1; loop <= totalPageCnt; loop++) {
+        rc = memset_s(uspMetaBuffer, UNDO_META_PAGE_SIZE, 0, UNDO_META_PAGE_SIZE);
+        securec_check(rc, "\0", "\0");
+
+        if (loop != totalPageCnt) {
+            readSize = UNDOSPACE_COUNT_PER_PAGE * sizeof(UndoSpaceMetaInfo);
+        } else {
+            readSize = (PERSIST_ZONE_COUNT - (totalPageCnt - 1) * UNDOSPACE_COUNT_PER_PAGE) * sizeof(UndoSpaceMetaInfo);
+        }
+
+        /* Read one page(512), store in uspMetaBuffer. */
+        ret = read(fd, (char *) uspMetaBuffer, UNDO_META_PAGE_SIZE);
+        if (ret != UNDO_META_PAGE_SIZE) {
+            close(fd);
+            fprintf(stderr, "Read undo meta page failed, expect size(%u), real size(%u).\n", UNDO_META_PAGE_SIZE, ret);
+            return false;
+        }
+
+        /* Get page CRC from uspMetaBuffer. */
+        pageCrcVal = *(pg_crc32 *) (uspMetaBuffer + readSize);
+
+        /* 
+         * Calculate the CRC value based on all undospace meta information stored on the page. 
+         * Then compare with pageCrcVal.
+         */
+        CheckCRC(comCrcVal, pageCrcVal, readSize, uspMetaBuffer);
+        /* Set attribute values of undospace stored in shared memory. */
+        for (uint32 offset = 0; offset < (readSize / sizeof(UndoSpaceMetaInfo)); offset++) {
+            zoneId = (loop - 1) * UNDOSPACE_COUNT_PER_PAGE + offset;
+            uspSpaceInfo = (UndoSpaceMetaInfo *) (uspMetaBuffer + offset * sizeof(UndoSpaceMetaInfo));
+            if ((zid == INVALID_ZONE_ID) || (zid != INVALID_ZONE_ID && zid == zoneId)) {
+                fprintf(stdout, "zid=%d, head=%lu, tail=%lu, lsn=%lu.\n", zoneId, 
+                    UNDO_PTR_GET_OFFSET(uspSpaceInfo->head), UNDO_PTR_GET_OFFSET(uspSpaceInfo->tail), 
+                    uspSpaceInfo->lsn);
+
+                if (zid != INVALID_ZONE_ID) {
+                    break;
+                }
+            }
+        }
+    }
+    close(fd);
+    return true;
+}
+
+static int ParseUndoSlot(const char *filename)
+{
+    errno_t rc = EOK;
+    off_t seekpos;
+    uint32 ret = 0;
+    TransactionSlot *slot = NULL;
+    char buffer[BLCKSZ] = {'\0'};
+    int fd = open(filename, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
+
+    if (fd < 0) {
+        fprintf(stderr, "Open file(%s), return code desc(%s).\n", UNDO_META_FILE, strerror(errno));
+        return false;
+    }
+
+    for (uint32 loop = 0; loop < UNDO_META_SEG_SIZE; loop++) {
+        seekpos = (off_t)BLCKSZ * loop;
+        lseek(fd, seekpos, SEEK_SET);
+        rc = memset_s(buffer, BLCKSZ, 0, BLCKSZ);
+        securec_check(rc, "\0", "\0");
+
+        ret = read(fd, (char *)buffer, BLCKSZ);
+        if (ret != BLCKSZ) {
+            close(fd);
+            fprintf(stderr, "Read undo meta page failed, expect size(8192), real size(%u).\n", ret);
+            return false;
+        }
+        fprintf(stdout, "Block %u, LSN (%X/%X)\n", loop, (uint32)(PageGetLSN(buffer) >> 32),
+            (uint32)PageGetLSN(buffer));
+
+        for (uint32 offset = UNDO_LOG_BLOCK_HEADER_SIZE; offset < BLCKSZ - MAXALIGN(sizeof(TransactionSlot));
+            offset += MAXALIGN(sizeof(TransactionSlot))) {
+            slot = (TransactionSlot *) (buffer + offset);
+            if (slot->XactId() != InvalidTransactionId || slot->StartUndoPtr() != INVALID_UNDO_REC_PTR) {
+                fprintf(stdout, "offset=%u, xid=%lu, startptr=%lu, endptr=%lu, dbid=%u, rollback finish=%d.\n",
+                    offset, slot->XactId(), slot->StartUndoPtr(), slot->EndUndoPtr(),
+                    slot->DbId(), !(slot->NeedRollback()));
+            }
+        }
+    }
+    close(fd);
+    return true;
+}
+
+typedef struct UndoHeader {
+    UndoRecordHeader        whdr_;
+    UndoRecordBlock         wblk_;
+    UndoRecordTransaction   wtxn_;
+    UndoRecordOldTd         wtd_;
+    UndoRecordPayload       wpay_;
+} UndoHeader;
+
+char g_dir[100] = {0};
+
+static int OpenUndoBlock(int zoneId, BlockNumber blockno)
+{
+    char fileName[100] = {0};
+    errno_t rc = EOK;
+    int segno = blockno / UNDOSEG_SIZE;
+
+    rc = snprintf_s(fileName, sizeof(fileName), sizeof(fileName), g_dir);
+    securec_check(rc, "\0", "\0");
+    rc = snprintf_s(fileName + strlen(fileName), sizeof(fileName), sizeof(fileName), "%05X.%07zX", zoneId, segno);
+    securec_check(rc, "\0", "\0");
+
+    int fd = open(fileName, O_RDONLY | PG_BINARY, S_IRUSR | S_IWUSR);
+
+    if (fd < 0) {
+        fprintf(stderr, "Open file(%s), return code desc(%s).\n", UNDO_META_FILE, strerror(errno));
+        return-1;
+    }
+
+    return fd;
+}
+
+bool ReadUndoBytes(char *destptr, int destlen, char **readeptr, char *endptr, int *myBytesRead, int *alreadyRead)
+{
+    if (*myBytesRead >= destlen) {
+        *myBytesRead -= destlen;
+        return true;
+    }
+
+    int remaining = destlen - *myBytesRead;
+    int maxReadOnCurrPage = endptr - *readeptr;
+    int canRead = Min(remaining, maxReadOnCurrPage);
+
+    if (canRead == 0) {
+        return false;
+    }
+
+    errno_t rc = memcpy_s(destptr + *myBytesRead, remaining, *readeptr, canRead);
+    securec_check(rc, "\0", "\0");
+
+    *readeptr += canRead;
+    *alreadyRead += canRead;
+    *myBytesRead = 0;
+
+    return (canRead == remaining);
+}
+
+bool ReadUndoRecord(UndoHeader *urec, char *buffer, int startingByte, int *alreadyRead)
+{
+    char *readptr = buffer + startingByte;
+    char *endptr = buffer + BLCKSZ;
+    int myBytesRead = *alreadyRead;
+
+    if (!ReadUndoBytes((char*)&(urec->whdr_), SIZE_OF_UNDO_RECORD_HEADER,
+        &readptr, endptr, &myBytesRead, alreadyRead)) {
+        return false;
+    }
+    if (!ReadUndoBytes((char*)&(urec->wblk_), SIZE_OF_UNDO_RECORD_BLOCK,
+        &readptr, endptr, &myBytesRead, alreadyRead)) {
+        return false;
+    }
+    if ((urec->whdr_.uinfo & UNDO_UREC_INFO_TRANSAC) != 0) {
+        if (!ReadUndoBytes((char *)&urec->wtxn_, SIZE_OF_UNDO_RECORD_TRANSACTION,
+            &readptr, endptr, &myBytesRead, alreadyRead)) {
+            return false;
+        }
+    }
+    if ((urec->whdr_.uinfo & UNDO_UREC_INFO_OLDTD) != 0) {
+        if (!ReadUndoBytes((char *)&urec->wtd_, SIZE_OF_UNDO_RECORD_OLDTD,
+            &readptr, endptr, &myBytesRead, alreadyRead)) {
+            return false;
+        }
+    }
+    if ((urec->whdr_.uinfo & UNDO_UREC_INFO_HAS_PARTOID) != 0) {
+        if (!ReadUndoBytes((char *)&urec->wtd_, SIZE_OF_UNDO_RECORD_PARTITION,
+            &readptr, endptr, &myBytesRead, alreadyRead)) {
+            return false;
+        }
+    }
+    if ((urec->whdr_.uinfo & UNDO_UREC_INFO_HAS_TABLESPACEOID) != 0) {
+        if (!ReadUndoBytes((char *)&urec->wtd_, SIZE_OF_UNDO_RECORD_TABLESPACE,
+            &readptr, endptr, &myBytesRead, alreadyRead)) {
+            return false;
+        }
+    }
+    if ((urec->whdr_.uinfo & UNDO_UREC_INFO_PAYLOAD) != 0) {
+        if (!ReadUndoBytes((char *)&urec->wtd_, SIZE_OF_UNDO_RECORD_PAYLOAD,
+            &readptr, endptr, &myBytesRead, alreadyRead)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool ParseUndoRecord(UndoRecPtr urp)
+{
+    char buffer[BLCKSZ] = {'\0'};
+    BlockNumber blockno = UNDO_PTR_GET_BLOCK_NUM(urp);
+    int zoneId = UNDO_PTR_GET_ZONE_ID(urp);
+    int startingByte = UNDO_PTR_GET_BLOCK_NUM(urp);
+    int fd = -1;
+    int alreadyRead = 0;
+    off_t seekpos;
+    errno_t rc = EOK;
+    uint32 ret = 0;
+    UndoHeader *urec = (UndoHeader *)malloc(sizeof(UndoHeader));
+    UndoRecPtr blkprev = INVALID_UNDO_REC_PTR;
+
+    rc = memset_s(urec, sizeof(UndoHeader), (0), sizeof(UndoHeader));
+    securec_check(rc, "\0", "\0");
+
+    do {
+        fd = OpenUndoBlock(zoneId, blockno);
+        if (fd < 0) {
+            return false;
+        }
+        seekpos = (off_t)BLCKSZ * (blockno % ((BlockNumber)UNDOSEG_SIZE));
+        lseek(fd, seekpos, SEEK_SET);
+        rc = memset_s(buffer, BLCKSZ, 0, BLCKSZ);
+        securec_check(rc, "\0", "\0");
+
+        ret = read(fd, (char *)buffer, BLCKSZ);
+        if (ret != BLCKSZ) {
+            close(fd);
+            fprintf(stderr, "Read undo meta page failed, expect size(8192), real size(%u).\n", ret);
+            return false;
+        }
+
+        if (ReadUndoRecord(urec, buffer, startingByte, &alreadyRead)) {
+            break;
+        }
+
+        startingByte = UNDO_LOG_BLOCK_HEADER_SIZE;
+        blockno++;
+    } while (true);
+
+    blkprev = urec->wblk_.blkprev;
+    fprintf(stderr, "UndoRecPtr(%lu):\nwhdr = xid(%lu), cid(%u), reloid(%u), relfilenode(%u), utype(%u).\n",
+        urp, urec->whdr_.xid, urec->whdr_.cid, urec->whdr_.reloid, urec->whdr_.relfilenode, urec->whdr_.utype);
+    fprintf(stderr, "wblk = blk_prev(%lu), blockno(%u), offset(%u).\n", urec->wblk_.blkprev, urec->wblk_.blkno,
+        urec->wblk_.offset);
+    fprintf(stderr, "wtxn = prevurp(%lu).\n", urec->wtxn_.prevurp);
+    fprintf(stderr, "wpay = payloadlen(%u).\n", urec->wpay_.payloadlen);
+
+    free(urec);
+    close(fd);
+
+    if (blkprev != INVALID_UNDO_REC_PTR) {
+        ParseUndoRecord(blkprev);
+    }
+
     return true;
 }
 
@@ -4299,12 +5164,13 @@ int main(int argc, char** argv)
 {
     int c;
     char* filename = NULL;
-
     char* env = NULL;
     const char* progname = NULL;
     uint32 start_point = 0;
     uint32 num_block = 0;
     uint64 cu_offset = 0;
+    int zid = INVALID_ZONE_ID;
+    errno_t ret;
     progname = get_progname(argv[0]);
 
     if (argc > 1) {
@@ -4324,7 +5190,7 @@ int main(int argc, char** argv)
     setvbuf(stderr, NULL, _IONBF, 0);
 #endif
 
-    while ((c = getopt(argc, argv, "bf:o:t:vs:n:r:i:I:N:uwd")) != -1) {
+    while ((c = getopt(argc, argv, "bf:o:t:vs:z:n:r:i:I:N:uwdS:")) != -1) {
         switch (c) {
             case 'f':
                 filename = optarg;
@@ -4417,9 +5283,19 @@ int main(int argc, char** argv)
             case 'w':
                 write_back = true;
                 break;
+
             case 'd':
                 dirty_page = true;
                 break;
+
+            case 'z':
+                zid = (int)atoi(optarg);
+                break;
+
+            case 'S':
+                SegNo = (unsigned)atoi(optarg);
+                break;
+
             default:
                 fprintf(stderr, _("Try \"%s --help\" for more information.\n"), progname);
                 exit(1);
@@ -4444,8 +5320,8 @@ int main(int argc, char** argv)
 
     if (((start_point != 0) || (num_block != 0)) &&
         /* only heap/index/undo/dw */
-        (hackingtype > HACKING_UNDO && hackingtype != HACKING_DW)) {
-        fprintf(stderr, "Start point or block number only takes effect when hacking heap/undo/index.\n");
+        (hackingtype > HACKING_UNDO && hackingtype != HACKING_DW && hackingtype != HACKING_SEGMENT)) {
+        fprintf(stderr, "Start point or block number only takes effect when hacking segment/heap/undo/index.\n");
         start_point = num_block = 0;
     }
 
@@ -4454,9 +5330,18 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    if (argc > optind)
+    if ((zid != INVALID_ZONE_ID) && (hackingtype != HACKING_UNDO_SPACE_META) &&
+        (hackingtype != HACKING_UNDO_SPACE_META)) {
+        fprintf(stderr, "zid is used for undo space dump.\n");
+        zid = -1;
+    } else if ((zid < INVALID_ZONE_ID) || (zid >= PERSIST_ZONE_COUNT)) {
+        fprintf(stderr, "zid should in -1 ~ %d.\n", PERSIST_ZONE_COUNT);
+        zid = -1;
+    }
+
+    if (argc > optind) {
         pgdata = argv[optind];
-    else {
+    } else {
         if ((env = getenv("GAUSSDATA")) != NULL && *env != '\0')
             pgdata = env;
     }
@@ -4469,6 +5354,19 @@ int main(int argc, char** argv)
     switch (hackingtype) {
         case HACKING_HEAP:
             if (!parse_page_file(filename, SEG_HEAP, start_point, num_block)) {
+                fprintf(stderr, "Error during parsing heap file %s.\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_FSM:
+            if (!parse_page_file(filename, SEG_FSM, start_point, num_block)) {
+                fprintf(stderr, "Error during parsing fsm file %s\n", filename);
+                exit(1);
+            }
+            break;
+
+        case HACKING_UHEAP:
+            if (!parse_page_file(filename, SEG_UHEAP, start_point, num_block)) {
                 fprintf(stderr, "Error during parsing heap file %s.\n", filename);
                 exit(1);
             }
@@ -4550,11 +5448,50 @@ int main(int argc, char** argv)
                 exit(1);
             }
             break;
+        case HACKING_SEGMENT:
+            if (!parse_segment_head(filename, start_point)) {
+                fprintf(stderr, "Error during parsing segment head %s\n", filename);
+            }
+            break;
         case HACKING_DW_SINGLE:
             if (!parse_dw_single_flush_file(filename)) {
                 fprintf(stderr, "Error during parsing dw single flush file %s\n", filename);
                 exit(1);
             }
+            break;
+        case HACKING_UNDO_ZONE_META:
+            if (!ParseUndoZoneMeta(filename, zid)) {
+                fprintf(stderr, "Error during parsing undo space meta file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_UNDO_SPACE_META:
+            if (!ParseUndoSpaceMeta(filename, zid, UNDO_LOG_SPACE)) {
+                fprintf(stderr, "Error during parsing undo group meta file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_UNDO_SLOT_SPACE_META:
+            if (!ParseUndoSpaceMeta(filename, zid, UNDO_SLOT_SPACE)) {
+                fprintf(stderr, "Error during parsing undo group meta file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_UNDO_SLOT:
+            if (!ParseUndoSlot(filename)) {
+                fprintf(stderr, "Error during parsing undo group meta file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_UNDO_RECORD:
+            ret = snprintf_s(g_dir, sizeof(g_dir), sizeof(g_dir), filename);
+            securec_check(ret, "\0", "\0");
+            if (!ParseUndoRecord(cu_offset)) {
+                fprintf(stderr, "Error during parsing undo group meta file %s\n", filename);
+                exit(1);
+            }
+            break;
+        case HACKING_UNDO_FIX:
             break;
         default:
             /* should be impossible to be here */

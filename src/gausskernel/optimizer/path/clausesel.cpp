@@ -715,7 +715,7 @@ static List* switch_arg_items(Node* funExpr, Const* cnst, Oid* eqlOprOid, Oid* i
             bool outer_is_stream_support = false;
             ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
             ResourceOwner tempOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "SwitchArgItems",
-                MEMORY_CONTEXT_OPTIMIZER);
+                THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
             t_thrd.utils_cxt.CurrentResourceOwner = tempOwner;
 
             if (IS_PGXC_COORDINATOR) {
@@ -884,6 +884,19 @@ static void get_vardata_for_filter_or_semijoin(
     }
 }
 
+void getVardataFromScalarArray(Node* node, get_vardata_for_filter_or_semijoin_context* context)
+{
+    Node* left = NULL;
+    if (RatioType_Join == context->ratiotype) {
+        bool join_is_reversed = false;
+        get_join_variables(context->root, ((ScalarArrayOpExpr*)node)->args, context->sjinfo, 
+            &context->semijoin_vardata1, &context->semijoin_vardata2, &join_is_reversed);
+    } else {
+        left = (Node*)linitial(((ScalarArrayOpExpr*)node)->args);
+        examine_variable(context->root, left, context->varRelid, &context->filter_vardata);
+    }
+}
+
 /*
  * get_vardata_for_filter_or_semijoin_walker: get vardata walker for clause.
  *
@@ -926,12 +939,8 @@ static bool get_vardata_for_filter_or_semijoin_walker(Node* node, get_vardata_fo
 
         if (RatioType_Join == context->ratiotype) {
             bool join_is_reversed = false;
-            get_join_variables(context->root,
-                opclause->args,
-                context->sjinfo,
-                &context->semijoin_vardata1,
-                &context->semijoin_vardata2,
-                &join_is_reversed);
+            get_join_variables(context->root, opclause->args, context->sjinfo, &context->semijoin_vardata1,
+                &context->semijoin_vardata2, &join_is_reversed);
             return true;
         } else {
             Oid eqlOprOid = 0;
@@ -952,8 +961,7 @@ static bool get_vardata_for_filter_or_semijoin_walker(Node* node, get_vardata_fo
                 context->root, args, context->varRelid, &context->filter_vardata, &other, &varonleft);
         }
     } else if (IsA(node, ScalarArrayOpExpr)) {
-        left = (Node*)linitial(((ScalarArrayOpExpr*)node)->args);
-        examine_variable(context->root, left, context->varRelid, &context->filter_vardata);
+        getVardataFromScalarArray(node, context);
         return true;
     } else if (IsA(node, RowCompareExpr)) {
         args = list_make2(linitial(((RowCompareExpr*)node)->largs), linitial(((RowCompareExpr*)node)->rargs));

@@ -28,6 +28,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/sysattr.h"
+#include "access/ustore/knl_utuple.h"
 
 #include "catalog/pg_class.h"
 #include "catalog/pg_type.h"
@@ -280,26 +281,22 @@ static void print_literal(StringInfo s, Oid typid, char* outputstr)
 }
 
 /* print the tuple 'tuple' into the StringInfo s */
-static void tuple_to_jsoninfo(
+static void TupleToJsoninfo(
     cJSON* cols_name, cJSON* cols_type, cJSON* cols_val, TupleDesc tupdesc, HeapTuple tuple, bool skip_nulls)
 {
-    if (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data))
+    if ((tuple->tupTableType == HEAP_TUPLE) && (HEAP_TUPLE_IS_COMPRESSED(tuple->t_data) ||
+        (int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)) {
         return;
-    if ((int)HeapTupleHeaderGetNatts(tuple->t_data, tupdesc) > tupdesc->natts)
-        return;
-
-    int natt;
+    }
 
     /* print all columns individually */
-    for (natt = 0; natt < tupdesc->natts; natt++) {
-        Form_pg_attribute attr; /* the attribute itself */
-        Oid typid;              /* type of current attribute */
+    for (int natt = 0; natt < tupdesc->natts; natt++) {
         Oid typoutput;          /* output function */
         bool typisvarlena = false;
-        Datum origval;       /* possibly toasted Datum */
+        Datum origval = 0;      /* possibly toasted Datum */
         bool isnull = false; /* column is null? */
 
-        attr = tupdesc->attrs[natt];
+        Form_pg_attribute attr = tupdesc->attrs[natt]; /* the attribute itself */
 
         /*
          * don't print dropped columns, we can't be sure everything is
@@ -315,11 +312,14 @@ static void tuple_to_jsoninfo(
         if (attr->attnum < 0)
             continue;
 
-        typid = attr->atttypid;
+        Oid typid = attr->atttypid; /* type of current attribute */
 
         /* get Datum from tuple */
-        origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
-
+        if (tuple->tupTableType == HEAP_TUPLE) {
+            origval = heap_getattr(tuple, natt + 1, tupdesc, &isnull);
+        } else {
+            origval = uheap_getattr((UHeapTuple)tuple, natt + 1, tupdesc, &isnull);
+        }
         if (isnull && skip_nulls)
             continue;
 
@@ -347,8 +347,6 @@ static void tuple_to_jsoninfo(
         /* print data */
         if (isnull)
             appendStringInfoString(val_str, "null");
-        else if (typisvarlena && VARATT_IS_EXTERNAL_ONDISK_B(origval))
-            appendStringInfoString(val_str, "unchanged-toast-datum");
         else if (!typisvarlena)
             print_literal(val_str, typid, OidOutputFunctionCall(typoutput, origval));
         else {
@@ -360,6 +358,7 @@ static void tuple_to_jsoninfo(
         cJSON_AddItemToArray(cols_val, col_val);
     }
 }
+
 /*
  * callback for individual changed tuples
  */
@@ -405,29 +404,55 @@ static void pg_decode_change(
         case REORDER_BUFFER_CHANGE_INSERT:
             op_type = cJSON_CreateString("INSERT");
             if (change->data.tp.newtuple != NULL) {
-                tuple_to_jsoninfo(
+                TupleToJsoninfo(
                     columns_name, columns_type, columns_val, tupdesc, &change->data.tp.newtuple->tuple, false);
             }
             break;
         case REORDER_BUFFER_CHANGE_UPDATE:
             op_type = cJSON_CreateString("UPDATE");
             if (change->data.tp.oldtuple != NULL) {
-                tuple_to_jsoninfo(
+                TupleToJsoninfo(
                     old_keys_name, old_keys_type, old_keys_val, tupdesc, &change->data.tp.oldtuple->tuple, true);
             }
 
             if (change->data.tp.newtuple != NULL) {
-                tuple_to_jsoninfo(
+                TupleToJsoninfo(
                     columns_name, columns_type, columns_val, tupdesc, &change->data.tp.newtuple->tuple, false);
             }
             break;
         case REORDER_BUFFER_CHANGE_DELETE:
             op_type = cJSON_CreateString("DELETE");
             if (change->data.tp.oldtuple != NULL) {
-                tuple_to_jsoninfo(
+                TupleToJsoninfo(
                     old_keys_name, old_keys_type, old_keys_val, tupdesc, &change->data.tp.oldtuple->tuple, true);
             }
             /* if there was no PK, we only know that a delete happened */
+            break;
+        case REORDER_BUFFER_CHANGE_UINSERT:
+            op_type = cJSON_CreateString("INSERT");
+            if (change->data.utp.newtuple != NULL) {
+                TupleToJsoninfo(columns_name, columns_type, columns_val, tupdesc,
+                    (HeapTuple)(&change->data.utp.newtuple->tuple), false);
+            }
+            break;
+        case REORDER_BUFFER_CHANGE_UDELETE:
+            op_type = cJSON_CreateString("DELETE");
+            if (change->data.utp.oldtuple != NULL) {
+                TupleToJsoninfo(old_keys_name, old_keys_type, old_keys_val, tupdesc,
+                    (HeapTuple)(&change->data.utp.oldtuple->tuple), true);
+            }
+            break;
+        case REORDER_BUFFER_CHANGE_UUPDATE:
+            op_type = cJSON_CreateString("UPDATE");
+            if (change->data.utp.oldtuple != NULL) {
+                TupleToJsoninfo(old_keys_name, old_keys_type, old_keys_val, tupdesc,
+                    (HeapTuple)(&change->data.utp.oldtuple->tuple), true);
+            }
+
+            if (change->data.utp.newtuple != NULL) {
+                TupleToJsoninfo(columns_name, columns_type, columns_val, tupdesc,
+                    (HeapTuple)&change->data.utp.newtuple->tuple, false);
+            }
             break;
         default:
             Assert(false);

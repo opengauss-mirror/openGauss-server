@@ -280,7 +280,15 @@ bool HotKeyValueIsEqual(HotkeyValue* hotkeyValue1, HotkeyValue* hotkeyValue2)
         Oid typid = cnst1->consttype;
         Datum value1 = cnst1->constvalue;
         Datum value2 = cnst2->constvalue;
-        isEqual = datumIsEqual(value1, value2, GetTypByVal(typid), GetTypLen(typid));
+        if (cnst1->constisnull && cnst2->constisnull) {
+            isEqual = (cnst1->consttype == cnst2->consttype);
+        } else if (cnst1->constisnull || cnst2->constisnull) {
+            /* Only one side is null, values can't be equal. */
+            isEqual = false;
+        } else {
+            isEqual = datumIsEqual(value1, value2, GetTypByVal(typid), GetTypLen(typid));
+        }
+
         if (!isEqual)
             return false;
         lcValue2 = lcValue2->next;
@@ -735,7 +743,13 @@ char* ConstructHotkeyValue(HotkeyValue* hotkeyValue)
     appendStringInfo(&str, "{");
     foreach (lc, values) {
         Const* cnst = (Const*)lfirst(lc);
-        char* cnstText = ConstGetCstring(cnst);
+        char* cnstText;
+        if (cnst->constisnull) {
+            cnstText = pstrdup("null");
+        } else {
+            cnstText = ConstGetCstring(cnst);
+        }
+
         if (!first) {
             appendStringInfo(&str, ",");
         }

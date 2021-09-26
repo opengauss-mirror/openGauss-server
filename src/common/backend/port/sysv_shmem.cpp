@@ -252,7 +252,7 @@ bool PGSharedMemoryIsInUse(unsigned long id1, unsigned long id2)
 
         /*
          * EACCES implies that the segment belongs to some other userid, which
-         * means it is not a Postgres shmem segment (or at least, not one that
+         * means it is not a openGauss shmem segment (or at least, not one that
          * is relevant to our data directory).
          */
         if (errno == EACCES)
@@ -511,7 +511,7 @@ void PGSharedMemoryDetach(void)
 }
 
 /*
- * Attach to shared memory and make sure it has a Postgres header
+ * Attach to shared memory and make sure it has a openGauss header
  *
  * Returns attach address if OK, else NULL
  */

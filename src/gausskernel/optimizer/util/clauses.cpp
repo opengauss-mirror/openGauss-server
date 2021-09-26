@@ -26,7 +26,7 @@
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
 #include "executor/functions.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -54,6 +54,7 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/typcache.h"
+#include "catalog/pg_proc_fn.h"
 
 typedef struct {
     PlannerInfo* root;
@@ -142,7 +143,6 @@ static bool is_exec_external_param_const(PlannerInfo* root, Node* node);
 static bool is_operator_pushdown(Oid opno);
 static bool contain_var_unsubstitutable_functions_walker(Node* node, void* context);
 static bool is_accurate_estimatable_func(Oid funcId);
-static Node* convert_equalsimplevar_to_nulltest(Oid opno, List* args);
 
 /*****************************************************************************
  *		OPERATOR clause functions
@@ -1594,7 +1594,24 @@ static Relids find_nonnullable_rels_walker(Node* node, bool top_level)
     } else if (IsA(node, PlaceHolderVar)) {
         PlaceHolderVar* phv = (PlaceHolderVar*)node;
 
+        /*
+         * If the contained expression forces any rels non-nullable, so does
+         * the PHV.
+         */
         result = find_nonnullable_rels_walker((Node*)phv->phexpr, top_level);
+        /*
+         * If the PHV's syntactic scope is exactly one rel, it will be forced
+         * to be evaluated at that rel, and so it will behave like a Var of
+         * that rel: if the rel's entire output goes to null, so will the PHV.
+         * (If the syntactic scope is a join, we know that the PHV will go to
+         * null if the whole join does; but that is AND semantics while we
+         * need OR semantics for find_nonnullable_rels' result, so we can't do
+         * anything with the knowledge.)
+         */
+        if (phv->phlevelsup == 0 &&
+            bms_membership(phv->phrels) == BMS_SINGLETON)
+            result = bms_add_members(result, phv->phrels);
+
     }
     return result;
 }
@@ -2373,6 +2390,7 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
             newexpr = makeNode(FuncExpr);
             newexpr->funcid = expr->funcid;
             newexpr->funcresulttype = expr->funcresulttype;
+            newexpr->funcresulttype_orig = expr->funcresulttype_orig;
             newexpr->funcretset = expr->funcretset;
             newexpr->funcvariadic = expr->funcvariadic;
             newexpr->funcformat = expr->funcformat;
@@ -2412,11 +2430,6 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
                 if (simple != NULL) /* successfully simplified it */
                     return (Node*)simple;
             }
-
-            /* convert qual to nulltest if the qual is "Var = Var" and two Vars are equal. */
-            simple = (Expr*)convert_equalsimplevar_to_nulltest(expr->opno, args);
-            if (simple != NULL)
-                return (Node*)simple;
 
             /*
              * The expression cannot be simplified any further, so build
@@ -3769,9 +3782,16 @@ static List* reorder_function_arguments(List* args, HeapTuple func_tuple)
         int pos = 0;
 
         proallargs = get_func_arg_info(func_tuple, &argtypes, &argnames, &argmodes);
-        defposdatum = SysCacheGetAttr(PROCOID, func_tuple, Anum_pg_proc_prodefaultargpos, &isnull);
-        AssertEreport(!isnull, MOD_OPT, "");
-        defpos = (int2vector*)DatumGetPointer(defposdatum);
+        if (pronargs <= FUNC_MAX_ARGS_INROW) {
+            defposdatum = SysCacheGetAttr(PROCOID, func_tuple, Anum_pg_proc_prodefaultargpos, &isnull);
+            AssertEreport(!isnull, MOD_OPT, "");
+            defpos = (int2vector*)DatumGetPointer(defposdatum);
+        } else {
+            defposdatum = SysCacheGetAttr(PROCOID, func_tuple, Anum_pg_proc_prodefaultargposext, &isnull);
+            AssertEreport(!isnull, MOD_OPT, "");
+            defpos = (int2vector*)PG_DETOAST_DATUM(defposdatum);
+        }
+
         FetchDefaultArgumentPos(&argdefpos, defpos, argmodes, proallargs);
 
         defaults = fetch_function_defaults(func_tuple);
@@ -3900,7 +3920,8 @@ static void recheck_cast_function_args(List* args, Oid result_type, HeapTuple fu
     func_package = DatumGetBool(ispackage);
     if (!func_package || nargs <= funcform->pronargs) {
         Assert(nargs == funcform->pronargs);
-        proargtypes = funcform->proargtypes.values;
+        oidvector* proargs = ProcedureGetArgTypes(func_tuple);
+        proargtypes = proargs->values;
     } else if (nargs > funcform->pronargs) {
         Datum proallargtypes;
         ArrayType* arr = NULL;
@@ -5170,36 +5191,6 @@ static bool is_accurate_estimatable_func(Oid funcId)
 }
 
 /*
- * @Description: convert qual to nulltest if the qual is "Var = Var" and two Vars are equal,
- *                      because the selectivity of the qual is DEFAULT_EQ_SEL
- *                      result in underestimate the joinrel's rows.
- *
- * @in opno - oid of the operator
- * @in args - arguments of the operator
- * @return - if qual is "Var = Var" and two Vars are equal return NullTest node, otherwise return NULL.
- */
-static Node* convert_equalsimplevar_to_nulltest(Oid opno, List* args)
-{
-    Node* larg = NULL;
-    Node* rarg = NULL;
-    Node* nullTest = NULL;
-
-    if (list_length(args) != 2)
-        return NULL;
-
-    larg = (Node*)linitial(args);
-    rarg = (Node*)lsecond(args);
-
-    if (_equalSimpleVar(larg, rarg) && ((Var*)larg)->varlevelsup == ((Var*)rarg)->varlevelsup &&
-        (get_oprrest(opno) == EQSELRETURNOID)) {
-        nullTest = (Node*)makeNullTest(IS_NOT_NULL, (Expr*)larg);
-    }
-
-    return nullTest;
-}
-
-#ifndef ENABLE_MULTIPLE_NODES
-/*
  * check whether the node have rownum expr or not, test all kinds of nodes,
  * check if it has the volatile rownum. If the node include rownum
  * function, it will return true, else it will return false.
@@ -5217,6 +5208,11 @@ bool contain_rownum_walker(Node *node, void *context)
     return expression_tree_walker(node, (bool (*)())contain_rownum_walker, context);
 }
 
+
+extern bool ContainRownumExpr(Node *node)
+{
+    return contain_rownum_walker(node, NULL);
+}
 
 /*
  * get the jtnode's qualifiers list, make query tree's table jion tree's
@@ -5238,4 +5234,4 @@ List *get_quals_lists(Node *jtnode)
 
     return quallist;
 }
-#endif
+

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * typcache.c
- *	  POSTGRES type cache code
+ *	  openGauss type cache code
  *
  * The type cache exists to speed lookup of certain information about data
  * types that is not directly available from a type's pg_type row.  For

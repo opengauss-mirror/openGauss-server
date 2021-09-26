@@ -4,12 +4,14 @@
  *	  Planner preprocessing for subqueries and join tree manipulation.
  *
  * NOTE: the intended sequence for invoking these operations is
+ *      replace_empty_jointree
  *		pull_up_sublinks
  *		inline_set_returning_functions
  *		pull_up_subqueries
  *		flatten_simple_union_all
  *		do expression preprocessing (including flattening JOIN alias vars)
  *		reduce_outer_joins
+ *      remove_useless_result_rtes
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -107,6 +109,49 @@ static Node *pull_up_sublinks_targetlist(PlannerInfo *root, Node *node,
 #ifndef ENABLE_MULTIPLE_NODES
 static bool find_rownum_in_quals(PlannerInfo *root);
 #endif
+
+/*
+ * replace_empty_jointree
+ *             If the Query's jointree is empty, replace it with a dummy RTE_RESULT
+ *             relation.
+ *
+ * By doing this, we can avoid a bunch of corner cases that formerly existed
+ * for SELECTs with omitted FROM clauses.  An example is that a subquery
+ * with empty jointree previously could not be pulled up, because that would
+ * have resulted in an empty relid set, making the subquery not uniquely
+ * identifiable for join or PlaceHolderVar processing.
+ *
+ * Unlike most other functions in this file, this function doesn't recurse;
+ * we rely on other processing to invoke it on sub-queries at suitable times.
+ */
+void replace_empty_jointree(Query *parse)
+{
+    RangeTblEntry *rte;
+    Index           rti;
+    RangeTblRef *rtr;
+
+    /* Nothing to do if jointree is already nonempty */
+    if (parse->jointree->fromlist != NIL)
+        return;
+
+    /* We mustn't change it in the top level of a setop tree, either */
+    if (parse->setOperations)
+        return;
+
+    /* Create suitable RTE */
+    rte = makeNode(RangeTblEntry);
+    rte->rtekind = RTE_RESULT;
+    rte->eref = makeAlias("*RESULT*", NIL);
+
+    /* Add it to rangetable */
+    parse->rtable = lappend(parse->rtable, rte);
+    rti = list_length(parse->rtable);
+
+    /* And jam a reference into the jointree */
+    rtr = makeNode(RangeTblRef);
+    rtr->rtindex = rti;
+    parse->jointree->fromlist = list_make1(rtr);
+}
 
 /*
  * pull_up_sublinks
@@ -436,6 +481,10 @@ static Node* pull_up_sublinks_qual_recurse(PlannerInfo* root, Node* node, Node**
         if (IS_STREAM_PLAN)
             substitute_ctes_with_subqueries(root, (Query*)sublink->subselect, root->is_under_recursive_tree);
 
+        if (has_no_expand_hint((Query*)sublink->subselect)) {
+            return node;
+        }
+
         /* Is it a convertible ANY or EXISTS clause? */
         if (sublink->subLinkType == ANY_SUBLINK) {
             if ((j = convert_ANY_sublink_to_join(root, sublink, false, *available_rels1)) != NULL) {
@@ -713,6 +762,9 @@ static Node* pull_up_sublinks_targetlist(PlannerInfo *root,
     forboth(lc, sublinkList, lc1, sublinkName)
     {
         SubLink *sublink = (SubLink*) lfirst(lc);
+        if (has_no_expand_hint((Query*)sublink->subselect)) {
+            continue;
+        }
         char *resname = (char*) lfirst(lc1);
         Assert(IsA(sublink, SubLink));
 
@@ -1021,6 +1073,7 @@ void pull_up_subquery_hint(PlannerInfo* root, Query* parse, HintState* hint_stat
     parse->hintState->skew_hint = list_concat(parse->hintState->skew_hint, hint_state->skew_hint);
     parse->hintState->nall_hints = parse->hintState->nall_hints + hint_state->nall_hints;
     parse->hintState->multi_node_hint = hint_state->multi_node_hint;
+    /* no_expand hint, set hint, no_gpc hint should not be pulled up */
 
     if (hint_state->block_name_hint) {
         BlockNameHint* blockNameHint = (BlockNameHint*)linitial(hint_state->block_name_hint);
@@ -1113,6 +1166,12 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
     Assert(subquery->cteList == NIL);
 
     /*
+     * If the FROM clause is empty, replace it with a dummy RTE_RESULT RTE, so
+     * that we don't need so many special cases to deal with that situation.
+     */
+    replace_empty_jointree(subquery);
+
+    /*
      * Try to subsitute CTEs with subqueries.
      */
     if (IS_STREAM_PLAN)
@@ -1161,7 +1220,8 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
                 errmsg("jointree in subquery could not be NULL")));
     }
     if (is_simple_subquery(subquery, rte, lowest_outer_join) &&
-        (containing_appendrel == NULL || is_safe_append_member(subquery))) {
+        (containing_appendrel == NULL || is_safe_append_member(subquery)) &&
+        !has_no_expand_hint(subquery)) {
         /* good to go */
     } else {
         /*
@@ -1318,6 +1378,7 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
                 case RTE_RELATION:
                 case RTE_JOIN:
                 case RTE_CTE:
+                case RTE_RESULT:
                 case RTE_REMOTE_DUMMY:
                     /* these can't contain any lateral references */
                     break;
@@ -1394,8 +1455,15 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
      * needed on those flags
      *
      * Return the adjusted subquery jointree to replace the RangeTblRef entry
-     * in parent's jointree.
+     * in parent's jointree; or, if the FromExpr is degenerate, just return
+     * its single member.
      */
+    Assert(IsA(subquery->jointree, FromExpr));
+    Assert(subquery->jointree->fromlist != NIL);
+    if (subquery->jointree->quals == NULL &&
+        list_length(subquery->jointree->fromlist) == 1)
+        return (Node *) linitial(subquery->jointree->fromlist);
+
     return (Node*)subquery->jointree;
 }
 
@@ -1684,7 +1752,15 @@ static bool is_simple_subquery(Query* subquery, RangeTblEntry *rte, JoinExpr *lo
      * prevent information leakage once the RTE's Vars are scattered about in
      * the upper query.
      */
+
     if (rte->security_barrier)
+        return false;
+    if (ContainRownumQual(subquery)) {
+        return false;
+    }
+    if (subquery->hasAggs || subquery->hasWindowFuncs || subquery->groupClause || subquery->groupingSets ||
+        subquery->havingQual || subquery->sortClause || subquery->distinctClause || subquery->limitOffset ||
+        subquery->limitCount || subquery->hasForUpdate || subquery->cteList)
         return false;
 
     /*
@@ -1696,7 +1772,7 @@ static bool is_simple_subquery(Query* subquery, RangeTblEntry *rte, JoinExpr *lo
         return false;
     }
 #ifndef ENABLE_MULTIPLE_NODES
-	    if (contain_rownum_qual(subquery)) {
+	    if (ContainRownumQual(subquery)) {
             return false;
         }
 #endif
@@ -1763,10 +1839,11 @@ static bool is_simple_union_all(Query* subquery)
         IsA(topop, SetOperationStmt), MOD_OPT_REWRITE, "subquery's setOperations mismatch in is_simple_union_all");
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (contain_rownum_qual(subquery)) {
+    if (ContainRownumQual(subquery)) {
         return false;
     }
 #endif
+
     /* Can't handle ORDER BY, LIMIT/OFFSET, locking, or WITH */
     if (subquery->sortClause || subquery->limitOffset || subquery->limitCount || subquery->rowMarks ||
         subquery->cteList)
@@ -1966,6 +2043,7 @@ static void replace_vars_in_jointree(Node* jtnode, pullup_replace_vars_context* 
                     case RTE_RELATION:
                     case RTE_JOIN:
                     case RTE_CTE:
+                    case RTE_RESULT:
                         /* these shouldn't be marked LATERAL */
                         Assert(false);
                         break;
@@ -2764,6 +2842,177 @@ static void reduce_outer_joins_pass2(Node* jtnode, reduce_outer_joins_state* sta
 }
 
 /*
+ * remove_useless_result_rtes
+ *             Attempt to remove RTE_RESULT RTEs from the join tree.
+ *
+ * We can remove RTE_RESULT entries from the join tree using the knowledge
+ * that RTE_RESULT returns exactly one row and has no output columns.  Hence,
+ * if one is inner-joined to anything else, we can delete it.  Optimizations
+ * are also possible for some outer-join cases, as detailed below.
+ *
+ * Some of these optimizations depend on recognizing empty (constant-true)
+ * quals for FromExprs and JoinExprs.  That makes it useful to apply this
+ * optimization pass after expression preprocessing, since that will have
+ * eliminated constant-true quals, allowing more cases to be recognized as
+ * optimizable.  What's more, the usual reason for an RTE_RESULT to be present
+ * is that we pulled up a subquery or VALUES clause, thus very possibly
+ * replacing Vars with constants, making it more likely that a qual can be
+ * reduced to constant true.  Also, because some optimizations depend on
+ * the outer-join type, it's best to have done reduce_outer_joins() first.
+ *
+ * A PlaceHolderVar referencing an RTE_RESULT RTE poses an obstacle to this
+ * process: we must remove the RTE_RESULT's relid from the PHV's phrels, but
+ * we must not reduce the phrels set to empty.  If that would happen, and
+ * the RTE_RESULT is an immediate child of an outer join, we have to give up
+ * and not remove the RTE_RESULT: there is noplace else to evaluate the
+ * PlaceHolderVar.  (That is, in such cases the RTE_RESULT *does* have output
+ * columns.)  But if the RTE_RESULT is an immediate child of an inner join,
+ * we can change the PlaceHolderVar's phrels so as to evaluate it at the
+ * inner join instead.  This is OK because we really only care that PHVs are
+ * evaluated above or below the correct outer joins.
+ *
+ * We used to try to do this work as part of pull_up_subqueries() where the
+ * potentially-optimizable cases get introduced; but it's way simpler, and
+ * more effective, to do it separately.
+ */
+void remove_useless_result_rtes(PlannerInfo *root)
+{
+    ListCell   *cell;
+    ListCell   *prev;
+    ListCell   *next;
+
+    /* Top level of jointree must always be a FromExpr */
+    Assert(IsA(root->parse->jointree, FromExpr));
+    /* Recurse ... */
+    root->parse->jointree = (FromExpr *)
+            remove_useless_results_recurse(root, (Node *) root->parse->jointree);
+    /* We should still have a FromExpr */
+    Assert(IsA(root->parse->jointree, FromExpr));
+
+    /*
+     * Remove any PlanRowMark referencing an RTE_RESULT RTE.  We obviously
+     * must do that for any RTE_RESULT that we just removed.  But one for a
+     * RTE that we did not remove can be dropped anyway: since the RTE has
+     * only one possible output row, there is no need for EPQ to mark and
+     * restore that row.
+     *
+     * It's necessary, not optional, to remove the PlanRowMark for a surviving
+     * RTE_RESULT RTE; otherwise we'll generate a whole-row Var for the
+     * RTE_RESULT, which the executor has no support for.
+     */
+    prev = NULL;
+    for (cell = list_head(root->rowMarks); cell; cell = next) {
+        PlanRowMark *rc = (PlanRowMark *) lfirst(cell);
+
+        next = lnext(cell);
+        if (rt_fetch(rc->rti, root->parse->rtable)->rtekind == RTE_RESULT)
+            root->rowMarks = list_delete_cell(root->rowMarks, cell, prev);
+        else
+            prev = cell;
+    }
+}
+
+/*
+ * get_result_relid
+ *             If jtnode is a RangeTblRef for an RTE_RESULT RTE, return its relid;
+ *             otherwise return 0.
+ */
+int get_result_relid(PlannerInfo *root, Node *jtnode)
+{
+    int                     varno;
+
+    if (!IsA(jtnode, RangeTblRef))
+        return 0;
+    varno = ((RangeTblRef *) jtnode)->rtindex;
+    if (rt_fetch(varno, root->parse->rtable)->rtekind != RTE_RESULT)
+        return 0;
+    return varno;
+}
+
+/*
+ * remove_result_refs
+ *             Helper routine for dropping an unneeded RTE_RESULT RTE.
+ *
+ * This doesn't physically remove the RTE from the jointree, because that's
+ * more easily handled in remove_useless_results_recurse.  What it does do
+ * is the necessary cleanup in the rest of the tree: we must adjust any PHVs
+ * that may reference the RTE.  Be sure to call this at a point where the
+ * jointree is valid (no disconnected nodes).
+ *
+ * Note that we don't need to process the append_rel_list, since RTEs
+ * referenced directly in the jointree won't be appendrel members.
+ *
+ * varno is the RTE_RESULT's relid.
+ * newjtloc is the jointree location at which any PHVs referencing the
+ * RTE_RESULT should be evaluated instead.
+ */
+void remove_result_refs(PlannerInfo *root, int varno, Node *newjtloc)
+{
+    /* Fix up PlaceHolderVars as needed */
+    /* If there are no PHVs anywhere, we can skip this bit */
+    if (root->glob->lastPHId != 0) {
+        Relids          subrelids;
+
+        subrelids = get_relids_in_jointree(newjtloc, false);
+        Assert(!bms_is_empty(subrelids));
+        substitute_multiple_relids((Node *) root->parse, varno, subrelids);
+    }
+
+    /*
+     * We also need to remove any PlanRowMark referencing the RTE, but we
+     * postpone that work until we return to remove_useless_result_rtes.
+     */
+}
+
+bool find_dependent_phvs_walker(Node *node,
+    find_dependent_phvs_context *context)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, PlaceHolderVar)) {
+        PlaceHolderVar *phv = (PlaceHolderVar *) node;
+
+        if ((int)(phv->phlevelsup) == context->sublevels_up &&
+            bms_equal(context->relids, phv->phrels))
+            return true;
+            /* fall through to examine children */
+    }
+    if (IsA(node, Query)) {
+        /* Recurse into subselects */
+        bool            result;
+
+        context->sublevels_up++;
+        result = query_tree_walker((Query *) node, (bool (*)())find_dependent_phvs_walker,
+                                   (void *) context, 0);
+        context->sublevels_up--;
+        return result;
+    }
+    /* Shouldn't need to handle planner auxiliary nodes here */
+    Assert(!IsA(node, SpecialJoinInfo));
+    Assert(!IsA(node, AppendRelInfo));
+    Assert(!IsA(node, PlaceHolderInfo));
+    Assert(!IsA(node, MinMaxAggInfo));
+
+    return expression_tree_walker(node, (bool (*)())find_dependent_phvs_walker,
+                                  (void *) context);
+}
+
+bool find_dependent_phvs(Node *node, int varno)
+{
+    find_dependent_phvs_context context;
+
+    context.relids = bms_make_singleton(varno);
+    context.sublevels_up = 0;
+
+    /*
+     * Must be prepared to start with a Query or a bare expression tree.
+     */
+    return query_or_expression_tree_walker(node, (bool (*)())find_dependent_phvs_walker,
+                                           (void *) &context,
+                                           0);
+}
+
+/*
  * substitute_multiple_relids - adjust node relid sets after pulling up
  * a subquery
  *
@@ -3369,8 +3618,7 @@ static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Nod
     return jtnode;
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
-static bool find_rownum_in_quals(PlannerInfo *root)
+extern bool find_rownum_in_quals(PlannerInfo *root)
 {
     if (root->parse == NULL) {
         return false;
@@ -3397,4 +3645,14 @@ static bool find_rownum_in_quals(PlannerInfo *root)
 
     return hasRownum;
 }
-#endif
+
+
+bool ContainRownumQual(const Query *parse)
+{
+    if (!IsA(parse->jointree, FromExpr)) {
+        return false;
+    }
+
+    return contain_rownum_walker(((FromExpr *)parse->jointree)->quals, NULL);
+}
+

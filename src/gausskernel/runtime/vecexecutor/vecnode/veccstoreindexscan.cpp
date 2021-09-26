@@ -32,9 +32,9 @@
 #include "access/genam.h"
 #include "access/tableam.h"
 #include "access/relscan.h"
-#include "executor/execdebug.h"
-#include "executor/nodeIndexonlyscan.h"
-#include "executor/nodeIndexscan.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeIndexonlyscan.h"
+#include "executor/node/nodeIndexscan.h"
 #include "optimizer/clauses.h"
 #include "utils/array.h"
 #include "utils/batchsort.h"
@@ -295,7 +295,6 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
     rc = memcpy_s(indexstate, sizeof(CStoreScanState), scanstate, sizeof(CStoreScanState));
     securec_check(rc, "\0", "\0");
 
-#ifdef ENABLE_LLVM_COMPILE
     /*
      * First, not only consider the LLVM native object, but also consider the cost of
      * the LLVM compilation time. We will not use LLVM optimization if there is
@@ -316,7 +315,6 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
         if (jitted_vecqual != NULL)
             llvmCodeGen->addFunctionToMCJit(jitted_vecqual, reinterpret_cast<void**>(&(indexstate->jitted_vecqual)));
     }
-#endif
 
     indexstate->ps.plan = (Plan*)node;
     indexstate->ps.state = estate;
@@ -364,6 +362,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
         indexScan->cstorequal = node->cstorequal;
 
         indexstate->m_indexScan = ExecInitCStoreScan(indexScan, indexstate->ss_partition_parent, estate, eflags, true);
+        indexstate->part_id = indexstate->m_indexScan->part_id;
         indexstate->m_btreeIndexScan = NULL;
         indexstate->m_btreeIndexOnlyScan = NULL;
         indexstate->m_cstoreIndexScanFunc = &ExecCstoreIndexScanT<PSORT_INDEX>;
@@ -384,6 +383,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
                 node->indexqual,
                 node->indexorderby);
             indexstate->m_btreeIndexScan = btreeIndexScan;
+            indexstate->part_id = indexstate->m_btreeIndexScan->ss.part_id;
             indexstate->m_btreeIndexOnlyScan = NULL;
             indexstate->m_cstoreIndexScanFunc = &ExecCstoreIndexScanT<BTREE_INDEX>;
         } else {
@@ -398,6 +398,7 @@ CStoreIndexScanState* ExecInitCstoreIndexScan(CStoreIndexScan* node, EState* est
                 node->indexqual,
                 node->indexorderby);
             indexstate->m_btreeIndexOnlyScan = btreeIndexOnlyScan;
+            indexstate->part_id = indexstate->m_btreeIndexOnlyScan->ss.part_id;
             indexstate->m_btreeIndexScan = NULL;
             indexstate->m_cstoreIndexScanFunc = &ExecCstoreIndexScanT<BTREE_INDEX_ONLY>;
         }

@@ -14,7 +14,7 @@
  * ---------------------------------------------------------------------------------------
  *
  * cstoreskey.h
- *        POSTGRES column store scan key definitions.
+ *        openGauss column store scan key definitions.
  *
  *
  * IDENTIFICATION

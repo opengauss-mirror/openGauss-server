@@ -194,7 +194,7 @@ bool is_rangelist_plan(Plan* plan)
     return false;
 }
 
-ExecNodes* stream_merge_exec_nodes(Plan* lefttree, Plan* righttree)
+ExecNodes* stream_merge_exec_nodes(Plan* lefttree, Plan* righttree, bool push_nodelist)
 {
     return lefttree->exec_nodes;
 }

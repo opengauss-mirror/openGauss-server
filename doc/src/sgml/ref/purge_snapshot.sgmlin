@@ -1,0 +1,16 @@
+<refentry id="SQL-PURGE_SNAPSHOT">
+<refmeta>
+<refentrytitle>PURGE SNAPSHOT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>PURGE SNAPSHOT</refname>
+<refpurpose>remove a snapshot</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+PURGE SNAPSHOT <qualified_name> @ <version | ident | sconst>;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

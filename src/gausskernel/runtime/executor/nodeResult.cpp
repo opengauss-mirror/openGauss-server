@@ -46,7 +46,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeResult.h"
+#include "executor/node/nodeResult.h"
 #include "utils/memutils.h"
 
 /* ----------------------------------------------------------------

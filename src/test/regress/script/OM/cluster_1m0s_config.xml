@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ROOT>
+  <CLUSTER>
+    <PARAM name="clusterName" value="gauss"/>
+    <PARAM name="nodeNames" value="hostname"/>
+    <PARAM name="gaussdbAppPath" value="/usr1/opengaussautoinstall/cluster/app"/>
+    <PARAM name="gaussdbLogPath" value="/usr1/opengaussautoinstall/cluster/gaussdb_log" />
+    <PARAM name="tmpMppdbPath" value="/usr1/opengaussautoinstall/cluster/tmp"/>
+    <PARAM name="gaussdbToolPath" value="/usr1/opengaussautoinstall/cluster/tool"/>
+    <PARAM name="corePath" value="/usr1/opengaussautoinstall/cluster/corefile"/>
+    <PARAM name="backIp1s" value="ip"/>
+    <PARAM name="password" value="Gauss_234"/>
+    <PARAM name="clusterType" value="single-inst"/>
+  </CLUSTER>
+  <DEVICELIST>
+    <DEVICE sn="hostname">
+        <PARAM name="name" value="hostname"/>
+        <PARAM name="backIp1" value="ip"/>
+        <PARAM name="sshIp1" value="ip"/>
+        <PARAM name="azName" value="AZ1"/>
+        <PARAM name="azPriority" value="1"/>
+        <PARAM name="dataNum" value="1"/>
+        <PARAM name="dataPortBase" value="31011"/>
+        <PARAM name="dataPortStandby" value="31212"/>
+        <PARAM name="dataPortDummyStandby" value="31313"/>
+        <PARAM name="dataNode1" value="/usr1/opengaussautoinstall/cluster/data/dn1"/>
+    </DEVICE>
+  </DEVICELIST>
+</ROOT>
+

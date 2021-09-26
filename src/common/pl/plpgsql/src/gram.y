@@ -13,10 +13,11 @@
  * -------------------------------------------------------------------------
  */
 
-#include "plpgsql.h"
+#include "utils/plpgsql.h"
 
 #include "catalog/namespace.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
 #include "nodes/makefuncs.h"
@@ -32,6 +33,7 @@
 #include "utils/builtins.h"
 #include "utils/memutils.h"
 #include "utils/syscache.h"
+#include "utils/pl_package.h"
 
 #include <limits.h>
 
@@ -63,6 +65,20 @@ record_stmt_label(char * label, PLpgSQL_stmt *stmt)
     u_sess->plsql_cxt.goto_labels = lappend(u_sess->plsql_cxt.goto_labels, (void *)gl);
 }
 
+static void IsInPublicNamespace(char* varname) {
+    if (u_sess->plsql_cxt.plpgsql_curr_compile == NULL && 
+        u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+        PLpgSQL_package* pkg = u_sess->plsql_cxt.plpgsql_curr_compile_package;
+        if (plpgsql_ns_lookup(pkg->public_ns, true, varname, NULL, NULL, NULL) != NULL) {
+            ereport(ERROR,
+                (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("variable name \"%s\" already defined", varname),
+                    errdetail("variable name already defined"),
+                    errcause("variable name maybe defined in public variable"),
+                    erraction("rename variable")));
+        }
+    }
+}
 /*
  * Bison doesn't allocate anything that needs to live across parser calls,
  * so we can easily have it use palloc instead of malloc.  This prevents
@@ -105,7 +121,7 @@ static bool is_function(const char *name, bool is_assign, bool no_parenthesis);
 static void 	plpgsql_parser_funcname(const char *s, char **output,
                                         int numidents);
 static PLpgSQL_stmt 	*make_callfunc_stmt(const char *sqlstart,
-                                int location, bool is_assign);
+                                int location, bool is_assign, bool eaten_first_token);
 static PLpgSQL_stmt 	*make_callfunc_stmt_no_arg(const char *sqlstart, int location);
 static PLpgSQL_expr 	*read_sql_construct5(int until,
                                              int until2,
@@ -177,6 +193,10 @@ static	PLpgSQL_expr	*read_cursor_args(PLpgSQL_var *cursor,
 static	List			*read_raise_options(void);
 static  bool            last_pragma;
 
+static char* get_proc_str(int tok);
+static char* get_init_proc(int tok);
+static void raw_parse_package_function(char* proc_str);
+static void checkFuncName(List* funcname);
 %}
 
 %expect 0
@@ -213,7 +233,7 @@ static  bool            last_pragma;
             char *label;
             int  n_initvars;
             int  *initvarnos;
-            bool autonomous;
+            bool isAutonomous;
         }						declhdr;
         struct
         {
@@ -257,7 +277,7 @@ static  bool            last_pragma;
 %type <forvariable>	for_variable
 %type <stmt>	for_control forall_control
 
-%type <str>		any_identifier opt_block_label opt_label goto_block_label label_name
+%type <str>		any_identifier opt_block_label opt_label goto_block_label label_name spec_proc init_proc
 
 %type <list>	proc_sect proc_stmts stmt_elsifs stmt_else forall_body
 %type <loop_body>	loop_body
@@ -336,6 +356,7 @@ static  bool            last_pragma;
 %token <keyword>	K_ALL
 %token <keyword>	K_ALTER
 %token <keyword>	K_ARRAY
+%token <keyword>	K_AS
 %token <keyword>	K_BACKWARD
 %token <keyword>	K_BEGIN
 %token <keyword>	K_BY
@@ -352,6 +373,7 @@ static  bool            last_pragma;
 %token <keyword>	K_DEFAULT
 %token <keyword>	K_DELETE
 %token <keyword>	K_DETAIL
+%token <keyword>	K_DETERMINISTIC
 %token <keyword>	K_DIAGNOSTICS
 %token <keyword>	K_DUMP
 %token <keyword>	K_ELSE
@@ -369,11 +391,13 @@ static  bool            last_pragma;
 %token <keyword>	K_FOREACH
 %token <keyword>	K_FORWARD
 %token <keyword>	K_FROM
+%token <keyword>	K_FUNCTION
 %token <keyword>	K_GET
 %token <keyword>	K_GOTO
 %token <keyword>	K_HINT
 %token <keyword>	K_IF
 %token <keyword>	K_IMMEDIATE
+%token <keyword>    K_INSTANTIATION
 %token <keyword>	K_IN
 %token <keyword>	K_INFO
 %token <keyword>	K_INSERT
@@ -396,12 +420,14 @@ static  bool            last_pragma;
 %token <keyword>	K_OPTION
 %token <keyword>	K_OR
 %token <keyword>	K_OUT
+%token <keyword>    K_PACKAGE
 %token <keyword>	K_PERFORM
 %token <keyword>	K_PG_EXCEPTION_CONTEXT
 %token <keyword>	K_PG_EXCEPTION_DETAIL
 %token <keyword>	K_PG_EXCEPTION_HINT
 %token <keyword>	K_PRAGMA
 %token <keyword>	K_PRIOR
+%token <keyword>	K_PROCEDURE
 %token <keyword>	K_QUERY
 %token <keyword>	K_RAISE
 %token <keyword>	K_RECORD
@@ -437,6 +463,52 @@ static  bool            last_pragma;
 %token <keyword>	K_WITH
 
 %%
+
+pl_body         : pl_package_spec
+                | pl_function
+                | pl_package_init
+                ;
+pl_package_spec : K_PACKAGE decl_sect K_END
+                    {
+                        int nDatums = 0;
+                        if (u_sess->plsql_cxt.plpgsql_curr_compile!=NULL) {
+                            nDatums = u_sess->plsql_cxt.plpgsql_nDatums;
+                        } else {
+                            nDatums = u_sess->plsql_cxt.plpgsql_pkg_nDatums;
+                        }
+
+                        for (int i = 0; i < nDatums; i++) {
+                            u_sess->plsql_cxt.plpgsql_Datums[i]->ispkg = true;
+                        }
+                        PLpgSQL_nsitem* ns_cur = plpgsql_ns_top();
+                        while (ns_cur != NULL) {
+                            ns_cur->pkgname =  u_sess->plsql_cxt.plpgsql_curr_compile_package->pkg_signature;
+                            ns_cur = ns_cur->prev;
+                        }
+                        u_sess->plsql_cxt.plpgsql_curr_compile_package->n_initvars = $2.n_initvars;
+                        u_sess->plsql_cxt.plpgsql_curr_compile_package->initvarnos = $2.initvarnos;
+                    }
+                ;
+pl_package_init : K_INSTANTIATION init_proc
+                    {
+                        if (u_sess->plsql_cxt.plpgsql_curr_compile_package!=NULL)
+                        {
+                            List* raw_parsetree_list = NULL;
+                            raw_parsetree_list = raw_parser($2);
+                            DoStmt* stmt;
+                            stmt = (DoStmt *)linitial(raw_parsetree_list);
+                            stmt->isExecuted = false;
+                            if (u_sess->plsql_cxt.plpgsql_curr_compile_package->is_spec_compiling) {
+                                stmt->isSpec = true;
+                            } else {
+                                stmt->isSpec = false;
+                            }
+                            List *proc_list = u_sess->plsql_cxt.plpgsql_curr_compile_package->proc_list;
+                            u_sess->plsql_cxt.plpgsql_curr_compile_package->proc_list = lappend(proc_list,stmt);
+                        } else {
+                            yyerror("instantiation only use in package compile");
+                        }
+                    }
 
 pl_function		: comp_options pl_block opt_semi
                     {
@@ -478,10 +550,9 @@ pl_block		: decl_sect K_BEGIN proc_sect exception_sect K_END opt_label
 
                         newp->cmd_type	= PLPGSQL_STMT_BLOCK;
                         newp->lineno		= plpgsql_location_to_lineno(@2);
+                        newp->sqlString = plpgsql_get_curline_query();
                         newp->label		= $1.label;
-#ifndef ENABLE_MULTIPLE_NODES
-                        newp->autonomous = $1.autonomous;
-#endif
+                        newp->isAutonomous = $1.isAutonomous;
                         newp->n_initvars = $1.n_initvars;
                         newp->initvarnos = $1.initvarnos;
                         newp->body		= $3;
@@ -505,7 +576,7 @@ decl_sect		: opt_block_label
                         $$.label	  = $1;
                         $$.n_initvars = 0;
                         $$.initvarnos = NULL;
-                        $$.autonomous = false;
+                        $$.isAutonomous = false;
                     }
                 | opt_block_label decl_start
                     {
@@ -513,7 +584,7 @@ decl_sect		: opt_block_label
                         $$.label	  = $1;
                         $$.n_initvars = 0;
                         $$.initvarnos = NULL;
-                        $$.autonomous = false;
+                        $$.isAutonomous = false;
                     }
                 | opt_block_label decl_start decl_stmts
                     {
@@ -521,7 +592,7 @@ decl_sect		: opt_block_label
                         $$.label	  = $1;
                         /* Remember variables declared in decl_stmts */
                         $$.n_initvars = plpgsql_add_initdatums(&($$.initvarnos));
-                        $$.autonomous = last_pragma;
+                        $$.isAutonomous = last_pragma;
                         last_pragma = false;
                     }
                 ;
@@ -565,6 +636,7 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                     {
                         PLpgSQL_variable	*var;
 
+                        IsInPublicNamespace($1.name);
                         /*
                          * If a collation is supplied, insert it into the
                          * datatype.  We assume decl_datatype always returns
@@ -620,12 +692,16 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                     }
                 | decl_varname K_ALIAS K_FOR decl_aliasitem ';'
                     {
+                        IsInPublicNamespace($1.name);
                         plpgsql_ns_additem($4->itemtype,
                                            $4->itemno, $1.name);
                         pfree_ext($1.name);
                     }
                 |	K_CURSOR decl_varname opt_scrollable 
-                    { plpgsql_ns_push($2.name); }
+                    {
+                        IsInPublicNamespace($2.name);
+                        plpgsql_ns_push($2.name); 
+                    }
                     decl_cursor_args decl_is_for decl_cursor_query
                     {
                         PLpgSQL_var *newp;
@@ -651,12 +727,14 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                     }
                 |	K_TYPE decl_varname K_IS K_REF K_CURSOR ';'
                     {
+                        IsInPublicNamespace($2.name);
                         /* add name of cursor type to PLPGSQL_NSTYPE_REFCURSOR */
                         plpgsql_ns_additem(PLPGSQL_NSTYPE_REFCURSOR,0,$2.name);
                         pfree_ext($2.name);
                     }
                 |	decl_varname T_REFCURSOR ';'
                     {
+                        IsInPublicNamespace($1.name);
                         plpgsql_build_variable(
                                 $1.name, 
                                 $1.lineno,
@@ -667,6 +745,10 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
 
                 |	decl_varname K_SYS_REFCURSOR ';'
                     {
+                        IsInPublicNamespace($1.name);
+                        if (IsOnlyCompilePackage()) {
+                            yyerror("not allow use ref cursor in package");
+                        }
                         plpgsql_build_variable(
                                 $1.name, 
                                 $1.lineno,
@@ -681,11 +763,13 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                  */
                 |	K_TYPE decl_varname K_IS K_VARRAY '(' ICONST ')'  K_OF decl_datatype ';'
                     {
+                        IsInPublicNamespace($2.name);
                         plpgsql_build_varrayType($2.name, $2.lineno, $9, true);
                         pfree_ext($2.name);
                     }
                 |	decl_varname varray_var decl_defval
                     {
+                        IsInPublicNamespace($1.name);
                         char *type_name;
                         errno_t ret;
                         PLpgSQL_type * var_type = ((PLpgSQL_var *)u_sess->plsql_cxt.plpgsql_Datums[$2])->datatype;
@@ -708,6 +792,7 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                     }
                 |	K_TYPE decl_varname K_IS K_RECORD '(' record_attr_list ')' ';'
                     {
+                        IsInPublicNamespace($2.name);
                         PLpgSQL_rec_type	*newp = NULL;
 
                         newp = plpgsql_build_rec_type($2.name, $2.lineno, $6, true);
@@ -719,6 +804,7 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                     }
                 |	decl_varname record_var ';'
                     {
+                        IsInPublicNamespace($1.name);
                         PLpgSQL_var *newp = NULL;
                         PLpgSQL_type * var_type = (PLpgSQL_type *)u_sess->plsql_cxt.plpgsql_Datums[$2];
 
@@ -730,21 +816,35 @@ decl_statement	: decl_varname decl_const decl_datatype decl_collate decl_notnull
                                      errmsg("build variable failed")));
                         pfree_ext($1.name);
                     }
-		|	K_PRAGMA any_identifier ';'
-		    {
-			if (pg_strcasecmp($2, "autonomous_transaction") == 0)
-#ifndef ENABLE_MULTIPLE_NODES			
-				last_pragma = true;
-#else			     
-
-				ereport(ERROR,
-		                	(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-		                         errmsg("autonomous transaction is not yet supported.")));
-#endif				
-			else
-				elog(ERROR, "invalid pragma");
-		    }
+                |   K_FUNCTION {u_sess->parser_cxt.is_procedure=false;} spec_proc
+                    {
+                        raw_parse_package_function($3);
+                    }
+                |   K_PROCEDURE {u_sess->parser_cxt.is_procedure=true;} spec_proc
+                    {
+                        raw_parse_package_function($3);
+                    }
+                |	K_PRAGMA any_identifier ';'
+                {
+                        if (pg_strcasecmp($2, "autonomous_transaction") == 0)
+                            last_pragma = true;
+                        else
+                            elog(ERROR, "invalid pragma");
+                }
                 ;
+
+spec_proc        :
+                 {
+                     $$ = get_proc_str(yychar);
+                     yyclearin;
+                 }    
+
+init_proc        :
+                 {
+                     $$ = get_init_proc(yychar);
+                     yyclearin;
+                 }    
+
 
 record_attr_list : record_attr
                    {
@@ -831,6 +931,7 @@ decl_cursor_args :
                         newp->nfields = list_length($2);
                         newp->fieldnames = (char **)palloc(newp->nfields * sizeof(char *));
                         newp->varnos = (int *)palloc(newp->nfields * sizeof(int));
+                        newp->isImplicit = true;
 
                         i = 0;
                         foreach (l, $2)
@@ -906,12 +1007,17 @@ decl_aliasitem	: T_WORD
                                                     NULL);
                         else
                             nsi = NULL;
-                        if (nsi == NULL)
-                            ereport(ERROR,
-                                    (errcode(ERRCODE_UNDEFINED_OBJECT),
-                                     errmsg("variable \"%s\" does not exist",
-                                            NameListToString($1.idents)),
-                                     parser_errposition(@1)));
+                        if (nsi == NULL) {
+                            int yylloc_bak = yylloc;
+                            int isPkg =plpgsql_pkg_adddatum2ns($1.idents);
+                            yylloc = yylloc_bak;
+                            if (isPkg < 0)
+                                ereport(ERROR,
+                                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                         errmsg("variable \"%s\" does not exist",
+                                                NameListToString($1.idents)),
+                                         parser_errposition(@1)));
+                        }
                         $$ = nsi;
                     }
                 ;
@@ -1122,6 +1228,7 @@ stmt_perform	: K_PERFORM expr_until_semi
                         newp->cmd_type = PLPGSQL_STMT_PERFORM;
                         newp->lineno   = plpgsql_location_to_lineno(@1);
                         newp->expr  = $2;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -1136,9 +1243,22 @@ stmt_assign		: assign_var assign_operator expr_until_semi
                         newp->lineno   = plpgsql_location_to_lineno(@1);
                         newp->varno = $1;
                         newp->expr  = $3;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
+                | T_CWORD assign_operator expr_until_semi
+                  {
+                        List* wholeName = $1.idents;
+                        int dno = plpgsql_pkg_add_unknown_var_to_namespace(wholeName);
+                        PLpgSQL_stmt_assign *newp;
+                        newp = (PLpgSQL_stmt_assign *)palloc0(sizeof(PLpgSQL_stmt_assign));
+                        newp->cmd_type = PLPGSQL_STMT_ASSIGN;
+                        newp->lineno   = plpgsql_location_to_lineno(@1);
+                        newp->varno = dno;
+                        newp->expr  = $3;
+                        $$ = (PLpgSQL_stmt *)newp;
+                  }
                 ;
 
 stmt_getdiag	: K_GET getdiag_area_opt K_DIAGNOSTICS getdiag_list ';'
@@ -1151,6 +1271,7 @@ stmt_getdiag	: K_GET getdiag_area_opt K_DIAGNOSTICS getdiag_list ';'
                         newp->lineno   = plpgsql_location_to_lineno(@1);
                         newp->is_stacked = $2;
                         newp->diag_items = $4;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         /*
                          * Check information items are valid for area option.
@@ -1350,6 +1471,7 @@ stmt_goto		: K_GOTO label_name
                         newp->cmd_type  = PLPGSQL_STMT_GOTO;
                         newp->lineno = plpgsql_location_to_lineno(@1);
                         newp->label = $2;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -1371,6 +1493,7 @@ stmt_if			: K_IF expr_until_then proc_sect stmt_elsifs stmt_else K_END K_IF ';'
                         newp->then_body	= $3;
                         newp->elsif_list = $4;
                         newp->else_body  = $5;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -1441,6 +1564,7 @@ case_when		: K_WHEN expr_until_then proc_sect
                         newp->lineno	= plpgsql_location_to_lineno(@1);
                         newp->expr	= $2;
                         newp->stmts	= $3;
+                        newp->sqlString = plpgsql_get_curline_query();
                         $$ = newp;
                     }
                 ;
@@ -1473,6 +1597,7 @@ stmt_loop		: opt_block_label K_LOOP loop_body
                         newp->lineno   = plpgsql_location_to_lineno(@2);
                         newp->label	  = $1;
                         newp->body	  = $3.stmts;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         check_labels($1, $3.end_label, $3.end_label_location);
                         plpgsql_ns_pop();
@@ -1494,6 +1619,7 @@ stmt_while		: opt_block_label K_WHILE expr_until_loop loop_body
                         newp->label	  = $1;
                         newp->cond	  = $3;
                         newp->body	  = $4.stmts;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         check_labels($1, $4.end_label, $4.end_label_location);
                         plpgsql_ns_pop();
@@ -1516,6 +1642,7 @@ stmt_for		: opt_block_label K_FOR for_control loop_body
                             newp->lineno   = plpgsql_location_to_lineno(@2);
                             newp->label	  = $1;
                             newp->body	  = $4.stmts;
+                            newp->sqlString = plpgsql_get_curline_query();
                             $$ = (PLpgSQL_stmt *) newp;
 
                             /* register the stmt if it is labeled */
@@ -1535,6 +1662,7 @@ stmt_for		: opt_block_label K_FOR for_control loop_body
                             newp->lineno   = plpgsql_location_to_lineno(@2);
                             newp->label	  = $1;
                             newp->body	  = $4.stmts;
+                            newp->sqlString = plpgsql_get_curline_query();
                             $$ = (PLpgSQL_stmt *) newp;
 
                             /* register the stmt if it is labeled */
@@ -1559,8 +1687,10 @@ stmt_for		: opt_block_label K_FOR for_control loop_body
                             PLpgSQL_stmt_fori		*newm;
 
                             newm = (PLpgSQL_stmt_fori *) $3;
+                            newm->lineno   = plpgsql_location_to_lineno(@2);
                             newm->label	  = NULL;
                             newm->body	  = $4;
+                            newm->sqlString = plpgsql_get_curline_query();
                             $$ = (PLpgSQL_stmt *) newm;
                         }
                         else
@@ -2030,6 +2160,7 @@ stmt_foreach_a	: opt_block_label K_FOREACH for_variable foreach_slice K_IN K_ARR
                         newp->slice = $4;
                         newp->expr = $7;
                         newp->body = $8.stmts;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         if ($3.rec)
                         {
@@ -2089,6 +2220,7 @@ stmt_exit		: exit_type opt_label opt_exitcond
                         newp->lineno	  = plpgsql_location_to_lineno(@1);
                         newp->label	  = $2;
                         newp->cond	  = $3;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -2149,6 +2281,7 @@ stmt_raise		: K_RAISE
                         newp->message	= NULL;
                         newp->params		= NIL;
                         newp->options	= NIL;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         tok = yylex();
                         if (tok == 0)
@@ -2160,7 +2293,31 @@ stmt_raise		: K_RAISE
                          */
                         if (tok != ';')
                         {
-                            if (T_DATUM == tok && PLPGSQL_DTYPE_ROW == yylval.wdatum.datum->dtype)
+                            if (T_CWORD == tok) {
+                                PLpgSQL_expr *expr = NULL;
+                                List* wholeName = yylval.cword.idents;
+                                int dno = plpgsql_pkg_add_unknown_var_to_namespace(wholeName, PLPGSQL_DTYPE_ROW);
+                                if (dno == -1) {
+                                    yyerror("not found package");
+                                }
+                                sprintf(message, "line:%d ", plpgsql_location_to_lineno(@1));
+                                appendStringInfoString(&ds, message);
+                                appendStringInfoString(&ds,"%");
+                                row = (PLpgSQL_row*)u_sess->plsql_cxt.plpgsql_Datums[dno];
+                                row->dtype = PLPGSQL_DTYPE_ROW;
+                                row->customErrorCode = plpgsql_getCustomErrorCode();
+                                /* condname is system embedded error name, so it is still null in this case. */
+                                newp->condname = pstrdup(unpack_sql_state(row->customErrorCode));
+                                newp->message = pstrdup(ds.data);
+                                plpgsql_push_back_token(tok);
+                                expr = read_sql_construct(';', 0, 0, ";",
+                                                          "SELECT ", true, true, true, NULL, &tok);
+
+                                if (tok != ';')
+                                    yyerror("syntax error");
+
+                                newp->params = lappend(newp->params, expr);
+                            } else if (T_DATUM == tok && PLPGSQL_DTYPE_ROW == yylval.wdatum.datum->dtype)
                             {
                                 PLpgSQL_expr *expr = NULL;
 
@@ -2397,7 +2554,7 @@ stmt_execsql			: K_ALTER
                         }
                         else
                         {
-                            PLpgSQL_stmt *stmt = make_callfunc_stmt($1.ident, @1, false);
+                            PLpgSQL_stmt *stmt = make_callfunc_stmt($1.ident, @1, false, false);
                             if (stmt->cmd_type == PLPGSQL_STMT_PERFORM)
                             {
                                 ((PLpgSQL_stmt_perform *)stmt)->expr->is_funccall = true;
@@ -2415,38 +2572,58 @@ stmt_execsql			: K_ALTER
                     }
                 }
             }
-        | T_CWORD
+        | T_CWORD '('
             {
-                int tok = yylex();
+
                 char *name = NULL;
                 bool isCallFunc = false;
                 bool FuncNoarg = false;
+                checkFuncName($1.idents);
+                MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+                name = NameListToString($1.idents);
+                (void)MemoryContextSwitchTo(colCxt);
+                isCallFunc = is_function(name, false, false);
+                if (isCallFunc)
+                {    
+                    if (FuncNoarg)
+                        $$ = make_callfunc_stmt_no_arg(name, @1); 
+                    else 
+                    {    
+                        PLpgSQL_stmt *stmt = make_callfunc_stmt(name, @1, false, true);
+                        if (stmt->cmd_type == PLPGSQL_STMT_PERFORM)
+                        {    
+                            ((PLpgSQL_stmt_perform *)stmt)->expr->is_funccall = true;
+                        }    
+                        else if (stmt->cmd_type == PLPGSQL_STMT_EXECSQL)
+                        {    
+                            ((PLpgSQL_stmt_execsql *)stmt)->sqlstmt->is_funccall = true;
+                        }    
+                        $$ = stmt;
+                    }    
+                }    
+                else 
+                {    
+                    $$ = make_execsql_stmt(T_CWORD, @1); 
+                }    
+            }   
+        | T_CWORD ';'
+            {
+                char *name = NULL;
+                bool isCallFunc = false;
+                checkFuncName($1.idents);
+                MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+                name = NameListToString($1.idents);
+                (void)MemoryContextSwitchTo(colCxt);
+                isCallFunc = is_function(name, false, true);
+                bool FuncNoarg = true;
 
-                if ('(' == tok)
-                {
-                    MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
-                    name = NameListToString($1.idents);
-                    (void)MemoryContextSwitchTo(colCxt);
-                    isCallFunc = is_function(name, false, false);
-                }
-                else if ('=' == tok || COLON_EQUALS == tok || '[' == tok)
-                    cword_is_not_variable(&($1), @1);
-                else if (';' == tok) {
-                    MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
-                    name = NameListToString($1.idents);
-                    (void)MemoryContextSwitchTo(colCxt);
-                    isCallFunc = is_function(name, false, true);
-                    FuncNoarg = true;
-                }
-
-                plpgsql_push_back_token(tok);
                 if (isCallFunc)
                 {
                     if (FuncNoarg)
                         $$ = make_callfunc_stmt_no_arg(name, @1);
                     else
                     {
-                        PLpgSQL_stmt *stmt = make_callfunc_stmt(name, @1, false);
+                        PLpgSQL_stmt *stmt = make_callfunc_stmt(name, @1, false, true);
                         if (stmt->cmd_type == PLPGSQL_STMT_PERFORM)
                         {
                             ((PLpgSQL_stmt_perform *)stmt)->expr->is_funccall = true;
@@ -2473,7 +2650,7 @@ stmt_execsql			: K_ALTER
                 else
                 {
                     plpgsql_push_back_token(tok);
-                    $$ = make_callfunc_stmt("array_extend", @1, false);
+                    $$ = make_callfunc_stmt("array_extend", @1, false, false);
                 }
             }
         ;
@@ -2508,6 +2685,7 @@ stmt_dynexecute : K_EXECUTE
                         newp->isinouttype = false;
                         newp->ppd = NULL;
                         newp->isanonymousblock = true;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         /* If we found "INTO", collect the argument */
                         
@@ -2563,6 +2741,7 @@ stmt_open		: K_OPEN cursor_variable
                         newp->lineno = plpgsql_location_to_lineno(@1);
                         newp->curvar = $2->dno;
                         newp->cursor_options = CURSOR_OPT_FAST_PLAN;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         if ($2->cursor_explicit_expr == NULL)
                         {
@@ -2663,6 +2842,7 @@ stmt_fetch		: K_FETCH opt_fetch_direction cursor_variable K_INTO
                         fetch->row		= row;
                         fetch->curvar	= $3->dno;
                         fetch->is_move	= false;
+                        fetch->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)fetch;
                     }
@@ -2675,6 +2855,7 @@ stmt_move		: K_MOVE opt_fetch_direction cursor_variable ';'
                         fetch->lineno = plpgsql_location_to_lineno(@1);
                         fetch->curvar	= $3->dno;
                         fetch->is_move	= true;
+                        fetch->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)fetch;
                     }
@@ -2694,6 +2875,7 @@ stmt_close		: K_CLOSE cursor_variable ';'
                         newp->cmd_type = PLPGSQL_STMT_CLOSE;
                         newp->lineno = plpgsql_location_to_lineno(@1);
                         newp->curvar = $2->dno;
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -2702,11 +2884,12 @@ stmt_close		: K_CLOSE cursor_variable ';'
 stmt_null		: K_NULL ';'
                     {
                         /* We do building a node for NULL for GOTO */
-                        PLpgSQL_stmt *newp;
+                        PLpgSQL_stmt_null *newp;
 
                         newp = (PLpgSQL_stmt_null *)palloc(sizeof(PLpgSQL_stmt_null));
                         newp->cmd_type = PLPGSQL_STMT_NULL;
                         newp->lineno = plpgsql_location_to_lineno(@1);
+                        newp->sqlString = plpgsql_get_curline_query();
 
                         $$ = (PLpgSQL_stmt *)newp;
                     }
@@ -2718,7 +2901,8 @@ stmt_commit		: opt_block_label K_COMMIT ';'
 
                         newp = (PLpgSQL_stmt_commit *)palloc(sizeof(PLpgSQL_stmt_commit));
                         newp->cmd_type = PLPGSQL_STMT_COMMIT;
-                        newp->lineno = plpgsql_location_to_lineno(@1);
+                        newp->lineno = plpgsql_location_to_lineno(@2);
+                        newp->sqlString = plpgsql_get_curline_query();
                         plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
@@ -2732,7 +2916,8 @@ stmt_rollback		: opt_block_label K_ROLLBACK ';'
 
                         newp = (PLpgSQL_stmt_rollback *) palloc(sizeof(PLpgSQL_stmt_rollback));
                         newp->cmd_type = PLPGSQL_STMT_ROLLBACK;
-                        newp->lineno = plpgsql_location_to_lineno(@1);
+                        newp->lineno = plpgsql_location_to_lineno(@2);
+                        newp->sqlString = plpgsql_get_curline_query();
                         plpgsql_ns_pop();
 
                         $$ = (PLpgSQL_stmt *)newp;
@@ -2787,7 +2972,7 @@ exception_sect	:
                                                      plpgsql_build_datatype(TEXTOID,
                                                                             -1,
                                                                             u_sess->plsql_cxt.plpgsql_curr_compile->fn_input_collation),
-                                                     true);
+                                                     true, true);
                         ((PLpgSQL_var *) var)->isconst = true;
                         newp->sqlstate_varno = var->dno;
 
@@ -2795,7 +2980,7 @@ exception_sect	:
                                                      plpgsql_build_datatype(TEXTOID,
                                                                             -1,
                                                                             u_sess->plsql_cxt.plpgsql_curr_compile->fn_input_collation),
-                                                     true);
+                                                     true, true);
                         ((PLpgSQL_var *) var)->isconst = true;
                         newp->sqlerrm_varno = var->dno;
 
@@ -2922,17 +3107,19 @@ expr_until_semi :
                             plpgsql_is_token_match2(T_CWORD,'('))
                         {
                             tok = yylex();
-                            if (T_WORD == tok)
+                            if (T_WORD == tok) {
                                 name = yylval.word.ident;
-                            else
+                            } else {
+                                checkFuncName(yylval.cword.idents);
                                 name = NameListToString(yylval.cword.idents);
+                            }
 
                             isCallFunc = is_function(name, true, false);
                         }
 
                         if (isCallFunc)
                         {
-                            stmt = make_callfunc_stmt(name, yylloc, true);
+                            stmt = make_callfunc_stmt(name, yylloc, true, false);
                             if (PLPGSQL_STMT_EXECSQL == stmt->cmd_type)
                                 expr = ((PLpgSQL_stmt_execsql*)stmt)->sqlstmt;
                             else if (PLPGSQL_STMT_PERFORM == stmt->cmd_type)
@@ -2943,8 +3130,19 @@ expr_until_semi :
                         }
                         else
                         {
-                            if (name != NULL)
+                            if (name != NULL) {
                                 plpgsql_push_back_token(tok);
+                                name = NULL;
+                            }
+
+                            if (!plpgsql_is_token_match2(T_CWORD,'('))
+                            {
+                                if (plpgsql_is_token_match(T_CWORD)) {
+                                    List* wholeName = yylval.cword.idents;
+                                    plpgsql_pkg_add_unknown_var_to_namespace(wholeName);
+                                }
+                            }
+
                             $$ = read_sql_expression(';', ";");
                         }	
                     }
@@ -3042,6 +3240,8 @@ unreserved_keyword	:
                 | K_NO
                 | K_NOTICE
                 | K_OPTION
+                | K_PACKAGE
+                | K_INSTANTIATION
                 | K_PG_EXCEPTION_CONTEXT
                 | K_PG_EXCEPTION_DETAIL
                 | K_PG_EXCEPTION_HINT
@@ -3280,7 +3480,7 @@ plpgsql_parser_funcname(const char *s, char **output, int numidents)
  * Notes		:
  */ 
 static PLpgSQL_stmt *
-make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
+make_callfunc_stmt(const char *sqlstart, int location, bool is_assign, bool eaten_first_token)
 {
     int nparams = 0;
     int nfields = 0;
@@ -3396,9 +3596,18 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
 
     tok = yylex();
 
-    /* check the format for the function without parameters */
-    if ((tok = yylex()) == ')')
-        noargs = TRUE;
+    /* 
+     *  check the format for the function without parameters
+     *  if eaten_first_token is true,first token is '(' ,so if next token is ')',it means
+     *  no args
+     */
+    if (eaten_first_token==true) {
+        if (tok == ')')
+            noargs = TRUE;
+    } else {
+        if ((tok = yylex()) == ')')
+            noargs = TRUE;
+    }
     plpgsql_push_back_token(tok);
 
     /* has any "out" parameters, user execsql stmt */
@@ -3792,6 +4001,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
                 perform->cmd_type = PLPGSQL_STMT_PERFORM;
                 perform->lineno   = plpgsql_location_to_lineno(location);
                 perform->expr	  = expr;
+                perform->sqlString = plpgsql_get_curline_query();
                 return (PLpgSQL_stmt *)perform;
             }
             else if (all_arg >= narg)
@@ -3815,6 +4025,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
                     row->nfields = new_nfields;
                     row->fieldnames = (char **)palloc0(sizeof(char *) * new_nfields);
                     row->varnos = (int *)palloc0(sizeof(int) * new_nfields);
+                    row->isImplicit = true;
 
                     /* fetch out argument from fieldnames into row->fieldnames */
                     for (i = 0; i < nfields; i++)
@@ -3894,6 +4105,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
                 execsql->row	 = row;
                 execsql->placeholders = placeholders;
                 execsql->multi_func = multi_func;
+                execsql->sqlString = plpgsql_get_curline_query();
                 return (PLpgSQL_stmt *)execsql;
             }
         }
@@ -3917,6 +4129,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
             row->nfields = nfields;
             row->fieldnames = (char **)palloc(sizeof(char *) * nfields);
             row->varnos = (int *)palloc(sizeof(int) * nfields);
+            row->isImplicit = true;
             while (--nfields >= 0)
             {
                 row->fieldnames[nfields] = fieldnames[nfields];
@@ -3933,6 +4146,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
             perform->cmd_type = PLPGSQL_STMT_PERFORM;
             perform->lineno   = plpgsql_location_to_lineno(location);
             perform->expr	  = expr;
+            perform->sqlString = plpgsql_get_curline_query();
             return (PLpgSQL_stmt *)perform;
         }
         else
@@ -3948,6 +4162,7 @@ make_callfunc_stmt(const char *sqlstart, int location, bool is_assign)
             execsql->row	 = row;
             execsql->placeholders = placeholders;
             execsql->multi_func = multi_func;
+            execsql->sqlString = plpgsql_get_curline_query();
             return (PLpgSQL_stmt *)execsql;
         }
     }
@@ -3990,9 +4205,7 @@ is_function(const char *name, bool is_assign, bool no_parenthesis)
      * if A.B.C, it's not a function invoke, because can not use function of 
      * other database. if A.B, then it must be a function invoke. 
      */
-    if (cp[2] && cp[2][0] != '\0')
-        return false;
-    else if (cp[0] && cp[0][0] != '\0')
+    if (cp[0] && cp[0][0] != '\0')
     {
         /* these are function in pg_proc who are overloaded, so they can not be
          * execured by := or direct call.
@@ -4012,7 +4225,9 @@ is_function(const char *name, bool is_assign, bool no_parenthesis)
         if(keyword && no_parenthesis && UNRESERVED_KEYWORD == keyword->category)
             return false;
 
-        if (cp[1] && cp[1][0] != '\0')
+        if (cp[2] && cp[2][0] != '\0') 
+            funcname = list_make3(makeString(cp[0]), makeString(cp[1]),makeString(cp[2]));
+        else if (cp[1] && cp[1][0] != '\0')
             funcname = list_make2(makeString(cp[0]), makeString(cp[1]));
         else
             funcname = list_make1(makeString(cp[0]));
@@ -4069,6 +4284,29 @@ is_function(const char *name, bool is_assign, bool no_parenthesis)
         return true;/* passed all test */
     }
     return false;
+}
+
+static void checkFuncName(List* funcname) 
+{
+    MemoryContext colCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+    char* name = NameListToString(funcname);
+    Oid packageOid = InvalidOid;
+    Oid namespaceId = InvalidOid;
+    if (list_length(funcname) > 2) {
+        if (list_length(funcname) == 3) {
+            char* schemaname = strVal(linitial(funcname));
+            char* pkgname = strVal(lsecond(funcname));
+            namespaceId = SchemaNameGetSchemaOid(schemaname, false);
+            if (OidIsValid(namespaceId)) {
+                packageOid = PackageNameGetOid(pkgname, namespaceId);
+            }
+        }
+        if (!OidIsValid(packageOid)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("cross-database references are not implemented: %s", name)));
+        }
+    }
+    (void)MemoryContextSwitchTo(colCxt);
 }
 
 /* Convenience routine to read an expression with one possible terminator */
@@ -4156,7 +4394,11 @@ read_sql_construct5(int until,
     const char			right_brack[2] = ")";
     int					loc = 0;
     int					curloc = 0;
-
+    List*               idents = NULL;
+    char*               word1 = NULL;
+    char*               word2 = NULL;
+    int                 nnames = 0;
+    int                 dno    = -1;
     /*
      * ds will do a lot of enlarge, which need to relloc the space, and the old space 
      * will be return to current context. So if we don't switch the context, the original 
@@ -4312,6 +4554,25 @@ read_sql_construct5(int until,
                     /* do nothing */
                 }
                 break;
+            case T_CWORD:
+                idents = yylval.cword.idents;
+                if (list_length(idents) == 2) {
+                    word1 = strVal(linitial(idents));
+                    word2 = strVal(lsecond(idents));
+                } else if (list_length(idents) == 3) {
+                    word1 = strVal(lsecond(idents));
+                    word2 = strVal(lthird(idents));                    
+                }else {
+                    yyerror("syntax error");
+                }
+                if (plpgsql_ns_lookup(plpgsql_ns_top(), false, word1, word2, NULL, &nnames) == NULL) {
+                    dno = plpgsql_pkg_add_unknown_var_to_namespace(yylval.cword.idents);
+                }
+                if (dno != -1) {
+                    appendStringInfoString(&ds, NameListToString(idents));
+                    ds_changed = true;
+                    break;
+                }
             default:
                 tok = yylex();
 
@@ -4402,6 +4663,134 @@ read_sql_construct(int until,
 {
     return read_sql_construct5(until, until2, until3, until3, 0,
                                expected, sqlstart, isexpression, valid_sql, trim, startloc, endtoken);
+}
+/*
+ * get function declare or definition string in package.
+ */
+static char * 
+get_proc_str(int tok)
+{
+    int     blocklevel = 0;
+    int     pre_tok = 0;
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package==NULL) {
+        yyerror("not allowed create procedure in function or procedure.");
+    }
+    tok = yylex(); 
+    StringInfoData      ds;  
+    bool is_defining_proc = false;
+    int startlocation = yylloc;
+    char * spec_proc_str = NULL;
+    MemoryContext oldCxt = MemoryContextSwitchTo(u_sess->plsql_cxt.compile_tmp_cxt);
+    initStringInfo(&ds);
+    MemoryContextSwitchTo(oldCxt);
+    if (u_sess->parser_cxt.is_procedure==false){
+        appendStringInfoString(&ds, " CREATE OR REPLACE FUNCTION ");
+    } else {
+        appendStringInfoString(&ds, " CREATE OR REPLACE PROCEDURE ");
+    }
+    u_sess->parser_cxt.in_package_function_compile = true;
+    while(true)
+    {    
+
+        if (tok == YYEOF) {
+            if (u_sess->parser_cxt.is_procedure==false){
+                yyerror("function is not ended correctly");
+            } else {
+                yyerror("procedure is not ended correctly");
+            }
+        }
+
+        if (tok == ';' && !is_defining_proc) 
+        {
+            break;
+        }
+        /* procedure or function can have multiple blocklevel*/
+        if (tok == K_BEGIN) 
+        {
+            blocklevel++;
+        }
+
+        /* if have is or as,it means in body*/
+        if (tok == K_IS || tok == K_AS)
+        {
+            if (u_sess->plsql_cxt.plpgsql_curr_compile_package->is_spec_compiling) {
+                yyerror("not allow define function or procedure in package specification");
+            } 
+            is_defining_proc = true;
+        }
+
+        if (tok == K_END) 
+        {
+            tok = yylex();
+            /* process end loop*/
+            if (tok == K_LOOP) {
+                continue;
+            }
+            if (blocklevel == 1 && (pre_tok == ';' || pre_tok == K_BEGIN) && (tok == ';' || tok == 0))
+            {
+                break;
+            }
+            if (blocklevel > 1 && (pre_tok == ';' || pre_tok == K_BEGIN) && (tok == ';' || tok == 0))
+            {
+                blocklevel--;
+            }
+        }
+        pre_tok = tok;
+        tok = yylex();
+    }    
+    u_sess->parser_cxt.in_package_function_compile = false;
+    plpgsql_append_source_text(&ds, startlocation, yylloc);
+
+    /* 
+        To use the SQL Parser, we add a string to make SQL parser recognize. 
+        Package specification use SQL parser parse the string too.
+    */
+    if (is_defining_proc == false) {
+        appendStringInfoString(&ds, " AS BEGIN ");
+        appendStringInfoString(&ds, " END;\n");
+        u_sess->parser_cxt.isFunctionDeclare = true;
+    } else {
+        u_sess->parser_cxt.isFunctionDeclare = false;
+    }
+
+    spec_proc_str = pstrdup(ds.data);
+    pfree_ext(ds.data);
+    return spec_proc_str;
+}
+static char* get_init_proc(int tok) 
+{
+    int startlocation = yylloc;
+    char* init_package_str = NULL;
+    StringInfoData      ds;  
+    initStringInfo(&ds);
+    while(true)
+    {  
+        /* 
+          package instantiation still need a token 'END' as end,
+          but it's from package end, For details about how to instantiate
+          a package, see the package instantiation grammer.
+        */
+        if (tok == K_BEGIN)
+            startlocation = yylloc;
+        if (tok == YYEOF)
+            yyerror("procedure is not ended correctly");
+        if (tok == K_END) 
+        {
+            tok = yylex();
+            if (tok == ';' || tok == 0)
+            {
+                break;
+            }
+        }
+        tok = yylex();
+    } 
+    /*
+      package instantiation not need specify end.
+    */
+    plpgsql_append_source_text(&ds, startlocation, yylloc);
+    init_package_str = pstrdup(ds.data);
+    pfree_ext(ds.data);
+    return init_package_str;
 }
 
 static PLpgSQL_type *
@@ -4614,6 +5003,17 @@ make_execsql_stmt(int firsttoken, int location)
             read_into_target(&rec, &row, &have_strict);
             u_sess->plsql_cxt.plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_EXPR;
         }
+        if (tok == T_CWORD && prev_tok!=K_SELECT 
+                           && prev_tok!= K_PERFORM) {
+            List  *dtname = yylval.cword.idents;
+            tok = yylex();
+            if (tok == '(') {
+                plpgsql_push_back_token(tok);
+                continue;
+            }
+            plpgsql_push_back_token(tok);
+            plpgsql_pkg_add_unknown_var_to_namespace(dtname);
+        }
     }
 
     u_sess->plsql_cxt.plpgsql_IdentifierLookup = save_IdentifierLookup;
@@ -4656,6 +5056,7 @@ make_execsql_stmt(int firsttoken, int location)
     execsql->rec	 = rec;
     execsql->row	 = row;
     execsql->placeholders = placeholders;
+    execsql->sqlString = plpgsql_get_curline_query();
 
     return (PLpgSQL_stmt *) execsql;
 }
@@ -4682,6 +5083,7 @@ read_fetch_direction(void)
     fetch->how_many  = 1;
     fetch->expr		 = NULL;
     fetch->returns_multiple_rows = false;
+    fetch->sqlString = plpgsql_get_curline_query();
 
     tok = yylex();
     if (tok == 0)
@@ -4832,6 +5234,7 @@ make_return_stmt(int location)
     newp->lineno   = plpgsql_location_to_lineno(location);
     newp->expr	  = NULL;
     newp->retvarno = -1;
+    newp->sqlString = plpgsql_get_curline_query();
 
     if (u_sess->plsql_cxt.plpgsql_curr_compile->fn_retset)
     {
@@ -4925,6 +5328,7 @@ make_return_next_stmt(int location)
     newp->lineno		= plpgsql_location_to_lineno(location);
     newp->expr		= NULL;
     newp->retvarno	= -1;
+    newp->sqlString = plpgsql_get_curline_query();
 
     if (u_sess->plsql_cxt.plpgsql_curr_compile->out_param_varno >= 0)
     {
@@ -4982,6 +5386,7 @@ make_return_query_stmt(int location)
     newp = (PLpgSQL_stmt_return_query *)palloc0(sizeof(PLpgSQL_stmt_return_query));
     newp->cmd_type = PLPGSQL_STMT_RETURN_QUERY;
     newp->lineno = plpgsql_location_to_lineno(location);
+    newp->sqlString = plpgsql_get_curline_query();
 
     /* check for RETURN QUERY EXECUTE */
     if ((tok = yylex()) != K_EXECUTE)
@@ -5051,6 +5456,9 @@ check_assignable(PLpgSQL_datum *datum, int location)
             break;
         case PLPGSQL_DTYPE_ARRAYELEM:
             /* always assignable? */
+            break;
+        case PLPGSQL_DTYPE_UNKNOWN:
+            /* package variable? */
             break;
         default:
             elog(ERROR, "unrecognized dtype: %d", datum->dtype);
@@ -5284,6 +5692,7 @@ read_using_target(List  **in_expr, PLpgSQL_row **out_row)
         (*out_row)->nfields = out_nfields;
         (*out_row)->fieldnames = (char **)palloc(sizeof(char *) * out_nfields);
         (*out_row)->varnos = (int *)palloc(sizeof(int) * out_nfields);
+        (*out_row)->isImplicit = true;
         while (--out_nfields >= 0)
         {
             (*out_row)->fieldnames[out_nfields] = out_fieldnames[out_nfields];
@@ -5361,6 +5770,7 @@ read_into_scalar_list(char *initial_name,
     row->nfields = nfields;
     row->fieldnames = (char **)palloc(sizeof(char *) * nfields);
     row->varnos = (int *)palloc(sizeof(int) * nfields);
+    row->isImplicit = true;
     while (--nfields >= 0)
     {
         row->fieldnames[nfields] = fieldnames[nfields];
@@ -5473,6 +5883,7 @@ read_into_array_scalar_list(char *initial_name,
     row->nfields = nfields;
     row->fieldnames = (char**)palloc(sizeof(char *) * nfields);
     row->varnos = (int*)palloc(sizeof(int) * nfields);
+    row->isImplicit = true;
     while (--nfields >= 0)
     {
         row->fieldnames[nfields] = fieldnames[nfields];
@@ -5543,6 +5954,7 @@ read_into_placeholder_scalar_list(char *initial_name,
     row->varnos = NULL;
     row->intoplaceholders = intoplaceholders;
     row->intodatums = NULL;
+    row->isImplicit = true;
 
     plpgsql_adddatum((PLpgSQL_datum *)row);
 
@@ -5577,6 +5989,7 @@ make_scalar_list1(char *initial_name,
     row->varnos = (int *)palloc(sizeof(int));
     row->fieldnames[0] = initial_name;
     row->varnos[0] = initial_datum->dno;
+    row->isImplicit = true;
 
     plpgsql_adddatum((PLpgSQL_datum *)row);
 
@@ -5703,6 +6116,11 @@ parse_datatype(const char *string, int location)
     t_thrd.log_cxt.error_context_stack = syntax_errcontext.previous;
 
     /* Okay, build a PLpgSQL_type data structure for it */
+    if (u_sess->plsql_cxt.plpgsql_curr_compile == NULL)
+    {
+        return plpgsql_build_datatype(type_id, typmod, 0);
+    }
+
     return plpgsql_build_datatype(type_id, typmod,
                                   u_sess->plsql_cxt.plpgsql_curr_compile->fn_input_collation);
 }
@@ -5976,6 +6394,7 @@ make_case(int location, PLpgSQL_expr *t_expr,
     newp->t_varno = 0;
     newp->case_when_list = case_when_list;
     newp->have_else = (else_stmts != NIL);
+    newp->sqlString = plpgsql_get_curline_query();
     /* Get rid of list-with-NULL hack */
     if (list_length(else_stmts) == 1 && linitial(else_stmts) == NULL)
         newp->else_stmts = NIL;
@@ -6009,7 +6428,7 @@ make_case(int location, PLpgSQL_expr *t_expr,
                                    plpgsql_build_datatype(INT4OID,
                                                           -1,
                                                           InvalidOid),
-                                   true);
+                                   true, true);
         newp->t_varno = t_var->dno;
 
         foreach(l, case_when_list)
@@ -6130,6 +6549,7 @@ make_callfunc_stmt_no_arg(const char *sqlstart, int location)
     perform->cmd_type = PLPGSQL_STMT_PERFORM;
     perform->lineno = plpgsql_location_to_lineno(location);
     perform->expr = expr;
+    perform->sqlString = plpgsql_get_curline_query();
 
     return (PLpgSQL_stmt *)perform;
 }
@@ -6203,8 +6623,35 @@ parse_lob_open_close(int location)
 		perform->cmd_type = PLPGSQL_STMT_PERFORM;
 		perform->lineno = plpgsql_location_to_lineno(location);
 		perform->expr = expr;
+        perform->sqlString = plpgsql_get_curline_query();
 		return (PLpgSQL_stmt *)perform;
 	}
 	yyerror("syntax error");
 	return NULL;
+}
+
+static void raw_parse_package_function(char* proc_str)
+{
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package!=NULL)
+    {
+        List* raw_parsetree_list = NULL;
+        raw_parsetree_list = raw_parser(proc_str);
+        CreateFunctionStmt* stmt;;
+        stmt = (CreateFunctionStmt *)linitial(raw_parsetree_list);
+        stmt->queryStr = proc_str;
+        if (u_sess->plsql_cxt.plpgsql_curr_compile_package->is_spec_compiling) {
+            stmt->isPrivate = false;
+        } else {
+            stmt->isPrivate = true;
+        }
+        if (u_sess->parser_cxt.isFunctionDeclare) {
+            stmt->isFunctionDeclare = true;
+        } else {
+            stmt->isFunctionDeclare = false;
+        }
+            List *proc_list = u_sess->plsql_cxt.plpgsql_curr_compile_package->proc_list;
+            u_sess->plsql_cxt.plpgsql_curr_compile_package->proc_list = lappend(proc_list,stmt);
+        } else {
+            yyerror("kerword PROCEDURE only use in package compile");
+        }
 }

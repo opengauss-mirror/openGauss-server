@@ -30,12 +30,10 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-ifeq ($(enable_multiple_nodes), yes)
-	OBJS= stmt_retry.o dest.o fastpath.o postgres.o pquery.o utility.o auditfuncs.o
-else
-	OBJS= stmt_retry.o dest.o fastpath.o postgres.o pquery.o utility.o auditfuncs.o \
-      	      autonomoustransaction.o
-endif
+
+OBJS= stmt_retry.o dest.o fastpath.o postgres.o pquery.o utility.o auditfuncs.o \
+            autonomoustransaction.o
+
 
 ifneq (,$(filter $(PORTNAME),cygwin win32))
 override CPPFLAGS += -fPIC -DWIN32_STACK_RLIMIT=$(WIN32_STACK_RLIMIT)

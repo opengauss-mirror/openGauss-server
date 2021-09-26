@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pgxc.h
- *		Postgres-XC flags and connection control information
+ *		openGauss flags and connection control information
  *
  *
  * Portions Copyright (c) 1996-2011  PostgreSQL Global Development Group
@@ -56,6 +56,10 @@ typedef enum {
 
 /* Is the CN receive SQL statement ? */
 #define IS_MAIN_COORDINATOR (IS_PGXC_COORDINATOR && !IsConnFromCoord())
+
+#define ENABLE_THREAD_POOL_DN_LOGICCONN ((g_instance.attr.attr_common.enable_thread_pool && \
+    g_instance.attr.attr_storage.comm_cn_dn_logic_conn &&                                   \
+    IS_PGXC_DATANODE))
 
 #define IS_SERVICE_NODE (g_instance.role == VCOORDINATOR || g_instance.role == VSINGLENODE)
 

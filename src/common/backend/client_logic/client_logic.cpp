@@ -25,6 +25,7 @@
 #include "client_logic/client_logic.h"
 #include "client_logic/cstrings_map.h"
 #include "access/sysattr.h"
+#include "access/tableam.h"
 #include "commands/dbcommands.h"
 #include "catalog/dependency.h"
 #include "catalog/pg_namespace.h"
@@ -32,6 +33,7 @@
 #include "utils/builtins.h"
 #include "utils/timestamp.h"
 #include "utils/acl.h"
+#include "access/hash.h"
 #include "access/heapam.h"
 #include "utils/snapmgr.h"
 #include "utils/syscache.h"
@@ -47,7 +49,6 @@
 #include "tcop/utility.h"
 #include "pgxc/pgxc.h"
 #include "utils/fmgroids.h"
-#include "MurmurHash3.h"
 
 #define INIT_VALUES_NULLS(type, id)                                                         \
     do {                                                                                    \
@@ -64,6 +65,99 @@
 const size_t ENCRYPTED_VALUE_MIN_LENGTH = 170;
 const size_t ENCRYPTED_VALUE_MAX_LENGTH = 1024;
 static bool get_cmk_name(const Oid global_key_id, NameData &cmk_name);
+
+void delete_client_master_keys(Oid roleid)
+{
+    Relation relation = heap_open(ClientLogicGlobalSettingsId, AccessShareLock);
+    if (relation == NULL) {
+        return;
+    }
+    HeapTuple rtup = NULL;
+    Form_gs_client_global_keys rel_data = NULL;
+    List *global_keys = NIL;
+    ListCell* cell = NULL;
+    TableScanDesc scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+    while (scan && (rtup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
+        rel_data = (Form_gs_client_global_keys)GETSTRUCT(rtup);
+        if (rel_data == NULL) {
+            continue;
+        }
+        if (rel_data->key_owner == roleid) {
+            Oid global_key_id = HeapTupleGetOid(rtup);
+            if (global_key_id != InvalidOid) {
+                KeyOidNameMap* key_map = (KeyOidNameMap*)palloc(sizeof(KeyOidNameMap));
+                key_map->key_oid = global_key_id;
+                key_map->key_name = rel_data->global_key_name;
+                global_keys = lappend(global_keys, key_map);
+            }
+        }
+    }
+    tableam_scan_end(scan);
+    heap_close(relation, AccessShareLock);
+
+    foreach (cell, global_keys) {
+        KeyOidNameMap *global_key = (KeyOidNameMap *)lfirst(cell);
+        Oid global_key_id = global_key->key_oid;
+        ObjectAddress cmk_addr;
+        cmk_addr.classId = ClientLogicGlobalSettingsId;
+        cmk_addr.objectId = global_key_id;
+        cmk_addr.objectSubId = 0;
+        ereport(NOTICE, (errmsg("drop cascades to client master key: %s", global_key->key_name.data)));
+        performDeletion(&cmk_addr, DROP_CASCADE, 0);
+    }
+    list_free(global_keys);
+}
+
+void delete_column_keys(Oid roleid)
+{
+    Relation relation = heap_open(ClientLogicColumnSettingsId, AccessShareLock);
+    if (relation == NULL) {
+        return;
+    }
+    HeapTuple rtup = NULL;
+    Form_gs_column_keys rel_data = NULL;
+    List *column_keys = NIL;
+    ListCell* cell = NULL;
+    TableScanDesc scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
+    while (scan && (rtup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection))) {
+        rel_data = (Form_gs_column_keys)GETSTRUCT(rtup);
+        if (rel_data == NULL) {
+            continue;
+        }
+        if (rel_data->key_owner == roleid) {
+            Oid column_key_id = HeapTupleGetOid(rtup);
+            if (column_key_id != InvalidOid) {
+                column_keys = lappend_oid(column_keys, column_key_id);
+            }
+        }
+    }
+    tableam_scan_end(scan);
+    heap_close(relation, AccessShareLock);
+
+    foreach (cell, column_keys) {
+        Oid column_key_id = lfirst_oid(cell);
+        ObjectAddress cek_addr;
+        cek_addr.classId = ClientLogicColumnSettingsId;
+        cek_addr.objectId = column_key_id;
+        cek_addr.objectSubId = 0;
+        performDeletion(&cek_addr, DROP_CASCADE, 0);
+    }
+    list_free(column_keys);
+}
+
+static bool check_feature_enabled()
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    if (!IsConnFromCoord() && !u_sess->attr.attr_common.enable_full_encryption) {
+        return false;
+    }
+#else
+    if (!u_sess->attr.attr_common.enable_full_encryption) {
+        return false;
+    }
+#endif
+return true;
+}
 
 static Oid check_namespace(const List *key_name, Node * const stmt, char **keyname)
 {
@@ -222,6 +316,12 @@ void insert_gs_sec_encrypted_column_tuple(CeHeapInfo *ce_heap_info, Relation rel
     if (!IS_PGXC_COORDINATOR)
         return;
 #endif
+    if (!check_feature_enabled()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to add column encryption key when client encryption is disabled.")));
+    }
+    
     HeapTuple htup = NULL;
 
     bool encrypted_columns_nulls[Natts_gs_encrypted_columns];
@@ -319,25 +419,6 @@ static bool process_global_settings_flush_args(Oid global_key_id, const char *gl
     return true;
 }
 
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-static void check_key_path(const char *key_path)
-{
-    const char *key_path_tag = "gs_ktool/";
-    if (key_path == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
-    }
-    if ((strlen(key_path) <= strlen(key_path_tag)) || 
-        (strncmp(key_path, key_path_tag, strlen(key_path_tag)) != 0)) {
-        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
-    }
-    for (size_t i = strlen(key_path_tag); i < strlen(key_path); i++) {
-        if (key_path[i] < '0' || key_path[i] > '9') {
-            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key path")));
-        }
-    }
-}
-#endif
-
 static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid global_key_id)
 {
     /* get arguments */
@@ -351,34 +432,14 @@ static int process_global_settings_args(CreateClientLogicGlobal *parsetree, Oid 
                 global_function = global_param->value;
                 break;
             case ClientLogicGlobalProperty::CMK_KEY_STORE: {
-                CmkKeyStore key_store = get_key_store_from_string(global_param->value);
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-                if (key_store != CmkKeyStore::GS_KTOOL) {
-#else
-                if (key_store != CmkKeyStore::LOCALKMS) {
-#endif              
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid key store")));
-                }
                 string_args.set("KEY_STORE", global_param->value);
                 break;
             }
             case ClientLogicGlobalProperty::CMK_KEY_PATH: {
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-                check_key_path(global_param->value);
-#endif  
                 string_args.set("KEY_PATH", global_param->value);
                 break;
             }
             case ClientLogicGlobalProperty::CMK_ALGORITHM: {
-                CmkAlgorithm cmk_algo = get_algorithm_from_string(global_param->value);
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
-                if (cmk_algo != CmkAlgorithm::AES_256_CBC) {
-#else
-                if (cmk_algo != CmkAlgorithm::RSA_2048) {
-#endif
-
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("Invalid algorithm")));
-                }
                 string_args.set("ALGORITHM", global_param->value);
                 break;
             }
@@ -562,6 +623,11 @@ static bool get_cmk_name(const Oid global_key_id, NameData &cmk_name)
 static bool process_column_settings_flush_args(Oid column_key_id, const char *column_function, const char *key,
     size_t keySize, const char *value, size_t valueSize)
 {
+    if (!check_feature_enabled()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to process column keys when client encryption is disabled.")));
+    }
     char key_str[MAX_ARGS_SIZE];
     char value_str[MAX_ARGS_SIZE];
     errno_t rc = EOK;
@@ -677,7 +743,7 @@ int process_column_settings(CreateClientLogicColumn *parsetree)
     Acl *key_acl = get_user_default_acl(ACL_OBJECT_COLUMN_SETTING, user_id, namespace_id);
 
     schema_name = get_namespace_name(namespace_id);
-    /* retrieve global setting id (foreign key) */
+    /* retrieve client master key id (foreign key) */
     ListCell *key_item(NULL);
     Oid global_key_id(InvalidOid);
     const char *global_key_name = NULL;
@@ -720,10 +786,9 @@ int process_column_settings(CreateClientLogicColumn *parsetree)
     securec_check(rc, "\0", "\0");
 
     /* fill catalog variable */
-    Oid distid = 0;
     column_settings_values[Anum_gs_column_keys_column_key_name - 1] =
         DirectFunctionCall1(namein, CStringGetDatum(cek_name));
-    MurmurHash3_x86_32(fqdn, strlen(fqdn), 0x12345, &distid);
+    Oid distid = hash_any((unsigned char*)fqdn, strlen(fqdn));
     column_settings_values[Anum_gs_column_keys_column_key_distributed_id - 1] = ObjectIdGetDatum(distid);
     column_settings_values[Anum_gs_column_keys_global_key_id - 1] = ObjectIdGetDatum(global_key_id);
     column_settings_values[Anum_gs_column_keys_key_namespace - 1] = ObjectIdGetDatum(namespace_id);
@@ -807,6 +872,7 @@ int drop_global_settings(DropStmt *stmt)
                 errmsg("Un-support to drop client master key when client encryption is disabled.")));
     }
 #endif
+    
     char *global_key_name = NULL;
     ListCell *cell = NULL;
     foreach (cell, stmt->objects) {
@@ -975,6 +1041,11 @@ void remove_cmk_by_id(Oid id)
 }
 void remove_encrypted_col_by_id(Oid id)
 {
+    if (!check_feature_enabled()) {
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                errmsg("Un-support to remove encrypted column when client encryption is disabled.")));
+    }
     Relation ce_rel = heap_open(ClientLogicCachedColumnsId, RowExclusiveLock);
     HeapTuple tup = SearchSysCache1(CEOID, ObjectIdGetDatum(id));
     if (!HeapTupleIsValid(tup)) /* should not happen */

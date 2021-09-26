@@ -45,7 +45,7 @@
 #include "storage/procarray.h"
 #include "storage/shmem.h"
 #include "storage/sinvaladt.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "threadpool/threadpool.h"
 #include "utils/catcache.h"
 #include "gs_threadlocal.h"
@@ -1260,7 +1260,7 @@ static void CreateGTTRelFiles(const ResultRelInfo* resultRelInfo)
     UnlinkJunkRelFile(relation);
 
     RelationCreateStorage(
-        relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, InvalidOid, relation);
+        relation->rd_node, RELPERSISTENCE_GLOBAL_TEMP, relation->rd_rel->relowner, InvalidOid, relation);
     for (i = 0; i < resultRelInfo->ri_NumIndices; i++) {
         Relation index = resultRelInfo->ri_IndexRelationDescs[i];
         /* remove junk files when other session exited unexpected */
@@ -1279,7 +1279,7 @@ static void CreateGTTRelFiles(const ResultRelInfo* resultRelInfo)
         UnlinkJunkRelFile(toastrel);
 
         RelationCreateStorage(
-            toastrel->rd_node, RELPERSISTENCE_GLOBAL_TEMP, toastrel->rd_rel->relowner, InvalidOid, InvalidOid, toastrel);
+            toastrel->rd_node, RELPERSISTENCE_GLOBAL_TEMP, toastrel->rd_rel->relowner, InvalidOid, toastrel);
 
         ListCell* indlist = NULL;
         foreach (indlist, RelationGetIndexList(toastrel)) {
@@ -1309,6 +1309,14 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
 
     if (!RELATION_IS_GLOBAL_TEMP(relation)) {
         return;
+    }
+
+    if (u_sess->attr.attr_storage.max_active_gtt <= 0) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Global temporary table feature is disable"),
+                errhint("You might need to increase max_active_global_temporary_table "
+                        "to enable this feature.")));
     }
 
     if (!(operation == CMD_UTILITY || operation == CMD_INSERT)) {

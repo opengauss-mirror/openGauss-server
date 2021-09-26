@@ -49,7 +49,7 @@ static bool do_drop_slot = false;
 static char** options;
 static size_t noptions = 0;
 static bool g_change_plugin = false;
-static const char* plugin = NULL;
+char* plugin = "mppdb_decoding";
 
 /* Global State */
 static int outfd = -1;
@@ -636,7 +636,7 @@ static int getOptions(const int argc, char* const* argv)
     int c;
     int option_index;
     uint32 hi, lo;
-    while ((c = getopt_long(argc, argv, "f:F:nvd:h:o:p:U:wWP:s:S:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:F:nvd:h:o:p:U:wWP:s:S:I:", long_options, &option_index)) != -1) {
         switch (c) {
             /* general options */
             case 'f':
@@ -710,7 +710,7 @@ static int getOptions(const int argc, char* const* argv)
             break;
             case 'P':
                 check_env_value_c(optarg);
-                if (plugin) {
+                if (g_change_plugin && plugin) {
                     pfree_ext(plugin);
                 }
                 plugin = pg_strdup(optarg);
@@ -721,12 +721,12 @@ static int getOptions(const int argc, char* const* argv)
                 if (checkIsDigit(optarg) == 0) {
                     fprintf(stderr, _("%s: status interval reset to 0\n"), progname);
                 }
-                if ((atoi(optarg)) < 0 || (atoi(optarg) * 1000) > PG_INT32_MAX) {
-                    fprintf(stderr, _("%s: invalid status interval \"%s\"\n"), progname, optarg);
-                    return -1;
-                }
 
                 standby_message_timeout = atoi(optarg) * 1000;
+
+                if (standby_message_timeout < 0 || standby_message_timeout > PG_INT32_MAX) {
+                    standby_message_timeout = 0;
+                }
                 break;
             case 'F':
                 check_env_value_c(optarg);

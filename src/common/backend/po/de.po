@@ -12160,8 +12160,8 @@ msgstr "konnte pg_hba.conf nicht laden"
 
 #: postmaster/postmaster.c:1156
 #, c-format
-msgid "%s: could not locate matching postgres executable"
-msgstr "%s: konnte kein passendes Programm »postgres« finden"
+msgid "%s: could not locate matching openGauss executable"
+msgstr "%s: konnte kein passendes Programm »openGauss« finden"
 
 #: postmaster/postmaster.c:1179 utils/misc/tzparser.c:325
 #, c-format
@@ -12251,7 +12251,7 @@ msgstr "ungültiges Layout des Startpakets: Abschluss als letztes Byte erwartet"
 
 #: postmaster/postmaster.c:1707
 #, c-format
-msgid "no PostgreSQL user name specified in startup packet"
+msgid "no openGauss user name specified in startup packet"
 msgstr "kein PostgreSQL-Benutzername im Startpaket angegeben"
 
 #: postmaster/postmaster.c:1764

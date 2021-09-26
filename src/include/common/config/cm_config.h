@@ -88,6 +88,9 @@
 
 #define GROUP_NAME_VERSION1 "group_version1"
 #define GROUP_NAME_VERSION2 "group_version2"
+#define GROUP_NAME_VERSION1_BUCKET "group_version1_bucket_"
+#define CHILD_NODE_GROUP_NUM 4
+#define MIN_BUCKETCOUNT 32
 
 #define OPEN_FILE_ERROR -1
 #define OUT_OF_MEMORY -2
@@ -132,6 +135,8 @@
 #define ETCD_KEY_LENGTH 1024
 #define ETCD_VLAUE_LENGTH 1024
 
+#define MALLOC_BY_NODE_NUM 0
+#define MALLOC_BY_NODE_MAXNUM 1
 #define CASCADE_STANDBY_TYPE 3
 #define STATIC_CONFIG_FILE "cluster_static_config"
 #define DYNAMIC_DNROLE_FILE "cluster_dnrole_config"
@@ -155,6 +160,10 @@ typedef enum cmServerLevel {
     CM_SERVER_NONE = 0,  // no cm_server
     CM_SERVER_LEVEL_1 = 1
 } cmServerLevel;
+
+typedef enum ctlToCmNotifyDetail {
+    CLUSTER_STARTING = 0
+} ctlToCmNotifyDetail;
 
 typedef struct staticConfigHeader {
     uint32 crc;
@@ -423,7 +432,8 @@ extern char* g_local_node_name;
 extern char* g_lcname;
 
 extern int read_single_file(const char *file_path, int *err_no, uint32 nodeId, const char *dataPath);
-extern int read_config_file(const char* file_path, int* err_no);
+extern int read_config_file(const char* file_path, int* err_no,
+    bool inReload = false, int mallocByNodeNum = MALLOC_BY_NODE_NUM);
 extern int read_logic_cluster_name(const char* file_path, logicClusterList& lcList, int* err_no);
 extern int read_logic_cluster_config_files(const char* file_path, int* err_no);
 extern int read_lc_config_file(const char* file_path, int* err_no);

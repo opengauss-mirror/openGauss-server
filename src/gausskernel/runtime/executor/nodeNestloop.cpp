@@ -22,11 +22,11 @@
 #include "knl/knl_variable.h"
 
 #include "access/tableam.h"
-#include "executor/execdebug.h"
-#include "executor/nodeNestloop.h"
-#include "executor/execStream.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeNestloop.h"
+#include "executor/exec/execStream.h"
 #include "utils/memutils.h"
-#include "executor/nodeHashjoin.h"
+#include "executor/node/nodeHashjoin.h"
 
 static void MaterialAll(PlanState* node)
 {

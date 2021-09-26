@@ -3,7 +3,7 @@
  * sortsupport.h
  *	  Framework for accelerated sorting.
  *
- * Traditionally, PostgreSQL has implemented sorting by repeatedly invoking
+ * Traditionally, openGauss has implemented sorting by repeatedly invoking
  * an SQL-callable comparison function "cmp(x, y) returns int" on pairs of
  * values to be compared, where the comparison function is the BTORDER_PROC
  * pg_amproc support function of the appropriate btree index opclass.

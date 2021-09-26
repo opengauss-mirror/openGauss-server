@@ -1,7 +1,7 @@
 /*
  * pgbench.c
  *
- * A simple benchmark program for PostgreSQL
+ * A simple benchmark program for openGauss
  * Originally written by Tatsuo Ishii and enhanced by many contributors.
  *
  * contrib/pgbench/pgbench.c

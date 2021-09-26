@@ -1387,42 +1387,44 @@ explain (costs off)
 select 1 from hint_t1 as t1 where t1.a =
 (select /*+ leading((t3 t2)) mergejoin(t2 t3)*/ sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
 on (t2.a = t3.a) where t1.b = t2.b);
-                      QUERY PLAN                       
--------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Hash Join
-   Hash Cond: ((t1.a = (sum(t2.a))) AND (t1.b = t2.b))
+   Hash Cond: ((t1.b = subquery."?column?") AND (t1.a = subquery.a))
    ->  Seq Scan on hint_t1 t1
    ->  Hash
-         ->  HashAggregate
-               Group By Key: t2.b
-               ->  Merge Join
-                     Merge Cond: (t3.a = t2.a)
-                     ->  Sort
-                           Sort Key: t3.a
-                           ->  Seq Scan on hint_t3 t3
-                     ->  Sort
-                           Sort Key: t2.a
-                           ->  Seq Scan on hint_t2 t2
-(14 rows)
+         ->  Subquery Scan on subquery
+               ->  HashAggregate
+                     Group By Key: t2.b
+                     ->  Merge Join
+                           Merge Cond: (t3.a = t2.a)
+                           ->  Sort
+                                 Sort Key: t3.a
+                                 ->  Seq Scan on hint_t3 t3
+                           ->  Sort
+                                 Sort Key: t2.a
+                                 ->  Seq Scan on hint_t2 t2
+(15 rows)
 
 explain (costs off)
 select 1 from hint_t1 as t1 where t1.a =
 (select /*+ nestloop(t2 t3)*/ sum(t2.a) as a from hint_t2 as t2 join hint_t3 as t3
 on (t2.a = t3.a) where t1.b = t2.b);
-                      QUERY PLAN                       
--------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Hash Join
-   Hash Cond: ((t1.a = (sum(t2.a))) AND (t1.b = t2.b))
+   Hash Cond: ((t1.b = subquery."?column?") AND (t1.a = subquery.a))
    ->  Seq Scan on hint_t1 t1
    ->  Hash
-         ->  HashAggregate
-               Group By Key: t2.b
-               ->  Nested Loop
-                     Join Filter: (t2.a = t3.a)
-                     ->  Seq Scan on hint_t2 t2
-                     ->  Materialize
-                           ->  Seq Scan on hint_t3 t3
-(11 rows)
+         ->  Subquery Scan on subquery
+               ->  HashAggregate
+                     Group By Key: t2.b
+                     ->  Nested Loop
+                           Join Filter: (t2.a = t3.a)
+                           ->  Seq Scan on hint_t2 t2
+                           ->  Materialize
+                                 ->  Seq Scan on hint_t3 t3
+(12 rows)
 
 explain (costs off)
 select 1 from hint_t1 as t1 where t1.a in
@@ -2234,8 +2236,8 @@ WARNING:  unused hint: No IndexScan(hint_vec hint_vec_index2)
 (3 rows)
 
 explain (costs off) select hint_t1.a from hint_t1
-join  (select /*+ hashjoin(t2 aa)*/ a from hint_t2 as t2 
-      where t2.a in (select /*+ blockname(aa)*/ a from hint_t3 group by a))as bb 
+join  (select /*+ hashjoin(t2 aa)*/ a from hint_t2 as t2
+      where t2.a in (select /*+ blockname(aa)*/ a from hint_t3 group by a))as bb
   on (hint_t1.a = bb.a);
                      QUERY PLAN                      
 -----------------------------------------------------

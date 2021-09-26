@@ -303,7 +303,7 @@ int CsvParserImpl::splitFields(char *buf, int len, char **raw_fields, int max_fi
         size_t input_len;
         bool saw_quote = false;
 
-        if (fieldno > max_fields) {
+        if (fieldno >= max_fields) {
             // extra column, check if ignore_extra_data
             if (!m_options->ignore_extra_data) {
                 ereport(ERROR,

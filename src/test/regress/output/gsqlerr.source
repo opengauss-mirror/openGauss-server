@@ -1,14 +1,4 @@
 --for LLT
---test call scanEreport and generate errmsg.h
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport
-argc error.
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport 0
-argv[1] or argv[2] or argv[4] is null.
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport src/ src/errcodes.txt escan.txt
-argv[1] or argv[2] or argv[4] is null.
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../.. ereport.txt src/errcodes.txt escan.txt
-call resolved_path:src/errcodes.txt get resolved_name error.
-\! @abs_srcdir@/../../../../src/bin/gsqlerr/scanEreport @abs_srcdir@/../../../.. ereport.txt @abs_srcdir@/../../../../src/common/backend/utils/errcodes.txt escan.txt
 --test gsqlerr error
 \! @abs_bindir@/gsqlerr
 Invalid option, please use 'gsqlerr -h' for more information.
@@ -50,32 +40,3 @@ Options:
 \! @abs_bindir@/gsqlerr -v
 
 V1.0 for gsqlerror. 
---test gsql outer -errcode
-\! @abs_bindir@/gsqlerr 0
-Invalid option, please use 'gsqlerr -h' for more information.
-Display errorcode description
-
-gsqlerror [options...]
-
-Options:
-  -h               print online manual
-  -v               print version
-  [errorcode]      print errorcode description
---?.*
-
-\! @abs_bindir@/gsqlerr 1
-
-[Description]
---?.*
-
-[Causes]
---?.*
-
-[Action]
---?.*
-
-\! @abs_bindir@/gsqlerr 9999
-
-Error code 9999 does not exist.
---?.*
-

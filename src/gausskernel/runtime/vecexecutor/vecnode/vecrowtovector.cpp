@@ -280,7 +280,9 @@ static void CheckTypeSupportRowToVec(List* targetlist)
         entry = (TargetEntry*)lfirst(cell);
         if (IsA(entry->expr, Var)) {
             var = (Var*)entry->expr;
-            if (var->varattno > 0 && var->varoattno > 0 && !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
+            if (var->varattno > 0 && var->varoattno > 0
+                && var->vartype != TIDOID // cstore support for hidden column CTID
+                && !IsTypeSupportedByCStore(var->vartype, var->vartypmod)) {
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("type \"%s\" is not supported in column store",
                         format_type_with_typemod(var->vartype, var->vartypmod))));

@@ -1,0 +1,89 @@
+--load python3 if want to load python2: create extension plpythonu
+CREATE EXTENSION plpython3u;
+CREATE TABLE temp (a INT ,b INT) ;
+INSERT INTO temp VALUES (1,2),(2,3),(3,4),(4,5),(5,6);
+CREATE OR REPLACE FUNCTION pymax(a INT, b INT)
+RETURNS INT
+LANGUAGE plpython3u FENCED
+AS $$
+if a > b:
+    return a;
+else:
+    return b;
+$$;
+SELECT pymax(1, 2);
+
+SELECT pymax(1 + 3, 2);
+
+SELECT pymax(a, b) FROM temp;
+
+CREATE OR REPLACE FUNCTION pyless(a INT, b INT)
+RETURNS INT
+LANGUAGE plpython3u FENCED
+AS $$
+import numpy
+if a < b:
+    return a;
+else:
+    return b;
+$$;
+
+SELECT pyless(1, 2);
+
+SELECT pyless(1 + 3, 2);
+
+SELECT pyless(a, b) FROM temp;
+
+CREATE OR REPLACE FUNCTION pyequal(a INT, b INT)
+RETURNS BOOLEAN
+LANGUAGE plpython3u FENCED
+AS $$
+return a==b
+$$;
+
+SELECT pyequal(1, 2);
+
+SELECT pyequal(1 + 3, 2 + 2);
+
+SELECT pyequal(a, b) FROM temp;
+
+CREATE OR REPLACE FUNCTION printa()
+RETURNS VARCHAR
+LANGUAGE plpython3u FENCED
+AS $$
+return 'AAAA'
+$$;
+
+SELECT printa();
+
+CREATE OR REPLACE FUNCTION printb()
+RETURNS VARCHAR
+LANGUAGE plpython3u FENCED
+AS $$
+return 'BBBB'
+$$;
+
+SELECT printb();
+
+CREATE TABLE employee (name TEXT, salary INTEGER, age INTEGER);
+
+INSERT INTO employee VALUES ('tom', 2000, 20),('jerry', 3000, 25);
+
+CREATE OR REPLACE FUNCTION make_pair (name TEXT, value INTEGER)
+RETURNS TEXT
+AS $$
+  return  "name:" +  name + ", value:" + str(value)
+$$ LANGUAGE plpython3u FENCED;
+
+SELECT make_pair(name, age) FROM employee;
+
+-- cleanup tables and functions in random order
+DROP TABLE temp;
+DROP TABLE employee;
+DROP FUNCTION pymax;
+DROP FUNCTION pyless;
+DROP FUNCTION printa;
+DROP FUNCTION printb;
+DROP FUNCTION make_pair;
+
+SELECT 'DB4AI PLPYTHON FENCED UDF TEST COMPLETED';

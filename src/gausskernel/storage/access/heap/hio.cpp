@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hio.cpp
- *	  POSTGRES heap access method input/output code.
+ *	  openGauss heap access method input/output code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -20,12 +20,15 @@
 #include "access/hio.h"
 #include "access/transam.h"
 #include "access/visibilitymap.h"
+#include "access/ustore/knl_upage.h"
 #include "commands/tablespace.h"
 #include "storage/buf/bufmgr.h"
+#include "storage/buf/bufpage.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/snapmgr.h"
+#include "utils/rel.h"
 
 /*
  * RelationPutHeapTuple - place tuple at specified page
@@ -63,7 +66,7 @@ void RelationPutHeapTuple(Relation relation, Buffer buffer, HeapTuple tuple, Tra
 /*
  * Read in a buffer, using bulk-insert strategy if bistate isn't NULL.
  */
-static Buffer ReadBufferBI(Relation relation, BlockNumber target_block, BulkInsertState bistate)
+Buffer ReadBufferBI(Relation relation, BlockNumber target_block, BulkInsertState bistate)
 {
     Buffer buffer;
 
@@ -106,19 +109,57 @@ static Buffer ReadBufferBI(Relation relation, BlockNumber target_block, BulkInse
  * amount which ramps up as the degree of contention ramps up, but limiting
  * the result to some sane overall value.
  */
+void CheckRelation(const Relation relation, int* extraBlocks, int lockWaiters)
+{
+    if (RelationIsIndex(relation)) {
+        if (RelationIsBucket(relation)) {
+            /* bucket relation need less extra blocks */
+            *extraBlocks = Min(4, lockWaiters);
+        } else {
+            *extraBlocks = Min(8, lockWaiters);
+        }
+    } else {
+        if (RelationIsBucket(relation)) {
+               /* bucket relation need less extra blocks */
+               *extraBlocks = Min(256, lockWaiters);
+           } else {
+               *extraBlocks = Min(512, lockWaiters * 20);
+           }
+    }
+}
+
+static void UBtreeAddExtraBlocks(Relation relation, BulkInsertState bistate)
+{
+    int extraBlocks = 0;
+    int lockWaiters = RelationExtensionLockWaiterCount(relation);
+    if (lockWaiters <= 0) {
+        return;
+    }
+    CheckRelation(relation, &extraBlocks, lockWaiters);
+    while (extraBlocks-- >= 0) {
+        /* Ouch - an unnecessary lseek() each time through the loop! */
+        Buffer buffer = ReadBufferBI(relation, P_NEW, bistate);
+        /* ubtree don't need to read or write here, and don't use FSM */
+        ReleaseBuffer(buffer); /* just release the buffer */
+    }
+}
+
 void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
 {
-    Page page;
     BlockNumber block_num = InvalidBlockNumber;
     BlockNumber first_block = InvalidBlockNumber;
     int extra_blocks = 0;
-    int lock_waiters = 0;
     Size freespace = 0;
-    Buffer buffer;
-    HeapPageHeader phdr;
+    bool isuheap = RelationIsUstoreFormat(relation);
+
+    if (RelationIsUstoreIndex(relation)) {
+        /* ubtree, use another bypass */
+        UBtreeAddExtraBlocks(relation, bistate);
+        return;
+    }
 
     /* Use the length of the lock wait queue to judge how much to extend. */
-    lock_waiters = RelationExtensionLockWaiterCount(relation);
+    int lock_waiters = RelationExtensionLockWaiterCount(relation);
     if (lock_waiters <= 0) {
         return;
     }
@@ -131,40 +172,41 @@ void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate)
      * Index relation tuple is smaller than the heap page, so not need expand
      * too many page at a time.
      */
-    if (RelationIsIndex(relation)) {
-        if (RelationIsBucket(relation)) {
-            /* bucket relation need less extra blocks */
-            extra_blocks = Min(4, lock_waiters);
-        } else {
-            extra_blocks = Min(8, lock_waiters);
-        }
-    } else {
-        if (RelationIsBucket(relation)) {
-               /* bucket relation need less extra blocks */
-               extra_blocks = Min(256, lock_waiters);
-           } else {
-               extra_blocks = Min(512, lock_waiters * 20);
-           }
-    }
-
+    CheckRelation(relation, &extra_blocks, lock_waiters);
     while (extra_blocks-- >= 0) {
         /* Ouch - an unnecessary lseek() each time through the loop! */
-        buffer = ReadBufferBI(relation, P_NEW, bistate);
+        Buffer buffer = ReadBufferBI(relation, P_NEW, bistate);
 
         /* Extend by one page. */
         LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
-        page = BufferGetPage(buffer);
+        Page page = BufferGetPage(buffer);
+
         if (!RelationIsIndex(relation)) {
-            phdr = (HeapPageHeader)page;
-            PageInit(page, BufferGetPageSize(buffer), 0, true);
-            phdr->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
-            phdr->pd_multi_base = 0;
-            MarkBufferDirty(buffer);
+            if (isuheap) {
+                UHeapPageHeaderData* uheapPage = (UHeapPageHeaderData*)page;
+                UPageInit<UPAGE_HEAP>(page, BufferGetPageSize(buffer), UHEAP_SPECIAL_SIZE,
+                    RelationGetInitTd(relation));
+                uheapPage->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
+                /* Mark the page dirty so we don't lose init information */
+                MarkBufferDirty(buffer); 
+            } else {
+                HeapPageHeader phdr = (HeapPageHeader)page;
+                PageInit(page, BufferGetPageSize(buffer), 0, true);
+                phdr->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
+                phdr->pd_multi_base = 0;
+                const char* algo = RelationGetAlgo(relation);
+                if (RelationisEncryptEnable(relation) || (algo && *algo != '\0')) {
+                    phdr->pd_upper -= sizeof(TdePageInfo);
+                    phdr->pd_special -= sizeof(TdePageInfo);
+                    PageSetTDE(page);
+                }
+                MarkBufferDirty(buffer);
+            }
         }
 
         block_num = BufferGetBlockNumber(buffer);
         if (!RelationIsIndex(relation)) {
-            freespace = PageGetHeapFreeSpace(page);
+            freespace = RelationIsUstoreFormat(relation) ? PageGetUHeapFreeSpace(page) : PageGetHeapFreeSpace(page);
         } else {
             freespace = BLCKSZ - 1;
         }
@@ -542,6 +584,9 @@ loop:
          */
         target_block = RecordAndGetPageWithFreeSpace(relation, target_block, page_free_space,
                                                      len + save_free_space + extralen);
+        ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
+                         errmsg("RelationGetBufferForTuple, get target block %u from FSM, nblocks in relation is %u",
+                                target_block, smgrnblocks(relation->rd_smgr, MAIN_FORKNUM))));
     }
 
     /*
@@ -634,6 +679,16 @@ loop:
     PageInit(page, BufferGetPageSize(buffer), 0, true);
     phdr->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
     phdr->pd_multi_base = 0;
+    const char* algo = RelationGetAlgo(relation);
+    if (RelationisEncryptEnable(relation) || (algo && *algo != '\0')) {
+        /* 
+         * For the reason of saving TdeInfo,
+         * we need to move the pointer(pd_special) forward by the length of TdeInfo.
+         */
+        phdr->pd_upper -= sizeof(TdePageInfo);
+        phdr->pd_special -= sizeof(TdePageInfo);
+        PageSetTDE(page);
+    }
 
     if (len > PageGetHeapFreeSpace(page)) {
         /* We should not get here given the test at the top */

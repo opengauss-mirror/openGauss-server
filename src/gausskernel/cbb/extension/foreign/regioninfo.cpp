@@ -68,14 +68,15 @@ char* readDataFromJsonFile(char* region)
 
     StringInfo regionMapfilePath = makeStringInfo();
     const char* gausshome = gs_getenv_r("GAUSSHOME");
+    char real_gausshome[PATH_MAX + 1] = {'\0'};
 
-    if (NULL != gausshome && 0 != strcmp(gausshome, "\0")) {
-        if (backend_env_valid(gausshome, "GAUSSHOME") == false) {
+    if (NULL != gausshome && 0 != strcmp(gausshome, "\0") && realpath(gausshome, real_gausshome) != NULL) {
+        if (backend_env_valid(real_gausshome, "GAUSSHOME") == false) {
             ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
             errmsg("Incorrect backend environment variable $GAUSSHOME"),
             errdetail("Please refer to the backend instance log for the detail")));
         }
-        appendStringInfo(regionMapfilePath, "%s/etc/%s", gausshome, regionMapfileName);
+        appendStringInfo(regionMapfilePath, "%s/etc/%s", real_gausshome, regionMapfileName);
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_FDW_ERROR),

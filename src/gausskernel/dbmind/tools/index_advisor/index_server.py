@@ -151,8 +151,7 @@ class IndexServer:
             if self._kwargs['driver']:
                 try:
                     import psycopg2
-                    cmd = cmd.replace('index_advisor_workload.py', 
-                                      'index_advisor_workload_driver.py')
+                    cmd += ' --driver'
                 except ImportError:
                     self.logger.warning('Driver import failed, use gsql to connect to the database.')
             self.logger.info('Index advisor cmd:%s' % cmd.split('|')[-1])

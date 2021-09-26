@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * inval.c
- *	  POSTGRES cache invalidation dispatcher code.
+ *	  openGauss cache invalidation dispatcher code.
  *
  *	This is subtle stuff, so pay attention:
  *
@@ -100,10 +100,10 @@
 #include "catalog/catalog.h"
 #include "catalog/pg_proc.h"
 #include "commands/prepare.h"
-#include "miscadmin.h"
 #include "postmaster/postmaster.h"
+#include "miscadmin.h"
 #include "storage/sinval.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/inval.h"
 #include "utils/globalplancache.h"
 #include "utils/memutils.h"
@@ -522,7 +522,6 @@ void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
          * short-circuit test is possible here.
          */
         RelFileNodeBackend rnode;
-
         RelFileNodeCopy(rnode.node, msg->sm.rnode, InvalidBktId);
         rnode.backend = (msg->sm.backend_hi << 16) | (int)msg->sm.backend_lo;
         smgrclosenode(rnode);
@@ -1270,7 +1269,7 @@ void CacheInvalidateSmgr(RelFileNodeBackend rnode)
 {
     SharedInvalidationMessage msg;
 
-    if (rnode.node.bucketNode == InvalidBktId) {
+    if (!IsSegmentFileNode(rnode.node)) {
         msg.sm.id = SHAREDINVALSMGR_ID;
         msg.sm.backend_hi = rnode.backend >> 16;
         msg.sm.backend_lo = rnode.backend & 0xffff;

@@ -46,16 +46,19 @@ static int numCatalogIds = 0;
 static TableInfo* tblinfo;
 static TypeInfo* typinfo;
 static FuncInfo* funinfo;
+static PkgInfo* packageinfo;
 static OprInfo* oprinfo;
 static NamespaceInfo* nspinfo;
 static int numTables;
 static int numTypes;
+static int numPackages;
 static int numFuncs;
 static int numOperators;
 static int numCollations;
 static int numNamespaces;
 static DumpableObject** tblinfoindex;
 static DumpableObject** typinfoindex;
+static DumpableObject** packageinfoindex;
 static DumpableObject** funinfoindex;
 static DumpableObject** oprinfoindex;
 static DumpableObject** collinfoindex;
@@ -121,6 +124,13 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading user-defined functions\n");
     funinfo = getFuncs(fout, &numFuncs);
     funinfoindex = buildIndexArray(funinfo, numFuncs, sizeof(FuncInfo));
+
+    if (g_verbose)
+        write_msg(NULL, "reading user-defined packages\n");
+    packageinfo = getPackages(fout, &numPackages);
+    if (packageinfo!=NULL) {
+        packageinfoindex = buildIndexArray(packageinfo, numPackages, sizeof(PkgInfo));
+    }
 
     /* this must be after getTables and getFuncs */
     if (g_verbose)
@@ -311,7 +321,7 @@ static void flagInhAttrs(TableInfo* ptblinfo, int inumTables)
 
         /* Sequences, contqueries and views never have parents */
         if (tbinfo->relkind == RELKIND_SEQUENCE || tbinfo->relkind == RELKIND_VIEW || 
-            tbinfo->relkind == RELKIND_CONTQUERY)
+            tbinfo->relkind == RELKIND_MATVIEW || tbinfo->relkind == RELKIND_CONTQUERY)
             continue;
 
         /* Don't bother computing anything for non-target tables, either */
@@ -592,7 +602,7 @@ static int DOCatalogIdCompare(const void* p1, const void* p2)
 
 /*
  * Build an array of pointers to all known dumpable objects
- *
+ * 
  * This simply creates a modifiable copy of the internal map.
  */
 void getDumpableObjects(DumpableObject*** objs, int* numObjs)

@@ -1,0 +1,73 @@
+<refentry id="SQL-CREATE_MODEL">
+<refmeta>
+<refentrytitle>CREATE MODEL</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE MODEL</refname>
+<refpurpose>Create a new machine learning model</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+
+CREATE MODEL model_name USING algorithm_name 
+[FEATURES { {expression [ [ AS ] output_name ]} [, ...] }]
+[TARGET { {expression [ [ AS ] output_name ]} [, ...] }]
+FROM { table_name | select_query }
+WITH hyperparameter_name = { hyperparameter_value | DEFAULT } [, ...] }
+
+where:
+  * algorithm_name is one of the architectures currently supported: 
+      * logistic_regression: Compute a logistic regression using Gradient Descent
+      * linear_regression: Compute a linear regression using Gradient Descent
+      * svm_classification: Compute a support vector machine classifier  using Gradient Descent
+      * kmeans: Compute an unsupervised clustering 
+  * select_query is a standard SELECT query
+  
+For supervised machine learning algorithms, FEATURES and TARGET clauses are mandatory. For unsupervised machine learning algorithms, FEATURES
+is optional, and TARGET cannot be specified.
+
+
+###########################
+###     Model usage     ###
+###########################
+
+The models created can be used in SELECT and UPDATE statements as expresions. The syntax is the following: 
+  PREDICT BY model_name FEATURES (expression [, ...]) [ [ AS ] output_name ]
+
+For example:  
+  SELECT id, PREDICT BY m (FEATURES f1, f2) AS prediction FROM t;
+  UPDATE t SET x=PREDICT BY m(features f1, f2);
+
+
+###########################
+###   Hyperparameters   ###
+###########################
+
+# Hyperparameter list for 'logistic_regression', 'linear_regression' and 'svm_classification':
+  * batch_size: Number of tuples 
+  * decay: Decay factor
+  * lambda (Only svm classifier): Lambda parameter of support vector machines
+  * learning_rate: Learning rate of the algorithm
+  * max_iterations: Maximum number of iterations until convergence
+  * max_seconds: Maximum number of seconds doing the optimization
+  * optimizer: Select optimzier between: gd (gradient descent) or ngd (normalized gradient descent)
+  * tolerance: System stops when the percentage of changes between two iterations is below this percentage
+  * verbose: 0 (no output), 1 (more output)
+
+# Hyperparameter list for 'kmeans':
+  * batch_size: Number of tuples in each processing batch
+  * distance_function: Distance function between clusters and centroids. Valid values are 'L1', 'L2', 'L2_Squared' and 'Linf'  
+  * max_iterations: Maximum iterations until convergence
+  * num_centroids: Number of centroids 'k' parameter for K-means
+  * num_features: Dimensionality of the point. Tuples that contain points that do not match the dimension are ignored.
+  * seed: Seed value for random
+  * tolerance: System stops when the percentage of changes between two iterations is below this percentage
+  * seeding_function: Algorithm used for initial seeds: 'Random++' or 'Kmeans||'
+  * verbose:  0 (no output), 1 (less output), or 2 (full output)
+  
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

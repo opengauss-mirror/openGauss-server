@@ -1,0 +1,311 @@
+create schema test_unione_mix_tables_4;
+set current_schema='test_unione_mix_tables_4';
+
+drop table if exists t1;
+drop table if exists t2;
+drop table if exists t3;
+
+drop type if exists composite_type;
+create type composite_type as (c1 int, c2 boolean, c3 money, c4 text, c5 date);
+
+create table t1
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+
+create table t2
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+create table t3
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (orientation=column);
+
+create table t4
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=USTORE);
+
+-- create table for post data insertion verification
+drop table if exists t1_v;
+drop table if exists t2_v;
+drop table if exists t3_v;
+
+create table t1_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+create table t2_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+create table t3_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime
+)
+with (storage_type=ASTORE);
+
+create table t4_v
+(
+        c1 tinyint,
+        c2 smallint,
+        c3 integer,
+        c4 bigint,
+        c5 money,
+        c6 boolean,
+        c7 char(10),
+        c8 character(10),
+        c9 nchar(10),
+        c10 varchar(10),
+        c11 text,
+        c12 clob,
+        c13 blob,
+        c14 bytea,
+        c15 date,
+        c16 time without time zone,
+        c17 reltime,
+        c18 composite_type
+)
+with (storage_type=ASTORE);
+
+-- copy data
+\COPY t1 FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|' csv header;
+\COPY t1_v FROM '@abs_srcdir@/tmp_check/datanode1/pg_copydir/test_unione_data2.data' delimiter '|' csv header;
+
+
+insert into t2 select * from t1 where c6=false;
+insert into t2_v select * from t1_v where c6=false;
+
+with del1 as (delete from t2 where c6=(select c6 from t1 where c3=100)), up1 as (update t1 set c1=sub.c1 from (select c1 from t4 where c2=100) as sub), ins3 as (insert into t3 (c1,c3,c5,c7,c9,c11,c14,c16 ) select c1,c3,c5,c7,c9,c11,c14,c16 from t2 where t2.c6=false) insert into t4 select * from t1;
+with del1 as (delete from t2_v where c6=(select c6 from t1_v where c3=100)), up1 as (update t1_v set c1=sub.c1 from (select c1 from t4_v where c2=100) as sub), ins3 as (insert into t3_v (c1,c3,c5,c7,c9,c11,c14,c16 ) select c1,c3,c5,c7,c9,c11,c14,c16 from t2_v where t2_v.c6=false) insert into t4_v select * from t1_v;
+
+create view view1 as (select * from t1 except select * from t1_v);
+select * from view1;
+
+create view view2 as (select * from t2 except select * from t2_v);
+select * from view2;
+
+create view view3 as (select * from t3 except select * from t3_v);
+select * from view3;
+
+create view view4 as (select * from t4 except select * from t4_v);
+select * from view4;
+
+with up1 as (update t1 set c1=8 from (select * from t2) as sub where t1.c15<sub.c15), up2 as (update t2 set c6=false from (select * from t4) as sub where t2.c1=sub.c1), up3 as (update t3 set c15='2020-11-11' from (select * from t2) as sub where t3.c2>sub.c3) update t4 set c15='2020-11-11' from (select * from t2) as sub where t4.c2>sub.c3;
+with up1 as (update t1_v set c1=8 from (select * from t2_v) as sub where t1_v.c15<sub.c15), up2 as (update t2_v set c6=false from (select * from t4_v) as sub where t2_v.c1=sub.c1), up3 as (update t3_v set c15='2020-11-11' from (select * from t2_v) as sub where t3_v.c2>sub.c3) update t4_v set c15='2020-11-11' from (select * from t2_v) as sub where t4_v.c2>sub.c3;
+
+create view view5 as (select * from t1 except select * from t1_v);
+select * from view5;
+
+create view view6 as (select * from t2 except select * from t2_v);
+select * from view6;
+
+create view view7 as (select * from t3 except select * from t3_v);
+select * from view7;
+
+create view view8 as (select * from t4 except select * from t4_v);
+select * from view8;
+
+with del1 as (delete from t2 where c1=8 returning c1), del2 as (delete from t4 where c1=1), del3 as (delete from t3 where c1=300) delete from t1 where c1=300;
+with del1 as (delete from t2_v where c1=8 returning c1), del2 as (delete from t4_v where c1=1), del3 as (delete from t3_v where c1=300) delete from t1_v where c1=300;
+
+create view view9 as (select * from t1 except select * from t1_v);
+select * from view9;
+
+create view view10 as (select * from t2 except select * from t2_v);
+select * from view10;
+
+create view view11 as (select * from t3 except select * from t3_v);
+select * from view11;
+
+create view view12 as (select * from t4 except select * from t4_v);
+select * from view12;
+
+with ins1 as (insert into t1 select * from t2 where c15<'2020-05-05'), ins2 as (insert into t2 select * from t1), ins3 as (insert into t3 (c1, c3, c5, c7, c9, c10, c12, c14, c16) select t2.c1, t2.c3, t2.c5, t2.c7, t2.c9, t2.c10, t2.c12, t2.c14, t2.c16 from t2, t4 where t2.c3=t4.c4 and t2.c6=false) insert into t4 select t2.c1,t2.c2,t2.c3,t2.c4,t2.c5,t2.c6,t2.c7,t2.c8,t2.c9,t2.c10,t2.c11,t2.c12,t2.c13,t2.c14,t2.c15,t2.c16,t2.c17 from t2,t3 where t2.c2=t3.c3 and t3.c15<'2020-10-10';
+with ins1 as (insert into t1_v select * from t2_v where c15<'2020-05-05'), ins2 as (insert into t2_v select * from t1_v), ins3 as (insert into t3_v (c1, c3, c5, c7, c9, c10, c12, c14, c16) select t2_v.c1, t2_v.c3, t2_v.c5, t2_v.c7, t2_v.c9, t2_v.c10, t2_v.c12, t2_v.c14, t2_v.c16 from t2_v, t4_v where t2_v.c3=t4_v.c4 and t2_v.c6=false) insert into t4_v select t2_v.c1,t2_v.c2,t2_v.c3,t2_v.c4,t2_v.c5,t2_v.c6,t2_v.c7,t2_v.c8,t2_v.c9,t2_v.c10,t2_v.c11,t2_v.c12,t2_v.c13,t2_v.c14,t2_v.c15,t2_v.c16,t2_v.c17 from t2_v,t3_v where t2_v.c2=t3_v.c3 and t3_v.c15<'2020-10-10';
+
+create view view13 as (select * from t1 except select * from t1_v);
+select * from view13;
+
+create view view14 as (select * from t2 except select * from t2_v);
+select * from view14;
+
+create view view15 as (select * from t3 except select * from t3_v);
+select * from view15;
+
+create view view16 as (select * from t4 except select * from t4_v);
+select * from view16;
+
+with del1 as (delete from t3 where c15<any(select t1.c15 from t1, t2 where t1.c1=t2.c2 and t2.c15<'2020-12-12')), up1 as (update t3 set t3.c16='01:01:01'
+from (select * from t1 where c4=345) as sub where t3.c3=sub.c4) insert into t3 select t2.c1,t2.c2,t2.c3,t2.c4,t2.c5,t2.c6,t2.c7,t2.c8,t2.c9,t2.c10,t2.c11,t2.c12,t2.c14,t2.c15,t2.c16,t2.c17 from t1,t2 where t1.c6=false and t2.c3>500;
+with del1 as (delete from t3_v where c15<any(select t1_v.c15 from t1_v, t2_v where t1_v.c1=t2_v.c2 and t2_v.c15<'2020-12-12')), up1 as (update t3_v set t3_v.c16='01:01:01'
+from (select * from t1_v where c4=345) as sub where t3_v.c3=sub.c4) insert into t3_v select t2_v.c1,t2_v.c2,t2_v.c3,t2_v.c4,t2_v.c5,t2_v.c6,t2_v.c7,t2_v.c8,t2_v.c9,t2_v.c10,t2_v.c11,t2_v.c12,t2_v.c14,t2_v.c15,t2_v.c16,t2_v.c17 from t1_v,t2_v where t1_v.c6=false and t2_v.c3>500;
+
+create view view17 as (select * from t1 except select * from t1_v);
+select * from view17;
+
+create view view18 as (select * from t2 except select * from t2_v);
+select * from view18;
+
+create view view19 as (select * from t3 except select * from t3_v);
+select * from view19;
+
+create view view20 as (select * from t4 except select * from t4_v);
+select * from view20;
+
+drop view view1;
+drop view view2;
+drop view view3;
+drop view view4;
+drop view view5;
+drop view view6;
+drop view view7;
+drop view view8;
+drop view view9;
+drop view view10;
+drop view view11;
+drop view view12;
+drop view view13;
+drop view view14;
+drop view view15;
+drop view view16;
+drop view view17;
+drop view view18;
+drop view view19;
+drop view view20;
+
+
+drop table t1;
+drop table t2;
+drop table t3;
+drop table t4;
+drop table t1_v;
+drop table t2_v;
+drop table t3_v;
+drop table t4_v;
+drop type composite_type;

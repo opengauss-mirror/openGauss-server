@@ -19,12 +19,11 @@ import copy
 import getpass
 import random
 import re
-import shlex
-import subprocess
-import time
+import json
 import select
 import logging
-import json
+from DAO.driver_execute import DriverExecute
+from DAO.gsql_execute import GSqlExecute
 
 ENABLE_MULTI_NODE = False
 SAMPLE_NUM = 5
@@ -33,20 +32,29 @@ MAX_INDEX_NUM = 10
 MAX_INDEX_STORAGE = None
 FULL_ARRANGEMENT_THRESHOLD = 20
 NEGATIVE_RATIO_THRESHOLD = 0.2
-BASE_CMD = ''
 SHARP = '#'
-SCHEMA = None
 JSON_TYPE = False
+DRIVER = None
 BLANK = ' '
-SQL_TYPE = ['select ', 'delete ', 'insert ', 'update ']
+SQL_TYPE = ['select', 'delete', 'insert', 'update']
 SQL_PATTERN = [r'\((\s*(\d+(\.\d+)?\s*)[,]?)+\)',  # match integer set in the IN collection
                r'([^\\])\'((\')|(.*?([^\\])\'))',  # match all content in single quotes
                r'(([^<>]\s*=\s*)|([^<>]\s+))(\d+)(\.\d+)?']  # match single integer
 SQL_DISPLAY_PATTERN = [r'\((\s*(\d+(\.\d+)?\s*)[,]?)+\)',  # match integer set in the IN collection
                        r'\'((\')|(.*?\'))',  # match all content in single quotes
                        r'([^\_\d])\d+(\.\d+)?']  # match single integer
-
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+
+class CheckValid(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        ill_character = [" ", "|", ";", "&", "$", "<", ">", "`", "\\", "'", "\"",
+                         "{", "}", "(", ")", "[", "]", "~", "*", "?", "!", "\n"]
+        if not values.strip():
+            return
+        if any(ill_char in values for ill_char in ill_character):
+            raise Exception("There are illegal characters in the %s." % self.dest)
+        setattr(namespace, self.dest, values)
 
 
 def read_input_from_pipe():
@@ -100,43 +108,6 @@ class IndexItem:
         self.select_sql_num = 0
 
 
-class IndexInfo:
-    def __init__(self, schema, table, indexname, columns, indexdef):
-        self.schema = schema
-        self.table = table
-        self.indexname = indexname
-        self.columns = columns
-        self.indexdef = indexdef
-        self.primary_key = False
-        self.redundant_obj = []
-
-
-def run_shell_cmd(target_sql_list):
-    cmd = BASE_CMD + ' -c \"'
-    if SCHEMA:
-        cmd += 'set current_schema = %s; ' % SCHEMA
-    for target_sql in target_sql_list:
-        cmd += target_sql + ';'
-    cmd += '\"'
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-    (stdout, stderr) = proc.communicate()
-    stdout, stderr = stdout.decode(), stderr.decode()
-    if 'gsql' in stderr or 'failed to connect' in stderr:
-        raise ConnectionError("An error occurred while connecting to the database.\n"
-                              + "Details: " + stderr)
-    return stdout
-
-
-def run_shell_sql_cmd(sql_file):
-    cmd = BASE_CMD + ' -f ./' + sql_file
-    try:
-        ret = subprocess.check_output(shlex.split(cmd), stderr=subprocess.STDOUT)
-    except subprocess.CalledProcessError as e:
-        print(e.output, file=sys.stderr)
-
-    return ret.decode()
-
-
 def green(text):
     return '\033[32m%s\033[0m' % text
 
@@ -163,8 +134,8 @@ def filter_low_benefit(pos_list, candidate_indexes, multi_iter_mode, workload):
             else:
                 cost_list_pos = pos_list[key] + 1
             sql_optimzed += 1 - workload[pos].cost_list[cost_list_pos] / workload[pos].cost_list[0]
-        negative_ratio = (index.insert_sql_num + index.delete_sql_num + index.update_sql_num) / \
-                         index.total_sql_num
+        negative_ratio = (index.insert_sql_num + index.delete_sql_num +
+                          index.update_sql_num) / index.total_sql_num
         # filter the candidate indexes that do not meet the conditions of optimization
         if sql_optimzed / len(index.positive_pos) < 0.1:
             remove_list.append(key)
@@ -174,8 +145,8 @@ def filter_low_benefit(pos_list, candidate_indexes, multi_iter_mode, workload):
         candidate_indexes.pop(item)
 
 
-def display_recommend_result(workload, candidate_indexes, index_cost_total,
-                             multi_iter_mode, display_info):
+def display_recommend_result(workload, candidate_indexes, index_cost_total, multi_iter_mode,
+                             display_info, integrate_indexes, history_invalid_indexes):
     cnt = 0
     index_current_storage = 0
     pos_list = []
@@ -185,7 +156,16 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total,
     # filter candidate indexes with low benefit
     filter_low_benefit(pos_list, candidate_indexes, multi_iter_mode, workload)
     # display determine result
+    integrate_indexes['currentIndexes'] = dict()
     for key, index in enumerate(candidate_indexes):
+        integrate_indexes['currentIndexes'][index.table] = \
+            integrate_indexes['currentIndexes'].get(index.table, list())
+        integrate_indexes['currentIndexes'][index.table].append(index.columns)
+        # association history recommendation results
+        if integrate_indexes['historyIndexes']:
+            from DAO.execute_factory import ExecuteFactory
+            ExecuteFactory.match_last_result(index.table, index.columns,
+                                             integrate_indexes, history_invalid_indexes)
         if MAX_INDEX_STORAGE and (index_current_storage + index.storage) > MAX_INDEX_STORAGE:
             continue
         if MAX_INDEX_NUM and cnt == MAX_INDEX_NUM:
@@ -225,7 +205,7 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total,
                 sql_info['sqlDetails'].append(sql_detail)
         workload_optimized = (1 - index_cost_total[cost_list_pos] / index_cost_total[0]) * 100
         sql_info['workloadOptimized'] = '%.2f' % (workload_optimized if workload_optimized > 1 else 1)
-        sql_info['schemaName'] = SCHEMA
+        sql_info['schemaName'] = index.table.split('.')[0]
         sql_info['tbName'] = table_name
         sql_info['columns'] = index.columns
         sql_info['statement'] = statement
@@ -237,136 +217,6 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total,
                                         - sql_info['deleteRatio'], 2)
         display_info['recommendIndexes'].append(sql_info)
     return display_info
-
-
-def record_redundant_indexes(cur_table_indexes, redundant_indexes):
-    cur_table_indexes = sorted(cur_table_indexes,
-                               key=lambda index_obj: len(index_obj.columns.split(',')))
-    # record redundant indexes
-    has_restore = []
-    for pos, index in enumerate(cur_table_indexes[:-1]):
-        is_redundant = False
-        for candidate_index in cur_table_indexes[pos + 1:]:
-            if 'UNIQUE INDEX' in index.indexdef:
-                # ensure that UNIQUE INDEX will not become redundant compared to normal index
-                if 'UNIQUE INDEX' not in candidate_index.indexdef:
-                    continue
-                # ensure redundant index not is pkey
-                elif index.primary_key:
-                    if re.match(r'%s' % candidate_index.columns, index.columns):
-                        candidate_index.redundant_obj.append(index)
-                        redundant_indexes.append(candidate_index)
-                        has_restore.append(candidate_index)
-                    continue
-            if re.match(r'%s' % index.columns, candidate_index.columns):
-                is_redundant = True
-                index.redundant_obj.append(candidate_index)
-        if is_redundant and index not in has_restore:
-            redundant_indexes.append(index)
-
-
-def check_useless_index(tables):
-    whole_indexes = list()
-    redundant_indexes = list()
-    if not tables:
-        return whole_indexes, redundant_indexes
-    tables_string = ','.join(["'%s'" % table for table in tables[SCHEMA]])
-    sql = "SELECT c.relname AS tablename, i.relname AS indexname, " \
-          "pg_get_indexdef(i.oid) AS indexdef, p.contype AS pkey from " \
-          "pg_index x JOIN pg_class c ON c.oid = x.indrelid JOIN " \
-          "pg_class i ON i.oid = x.indexrelid LEFT JOIN pg_namespace n " \
-          "ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON i.oid = p.conindid " \
-          "WHERE (c.relkind = ANY (ARRAY['r'::\"char\", 'm'::\"char\"])) AND " \
-          "(i.relkind = ANY (ARRAY['i'::\"char\", 'I'::\"char\"])) AND " \
-          "n.nspname = '%s' AND c.relname in (%s) order by c.relname;" % (SCHEMA, tables_string)
-
-    res = run_shell_cmd([sql]).split('\n')
-    if res:
-        cur_table_indexes = list()
-        for line in res:
-            if 'tablename' in line or re.match(r'-+', line):
-                continue
-            elif re.match(r'\(\d+ rows?\)', line):
-                continue
-            elif '|' in line:
-                table, index, indexdef, pkey = [item.strip() for item in line.split('|')]
-                cur_columns = re.search(r'\(([^\(\)]*)\)', indexdef).group(1)
-                cur_index_obj = IndexInfo(SCHEMA, table, index, cur_columns, indexdef)
-                if pkey:
-                    cur_index_obj.primary_key = True
-                whole_indexes.append(cur_index_obj)
-                if cur_table_indexes and cur_table_indexes[-1].table != table:
-                    record_redundant_indexes(cur_table_indexes, redundant_indexes)
-                    cur_table_indexes = []
-                cur_table_indexes.append(cur_index_obj)
-        if cur_table_indexes:
-            record_redundant_indexes(cur_table_indexes, redundant_indexes)
-    return whole_indexes, redundant_indexes
-
-
-def get_whole_index(tables, detail_info):
-    whole_index, redundant_indexes = check_useless_index(tables)
-    print_header_boundary(" Created indexes ")
-    detail_info['createdIndexes'] = []
-    if not whole_index:
-        print("No created index!")
-    else:
-        for index in whole_index:
-            index_info = {'schemaName': index.schema, 'tbName': index.table,
-                          'columns': index.columns, 'statement': index.indexdef + ';'}
-            detail_info['createdIndexes'].append(index_info)
-            print("%s;" % index.indexdef)
-    return whole_index, redundant_indexes
-
-
-def check_unused_index_workload(whole_indexes, redundant_indexes, workload_indexes, detail_info):
-    indexes_name = set(index.indexname for index in whole_indexes)
-    unused_index = list(indexes_name.difference(workload_indexes))
-    remove_list = []
-    print_header_boundary(" Current workload useless indexes ")
-    if not unused_index:
-        print("No useless index!")
-    detail_info['uselessIndexes'] = []
-    # useless index
-    unused_index_columns = dict()
-    for cur_index in unused_index:
-        for index in whole_indexes:
-            if cur_index == index.indexname:
-                unused_index_columns[cur_index] = index.columns
-                if 'UNIQUE INDEX' not in index.indexdef:
-                    statement = "DROP INDEX %s;" % index.indexname
-                    print(statement)
-                    useless_index = {"schemaName": index.schema, "tbName": index.table, "type": 3,
-                                     "columns": index.columns, "statement": statement}
-                    detail_info['uselessIndexes'].append(useless_index)
-    print_header_boundary(" Redundant indexes ")
-    # filter redundant index
-    for pos, index in enumerate(redundant_indexes):
-        is_redundant = False
-        for redundant_obj in index.redundant_obj:
-            # redundant objects are not in the useless index set or
-            # equal to the column value in the useless index must be redundant index
-            index_exist = redundant_obj.indexname not in unused_index_columns.keys() or \
-                          (unused_index_columns.get(redundant_obj.indexname) and
-                           redundant_obj.columns == unused_index_columns[redundant_obj.indexname])
-            if index_exist:
-                is_redundant = True
-        if not is_redundant:
-            remove_list.append(pos)
-    for item in sorted(remove_list, reverse=True):
-        redundant_indexes.pop(item)
-
-    if not redundant_indexes:
-        print("No redundant index!")
-    # redundant index
-    for index in redundant_indexes:
-        statement = "DROP INDEX %s;" % index.indexname
-        print(statement)
-        existing_index = [item.indexname + ':' + item.columns for item in index.redundant_obj]
-        redundant_index = {"schemaName": index.schema, "tbName": index.table, "type": 2,
-                           "columns": index.columns, "statement": statement,
-                           "existingIndex": existing_index}
-        detail_info['uselessIndexes'].append(redundant_index)
 
 
 def load_workload(file_path):
@@ -427,212 +277,9 @@ def workload_compression(input_path):
 
     for _, elem in templates.items():
         for sql in elem['samples']:
-            compressed_workload.append(QueryItem(sql.strip('\n'),
-                                                 elem['cnt'] / len(elem['samples'])))
+            compressed_workload.append(QueryItem(sql.strip(), elem['cnt'] / len(elem['samples'])))
         total_num += elem['cnt']
     return compressed_workload, total_num
-
-
-# parse the explain plan to get estimated cost by database optimizer
-def parse_explain_plan(plan):
-    cost_total = -1
-
-    plan_list = plan.split('\n')
-    for line in plan_list:
-        if '(cost=' in line:
-            pattern = re.compile(r'\(cost=([^\)]*)\)', re.S)
-            matched_res = re.search(pattern, line)
-            if matched_res:
-                cost_list = matched_res.group(1).split()
-                if len(cost_list) == 3:
-                    cost_total = float(cost_list[0].split('..')[-1])
-            break
-
-    return cost_total
-
-
-def update_index_storage(res, index_config, hypo_index_num):
-    index_id = re.findall(r'<\d+>', res)[0].strip('<>')
-    index_size_sql = 'select * from hypopg_estimate_size(%s);' % index_id
-    res = run_shell_cmd([index_size_sql]).split('\n')
-    for item in res:
-        if re.match(r'\d+', item.strip()):
-            index_config[hypo_index_num].storage = float(item.strip()) / 1024 / 1024
-
-
-def estimate_workload_cost_file(workload, index_config=None, ori_indexes_name=None):
-    total_cost = 0
-    sql_file = str(time.time()) + '.sql'
-    found_plan = False
-    hypo_index = False
-    is_computed = False
-    select_sql_pos = []
-    with open(sql_file, 'w') as file:
-        if SCHEMA:
-            file.write('SET current_schema = %s;\n' % SCHEMA)
-        if index_config:
-            if len(index_config) == 1 and index_config[0].positive_pos:
-                is_computed = True
-            # create hypo-indexes
-            file.write('SET enable_hypo_index = on;\n')
-            for index in index_config:
-                file.write("SELECT hypopg_create_index('CREATE INDEX ON %s(%s)');\n" %
-                         (index.table, index.columns))
-        if ENABLE_MULTI_NODE:
-            file.write('set enable_fast_query_shipping = off;\n')
-        file.write("set explain_perf_mode = 'normal'; \n")
-
-        for ind, query in enumerate(workload):
-            if 'select ' not in query.statement.lower():
-                workload[ind].cost_list.append(0)
-            else:
-                file.write('EXPLAIN ' + query.statement + ';\n')
-                select_sql_pos.append(ind)
-            # record ineffective sql and negative sql for candidate indexes
-            if is_computed:
-                record_ineffective_negative_sql(index_config[0], query, ind)
-
-    result = run_shell_sql_cmd(sql_file).split('\n')
-    if os.path.exists(sql_file):
-        os.remove(sql_file)
-
-    # parse the result of explain plans
-    i = 0
-    hypo_index_num = 0
-    for line in result:
-        if 'QUERY PLAN' in line:
-            found_plan = True
-        if 'ERROR' in line:
-            if i >= len(select_sql_pos):
-                raise ValueError("The size of workload is not correct!")
-            workload[select_sql_pos[i]].cost_list.append(0)
-            i += 1
-        if 'hypopg_create_index' in line:
-            hypo_index = True
-        if found_plan and '(cost=' in line:
-            if i >= len(select_sql_pos):
-                raise ValueError("The size of workload is not correct!")
-            query_cost = parse_explain_plan(line)
-            query_cost *= workload[select_sql_pos[i]].frequency
-            workload[select_sql_pos[i]].cost_list.append(query_cost)
-            total_cost += query_cost
-            found_plan = False
-            i += 1
-        if hypo_index:
-            if 'btree' in line and MAX_INDEX_STORAGE:
-                hypo_index = False
-                update_index_storage(line, index_config, hypo_index_num)
-                hypo_index_num += 1
-        if 'Index' in line and 'Scan' in line and not index_config:
-            ind1, ind2 = re.search(r'Index.*Scan(.*)on ([^\s]+)',
-                                   line.strip(), re.IGNORECASE).groups()
-            if ind1.strip():
-                ori_indexes_name.add(ind1.strip().split(' ')[1])
-            else:
-                ori_indexes_name.add(ind2)
-    while i < len(select_sql_pos):
-        workload[select_sql_pos[i]].cost_list.append(0)
-        i += 1
-    if index_config:
-        run_shell_cmd(['SELECT hypopg_reset_index();'])
-
-    return total_cost
-
-
-def make_single_advisor_sql(ori_sql):
-    sql = 'select gs_index_advise(\''
-    ori_sql = ori_sql.replace('"', '\'')
-    for elem in ori_sql:
-        if elem == '\'':
-            sql += '\''
-        sql += elem
-    sql += '\');'
-
-    return sql
-
-
-def parse_single_advisor_result(res, workload_table_name):
-    table_index_dict = {}
-    if len(res) > 2 and res[0:2] == ' (':
-        items = res.split(',', 1)
-        table = items[0][2:]
-        workload_table_name[SCHEMA] = workload_table_name.get(SCHEMA, set())
-        workload_table_name[SCHEMA].add(table)
-        indexes = re.split('[()]', items[1][:-1].strip('\"'))
-        for columns in indexes:
-            if columns == '':
-                continue
-            if table not in table_index_dict.keys():
-                table_index_dict[table] = []
-            table_index_dict[table].append(columns)
-
-    return table_index_dict
-
-
-# call the single-index-advisor in the database
-def query_index_advisor(query, workload_table_name):
-    table_index_dict = {}
-
-    if 'select' not in query.lower():
-        return table_index_dict
-
-    sql = make_single_advisor_sql(query)
-    result = run_shell_cmd([sql]).split('\n')
-
-    for res in result:
-        table_index_dict.update(parse_single_advisor_result(res, workload_table_name))
-
-    return table_index_dict
-
-
-# judge whether the index is used by the optimizer
-def query_index_check(query, query_index_dict):
-    valid_indexes = {}
-    if len(query_index_dict) == 0:
-        return valid_indexes
-
-    # create hypo-indexes
-    sql_list = ['SET enable_hypo_index = on;']
-    if ENABLE_MULTI_NODE:
-        sql_list.append('SET enable_fast_query_shipping = off;')
-    for table in query_index_dict.keys():
-        for columns in query_index_dict[table]:
-            if columns != '':
-                sql_list.append("SELECT hypopg_create_index('CREATE INDEX ON %s(%s)')" %
-                                (table, columns))
-    sql_list.append('SELECT hypopg_display_index()')
-    sql_list.append("set explain_perf_mode = 'normal'; explain " + query)
-    sql_list.append('SELECT hypopg_reset_index()')
-    result = run_shell_cmd(sql_list).split('\n')
-
-    # parse the result of explain plan
-    hypoid_table_column = {}
-    hypo_display = False
-    for line in result:
-        if hypo_display and 'btree' in line:
-            hypo_index_info = line.split(',', 3)
-            if len(hypo_index_info) == 4:
-                hypoid_table_column[hypo_index_info[1]] = \
-                    hypo_index_info[2] + ':' + hypo_index_info[3].strip('"()')
-        if hypo_display and re.search(r'\d+ rows', line):
-            hypo_display = False
-        if 'hypopg_display_index' in line:
-            hypo_display = True
-        if 'Index' in line and 'Scan' in line and 'btree' in line:
-            tokens = line.split(' ')
-            for token in tokens:
-                if 'btree' in token:
-                    hypo_index_id = re.search(r'\d+', token.split('_', 1)[0]).group()
-                    table_columns = hypoid_table_column.get(hypo_index_id)
-                    if not table_columns:
-                        continue
-                    table_name, columns = table_columns.split(':')
-                    if table_name not in valid_indexes.keys():
-                        valid_indexes[table_name] = []
-                    if columns not in valid_indexes[table_name]:
-                        valid_indexes[table_name].append(columns)
-
-    return valid_indexes
 
 
 # enumerate the column combinations for a suggested index
@@ -651,30 +298,38 @@ def get_indexable_columns(table_index_dict):
     return query_indexable_columns
 
 
-def generate_candidate_indexes(workload, workload_table_name):
+def get_valid_index_dict(table_index_dict, query, db):
+    need_check = False
+    query_indexable_columns = get_indexable_columns(table_index_dict)
+    valid_index_dict = db.query_index_check(query.statement, query_indexable_columns,
+                                            ENABLE_MULTI_NODE)
+
+    for i in range(MAX_INDEX_COLUMN_NUM):
+        for table in valid_index_dict.keys():
+            for columns in valid_index_dict[table]:
+                if columns.count(',') == i:
+                    need_check = True
+                    for single_column in query_indexable_columns[table]:
+                        if single_column not in columns:
+                            valid_index_dict[table].append(columns + ',' + single_column)
+        if need_check:
+            valid_index_dict = db.query_index_check(query.statement, valid_index_dict,
+                                                    ENABLE_MULTI_NODE)
+            need_check = False
+        else:
+            break
+    return valid_index_dict
+
+
+def generate_candidate_indexes(workload, workload_table_name, db):
     candidate_indexes = []
     index_dict = {}
-
+    if DRIVER:
+        db.init_conn_handle()
     for k, query in enumerate(workload):
         if 'select ' in query.statement.lower():
-            table_index_dict = query_index_advisor(query.statement, workload_table_name)
-            need_check = False
-            query_indexable_columns = get_indexable_columns(table_index_dict)
-            valid_index_dict = query_index_check(query.statement, query_indexable_columns)
-
-            for i in range(MAX_INDEX_COLUMN_NUM):
-                for table in valid_index_dict.keys():
-                    for columns in valid_index_dict[table]:
-                        if columns.count(',') == i:
-                            need_check = True
-                            for single_column in query_indexable_columns[table]:
-                                if single_column not in columns:
-                                    valid_index_dict[table].append(columns + ',' + single_column)
-                if need_check:
-                    valid_index_dict = query_index_check(query.statement, valid_index_dict)
-                    need_check = False
-                else:
-                    break
+            table_index_dict = db.query_index_advisor(query.statement, workload_table_name)
+            valid_index_dict = get_valid_index_dict(table_index_dict, query, db)
 
             # filter duplicate indexes
             for table in valid_index_dict.keys():
@@ -687,13 +342,15 @@ def generate_candidate_indexes(workload, workload_table_name):
                     if not any(re.match(r'%s' % columns, item) for item in index_dict[table]):
                         column_sql = {columns: [k]}
                         index_dict[table].update(column_sql)
+
                     elif columns in index_dict[table].keys():
                         index_dict[table][columns].append(k)
     for table, column_sqls in index_dict.items():
         for column, sql in column_sqls.items():
             print("table: ", table, "columns: ", column)
             candidate_indexes.append(IndexItem(table, column, sql))
-
+    if DRIVER:
+        db.close_conn()
     return candidate_indexes
 
 
@@ -759,7 +416,7 @@ def generate_atomic_config(workload):
 def find_subsets_num(config, atomic_config_total):
     atomic_subsets_num = []
     is_exist = False
-
+    cur_index_atomic_pos = -1
     for i, atomic_config in enumerate(atomic_config_total):
         if len(atomic_config) > len(config):
             continue
@@ -778,7 +435,8 @@ def find_subsets_num(config, atomic_config_total):
                 break
         if is_exist:
             atomic_subsets_num.append(i)
-
+    if cur_index_atomic_pos == -1:
+        raise ValueError("No atomic configs found for current config!")
     return atomic_subsets_num, cur_index_atomic_pos
 
 
@@ -789,30 +447,6 @@ def get_index_num(index, atomic_config_total):
             return i
 
     return -1
-
-
-def record_ineffective_negative_sql(candidate_index, obj, ind):
-    cur_table = candidate_index.table + ' '
-    if cur_table in obj.statement:
-        candidate_index.total_sql_num += obj.frequency
-        if 'insert ' in obj.statement.lower():
-            candidate_index.insert_sql_num += obj.frequency
-            candidate_index.negative_pos.append(ind)
-        elif 'delete ' in obj.statement.lower():
-            candidate_index.delete_sql_num += obj.frequency
-            candidate_index.negative_pos.append(ind)
-        elif 'update ' in obj.statement.lower():
-            candidate_index.update_sql_num += obj.frequency
-            if any(column in obj.statement.lower().split('where ', 1)[0] for column in
-                    candidate_index.columns.split(',')):
-                candidate_index.negative_pos.append(ind)
-            else:
-                candidate_index.ineffective_pos.append(ind)
-        else:
-            candidate_index.select_sql_num += obj.frequency
-            if ind not in candidate_index.positive_pos and \
-                    any(column in obj.statement.lower() for column in candidate_index.columns):
-                candidate_index.ineffective_pos.append(ind)
 
 
 # infer the total cost of workload for a config according to the cost of atomic configs
@@ -828,7 +462,7 @@ def infer_workload_cost(workload, config, atomic_config_total):
         if max(atomic_subsets_num) >= len(obj.cost_list):
             raise ValueError("Wrong atomic config for current query!")
         # compute the cost for selection
-        min_cost = sys.maxsize
+        min_cost = obj.cost_list[0]
         for num in atomic_subsets_num:
             if num < len(obj.cost_list) and obj.cost_list[num] < min_cost:
                 min_cost = obj.cost_list[num]
@@ -836,47 +470,157 @@ def infer_workload_cost(workload, config, atomic_config_total):
 
         # record ineffective sql and negative sql for candidate indexes
         if is_computed:
-            record_ineffective_negative_sql(config[-1], obj, ind)
+            from DAO.execute_factory import ExecuteFactory
+            ExecuteFactory.record_ineffective_negative_sql(config[-1], obj, ind)
     return total_cost, cur_index_atomic_pos
 
 
-def simple_index_advisor(input_path, max_index_num):
+def get_whole_index(tables, db, detail_info, history_indexes, history_invalid_index):
+    if DRIVER:
+        db.init_conn_handle()
+    whole_index, redundant_indexes = \
+        db.check_useless_index(tables, history_indexes, history_invalid_index)
+    if DRIVER:
+        db.close_conn()
+    print_header_boundary(" Created indexes ")
+    detail_info['createdIndexes'] = []
+    if not whole_index:
+        print("No created index!")
+    else:
+        for index in whole_index:
+            index_info = {'schemaName': index.schema, 'tbName': index.table,
+                          'columns': index.columns, 'statement': index.indexdef + ';'}
+            detail_info['createdIndexes'].append(index_info)
+            print("%s: %s;" % (index.schema, index.indexdef))
+    return whole_index, redundant_indexes
+
+
+def display_last_recommend_result(integrate_indexes, history_invalid_indexes, input_path):
+    # display historical effective indexes
+    if integrate_indexes['historyIndexes']:
+        print_header_boundary(" Historical effective indexes ")
+        for table_name, index_list in integrate_indexes['historyIndexes'].items():
+            for column in index_list:
+                index_name = 'idx_' + table_name + '_' + '_'.join(column.split(', '))
+                statement = 'CREATE INDEX ' + index_name + ' ON ' + table_name + '(' + column + ');'
+                print(statement)
+    # display historical invalid indexes
+    if history_invalid_indexes:
+        print_header_boundary(" Historical invalid indexes ")
+        for table_name, index_list in history_invalid_indexes.items():
+            for column in index_list:
+                index_name = 'idx_' + table_name + '_' + '_'.join(column.split(', '))
+                statement = 'CREATE INDEX ' + index_name + ' ON ' + table_name + '(' + column + ');'
+                print(statement)
+    # save integrate indexes result
+    integrate_indexes_file = os.path.join(os.path.dirname(input_path), 'index_result.json')
+    for table, indexes in integrate_indexes['currentIndexes'].items():
+        integrate_indexes['historyIndexes'][table] = \
+            integrate_indexes['historyIndexes'].get(table, list())
+        integrate_indexes['historyIndexes'][table].extend(indexes)
+        integrate_indexes['historyIndexes'][table] = \
+            list(set(integrate_indexes['historyIndexes'][table]))
+    with open(integrate_indexes_file, 'w') as file:
+        json.dump(integrate_indexes['historyIndexes'], file)
+
+
+def check_unused_index_workload(whole_indexes, redundant_indexes, workload_indexes, detail_info):
+    indexes_name = set(index.indexname for index in whole_indexes)
+    unused_index = list(indexes_name.difference(workload_indexes))
+    remove_list = []
+    print_header_boundary(" Current workload useless indexes ")
+    if not unused_index:
+        print("No useless index!")
+    detail_info['uselessIndexes'] = []
+    # useless index
+    unused_index_columns = dict()
+    for cur_index in unused_index:
+        for index in whole_indexes:
+            if cur_index == index.indexname:
+                unused_index_columns[cur_index] = index.columns
+                if 'UNIQUE INDEX' not in index.indexdef:
+                    statement = "DROP INDEX %s;" % index.indexname
+                    print(statement)
+                    useless_index = {"schemaName": index.schema, "tbName": index.table, "type": 3,
+                                     "columns": index.columns, "statement": statement}
+                    detail_info['uselessIndexes'].append(useless_index)
+    print_header_boundary(" Redundant indexes ")
+    # filter redundant index
+    for pos, index in enumerate(redundant_indexes):
+        is_redundant = False
+        for redundant_obj in index.redundant_obj:
+            # redundant objects are not in the useless index set or
+            # equal to the column value in the useless index must be redundant index
+            index_exist = redundant_obj.indexname not in unused_index_columns.keys() or \
+                          (unused_index_columns.get(redundant_obj.indexname) and
+                           redundant_obj.columns == unused_index_columns[redundant_obj.indexname])
+            if index_exist:
+                is_redundant = True
+        if not is_redundant:
+            remove_list.append(pos)
+    for item in sorted(remove_list, reverse=True):
+        redundant_indexes.pop(item)
+
+    if not redundant_indexes:
+        print("No redundant index!")
+    # redundant index
+    for index in redundant_indexes:
+        statement = "DROP INDEX %s.%s;" % \
+              (index.schema, index.indexname)
+        print(statement)
+        existing_index = [item.indexname + ':' + item.columns for item in index.redundant_obj]
+        redundant_index = {"schemaName": index.schema, "tbName": index.table, "type": 2,
+                           "columns": index.columns, "statement": statement,
+                           "existingIndex": existing_index}
+        detail_info['uselessIndexes'].append(redundant_index)
+
+
+def simple_index_advisor(input_path, max_index_num, integrate_indexes, db):
     workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     ori_indexes_name = set()
     workload_table_name = dict()
     display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
-    candidate_indexes = generate_candidate_indexes(workload, workload_table_name)
+    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
+    if DRIVER:
+        db.init_conn_handle()
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
-        estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
+        db.estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
         return ori_indexes_name, workload_table_name, display_info
 
     print_header_boundary(" Determine optimal indexes ")
-    ori_total_cost = estimate_workload_cost_file(workload,  ori_indexes_name=ori_indexes_name)
+    ori_total_cost = db.estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
     index_cost_total = [ori_total_cost]
     for _, obj in enumerate(candidate_indexes):
-        new_total_cost = estimate_workload_cost_file(workload, [obj])
+        new_total_cost = db.estimate_workload_cost_file(workload, [obj])
         index_cost_total.append(new_total_cost)
         obj.benefit = ori_total_cost - new_total_cost
+    if DRIVER:
+        db.close_conn()
+    if len(candidate_indexes) == 0:
+        print("No optimal indexes generated!")
+        return ori_indexes_name, workload_table_name, display_info
+    candidate_indexes = [item for item in candidate_indexes if item.benefit > 0]
     candidate_indexes = sorted(enumerate(candidate_indexes),
                                key=lambda item: item[1].benefit, reverse=True)
-    candidate_indexes = [item for item in candidate_indexes if item[1].benefit > 0]
     global MAX_INDEX_NUM
     MAX_INDEX_NUM = max_index_num
+    # match the last recommendation result
+    history_invalid_indexes = {}
+    display_recommend_result(workload, candidate_indexes, index_cost_total, False, display_info,
+                             integrate_indexes, history_invalid_indexes)
+    return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
 
-    display_recommend_result(workload, candidate_indexes, index_cost_total, False, display_info)
-    return ori_indexes_name, workload_table_name, display_info
 
-
-def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes):
+def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes, origin_sum_cost):
     opt_config = []
     index_num_record = set()
-    min_cost = sys.maxsize
+    min_cost = origin_sum_cost
     for i in range(len(candidate_indexes)):
-        if i == 1 and min_cost == sys.maxsize:
+        if i == 1 and min_cost == origin_sum_cost:
             break
-        cur_min_cost = sys.maxsize
+        cur_min_cost = origin_sum_cost
         cur_index = None
         cur_index_num = -1
         for k, index in enumerate(candidate_indexes):
@@ -906,42 +650,65 @@ def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes
     return opt_config
 
 
-def complex_index_advisor(input_path):
+def complex_index_advisor(input_path, integrate_indexes, db):
     workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     ori_indexes_name = set()
     workload_table_name = dict()
     display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
-    candidate_indexes = generate_candidate_indexes(workload, workload_table_name)
+    candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
-        estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
+        db.estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
         return ori_indexes_name, workload_table_name, display_info
 
     print_header_boundary(" Determine optimal indexes ")
+    if DRIVER:
+        db.init_conn_handle()
     atomic_config_total = generate_atomic_config(workload)
     if atomic_config_total and len(atomic_config_total[0]) != 0:
         raise ValueError("The empty atomic config isn't generated!")
     index_cost_total = []
     for atomic_config in atomic_config_total:
-        index_cost_total.append(estimate_workload_cost_file(workload, atomic_config,
-                                                            ori_indexes_name))
+        index_cost_total.append(db.estimate_workload_cost_file(workload, atomic_config,
+                                                               ori_indexes_name))
+    if DRIVER:
+        db.close_conn()
 
-    opt_config = greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes)
+    opt_config = greedy_determine_opt_config(workload, atomic_config_total,
+                                             candidate_indexes, index_cost_total[0])
+    if len(opt_config) == 0:
+        print("No optimal indexes generated!")
+        return ori_indexes_name, workload_table_name, display_info
+    # match the last invalid recommendation result
+    history_invalid_indexes = {}
+    display_recommend_result(workload, opt_config, index_cost_total, True, display_info,
+                             integrate_indexes, history_invalid_indexes)
+    return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
 
-    display_recommend_result(workload, opt_config, index_cost_total, True, display_info)
-    return ori_indexes_name, workload_table_name, display_info
+
+def get_last_indexes_result(input_path):
+    last_indexes_result_file = os.path.join(os.path.dirname(input_path), 'index_result.json')
+    integrate_indexes = {'historyIndexes': dict()}
+    if os.path.exists(last_indexes_result_file):
+        try:
+            with open(last_indexes_result_file, 'r') as file:
+                integrate_indexes['historyIndexes'] = json.load(file)
+        except json.JSONDecodeError:
+            return integrate_indexes
+    return integrate_indexes
 
 
 def main():
     arg_parser = argparse.ArgumentParser(description='Generate index set for workload.')
-    arg_parser.add_argument("p", help="Port of database")
-    arg_parser.add_argument("d", help="Name of database")
-    arg_parser.add_argument("--h", help="Host for database")
-    arg_parser.add_argument("-U", help="Username for database log-in")
+    arg_parser.add_argument("p", help="Port of database", type=int)
+    arg_parser.add_argument("d", help="Name of database", action=CheckValid)
+    arg_parser.add_argument("--h", help="Host for database",  action=CheckValid)
+    arg_parser.add_argument("-U", help="Username for database log-in", action=CheckValid)
     arg_parser.add_argument("-W", help="Password for database user", nargs="?", action=PwdAction)
     arg_parser.add_argument("f", help="File containing workload queries (One query per line)")
-    arg_parser.add_argument("--schema", help="Schema name for the current business data", required=True)
+    arg_parser.add_argument("--schema", help="Schema name for the current business data",
+                            required=True, action=CheckValid)
     arg_parser.add_argument("--max_index_num", help="Maximum number of suggested indexes", type=int)
     arg_parser.add_argument("--max_index_storage",
                             help="Maximum storage of suggested indexes/MB", type=int)
@@ -951,42 +718,56 @@ def main():
                             help="Whether to support distributed scenarios", default=False)
     arg_parser.add_argument("--json", action='store_true',
                             help="Whether the workload file format is json", default=False)
+    arg_parser.add_argument("--driver", action='store_true',
+                            help="Whether to employ python-driver", default=False)
     arg_parser.add_argument("--show_detail", action='store_true',
                             help="Whether to show detailed sql information", default=False)
     args = arg_parser.parse_args()
 
-    global MAX_INDEX_NUM, BASE_CMD, ENABLE_MULTI_NODE, MAX_INDEX_STORAGE, SCHEMA, JSON_TYPE
+    global MAX_INDEX_NUM, ENABLE_MULTI_NODE, MAX_INDEX_STORAGE, JSON_TYPE, DRIVER
     if args.max_index_num is not None and args.max_index_num <= 0:
         raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
                                          args.max_index_num)
     if args.max_index_storage is not None and args.max_index_storage <= 0:
         raise argparse.ArgumentTypeError("%s is an invalid positive int value" %
                                          args.max_index_storage)
-    if args.schema:
-        SCHEMA = args.schema
+
     JSON_TYPE = args.json
+    DRIVER = args.driver
     MAX_INDEX_NUM = args.max_index_num or 10
     ENABLE_MULTI_NODE = args.multi_node
     MAX_INDEX_STORAGE = args.max_index_storage
-    BASE_CMD = 'gsql -p ' + args.p + ' -d ' + args.d
-    if args.h:
-        BASE_CMD += ' -h ' + args.h
-    if args.U:
-        BASE_CMD += ' -U ' + args.U
-        if args.U != getpass.getuser() and not args.W:
-            raise ValueError('Enter the \'-W\' parameter for user '
-                             + args.U + ' when executing the script.')
-    if args.W:
-        BASE_CMD += ' -W ' + args.W
-
-    if args.multi_iter_mode:
-        workload_indexes, tables, detail_info = complex_index_advisor(args.f)
+    if args.U and args.U != getpass.getuser() and not args.W:
+        raise ValueError('Enter the \'-W\' parameter for user '
+                         + args.U + ' when executing the script.')
+    # Initialize the connection
+    try:
+        import psycopg2
+    except ImportError:
+        logging.warning('Driver import failed, use gsql to connect to the database.')
+        args.driver = None
+    if args.driver:
+        db = DriverExecute(args.d, args.U, args.W, args.h, args.p, args.schema,
+                           args.multi_node, args.max_index_storage)
     else:
-        workload_indexes, tables, detail_info = simple_index_advisor(args.f, args.max_index_num)
+        db = GSqlExecute(args.d, args.U, args.W, args.h, args.p, args.schema,
+                         args.multi_node, args.max_index_storage)
+        db.init_conn_handle()
+    integrate_indexes = get_last_indexes_result(args.f)
+    if args.multi_iter_mode:
+        workload_indexes, tables, detail_info, history_invalid_indexes = \
+            complex_index_advisor(args.f, integrate_indexes, db)
+    else:
+        workload_indexes, tables, detail_info, history_invalid_indexes = \
+            simple_index_advisor(args.f, args.max_index_num, integrate_indexes, db)
 
-    whole_indexes, redundant_indexes = get_whole_index(tables, detail_info)
+    whole_indexes, redundant_indexes = \
+        get_whole_index(tables, db, detail_info,
+                        integrate_indexes['historyIndexes'], history_invalid_indexes)
     # check the unused indexes of the current workload based on the whole index
     check_unused_index_workload(whole_indexes, redundant_indexes, workload_indexes, detail_info)
+    # display the results of the last index recommendation
+    display_last_recommend_result(integrate_indexes, history_invalid_indexes, args.f)
     if args.show_detail:
         print_header_boundary(" Display detail information ")
         sql_info = json.dumps(detail_info, indent=4, separators=(',', ':'))

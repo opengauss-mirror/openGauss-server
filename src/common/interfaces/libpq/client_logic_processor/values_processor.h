@@ -42,6 +42,7 @@ enum DecryptDataRes {
     DECRYPT_CEK_ERR,
     DERIVE_CEK_ERR,
     CLIENT_HEAP_ERR,
+    CLIENT_CACHE_ERR,
 };
 
 class ValuesProcessor {

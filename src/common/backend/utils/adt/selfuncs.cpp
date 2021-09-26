@@ -139,6 +139,7 @@
 #include "utils/bytea.h"
 #include "utils/date.h"
 #include "utils/datum.h"
+#include "utils/expr_distinct.h"
 #include "utils/extended_statistics.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
@@ -182,6 +183,7 @@ static double convert_timevalue_to_scalar(Datum value, Oid typid);
 static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatData* vardata);
 static bool get_variable_range(PlannerInfo* root, VariableStatData* vardata, Oid sortop, Datum* min, Datum* max);
 static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* vardata, Oid sortop, Datum* min, Datum* max);
+static bool is_var_eq_var_expr(List* args);
 RelOptInfo* find_join_input_rel(PlannerInfo* root, Relids relids);
 static Selectivity prefix_selectivity(
     PlannerInfo* root, VariableStatData* vardata, Oid vartype, Oid opfamily, Const* prefixcon);
@@ -193,7 +195,7 @@ static Const* string_to_bytea_const(const char* str, size_t str_len);
 static List* specialExpr_group_num(PlannerInfo* root, List* nodeList, double* numdistinct, double rows);
 static List* add_unique_group_var(
     PlannerInfo* root, List* varinfos, Node* var, VariableStatData* vardata, STATS_EST_TYPE eType = STATS_TYPE_LOCAL);
-static double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo);
+extern double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo);
 bool can_use_possion(VariableStatData* vardata, SpecialJoinInfo* sjinfo, double* ratio);
 extern Datum pg_stat_get_last_analyze_time(PG_FUNCTION_ARGS);
 extern List* find_skew_join_distribute_keys(Plan* plan);
@@ -289,8 +291,18 @@ Datum eqsel(PG_FUNCTION_ARGS)
      * If expression is not variable = something or something = variable, then
      * punt and return a default estimate.
      */
-    if (!get_restriction_variable(root, args, varRelid, &vardata, &other, &varonleft))
+    if (!get_restriction_variable(root, args, varRelid, &vardata, &other, &varonleft)) {
+        /*
+         * For Var=Var cases, return non-null frac instead of DEFAULT_EQ_SEL.
+         * This is to avoid selectivity underestimate.
+         */
+        if (is_var_eq_var_expr(args)) {
+            Node* left = (Node*)linitial(args);
+            selec = nulltestsel(root, IS_NOT_NULL, left, varRelid, JOIN_INNER, NULL);
+            PG_RETURN_FLOAT8((float8)selec);
+        }
         PG_RETURN_FLOAT8(DEFAULT_EQ_SEL);
+    }
 
     /*
      * We can do a lot better if the something is a constant.  (Note: the
@@ -305,6 +317,20 @@ Datum eqsel(PG_FUNCTION_ARGS)
     ReleaseVariableStats(vardata);
 
     PG_RETURN_FLOAT8((float8)selec);
+}
+
+/*
+ * is_var_eq_var_expr --- checks if the args forms a var eq var expression
+ *
+ * This acts as the trigger to the selectivity optimization for var eq var quals
+ */
+static bool is_var_eq_var_expr(List* args)
+{
+    if (list_length(args) != 2)
+        return false;
+    Node* left = (Node*)linitial(args);
+    Node* right = (Node*)lsecond(args);
+    return _equalSimpleVar(left, right) && ((Var*)left)->varlevelsup == ((Var*)right)->varlevelsup;
 }
 
 /*
@@ -2275,9 +2301,9 @@ static double eqjoinsel_inner(
     double relfrac1 = 1.0, relfrac2 = 1.0, relfrac;
 
     nd1 = get_variable_numdistinct(
-        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     nd2 = get_variable_numdistinct(
-        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     opfuncoid = get_opcode(opera);
 
     if (HeapTupleIsValid(vardata1->statsTuple)) {
@@ -2655,9 +2681,9 @@ static double eqjoinsel_semi(
 
     Oid opfuncoid = OidIsValid(opera) ? get_opcode(opera) : InvalidOid;
     nd1 = get_variable_numdistinct(
-        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     nd2 = get_variable_numdistinct(
-        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     /*
      * We clamp nd2 to be not more than what we estimate the inner relation's
      * size to be.	This is intuitively somewhat reasonable since obviously
@@ -2861,9 +2887,9 @@ static double neqjoinsel_semi(
 
     nullfrac1 = stats1 ? stats1->stanullfrac : 0.0;
     nd1 = get_variable_numdistinct(
-        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     nd2 = get_variable_numdistinct(
-        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
 
     /*
      * When one of the sides contains zero distinct values, the selectivity is zero;
@@ -4550,6 +4576,8 @@ void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatD
     errno_t rc = memset_s(vardata, sizeof(VariableStatData), 0, sizeof(VariableStatData));
     securec_check(rc, "\0", "\0");
 
+    vardata->root = root;
+
     /* we enable possion to estimate distinct for default. */
     vardata->enablePossion = true;
     /* Save the exposed type of the expression */
@@ -4684,10 +4712,7 @@ void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatD
 
                             char relPersistence = get_rel_persistence(index->indexoid);
 
-                            if (u_sess->attr.attr_common.upgrade_mode != 0) {
-                                vardata->statsTuple = NULL;
-                                vardata->freefunc = ReleaseSysCache;
-                            } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+                            if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
                                 vardata->statsTuple = get_gtt_att_statistic(index->indexoid, Int16GetDatum(pos + 1));
                                 vardata->freefunc = release_gtt_statistic_cache;
                             } else {
@@ -4788,10 +4813,7 @@ static void examine_simple_variable(PlannerInfo* root, Var* var, VariableStatDat
          * We do not search system cache in upgrading
          */
         char relPersistence = get_rel_persistence(rte->relid);
-        if (u_sess->attr.attr_common.upgrade_mode != 0) {
-            vardata->statsTuple = NULL;
-            vardata->freefunc = ReleaseSysCache;
-        } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
             vardata->statsTuple = get_gtt_att_statistic(rte->relid, var->varattno);
             vardata->freefunc = release_gtt_statistic_cache;
         } else {
@@ -4980,7 +5002,7 @@ statistic_proc_security_check(const VariableStatData *vardata, Oid func_oid)
  * compare the result to exact integer counts, or might divide by it.
  */
 double get_variable_numdistinct(VariableStatData* vardata, bool* isdefault, bool adjust_rows, double join_ratio,
-    SpecialJoinInfo* sjinfo, STATS_EST_TYPE eType)
+    SpecialJoinInfo* sjinfo, STATS_EST_TYPE eType, bool isJoinVar)
 {
     double stadistinct;
     double stanullfrac = 0.0;
@@ -5066,6 +5088,20 @@ double get_variable_numdistinct(VariableStatData* vardata, bool* isdefault, bool
      */
     if (vardata->isunique)
         stadistinct = -1.0 * (1.0 - stanullfrac);
+
+    /*
+     * If no stats, try to get the estimation
+     */
+    if (ENABLE_SQL_BETA_FEATURE(JOIN_SEL_WITH_CAST_FUNC) && !HeapTupleIsValid(vardata->statsTuple) && 
+        stadistinct == 0.0) {
+        stadistinct = GetExprNumDistinctRouter(vardata, adjust_rows, eType, isJoinVar);
+
+        if (stadistinct > 0.0) {
+            ereport(DEBUG2, (errmodule(MOD_OPT),
+                errmsg("[Get Variable Distinct]: direct distinct is %.0lf by router, early return", stadistinct)));
+            return clamp_row_est(stadistinct);
+        }
+    }
 
     /*
      * Otherwise we need to get the relation size; punt if not available.
@@ -5336,7 +5372,7 @@ static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* varda
         ScanDirection indexscandir;
 
         /* Ignore non-btree indexes */
-        if (index->relam != BTREE_AM_OID)
+        if (!OID_IS_BTREE(index->relam))
             continue;
 
         /*
@@ -5438,7 +5474,7 @@ static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* varda
                 index_rescan(index_scan, scankeys, 1, NULL, 0);
 
                 /* Fetch first tuple in sortop's direction */
-                if ((tup = index_getnext(index_scan, indexscandir)) != NULL) {
+                if ((tup = (HeapTuple)index_getnext(index_scan, indexscandir)) != NULL) {
                     /* Extract the index column values from the heap tuple */
                     ExecStoreTuple(tup, slot, InvalidBuffer, false);
                     FormIndexDatum(indexInfo, slot, estate, values, isnull);
@@ -5467,7 +5503,7 @@ static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* varda
                 index_rescan(index_scan, scankeys, 1, NULL, 0);
 
                 /* Fetch first tuple in reverse direction */
-                if ((tup = index_getnext(index_scan, (ScanDirection)-indexscandir)) != NULL) {
+                if ((tup = (HeapTuple)index_getnext(index_scan, (ScanDirection)-indexscandir)) != NULL) {
                     /* Extract the index column values from the heap tuple */
                     ExecStoreTuple(tup, slot, InvalidBuffer, false);
                     FormIndexDatum(indexInfo, slot, estate, values, isnull);
@@ -6502,7 +6538,8 @@ static void genericcostestimate(PlannerInfo* root, IndexPath* path, double loop_
      * enough to not alter index-vs-seqscan decisions, but will prevent
      * indexes of different sizes from looking exactly equally attractive.
      */
-    *indexTotalCost += index->pages * spc_random_page_cost / 100000.0;
+    if (ENABLE_SQL_BETA_FEATURE(INDEX_COST_WITH_LEAF_PAGES_ONLY))
+        *indexTotalCost += index->pages * spc_random_page_cost / 100000.0;
 
     /*
      * CPU cost: any complex expressions in the indexquals will need to be
@@ -6752,10 +6789,7 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
             staoid = rte->partitionOid;
         }
 
-        if (u_sess->attr.attr_common.upgrade_mode != 0) {
-            vardata.statsTuple = NULL;
-            vardata.freefunc = ReleaseSysCache;
-        } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
             vardata.statsTuple = get_gtt_att_statistic(rte->relid, colnum);
             vardata.freefunc = release_gtt_statistic_cache;
         } else {
@@ -6780,10 +6814,7 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
             staoid = index->partitionindex;
         }
 
-        if (u_sess->attr.attr_common.upgrade_mode != 0) {
-            vardata.statsTuple = NULL;
-            vardata.freefunc = ReleaseSysCache;
-        } else if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+        if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
             vardata.statsTuple = get_gtt_att_statistic(relid, colnum);
             vardata.freefunc = release_gtt_statistic_cache;
         } else {
@@ -6825,6 +6856,11 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     ReleaseVariableStats(vardata);
 
     PG_RETURN_VOID();
+}
+
+Datum ubtcostestimate(PG_FUNCTION_ARGS)
+{
+    return btcostestimate(fcinfo);
 }
 
 Datum hashcostestimate(PG_FUNCTION_ARGS)
@@ -8697,7 +8733,7 @@ void set_varratio_after_calc_selectivity(
  * Return:
  *	minimum join ratio with specific relation
  */
-static double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo)
+double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo)
 {
     double ratio = 1.0;
     ListCell* lc = NULL;

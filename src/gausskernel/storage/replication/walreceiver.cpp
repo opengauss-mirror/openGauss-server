@@ -41,6 +41,7 @@
 #include <syscall.h>
 #endif
 #include <sys/stat.h>
+#include <string>
 
 #include "access/xlog_internal.h"
 #include "access/xlog.h"
@@ -57,6 +58,7 @@
 #include "replication/walreceiver.h"
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
+#include "replication/dcf_replication.h"
 #include "storage/copydir.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
@@ -77,6 +79,7 @@
 #include "hotpatch/hotpatch.h"
 #include "utils/distribute_test.h"
 
+
 bool wal_catchup = false;
 
 #define NAPTIME_PER_CYCLE 1 /* max sleep time between cycles (1ms) */
@@ -86,8 +89,6 @@ bool wal_catchup = false;
 #define WAL_DATA_LEN ((sizeof(uint32) + 1 + sizeof(XLogRecPtr)))
 
 #define TEMP_CONF_FILE "postgresql.conf.bak"
-
-#define MAX_PATH 256
 
 const char *g_reserve_param[RESERVE_SIZE] = {
     "application_name",
@@ -125,8 +126,17 @@ const char *g_reserve_param[RESERVE_SIZE] = {
     "archive_dest",
 #ifndef ENABLE_MULTIPLE_NODES
     "recovery_min_apply_delay",
-    "sync_config_strategy"
+    "sync_config_strategy",
 #else
+    NULL,
+    NULL,
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    "dcf_node_id",
+    "dcf_data_path",
+    "dcf_log_path"
+#else
+    NULL,
     NULL,
     NULL
 #endif
@@ -148,8 +158,6 @@ static void DisableWalRcvImmediateExit(void);
 static void WalRcvDie(int code, Datum arg);
 static void XLogWalRcvDataPageReplication(char *buf, Size len);
 static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len);
-static void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr);
-static void XLogWalRcvReceiveInBuf(char *buf, Size nbytes, XLogRecPtr recptr);
 static void XLogWalRcvSendHSFeedback(void);
 static void XLogWalRcvSendSwitchRequest(void);
 static void WalDataRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr);
@@ -169,7 +177,6 @@ static void WalRcvSigHupHandler(SIGNAL_ARGS);
 static void WalRcvShutdownHandler(SIGNAL_ARGS);
 static void WalRcvQuickDieHandler(SIGNAL_ARGS);
 static void sigusr1_handler(SIGNAL_ARGS);
-static void sigusr2_handler(SIGNAL_ARGS);
 static void ConfigFileTimer(void);
 static bool ProcessConfigFileMessage(char *buf, Size len);
 static void firstSynchStandbyFile(void);
@@ -178,14 +185,8 @@ static TimestampTz GetHeartbeatLastReplyTimestamp();
 static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timestamp, bool ping_sent);
 static void WalRcvRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn);
 static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message);
-static void ProcessStandbyArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message);
-static void WalRecvSendArchiveXlogResponse();
-static void WalRecvSendArchiveXlogResult2Standby();
-static void SendArchiveStatus(bool status);
-static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response);
-static void InitArchiveStartPoint();
-static bool CheckXlogNameValid(char* xlog);
-int XlogNameCmp(const void* a, const void* b);
+static void WalRecvSendArchiveXlogResponse(ArchiveTaskStatus *archive_status);
+
 void ProcessWalRcvInterrupts(void)
 {
     /*
@@ -269,54 +270,6 @@ void walRcvDataCleanup()
     };
 }
 
-bool walRcvCtlBlockIsEmpty(void)
-{
-    volatile WalRcvCtlBlock *walrcb = NULL;
-
-    LWLockAcquire(WALWriteLock, LW_EXCLUSIVE);
-    walrcb = getCurrentWalRcvCtlBlock();
-
-    if (walrcb == NULL) {
-        LWLockRelease(WALWriteLock);
-        return true;
-    }
-
-    bool retState = false;
-
-    SpinLockAcquire(&walrcb->mutex);
-    if (IsExtremeRedo()) {
-        if (walrcb->walFreeOffset == walrcb->walReadOffset) {
-            retState = true;
-        }
-    } else {
-        if (walrcb->walFreeOffset == walrcb->walWriteOffset) {
-            retState = true;
-        }
-    }
-
-    SpinLockRelease(&walrcb->mutex);
-    LWLockRelease(WALWriteLock);
-    return retState;
-}
-
-void setObsArchLatch(const Latch* latch)
-{
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    SpinLockAcquire(&walrcv->mutex);
-    walrcv->obsArchLatch = (Latch *)latch;
-    SpinLockRelease(&walrcv->mutex);
-}
-
-void SetStandbyArchLatch(const Latch* latch)
-{
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    SpinLockAcquire(&walrcv->mutex);
-    walrcv->arch_latch = (Latch *)latch;
-    SpinLockRelease(&walrcv->mutex);
-}
-
 static void wakeupObsArchLatch()
 {
     /* use volatile pointer to prevent code rearrangement */
@@ -324,17 +277,6 @@ static void wakeupObsArchLatch()
     SpinLockAcquire(&walrcv->mutex);
     if (walrcv->obsArchLatch != NULL) {
         SetLatch(walrcv->obsArchLatch);
-    }
-    SpinLockRelease(&walrcv->mutex);
-}
-
-static void wakeupArchLatch()
-{
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    SpinLockAcquire(&walrcv->mutex);
-    if (walrcv->obsArchLatch != NULL) {
-        SetLatch(walrcv->arch_latch);
     }
     SpinLockRelease(&walrcv->mutex);
 }
@@ -399,30 +341,28 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         ProcessConfigFile(PGC_SIGHUP);
     }
 
-    volatile unsigned int *pitr_task_status = &g_instance.archive_obs_cxt.pitr_task_status;
-    if (unlikely(pg_atomic_read_u32(pitr_task_status) == PITR_TASK_DONE)) {
-        WalRecvSendArchiveXlogResponse();
-        pg_memory_barrier();
-        pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
-    }
-
-    /* send archive status to primary */
-    if (g_instance.archive_standby_cxt.need_to_send_archive_status) {
-        g_instance.archive_standby_cxt.need_to_send_archive_status = false;
-        SendArchiveStatus(g_instance.archive_standby_cxt.archive_enabled);
-    }
-
-    /* response the result of archive to primary */
-    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-    if (unlikely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_DONE)) {
-        WalRecvSendArchiveXlogResult2Standby();
-        pg_memory_barrier();
-        pg_atomic_write_u32(arch_task_status, ARCH_TASK_NONE);
+    ArchiveTaskStatus *archive_task = walreceiver_find_archive_task_status(PITR_TASK_DONE);
+    if (unlikely(archive_task != NULL)) {
+        if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+#ifndef ENABLE_MULTIPLE_NODES
+            DcfSendArchiveXlogResponse(archive_task);
+#endif
+        } else {
+            WalRecvSendArchiveXlogResponse(archive_task);
+        }
     }
 
     if (!WalRcvWriterInProgress())
         ereport(FATAL, (errmsg("terminating walreceiver process due to the death of walrcvwriter")));
-
+#ifndef ENABLE_MULTIPLE_NODES
+    /* For Paxos, receive wal should be done by send log callback function */
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+        DCFSendXLogLocation();
+        /* avoid frequent lock acquire */
+        pg_usleep(10000); /* 10ms */
+        return;
+    }
+#endif
     if (t_thrd.walreceiver_cxt.start_switchover && walrcv->conn_target != REPCONNTARGET_OBS) {
         t_thrd.walreceiver_cxt.start_switchover = false;
         XLogWalRcvSendSwitchRequest();
@@ -448,13 +388,13 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
             XLogWalRcvSendReply(false, false);
     } else if(walrcv->conn_target != REPCONNTARGET_OBS) {
         /*
-         * We didn't receive anything new. If we haven't heard anything
-         * from the server for more than u_sess->attr.attr_storage.wal_receiver_timeout / 2,
-         * ping the server. Also, if it's been longer than
-         * u_sess->attr.attr_storage.wal_receiver_status_interval since the last update we sent,
-         * send a status update to the master anyway, to report any
-         * progress in applying WAL.
-         */
+        * We didn't receive anything new. If we haven't heard anything
+        * from the server for more than u_sess->attr.attr_storage.wal_receiver_timeout / 2,
+        * ping the server. Also, if it's been longer than
+        * u_sess->attr.attr_storage.wal_receiver_status_interval since the last update we sent,
+        * send a status update to the master anyway, to report any
+        * progress in applying WAL.
+        */
         TimestampTz nowtime = GetCurrentTimestamp();
         bool requestReply = WalRecCheckTimeOut(nowtime, *last_recv_timestamp, *ping_sent);
         if (requestReply) {
@@ -474,20 +414,25 @@ void WalReceiverMain(void)
     char conninfo[MAXCONNINFO];
     char slotname[NAMEDATALEN];
     XLogRecPtr startpoint;
-    TimestampTz last_recv_timestamp;
+    TimestampTz last_recv_timestamp = 0;
     bool ping_sent = false;
     /* use volatile pointer to prevent code rearrangement */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     int channel_identifier = 0;
     int nRet = 0;
     errno_t rc = 0;
-    uint32 isRedoFinish;
 
     t_thrd.walreceiver_cxt.last_sendfilereply_timestamp = GetCurrentTimestamp();
     t_thrd.walreceiver_cxt.standby_config_modify_time = time(NULL);
-    isRedoFinish = pg_atomic_read_u32(&(g_instance.comm_cxt.predo_cxt.isRedoFinish));
-    knl_g_set_redo_finish_status(isRedoFinish | REDO_FINISH_STATUS_CM);
-    ereport(LOG, (errmsg("set knl_g_set_redo_finish_status_CM to true when connecting to the primary")));
+
+    knl_g_disconn_node_context_data disconn_node =
+        g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+
+    if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
+        ereport(ERROR, (errmodule(MOD_WALRECEIVER), (errcode(ERRCODE_WITH_CHECK_OPTION_VIOLATION),
+            (errmsg("Refuse WAL streaming when starting, ")), (errdetail("connection mode %d, connertion IP is %s:%d",
+                disconn_node.conn_mode, disconn_node.disable_conn_node_host, disconn_node.disable_conn_node_port)))));
+    }
 
     /*
      * WalRcv should be set up already (if we are a backend, we inherit this
@@ -561,9 +506,7 @@ void WalReceiverMain(void)
     /* Initialise to a sanish value */
     walrcv->lastMsgSendTime = walrcv->lastMsgReceiptTime = walrcv->latestWalEndTime = GetCurrentTimestamp();
 
-    WalRcvCtlAcquireExitLock();
     walrcv->walRcvCtlBlock = t_thrd.walreceiver_cxt.walRcvCtlBlock;
-    WalRcvCtlReleaseExitLock();
     if(walrcv->conn_target != REPCONNTARGET_OBS) {
         t_thrd.walreceiver_cxt.AmWalReceiverForFailover =
             (walrcv->conn_target == REPCONNTARGET_DUMMYSTANDBY || walrcv->conn_target == REPCONNTARGET_STANDBY) ? true
@@ -595,7 +538,7 @@ void WalReceiverMain(void)
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, sigusr1_handler);
-    (void)gspqsignal(SIGUSR2, sigusr2_handler);
+    (void)gspqsignal(SIGUSR2, SIG_IGN);
 
     /* Reset some signals that are accepted by postmaster but not here */
     (void)gspqsignal(SIGCHLD, SIG_DFL);
@@ -611,7 +554,8 @@ void WalReceiverMain(void)
      * Create a resource owner to keep track of our resources (not clear that
      * we need this, but may as well have one).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Wal Receiver", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Wal Receiver",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
@@ -620,26 +564,27 @@ void WalReceiverMain(void)
         SetWalRcvDummyStandbySyncPercent(0);
     
     t_thrd.xlog_cxt.ThisTimeLineID = GetRecoveryTargetTLI();
-    /* Establish the connection to the primary for XLOG streaming */
-    EnableWalRcvImmediateExit();
+    if (!g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+        /* Establish the connection to the primary for XLOG streaming */
+        EnableWalRcvImmediateExit();
+        WalReceiverFuncTable[GET_FUNC_IDX].walrcv_connect(conninfo, &startpoint, slotname[0] != '\0' ? slotname : NULL,
+                                                        channel_identifier);
+        DisableWalRcvImmediateExit();
 
-    WalReceiverFuncTable[GET_FUNC_IDX].walrcv_connect(conninfo, &startpoint, slotname[0] != '\0' ? slotname : NULL,
-                                                      channel_identifier);
-    DisableWalRcvImmediateExit();
+        if (GetWalRcvDummyStandbySyncPercent() == SYNC_DUMMY_STANDBY_END && walrcv->conn_target != REPCONNTARGET_OBS) {
+            Assert(t_thrd.walreceiver_cxt.AmWalReceiverForFailover == true);
+            ereport(LOG, (errmsg("Secondary Standby has no xlog")));
+        }
 
-    if (GetWalRcvDummyStandbySyncPercent() == SYNC_DUMMY_STANDBY_END && walrcv->conn_target != REPCONNTARGET_OBS) {
-        Assert(t_thrd.walreceiver_cxt.AmWalReceiverForFailover == true);
-        ereport(LOG, (errmsg("Secondary Standby has no xlog")));
+        rc = memset_s(t_thrd.walreceiver_cxt.reply_message, sizeof(StandbyReplyMessage), 0, sizeof(StandbyReplyMessage));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(t_thrd.walreceiver_cxt.feedback_message, sizeof(StandbyHSFeedbackMessage), 0,
+                    sizeof(StandbyHSFeedbackMessage));
+        securec_check(rc, "\0", "\0");
+        ereport(LOG, (errmsg("start replication at start point %X/%X", (uint32)(startpoint >> 32), (uint32)startpoint)));
+
+        last_recv_timestamp = GetCurrentTimestamp();
     }
-
-    rc = memset_s(t_thrd.walreceiver_cxt.reply_message, sizeof(StandbyReplyMessage), 0, sizeof(StandbyReplyMessage));
-    securec_check(rc, "\0", "\0");
-    rc = memset_s(t_thrd.walreceiver_cxt.feedback_message, sizeof(StandbyHSFeedbackMessage), 0,
-                  sizeof(StandbyHSFeedbackMessage));
-    securec_check(rc, "\0", "\0");
-    ereport(LOG, (errmsg("start replication at start point %X/%X", (uint32)(startpoint >> 32), (uint32)startpoint)));
-
-    last_recv_timestamp = GetCurrentTimestamp();
 
     if (t_thrd.proc_cxt.DataDir) {
         nRet = snprintf_s(t_thrd.walreceiver_cxt.gucconf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf",
@@ -673,13 +618,20 @@ void WalReceiverMain(void)
         SpinLockRelease(&t_thrd.walreceiver_cxt.walRcvCtlBlock->mutex);
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /* receivePtr should be set before it */
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
+        LaunchPaxos();
+    }
+#endif
+
     /*
-     * Synchronize standby's configure file once the HA build successfully.
+     * For primary-standby, synchronize standby's configure file once the HA build successfully.
      *
      * Note: If switchover in one hour, and there is no parameter is reloaded,
      * the parameters set by client will be disabled. So we should do this.
      */
-    if(walrcv->conn_target != REPCONNTARGET_OBS) {
+    if(walrcv->conn_target != REPCONNTARGET_OBS && !g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
         firstSynchStandbyFile();
         set_disable_conn_mode();
     }
@@ -725,6 +677,7 @@ static inline TimestampTz CalculateTimeout(TimestampTz last_reply_time)
 static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timestamp, bool ping_sent)
 {
     bool requestReply = false;
+    WalReplicationTimestampInfo tpInfo;
     TimestampTz heartbeat = GetHeartbeatLastReplyTimestamp();
     TimestampTz calculateTime = CalculateTimeout(heartbeat);
     TimestampTz hbValid = TimestampTzPlusMilliseconds(heartbeat, u_sess->attr.attr_storage.wal_receiver_timeout * 2);
@@ -739,9 +692,10 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
     if (timestamptz_cmp_internal(nowtime, calculateTime) >= 0 && timestamptz_cmp_internal(hbValid, nowtime) >= 0 &&
         (t_thrd.walreceiverfuncs_cxt.WalRcv != NULL &&
         t_thrd.walreceiverfuncs_cxt.WalRcv->node_state != NODESTATE_STANDBY_WAITING)) {
+        WalReplicationTimestampToString(&tpInfo, nowtime, calculateTime, last_recv_timestamp, heartbeat);
         ereport(ERROR, (errmsg(
             "terminating walreceiver due to heartbeat timeout,now time(%s) last heartbeat time(%s) calculateTime(%s)",
-            timestamptz_to_str(nowtime), timestamptz_to_str(heartbeat), timestamptz_to_str(calculateTime))));
+            tpInfo.nowTimeStamp, tpInfo.heartbeatStamp, tpInfo.timeoutStamp)));
     }
 
     /* don't bail out if we're doing something that doesn't require timeouts */
@@ -775,7 +729,6 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
      * replication timeout. Ping the server.
      */
     if (nowtime >= timeout) {
-        WalReplicationTimestampInfo tpInfo;
         if (log_min_messages <= DEBUG2 || client_min_messages <= DEBUG2) {
             WalReplicationTimestampToString(&tpInfo, nowtime, timeout, last_recv_timestamp, heartbeat);
             ereport(DEBUG2,
@@ -799,7 +752,7 @@ static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timest
 }
 
 /*
- * Mark us as STOPPED in proc at exit.
+ * Mark us as STOPPED in proc exit.
  */
 static void WalRcvDie(int code, Datum arg)
 {
@@ -811,7 +764,7 @@ static void WalRcvDie(int code, Datum arg)
      * Ensure that all WAL records received are flushed to disk.
      */
     KillWalRcvWriter();
-    
+
     /* we have to set REDO_FINISH_STATUS_LOCAL to false here, or there will be problems in this case:
        extremRTO is on, and DN received force finish signal, if cleanup is blocked, the force finish 
        signal will be ignored!
@@ -849,8 +802,8 @@ static void WalRcvDie(int code, Datum arg)
     }
 
     /* reset conn_channel */
-    errno_t rc = memset_s((void*)&walrcv->conn_channel,
-        sizeof(walrcv->conn_channel), 0, sizeof(walrcv->conn_channel));
+    errno_t rc = memset_s((void*)&walrcv->conn_channel, sizeof(walrcv->conn_channel),
+                         0, sizeof(walrcv->conn_channel));
     securec_check_c(rc, "\0", "\0");
 
     ereport(LOG, (errmsg("walreceiver thread shut down")));
@@ -907,7 +860,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
     int save_errno = errno;
 
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
-
     if (t_thrd.walreceiverfuncs_cxt.WalRcv &&
         t_thrd.walreceiverfuncs_cxt.WalRcv->node_state >= NODESTATE_SMART_DEMOTE_REQUEST &&
         t_thrd.walreceiverfuncs_cxt.WalRcv->node_state <= NODESTATE_FAST_DEMOTE_REQUEST) {
@@ -917,18 +869,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
 
-    errno = save_errno;
-}
-
-static void sigusr2_handler(SIGNAL_ARGS) {
-    /* get sigusr2 */
-    int save_errno = errno;
-    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
-    /*
-     * sending archive status to the primary in this step
-     */
-    g_instance.archive_standby_cxt.need_to_send_archive_status = true;
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
     errno = save_errno;
 }
 
@@ -948,7 +888,7 @@ static void XLogWalRcvDataPageReplication(char *buf, Size len)
     }
     if (len < sizeof(WalDataPageMessageHeader)) {
         ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal("invalid wal data page message received from primary")));
+            errmsg_internal("invalid wal data page message received from primary")));
     }
 
     /* memcpy is required here for alignment reasons */
@@ -963,9 +903,8 @@ static void XLogWalRcvDataPageReplication(char *buf, Size len)
     if (len > WS_MAX_DATA_QUEUE_SIZE) {
         Assert(false);
         ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
-                        errmsg_internal(
-                            "unexpected wal data size %lu bytes exceeds the max receiving data queue size %u bytes",
-                            len, WS_MAX_DATA_QUEUE_SIZE)));
+            errmsg_internal("unexpected wal data size %lu bytes exceeds the max receiving data queue size %u bytes",
+                len, WS_MAX_DATA_QUEUE_SIZE)));
     }
     if (u_sess->attr.attr_storage.HaModuleDebug) {
         WSDataRcvCheck(buf, len);
@@ -1087,25 +1026,6 @@ static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len)
             ProcessArchiveXlogMessage(&archiveXLogMessage);
             break;
         }
-        case 'n' : /* process the archive task message sent by primary */
-        {
-            ArchiveXlogMessage archiveXLogMessage;
-            CHECK_MSG_SIZE(len, ArchiveXlogMessage, "invalid ArchiveXlogMessage message received from primary");
-            /* memcpy is required here for alignment reasons */
-            errorno = memcpy_s(&archiveXLogMessage, sizeof(ArchiveXlogMessage), buf, sizeof(ArchiveXlogMessage));
-            securec_check(errorno, "\0", "\0");
-            ProcessStandbyArchiveXlogMessage(&archiveXLogMessage);
-            break;
-        }
-        case 'S': /* send the status of the archive thread on standby */
-        {
-            ArchiveStatusResponseMessage response;
-            CHECK_MSG_SIZE(len, ArchiveStatusResponseMessage, "invalid ArchiveStatusResponseMessage message received from primary");
-            errorno = memcpy_s(&response, sizeof(ArchiveStatusResponseMessage), buf, sizeof(ArchiveStatusResponseMessage));
-            securec_check(errorno, "\0", "\0");
-            ProcessArchiveStatusResponse(&response);
-            break;
-        }
         default:
             ereport(ERROR, (errcode(ERRCODE_PROTOCOL_VIOLATION),
                             errmsg_internal("invalid replication message type %c", type)));
@@ -1127,16 +1047,14 @@ void WSDataRcvCheck(char *data_buf, Size nbytes)
 
     if (total_len != nbytes) {
         Assert(false);
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("the corrupt data total len is %u bytes, the expected len is %lu bytes.", total_len, nbytes)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("the corrupt data total len is %u bytes, the expected len is %lu bytes.", total_len, nbytes)));
     }
 
     if (cur_buf[0] != 'd') {
         Assert(false);
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                 errmsg("the unexpected data flag is %c, the expected data flag is 'd'.", cur_buf[0])));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            errmsg("the unexpected data flag is %c, the expected data flag is 'd'.", cur_buf[0])));
     }
     cur_buf += 1;
 
@@ -1145,7 +1063,7 @@ void WSDataRcvCheck(char *data_buf, Size nbytes)
     if (XLogRecPtrIsInvalid(ref_xlog_ptr)) {
         Assert(false);
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("the start xlog employed for the wal data is invalid.")));
+            errmsg("the start xlog employed for the wal data is invalid.")));
     }
     cur_buf += sizeof(XLogRecPtr);
 
@@ -1154,7 +1072,7 @@ void WSDataRcvCheck(char *data_buf, Size nbytes)
     if (XLogRecPtrIsInvalid(ref_xlog_ptr)) {
         Assert(false);
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                        errmsg("the end xlog employed for the wal data is invalid.")));
+            errmsg("the end xlog employed for the wal data is invalid.")));
     }
 
     return;
@@ -1223,9 +1141,7 @@ static void WalDataRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
             }
         } else {
             Assert(false);
-            ereport(
-                ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                  errmsg("fail to push some wal data to the wal streaming writer queue: unexpected wal data flag %c.",
                         data_flag)));
         }
@@ -1278,7 +1194,7 @@ inline void WalReceiverWaitCopyXLogCount(XLogRecPtr recptr, XLogRecPtr startptr,
 /*
  * Receive XLOG data into receiver buffer.
  */
-static void XLogWalRcvReceiveInBuf(char *buf, Size nbytes, XLogRecPtr recptr)
+void XLogWalRcvReceiveInBuf(char *buf, Size nbytes, XLogRecPtr recptr)
 {
     int64 walfreeoffset;
     int64 walwriteoffset;
@@ -1407,7 +1323,7 @@ static void XLogWalRcvReceiveInBuf(char *buf, Size nbytes, XLogRecPtr recptr)
 /*
  * Receive XLOG data into receiver buffer.
  */
-static void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
+void XLogWalRcvReceive(char *buf, Size nbytes, XLogRecPtr recptr)
 {
     int walfreeoffset;
     int walwriteoffset;
@@ -1548,6 +1464,9 @@ void XLogWalRcvSendReply(bool force, bool requestReply)
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
     XLogRecPtr sndFlushPtr;
+
+    if (g_instance.attr.attr_storage.dcf_attr.enable_dcf)
+        return;
 
     /*
      * If the user doesn't want status to be reported to the master, be sure
@@ -1927,59 +1846,44 @@ const static int ARCHIVE_XLOG_DELAY = 10000;
 
 static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message)
 {
-    ereport(LOG, (errmsg("get archive xlog message :%X/%X", (uint32)(archive_xlog_message->targetLsn >> 32), 
-        (uint32)(archive_xlog_message->targetLsn))));
+    ereport(LOG, (errmsg("get archive xlog message %s :%X/%X", archive_xlog_message->slot_name, 
+        (uint32)(archive_xlog_message->targetLsn >> 32), (uint32)(archive_xlog_message->targetLsn))));
     errno_t errorno = EOK;
-    volatile unsigned int *pitr_task_status = &g_instance.archive_obs_cxt.pitr_task_status;
+    ArchiveTaskStatus *archive_task = find_archive_task_status(archive_xlog_message->slot_name);
+    if (archive_task == NULL) {
+        ereport(ERROR, (errmsg("get archive xlog message %s :%X/%X, but task slot not find", 
+            archive_xlog_message->slot_name, 
+            (uint32)(archive_xlog_message->targetLsn >> 32), 
+            (uint32)(archive_xlog_message->targetLsn))));
+    }
+    volatile unsigned int *pitr_task_status = &archive_task->pitr_task_status;
     unsigned int expected = PITR_TASK_NONE;
     int failed_times = 0;
+    /* lock for archiver get PITR_TASK_GET flag, but works on old task . 
+    * if archiver works between set flag and set task details.
+    */
+    SpinLockAcquire(&archive_task->mutex);
     while (pg_atomic_compare_exchange_u32(pitr_task_status, &expected, PITR_TASK_GET) == false) {
         /* some task arrived before last task done if expected not equal to NONE */
         expected = PITR_TASK_NONE;
         pg_usleep(ARCHIVE_XLOG_DELAY);  // sleep 0.01s
         if (failed_times++ >= GET_ARCHIVE_XLOG_RETRY_MAX) {
-            ereport(WARNING, (errmsg("get archive xlog message :%X/%X, but not finished",
+            ereport(WARNING, (errmsg("get archive xlog message %s :%X/%X, but not finished",
+                                     archive_xlog_message->slot_name,
                                      (uint32)(archive_xlog_message->targetLsn >> 32),
                                      (uint32)(archive_xlog_message->targetLsn))));
+            SpinLockRelease(&archive_task->mutex);
             return;
         }
     }
-    errorno = memcpy_s(&g_instance.archive_obs_cxt.archive_task,
+    
+    errorno = memcpy_s(&archive_task->archive_task,
         sizeof(ArchiveXlogMessage) + 1,
         archive_xlog_message,
         sizeof(ArchiveXlogMessage));
     securec_check(errorno, "\0", "\0");
+    SpinLockRelease(&archive_task->mutex);
     wakeupObsArchLatch();
-}
-
-/*
- * Process ProcessStandbyArchiveXlogMessage received from primary sender, message type is 'n'.
- */
-static void ProcessStandbyArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message)
-{
-    ereport(LOG, (errmsg("ProcessStandbyArchiveXlogMessage: get archive xlog message :%X/%X",
-                        (uint32)(archive_xlog_message->targetLsn >> 32), (uint32)(archive_xlog_message->targetLsn))));
-    errno_t errorno = EOK;
-    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-    unsigned int expected = ARCH_TASK_NONE;
-    int failed_times = 0;
-    while (pg_atomic_compare_exchange_u32(arch_task_status, &expected, ARCH_TASK_GET) == false) {
-        /* some task arrived before last task done if expected not equal to NONE */
-        expected = ARCH_TASK_NONE;
-        pg_usleep(ARCHIVE_XLOG_DELAY);  // sleep 0.01s
-        if (failed_times++ >= GET_ARCHIVE_XLOG_RETRY_MAX) {
-            ereport(WARNING, (errmsg("get archive xlog message :%X/%X, but not finished",
-                                     (uint32)(archive_xlog_message->targetLsn >> 32),
-                                     (uint32)(archive_xlog_message->targetLsn))));
-            return;
-        }
-    }
-    errorno = memcpy_s(&g_instance.archive_standby_cxt.archive_task,
-        sizeof(ArchiveXlogMessage) + 1,
-        archive_xlog_message,
-        sizeof(ArchiveXlogMessage));
-    securec_check(errorno, "\0", "\0");
-    wakeupArchLatch();
 }
 
 /*
@@ -2008,6 +1912,7 @@ static void XLogWalRcvSendSwitchRequest(void)
     securec_check(errorno, "\0", "\0");
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(buf, sizeof(StandbySwitchRequestMessage) + 1);
 
+
     SendPostmasterSignal(PMSIGNAL_UPDATE_WAITING);
     ereport(LOG, (errmsg("send %s switchover request to primary",
         DemoteModeDesc(t_thrd.walreceiver_cxt.request_message->demoteMode))));
@@ -2016,48 +1921,33 @@ static void XLogWalRcvSendSwitchRequest(void)
 /*
  * Send archive xlog response message to primary.
  */
-static void WalRecvSendArchiveXlogResponse()
+static void WalRecvSendArchiveXlogResponse(ArchiveTaskStatus *archive_task)
 {
-    char buf[sizeof(ArchiveXlogResponseMeeeage) + 1];
-    ArchiveXlogResponseMeeeage reply;
+    if (archive_task == NULL) {
+        return;
+    }
+    char buf[sizeof(ArchiveXlogResponseMessage) + 1];
+    ArchiveXlogResponseMessage reply;
     errno_t errorno = EOK;
-    reply.pitr_result = g_instance.archive_obs_cxt.pitr_finish_result;
-    reply.targetLsn = g_instance.archive_obs_cxt.archive_task.targetLsn;
+    reply.pitr_result = archive_task->pitr_finish_result;
+    reply.targetLsn = archive_task->archive_task.targetLsn;
+    errorno = memcpy_s(&reply.slot_name, NAMEDATALEN, archive_task->slotname, NAMEDATALEN);
+    securec_check(errorno, "\0", "\0");
+
     buf[0] = 'a';
     errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveXlogResponseMeeeage),
+        sizeof(ArchiveXlogResponseMessage),
         &reply,
-        sizeof(ArchiveXlogResponseMeeeage));
+        sizeof(ArchiveXlogResponseMessage));
     securec_check(errorno, "\0", "\0");
-    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMeeeage) + 1);
+    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMessage) + 1);
 
     ereport(LOG,
-        (errmsg("WalRecvSendArchiveXlogResponse %d %X/%X", reply.pitr_result, 
+        (errmsg("WalRecvSendArchiveXlogResponse %s:%d %X/%X", reply.slot_name, reply.pitr_result, 
             (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
-
-}
-
-/*
- * Send archive xlog result message to primary.
- */
-static void WalRecvSendArchiveXlogResult2Standby()
-{
-    char buf[sizeof(ArchiveXlogResponseMeeeage) + 1];
-    ArchiveXlogResponseMeeeage reply;
-    errno_t errorno = EOK;
-    reply.pitr_result = g_instance.archive_standby_cxt.arch_finish_result;
-    reply.targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
-    buf[0] = 'n';
-    errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveXlogResponseMeeeage),
-        &reply,
-        sizeof(ArchiveXlogResponseMeeeage));
-    securec_check(errorno, "\0", "\0");
-    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMeeeage) + 1);
-    const char* archive_result_string = ((reply.pitr_result) ? "success" : "fail");
-    ereport(LOG,
-        (errmsg("WalRecvSendArchiveXlogResult2Standby archive_result:%s archive_lsn:%X/%X", archive_result_string, 
-            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    volatile unsigned int *pitr_task_status = &archive_task->pitr_task_status;
+    pg_memory_barrier();
+    pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
 
 }
 
@@ -2226,6 +2116,8 @@ const char *wal_get_rebuild_reason_string(HaRebuildReason reason)
             return "System id not matched";
         case TIMELINE_REBUILD:
             return "Timeline not matched";
+        case DCF_LOG_LOSS_REBUILD:
+            return "DCF log loss";
         default:
             break;
     }
@@ -2286,9 +2178,9 @@ static void wal_get_ha_rebuild_reason_with_multi(char *buildReason, ServerMode l
         return;
     }
 
-    if (t_thrd.postmaster_cxt.ReplConnArray[hashmdata->current_repl] != NULL &&
-        (walrcv->conn_target == REPCONNTARGET_PRIMARY || am_cascade_standby()
-        || IS_DISASTER_RECOVER_MODE)) {
+    if ((t_thrd.postmaster_cxt.ReplConnArray[hashmdata->current_repl] != NULL &&
+        (walrcv->conn_target == REPCONNTARGET_PRIMARY || am_cascade_standby())) ||
+         IS_DISASTER_RECOVER_MODE) {
         if (hashmdata->repl_reason[hashmdata->current_repl] == NONE_REBUILD && isRunning) {
             rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
             securec_check_ss(rcs, "\0", "\0");
@@ -2787,29 +2679,6 @@ static void firstSynchStandbyFile(void)
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_send(bufTime, sizeof(ConfigModifyTimeMessage) + 1);
 }
 
-void GetPrimaryServiceAddress(char *address, size_t address_len)
-{
-    if (address == NULL || address_len == 0 || t_thrd.walreceiverfuncs_cxt.WalRcv == NULL)
-        return;
-
-    bool is_running = false;
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    int rc = 0;
-
-    SpinLockAcquire(&walrcv->mutex);
-    is_running = walrcv->isRuning;
-    SpinLockRelease(&walrcv->mutex);
-
-    if (walrcv->pid == 0 || !is_running)
-        return;
-
-    SpinLockAcquire(&walrcv->mutex);
-    rc = snprintf_s(address, address_len, (address_len - 1), "%s:%d", walrcv->conn_channel.remotehost,
-                    walrcv->conn_channel.remoteservice);
-    securec_check_ss(rc, "\0", "\0");
-    SpinLockRelease(&walrcv->mutex);
-}
-
 void MakeDebugLog(TimestampTz sendTime, TimestampTz lastMsgReceiptTime, const char *msgFmt)
 {
     char *sendtimeStr = NULL;
@@ -2867,181 +2736,4 @@ static void WalRcvRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecP
     } else {
         WalRcvSetPercentCountStartLsn(currentDoneLsn);
     }
-}
-
-/* 
- * SendArchiveStatus
- * This function is used to notify the primary of
- * whether archiving is enabled for standby.
- * 
- * If the value of status is true, archiving is enabled for the standby node.
- * Otherwise, archiving is disabled.
- * 
- * The targetLsn is the minimum lsn which is not archived.
- */
-static void SendArchiveStatus(bool status)
-{
-    char buf[sizeof(ArchiveStatusMessage) + 1];
-    ArchiveStatusMessage message;
-    errno_t errorno = EOK;
-    message.is_archive_activied = status;
-    InitArchiveStartPoint();
-    const char* status_string = status ? "on" : "off";
-    ereport(LOG, (errmsg("the archive thread status is %s, and the start point of lsn is %ld",
-                        status_string, g_instance.archive_standby_cxt.standby_archive_start_point)));
-    message.startLsn = g_instance.archive_standby_cxt.standby_archive_start_point;
-    buf[0] = 'S';
-    errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveStatusMessage),
-        &message,
-        sizeof(ArchiveStatusMessage));
-    securec_check(errorno, "\0", "\0");
-    libpqrcv_send(buf, sizeof(ArchiveStatusMessage) + 1);
-}
-
-static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response)
-{
-    ereport(LOG, (errmsg("get updating archive status response")));
-    bool is_success = response->is_set_status_success;
-    if (is_success) {
-        SetLatch(g_instance.archive_standby_cxt.arch_latch);
-    } else {
-        ereport(WARNING,
-                (errcode(ERRCODE_WARNING),
-                    errmsg("it is failed to notify the primary that updating the archive status of standby")));
-    }
-}
-
-/*
- * InitArchiveStartPoint is used to find a start point which is the standby should check
- */
-static void InitArchiveStartPoint()
-{
-    ReplicationSlot* obs_archive_slot = getObsReplicationSlot();
-    if (!IsServerModeStandby() || obs_archive_slot != NULL) {
-        return;
-    }
-    struct stat stat_buf;
-    XLogRecPtr targetLsn = 0;
-    XLogRecPtr flushPtr = t_thrd.walreceiverfuncs_cxt.WalRcv->walRcvCtlBlock->flushPtr;
-    XLogRecPtr* standby_archive_start_point = &g_instance.archive_standby_cxt.standby_archive_start_point;
-    XLogRecPtr backup = g_instance.archive_standby_cxt.standby_archive_start_point;
-    DIR *xldir = NULL;
-    struct dirent *xlde = NULL;
-
-    errno_t errorno = EOK;
-    xldir = AllocateDir(XLOGDIR);
-
-    if (xldir == NULL) {
-        ereport(ERROR,
-                (errcode_for_file_access(),
-                errmsg("InitArchiveStartPoint: could not open transaction log directory \"%s\": %m", XLOGDIR)));
-    }
-
-    /* find all xlog in the XLOGDIR and push it into a list */
-    List* xlog_names = NIL;
-    ListCell* xlog = NULL;
-    while ((xlde = ReadDir(xldir, XLOGDIR)) != NULL){
-        if (!CheckXlogNameValid(xlde->d_name)) {
-            continue;
-        }
-        char* xlog_name = (char*)palloc(sizeof(char) * MAX_PATH);
-        errorno = snprintf_s(xlog_name, MAX_PATH, MAX_PATH - 1, xlde->d_name);
-        xlog_names = lappend(xlog_names, xlog_name);
-    }
-    if (xlog_names->length == 0) {
-        *standby_archive_start_point = flushPtr;
-        return;
-    }
-
-    /* cast the type List to array of string, and sort the array */
-    char** xlog_array = (char**)palloc((sizeof(char*) * xlog_names->length));
-    int count = 0;
-    foreach(xlog, xlog_names) {
-        xlog_array[count++] = (char*)lfirst(xlog);
-    }
-    qsort(xlog_array, xlog_names->length, sizeof(char*), XlogNameCmp);
-
-    /* check the lsn which is the existsed xlog but not archived */
-    for (;;) {
-        targetLsn += XLogSegSize;
-        char lastoff[MAXFNAMELEN];
-        XLogSegNo segno = 0;
-        XLByteToSeg(targetLsn, segno);
-        errorno = snprintf_s(lastoff, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
-                            (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
-        
-        if (!CheckXlogNameValid(lastoff)) {
-            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FILE), errmsg("InitArchiveStartPoint:the lsn is error")));
-            break;
-        }
-
-        bool is_xlog = false;
-        for (int i = 0; i < xlog_names->length; i++) {
-            char* xlog_name = xlog_array[i];
-            int cmp_result = strcmp(lastoff, xlog_name);
-            if (cmp_result < 0) {
-                is_xlog = true;
-                break;
-            } else if (cmp_result > 0) {
-                continue;
-            } else {
-                is_xlog = true;
-                char statusPath[MAXPGPATH];
-                errorno = snprintf_s(statusPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/archive_status/%s%s", lastoff,
-                                    ".done");
-                securec_check_ss(errorno, "", "");
-                bool is_done = (stat(statusPath, &stat_buf) == 0);
-        
-                if (!is_done) {
-                    *standby_archive_start_point = targetLsn;
-                    ereport(LOG,
-                            (errmsg("the start point is %X/%X",
-                                    (uint32)(*standby_archive_start_point >> 32), (uint32)(*standby_archive_start_point))));
-                    return;
-                }
-                break;
-            }
-        }
-        if (!is_xlog) {
-            ereport(LOG, (errmsg("can not found this xlog in the XLOGDIR")));
-            break;
-        }
-    }
-
-    /* we use the smaller lsn as the archive start point */
-    if (backup <= *standby_archive_start_point) {
-        *standby_archive_start_point = backup;
-    }
-
-    /* we use the flushPtr as the archive start point if we can't find a start point according to the xlog */
-    if (*standby_archive_start_point == 0) {
-        *standby_archive_start_point = flushPtr;
-    }
-
-    /* release all memory which is used to store the xlog name */
-    foreach(xlog, xlog_names) {
-        char* name = (char*)lfirst(xlog);
-        pfree(name);
-        name = NULL;
-    }
-    if (xlog_array != NULL) {
-        pfree(xlog_array);
-        xlog_array = NULL;
-    }
-    FreeDir(xldir);
-    xldir = NULL;
-}
-
-static bool CheckXlogNameValid(char* xlog)
-{
-    if (strlen(xlog) != 24 || strspn(xlog, "0123456789ABCDEF") != 24) {
-        return false;
-    }
-    return true;
-}
-
-int XlogNameCmp(const void* a, const void* b)
-{
-    return strcmp(*(char* const*)a, *(char* const*)b);
 }

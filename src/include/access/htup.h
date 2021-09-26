@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * htup.h
- *	  POSTGRES heap tuple definitions.
+ *	  openGauss heap tuple definitions.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -21,7 +21,7 @@
 #include "storage/buf/buf.h"
 #include "storage/buf/bufpage.h"
 #include "storage/item/itemptr.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/relcache.h"
 
     /* Number of internal columns added by Redis during scale-in/scale-out. */
@@ -590,6 +590,7 @@ typedef MinimalTupleData* MinimalTuple;
 typedef struct HeapTupleData {
     uint32 t_len;           /* length of *t_data */
     uint1 tupTableType = HEAP_TUPLE;
+    uint1 tupInfo;
     int2   t_bucketId;
     ItemPointerData t_self; /* SelfItemPointer */
     Oid t_tableOid;         /* table the tuple came from */
@@ -1113,7 +1114,7 @@ extern void heap_freetuple(HeapTuple htup);
 #define heap_freetuple_ext(htup)  \
     do {                          \
         if ((htup) != NULL) {     \
-            heap_freetuple(htup); \
+            heap_freetuple((HeapTuple)htup); \
             htup = NULL;          \
         }                         \
     } while (0)
@@ -1140,6 +1141,7 @@ typedef struct KeepInvisbleOpt {
 } KeepInvisbleOpt;
 
 bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc = NULL);
+void HeapCopyTupleNoAlloc(HeapTuple dest, HeapTuple src);
 
 // for ut test
 extern HeapTuple test_HeapUncompressTup2(HeapTuple tuple, TupleDesc tuple_desc, Page dict_page);

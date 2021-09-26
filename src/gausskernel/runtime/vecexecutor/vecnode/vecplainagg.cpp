@@ -28,7 +28,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
-#include "executor/nodeAgg.h"
+#include "executor/node/nodeAgg.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"

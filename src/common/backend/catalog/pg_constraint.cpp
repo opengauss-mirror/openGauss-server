@@ -110,7 +110,7 @@ Oid CreateConstraintEntry(const char* constraintName, Oid constraintNamespace, c
     (void)namestrcpy(&cname, constraintName);
 
     /*
-     * Convert C arrays into Postgres arrays.
+     * Convert C arrays into openGauss arrays.
      */
     if (constraintNKeys > 0) {
         Datum* conkey = NULL;
@@ -406,7 +406,7 @@ bool ConstraintNameIsUsed(ConstraintCategory conCat, Oid objId, Oid objNamespace
  * Select a nonconflicting name for a new constraint.
  *
  * The objective here is to choose a name that is unique within the
- * specified namespace.  Postgres does not require this, but the SQL
+ * specified namespace.  openGauss does not require this, but the SQL
  * spec does, and some apps depend on it.  Therefore we avoid choosing
  * default names that so conflict.
  *

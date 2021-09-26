@@ -56,10 +56,11 @@
 
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
+#include "libcomm/libcomm.h"
 #include "libcomm_common.h"
 
 #ifdef ENABLE_UT
@@ -342,6 +343,11 @@ void gs_clean_cmailbox(const gsocket gs_sock)
         cmailbox->buff_q = mc_lqueue_clear(cmailbox->buff_q);
         cmailbox->query_id = 0;
     }
+    if (cmailbox->session_info_ptr != NULL) {
+        ereport(DEBUG5, (errmsg("Trace: (r|cmailbox clean). detail idx[%d], streamid[%d]",
+            gs_sock.idx, gs_sock.sid)));
+    }
+    cmailbox->session_info_ptr = NULL;
     LIBCOMM_PTHREAD_MUTEX_UNLOCK(&cmailbox->sinfo_lock);
     t_thrd.int_cxt.ImmediateInterruptOK = TempImmediateInterruptOK;
 
@@ -355,6 +361,7 @@ void gs_r_reset_cmailbox(struct c_mailbox* cmailbox, int close_reason)
     }
 
     int node_idx = cmailbox->idx;
+    int streamid = cmailbox->streamid;
     errno_t ss_rc;
 
     printf_cmailbox_statistic(cmailbox, g_instance.comm_cxt.g_r_node_sock[node_idx].remote_nodename);
@@ -383,6 +390,11 @@ void gs_r_reset_cmailbox(struct c_mailbox* cmailbox, int close_reason)
             LIBCOMM_FREE(cmailbox->statistic, sizeof(struct cmailbox_statistic));
         }
     }
+    if (cmailbox->session_info_ptr != NULL) {
+        ereport(DEBUG5, (errmsg("Trace: (r|cmailbox reset). detail idx[%d], streamid[%d]",
+            node_idx, streamid)));
+    }
+    cmailbox->session_info_ptr = NULL;
 #ifdef SCTP_BUFFER_DEBUG
     cmailbox->buff_q_tmp = mc_lqueue_clear(cmailbox->buff_q_tmp);
 #endif
@@ -460,6 +472,13 @@ void gs_mailbox_destory(int idx)
     if (g_instance.comm_cxt.g_c_mailbox[idx] != NULL) {
         for (sid = 0; sid < g_instance.comm_cxt.counters_cxt.g_max_stream_num; sid++) {
             cmailbox = &C_MAILBOX(idx, sid);
+            if (cmailbox->session_info_ptr != NULL) {
+                if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+                    NotifyListener(cmailbox, true, __FUNCTION__);
+                }
+                LIBCOMM_ELOG(DEBUG5, "Trace: (cmailbox destroy). detail idx[%d], streamid[%d]", idx, sid);
+            }
+            cmailbox->session_info_ptr = NULL;
             mc_lqueue_clear(cmailbox->buff_q);
             LIBCOMM_FREE(cmailbox->buff_q, sizeof(struct mc_lqueue));
             LIBCOMM_PTHREAD_MUTEX_DESTORY(&(cmailbox->sinfo_lock));
@@ -902,6 +921,26 @@ int gs_set_basic_info(const char* local_host,  // ip of local host
 
     gs_init_adapt_layer();
 
+#ifdef USE_SSL
+    // initialize SSL parameter
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+        LIBCOMM_ELOG(LOG, "comm_enable_SSL is open, call comm_initialize_SSL");
+        comm_initialize_SSL();
+        if (g_instance.attr.attr_network.SSL_server_context != NULL) {
+             LIBCOMM_ELOG(LOG, "comm_initialize_SSL success");
+        } else {
+             LIBCOMM_ELOG(LOG, "comm_initialize_SSL failed");
+        }
+    } else {
+        LIBCOMM_ELOG(LOG, "comm_enable_SSL is close");
+    }
+#endif
+
+    int ret = LibCommInitChannelConn(cur_node_num);
+    if (ret < 0) {
+        ereport(FATAL, (errmsg("Initialize libcomm control or data channel conn failed!")));
+    }
+
     // receiver structure setting
     gs_receivers_struct_init(
         g_instance.attr.attr_network.comm_control_port, g_instance.attr.attr_network.comm_sctp_port);
@@ -1303,6 +1342,44 @@ static void CommReceiverFlowerAcceptNewConn(const struct sock_id* tFdId, int ltk
         }
     }
 
+#ifdef USE_SSL
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+         LIBCOMM_ELOG(LOG, "CommReceiverFlowerAcceptNewConn call comm_ssl_open_server, fd is %d, id is %d, sock is %d",
+            tFdId->fd, tFdId->id, ctk);
+         libcomm_sslinfo** libcomm_ctrl_port = comm_ssl_find_port(&g_instance.comm_cxt.libcomm_ctrl_port_list, ctk);
+         if (*libcomm_ctrl_port == NULL) {
+             *libcomm_ctrl_port = (libcomm_sslinfo*)palloc(sizeof(libcomm_sslinfo));
+             if (*libcomm_ctrl_port == NULL) {
+                 LIBCOMM_ELOG(ERROR, "(r|recv loop)\tSocket[%d] create new ctrl SSL connection failed.", ctk);
+                 mc_tcp_close(ctk);
+                 return;
+             }
+             (*libcomm_ctrl_port)->next = NULL;
+             (*libcomm_ctrl_port)->node.ssl = NULL;
+             (*libcomm_ctrl_port)->node.peer = NULL;
+             (*libcomm_ctrl_port)->node.peer_cn = NULL;
+             (*libcomm_ctrl_port)->node.count = 0;
+             (*libcomm_ctrl_port)->node.sock = ctk;
+             LIBCOMM_ELOG(LOG, "(r|recv loop)\tSocket[%d] create new ctrl SSL connection success.", ctk);
+         } else {
+             LIBCOMM_ELOG(WARNING, "(r|recv loop)\tSocket[%d] has already create ctrl SSL connection.", ctk);
+             mc_tcp_close(ctk);
+             return;
+         }
+         int error = comm_ssl_open_server(&(*libcomm_ctrl_port)->node, ctk);
+         if (error == -1) {
+             LIBCOMM_ELOG(WARNING, "(r|flow ctrl)\tFailed to open server ctrl port ssl.");
+         } else if (error == -2) {
+             LIBCOMM_ELOG(WARNING, "(r|recv loop)\tFailed to open server ctrl port ssl and remove from list.");
+             libcomm_sslinfo* tmp = *libcomm_ctrl_port;
+             comm_ssl_close(&(*libcomm_ctrl_port)->node);
+             *libcomm_ctrl_port = (*libcomm_ctrl_port)->next;
+             pfree(tmp);
+         } else {
+             LIBCOMM_ELOG(LOG, "(r|flow ctrl)\tSuccess to open server ctrl port ssl.");
+         }
+    }
+#endif
     struct sock_id ctkFdId = {ctk, 0};
     /* update the new socket and its version */
     if (gs_update_fd_to_htab_socket_version(&ctkFdId) < 0) {
@@ -1693,6 +1770,43 @@ static int CommReceiverAcceptNewConnect(const struct sock_id *fdId, int selfid)
             "(r|recv loop)\tData channel GSS authentication SUCC, listen socket[%d].",
             fdId->fd);
     }
+#ifdef USE_SSL
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+        LIBCOMM_ELOG(LOG, "CommReceiverAcceptNewConnect call comm_ssl_open_server, fd is %d, id is %d, sock is %d", fdId->fd, fdId->id, clientSocket);
+        libcomm_sslinfo** libcomm_data_port = comm_ssl_find_port(&g_instance.comm_cxt.libcomm_data_port_list, clientSocket);
+        if (*libcomm_data_port == NULL) {
+            *libcomm_data_port = (libcomm_sslinfo*)palloc(sizeof(libcomm_sslinfo));
+            if (*libcomm_data_port == NULL) {
+                LIBCOMM_ELOG(ERROR, "(r|recv loop)\tFailed to palloc data port ssl.");
+                mc_tcp_close(clientSocket);
+                return 0;
+            }
+            (*libcomm_data_port)->next = NULL;
+            (*libcomm_data_port)->node.ssl = NULL;
+            (*libcomm_data_port)->node.peer = NULL;
+            (*libcomm_data_port)->node.peer_cn = NULL;
+            (*libcomm_data_port)->node.count = 0;
+            (*libcomm_data_port)->node.sock = clientSocket;
+            LIBCOMM_ELOG(LOG, "(r|recv loop)\tSocket[%d] create new data SSL connection success.", clientSocket);
+        } else {
+            LIBCOMM_ELOG(WARNING, "(r|recv loop)\tSocket[%d] has already create data SSL connection.", clientSocket);
+            mc_tcp_close(clientSocket);
+            return 0;
+        }
+        int error = comm_ssl_open_server(&(*libcomm_data_port)->node, clientSocket);
+        if (error == -1) {
+            LIBCOMM_ELOG(WARNING, "(r|recv loop)\tFailed to open server data port ssl.");
+        } else if (error == -2) {
+            LIBCOMM_ELOG(WARNING, "(r|recv loop)\tFailed to open server data port ssl and remove from list.");
+            libcomm_sslinfo* tmp = *libcomm_data_port;
+            comm_ssl_close(&(*libcomm_data_port)->node);
+            *libcomm_data_port = (*libcomm_data_port)->next;
+            pfree(tmp);
+        } else {
+            LIBCOMM_ELOG(LOG, "(r|recv loop)\tSuccess to open server data port ssl:%p.", (*libcomm_data_port)->node.ssl);
+        }
+    }
+#endif
 
     struct sock_id ctkFdId = {clientSocket, 0};
     if (gs_update_fd_to_htab_socket_version(&ctkFdId) < 0) {

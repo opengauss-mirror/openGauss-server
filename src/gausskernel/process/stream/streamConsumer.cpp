@@ -28,7 +28,7 @@
 #include "distributelayer/streamConsumer.h"
 #include "distributelayer/streamTransportComm.h"
 #include "executor/executor.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "libpq/libpq.h"
 #include "libcomm/libcomm.h"
 #include "miscadmin.h"
@@ -66,8 +66,7 @@ void StreamConsumer::init(StreamKey key, List* execProducerNodes, ParallelDesc d
 {
     int i = 0;
     bool found = false;
-    ListCell* nodelistCell = NULL;
-    int nodeIdx;
+    
     int producerNum = 0;
     AutoMutexLock streamLock(&m_streamInfoLock);
     AutoMutexLock copyLock(&nodeDefCopyLock);
@@ -92,27 +91,27 @@ void StreamConsumer::init(StreamKey key, List* execProducerNodes, ParallelDesc d
 
     /* Initialize the origin nodelist */
     m_originProducerNodeList = NIL;
+#ifdef ENABLE_MULTIPLE_NODES
+    copyLock.lock();
+    ListCell* nodelistCell = NULL;
+    int nodeIdx;
+    for (int j = 0; j < desc.producerDop; j++) {
+        foreach (nodelistCell, execProducerNodes) {
+            nodeIdx = lfirst_int(nodelistCell);
+            if (localNodeOnly && nodeIdx != u_sess->pgxc_cxt.PGXCNodeId)
+                continue;
 
-    if (!localNodeOnly) {
-        copyLock.lock();
-        for (int j = 0; j < desc.producerDop; j++) {
-            foreach (nodelistCell, execProducerNodes) {
-                nodeIdx = lfirst_int(nodelistCell);
-                if (nodeIdx != u_sess->pgxc_cxt.PGXCNodeId)
-                    continue;
-
-                rc = strncpy_s(&m_expectProducer[i].nodeName[0],
-                    NAMEDATALEN,
-                    global_node_definition->nodesDefinition[nodeIdx].nodename.data,
-                    strlen(global_node_definition->nodesDefinition[nodeIdx].nodename.data) + 1);
-                securec_check(rc, "\0", "\0");
-                m_expectProducer[i].nodeIdx = nodeIdx;
-                i++;
-            }
+            rc = strncpy_s(&m_expectProducer[i].nodeName[0],
+                NAMEDATALEN,
+                global_node_definition->nodesDefinition[nodeIdx].nodename.data,
+                strlen(global_node_definition->nodesDefinition[nodeIdx].nodename.data) + 1);
+            securec_check(rc, "\0", "\0");
+            m_expectProducer[i].nodeIdx = nodeIdx;
+            i++;
         }
-        copyLock.unLock();
     }
-
+    copyLock.unLock();
+#endif
     for (i = 0; i < producerNum; i++) {
         int nodeNameLen = 0;
         libcommaddrinfo* libcommaddr = NULL;

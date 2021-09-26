@@ -70,6 +70,7 @@ typedef struct knl_instance_attr_common {
     char* PGXCNodeName;
     char* transparent_encrypt_kms_url;
     char* thread_pool_attr;
+    char* comm_proxy_attr;
     char* numa_distribute_mode;
 
     bool data_sync_retry;

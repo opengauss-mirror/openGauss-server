@@ -132,7 +132,7 @@ int main(int argc, char* argv[])
 
 static void help(const char* progname)
 {
-    printf(_("%s removes a PostgreSQL role.\n\n"), progname);
+    printf(_("%s removes a openGauss role.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [ROLENAME]\n"), progname);
     printf(_("\nOptions:\n"));

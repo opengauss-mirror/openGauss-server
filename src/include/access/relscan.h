@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * relscan.h
- *	  POSTGRES relation scan descriptor definitions.
+ *	  openGauss relation scan descriptor definitions.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -23,15 +23,35 @@
 #define PARALLEL_SCAN_GAP 100
 
 /* ----------------------------------------------------------------
- *				 Scan State Information
+ *               Scan State Information
  * ----------------------------------------------------------------
  */
 #define IsValidScanDesc(sd)  (sd != NULL)
+
+/*
+ * Shared state for parallel heap scan.
+ *
+ * Each backend participating in a parallel heap scan has its own
+ * HeapScanDesc in backend-private memory, and those objects all contain
+ * a pointer to this structure.  The information here must be sufficient
+ * to properly initialize each new HeapScanDesc as workers join the scan,
+ * and it must act as a font of block numbers for those workers.
+ */
+typedef struct ParallelHeapScanDescData {
+    Oid phs_relid;                   /* OID of relation to scan */
+    bool phs_syncscan;               /* report location to syncscan logic? */
+    BlockNumber phs_nblocks;         /* # blocks in relation at start of scan */
+    slock_t phs_mutex;               /* mutual exclusion for setting startblock */
+    BlockNumber phs_startblock;      /* starting block number */
+    pg_atomic_uint64 phs_nallocated; /* number of blocks allocated to workers so far. */
+    bool isplain;                    /* is plain table or not */
+} ParallelHeapScanDescData;
 
 typedef struct HeapScanDescData {
     TableScanDescData rs_base;  /* AM independent part of the descriptor */
 
     /* scan parameters */
+    uint32 rs_flags;
     bool rs_allow_strat;  /* allow or disallow use of access strategy */
 
     /* scan current state */
@@ -46,6 +66,7 @@ typedef struct HeapScanDescData {
      *xs_ctbuf_hdr. t_bits which is varlength arr
      */
     HeapTupleData rs_ctup; /* current tuple in scan, if any */
+    ParallelHeapScanDesc rs_parallel; /* parallel scan information */
     HeapTupleHeaderData rs_ctbuf_hdr;
 } HeapScanDescData;
 
@@ -81,14 +102,18 @@ typedef struct IndexScanDescData {
     Relation heapRelation;  /* heap relation descriptor, or NULL */
 
     Relation indexRelation; /* index relation descriptor */
+    bool isUpsert;
     GPIScanDesc xs_gpi_scan; /* global partition index scan use information */
+    CBIScanDesc xs_cbi_scan; /* global bucket index scan use information */
     Snapshot xs_snapshot;   /* snapshot to see */
     int numberOfKeys;       /* number of index qualifier conditions */
     int numberOfOrderBys;   /* number of ordering operators */
     ScanKey keyData;        /* array of index qualifier descriptors */
     ScanKey orderByData;    /* array of ordering op descriptors */
     bool xs_want_itup;      /* caller requests index tuples */
-    bool xs_want_ext_oid;    /* global partition index need partition oid */
+    bool xs_want_ext_oid;   /* global partition index need partition oid */
+    bool xs_want_bucketid;  /* global bucket index need bucket id */
+    bool xs_want_xid;       /* partition local index merge need xid as well */
 
     /* signaling to index AM about killing index tuples */
     bool kill_prior_tuple;      /* last-returned tuple is dead */
@@ -108,6 +133,9 @@ typedef struct IndexScanDescData {
     Buffer xs_cbuf;        /* current heap buffer in scan, if any */
     /* NB: if xs_cbuf is not InvalidBuffer, we hold a pin on that buffer */
     bool xs_recheck; /* T means scan keys must be rechecked */
+
+    /* used in ubtree only, indicate that we need to recheck the returned IndexTuple */
+    bool xs_recheck_itup;
 
     /* state data for traversing HOT chains in index_getnext */
     bool xs_continue_hot; /* T if must keep walking HOT chain */
@@ -140,6 +168,7 @@ typedef struct HBktIdxScanDescData {
     Relation rs_rd;  /* heap relation descriptor */
 
     Relation idx_rd;  /* index relation descriptor */
+    bool isUpsert;
     struct ScanState* scanState;
     List* hBktList;
     int      curr_slot;

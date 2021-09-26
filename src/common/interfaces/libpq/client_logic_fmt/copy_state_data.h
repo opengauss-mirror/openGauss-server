@@ -70,6 +70,7 @@ typedef struct CopyStateData {
     int file_encoding;          /* file or remote side's character encoding */
     bool need_transcoding;               /* file encoding diff from server? */
     bool encoding_embeds_ascii;             /* ASCII can be non-first byte? */
+    bool is_attlist_null;       /* the attribute list in the copy statement */
 
     /* parameters from the COPY command */
     bool is_rel;

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * gist.cpp
- *	  interface routines for the postgres GiST index access method.
+ *	  interface routines for the openGauss GiST index access method.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -599,7 +599,7 @@ void gistdoinsert(Relation r, IndexTuple itup, Size freespace, GISTSTATE *gistst
                         (errcode(ERRCODE_INDEX_CORRUPTED),
                          errmsg("index \"%s\" contains an inner tuple marked as invalid", RelationGetRelationName(r)),
                          errdetail("This is caused by an incomplete page split at crash recovery before upgrading to "
-                                   "PostgreSQL 9.1."),
+                                   "openGauss 1.0.0"),
                          errhint("Please REINDEX it.")));
 
             /*

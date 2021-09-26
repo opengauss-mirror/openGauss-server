@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * block.h
- *	  POSTGRES disk block definitions.
+ *	  openGauss disk block definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -17,8 +17,8 @@
 /*
  * BlockNumber:
  *
- * each data file (heap or index) is divided into postgres disk blocks
- * (which may be thought of as the unit of i/o -- a postgres buffer
+ * each data file (heap or index) is divided into openGauss disk blocks
+ * (which may be thought of as the unit of i/o -- a openGauss buffer
  * contains exactly one disk block).  the blocks are numbered
  * sequentially, 0 to 0xFFFFFFFE.
  *

@@ -26,8 +26,8 @@
 
 #include "access/tableam.h"
 #include "executor/executor.h"
-#include "executor/nodeModifyTable.h"
-#include "executor/execMerge.h"
+#include "executor/node/nodeModifyTable.h"
+#include "executor/exec/execMerge.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "utils/builtins.h"

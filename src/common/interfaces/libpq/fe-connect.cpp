@@ -284,7 +284,6 @@ static int connectDBStart(PGconn* conn);
 static int connectDBComplete(PGconn* conn);
 static void connectSetConninfo(PGconn* conn);
 static PGPing internal_ping(PGconn* conn);
-static PGconn* makeEmptyPGconn(void);
 static void fillPGconn(PGconn* conn, PQconninfoOption* connOptions);
 static PQconninfoOption* conninfo_init(PQExpBuffer errorMessage);
 static PQconninfoOption* parse_connection_string(const char* conninfo, PQExpBuffer errorMessage, bool use_defaults);
@@ -345,7 +344,7 @@ pgthreadlock_t pg_g_threadlock = default_threadlock;
 /*
  *		PQconnectdbParams
  *
- * establishes a connection to a postgres backend through the postmaster
+ * establishes a connection to a openGauss backend through the postmaster
  * using connection information in two arrays.
  *
  * The keywords array is defined as
@@ -374,7 +373,7 @@ PGconn* PQconnectdbParams(const char* const* keywords, const char* const* values
         const char *role = (conn->pguser != NULL) ? conn->pguser : "";
         conn->client_logic->gucParams.role = role;
         if (connectDBComplete(conn) == 1 && conn->client_logic->enable_client_encryption) {
-            ICachedColumnManager::get_instance().load_cache(conn);
+            conn->client_logic->m_cached_column_manager->load_cache(conn);
         }
 #else
         (void)connectDBComplete(conn);
@@ -407,7 +406,7 @@ PGPing PQpingParams(const char* const* keywords, const char* const* values, int 
 /*
  *		PQconnectdb
  *
- * establishes a connection to a postgres backend through the postmaster
+ * establishes a connection to a openGauss backend through the postmaster
  * using connection information in a string.
  *
  * The conninfo string is either a whitespace-separated list of
@@ -434,7 +433,7 @@ PGconn* PQconnectdb(const char* conninfo)
     if ((conn != NULL) && conn->status != CONNECTION_BAD) {
 #ifdef HAVE_CE
         if (connectDBComplete(conn) == 1 && conn->client_logic->enable_client_encryption) {
-            ICachedColumnManager::get_instance().load_cache(conn);
+            conn->client_logic->m_cached_column_manager->load_cache(conn);
         }
 #else
         (void)connectDBComplete(conn);
@@ -470,7 +469,7 @@ void PQSetFinTime(time_t* fin_times, PGconn* conn)
 /*
  *      PQconnectdb Parallel
  *
- * establishes a connection to a postgres backend through the postmaster
+ * establishes a connection to a openGauss backend through the postmaster
  * using connection information in a string.
  *
  * The conninfo string is either a whitespace-separated list of
@@ -665,7 +664,7 @@ PGPing PQping(const char* conninfo)
 /*
  *		PQconnectStartParams
  *
- * Begins the establishment of a connection to a postgres backend through the
+ * Begins the establishment of a connection to a openGauss backend through the
  * postmaster using connection information in a struct.
  *
  * See comment for PQconnectdbParams for the definition of the string format.
@@ -733,7 +732,7 @@ PGconn* PQconnectStartParams(const char* const* keywords, const char* const* val
 /*
  * PQbuildPGconn
  *
- * Begins the establishment of a connection to a postgres backend through the
+ * Begins the establishment of a connection to a openGauss backend through the
  * postmaster using connection information in a string.
  *
  * malloc a PGconn*, init it and return in the input pointer connPtr.
@@ -794,7 +793,7 @@ char* PQbuildPGconn(const char* conninfo, PGconn** connPtr, int* packetlen)
 /*
  *		PQconnectStart
  *
- * Begins the establishment of a connection to a postgres backend through the
+ * Begins the establishment of a connection to a openGauss backend through the
  * postmaster using connection information in a string.
  *
  * See comment for PQconnectdb for the definition of the string format.
@@ -1139,7 +1138,7 @@ PQconninfoOption* PQconndefaults(void)
 /* ----------------
  *		PQsetdbLogin
  *
- * establishes a connection to a postgres backend through the postmaster
+ * establishes a connection to a openGauss backend through the postmaster
  * at the specified host and port.
  *
  * returns a PGconn* which is needed for all subsequent libpq calls
@@ -1237,7 +1236,7 @@ PGconn* PQsetdbLogin(const char* pghost, const char* pgport, const char* pgoptio
     if (connectDBStart(conn)) {
 #ifdef HAVE_CE
         if (connectDBComplete(conn) == 1 && conn->client_logic->enable_client_encryption) {
-            ICachedColumnManager::get_instance().load_cache(conn);
+            conn->client_logic->m_cached_column_manager->load_cache(conn);
         }
 #else
         (void)connectDBComplete(conn);
@@ -1305,16 +1304,25 @@ static void connectFailureMessage(PGconn* conn, int errorno)
         if (conn->pghostaddr != NULL) {
             check_strncpy_s(strncpy_s(host_addr, NI_MAXHOST, conn->pghostaddr, strlen(conn->pghostaddr)));
         } else if (addr->ss_family == AF_INET) {
-            if (inet_net_ntop(
-                    AF_INET, &((struct sockaddr_in*)addr)->sin_addr.s_addr, 32, host_addr, sizeof(host_addr)) == NULL)
+#if defined(WIN32) || defined(_WIN64)
+            rcs = strcpy_s(host_addr, NI_MAXHOST, "inet_net_ntop() unsupported on Windows");
+#else
+            if (inet_net_ntop(AF_INET, 
+                &((struct sockaddr_in*)addr)->sin_addr.s_addr, 32, host_addr, sizeof(host_addr)) == NULL) {
                 rcs = strcpy_s(host_addr, NI_MAXHOST, "???");
+            }
+#endif
         }
 #ifdef HAVE_IPV6
         else if (addr->ss_family == AF_INET6) {
-            if (inet_net_ntop(
-                    AF_INET6, &((struct sockaddr_in6*)addr)->sin6_addr.s6_addr, 128, host_addr, sizeof(host_addr)) ==
-                NULL)
+#if defined(WIN32) || defined(_WIN64)
+            rcs = strcpy_s(host_addr, NI_MAXHOST, "inet_net_ntop() unsupported on Windows");
+#else
+            if (inet_net_ntop(AF_INET6, 
+                &((struct sockaddr_in6*)addr)->sin6_addr.s6_addr, 128, host_addr, sizeof(host_addr)) == NULL) {
                 rcs = strcpy_s(host_addr, NI_MAXHOST, "???");
+            }
+#endif
         }
 #endif
         else {
@@ -1929,7 +1937,8 @@ keep_going: /* We will come back to here until there is
                 /* Remember current address for possible error msg
                  * ai_addrlen is size_t > SECUREC_MEM_MAX_LEN
                  */
-                memcpy(&conn->raddr.addr, addr_cur->ai_addr, addr_cur->ai_addrlen);
+                check_memcpy_s(
+                    memcpy_s(&conn->raddr.addr, sizeof(conn->raddr.addr), addr_cur->ai_addr, addr_cur->ai_addrlen));
 
                 conn->raddr.salen = addr_cur->ai_addrlen;
 
@@ -2470,9 +2479,8 @@ keep_going: /* We will come back to here until there is
                     conn->inStart = conn->inCursor;
                     /* OK to do without SSL? */
                     if (conn->sslmode[0] == 'r' || /* "require" */
-                        conn->sslmode[0] == 'v')   /* "verify-ca" or
+                        conn->sslmode[0] == 'v') { /* "verify-ca" or
                                                     * "verify-full" */
-                    {
                         /* Require SSL, but server does not want it */
                         appendPQExpBuffer(
                             &conn->errorMessage, libpq_gettext("server does not support SSL, but SSL was required\n"));
@@ -2519,8 +2527,7 @@ keep_going: /* We will come back to here until there is
                  */
                 if (conn->sslmode[0] == 'p' /* "prefer" */
                     && conn->allow_ssl_try  /* redundant? */
-                    && !conn->wait_ssl_try) /* redundant? */
-                {
+                    && !conn->wait_ssl_try) { /* redundant? */
                     /* only retry once */
                     conn->allow_ssl_try = false;
                     /* Must drop the old connection */
@@ -2566,7 +2573,7 @@ keep_going: /* We will come back to here until there is
             /*
              * Validate message type: we expect only an authentication
              * request or an error here.  Anything else probably means
-             * it's not Postgres on the other end at all.
+             * it's not openGauss on the other end at all.
              */
             if (!(beresp == 'R' || beresp == 'E')) {
                 appendPQExpBuffer(&conn->errorMessage,
@@ -2700,8 +2707,7 @@ keep_going: /* We will come back to here until there is
                  * then do a non-SSL retry
                  */
                 if (conn->sslmode[0] == 'p'                        /* "prefer" */
-                    && conn->allow_ssl_try && !conn->wait_ssl_try) /* redundant? */
-                {
+                    && conn->allow_ssl_try && !conn->wait_ssl_try) { /* redundant? */
                     /* only retry once */
                     conn->allow_ssl_try = false;
                     /* Must drop the old connection */
@@ -2825,7 +2831,7 @@ keep_going: /* We will come back to here until there is
                             return PGRES_POLLING_READING;
                         }
                     }
-                }  
+                }
             }
 
 #if defined(ENABLE_GSS) || defined(ENABLE_SSPI)
@@ -3115,7 +3121,7 @@ static PGPing internal_ping(PGconn* conn)
  * makeEmptyPGconn
  *	 - create a PGconn data structure with (as yet) no interesting data
  */
-static PGconn* makeEmptyPGconn(void)
+PGconn* makeEmptyPGconn(void)
 {
     PGconn* conn = NULL;
 
@@ -3165,7 +3171,7 @@ static PGconn* makeEmptyPGconn(void)
 #endif
     conn->is_logic_conn = false;
 #ifdef HAVE_CE
-    conn->client_logic = new PGClientLogic(conn);
+    conn->client_logic = new PGClientLogic(conn, NULL, NULL);
 #endif // HAVE_CE
 
     /*
@@ -6050,7 +6056,7 @@ static void dot_pg_pass_warning(PGconn* conn)
  * Obtain user's home directory, return in given buffer
  *
  * On Unix, this actually returns the user's home directory.  On Windows
- * it returns the PostgreSQL-specific application data folder.
+ * it returns the openGauss-specific application data folder.
  *
  * This is essentially the same as get_home_path(), but we don't use that
  * because we don't want to pull path.c into libpq (it pollutes application

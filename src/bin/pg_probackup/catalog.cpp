@@ -1142,8 +1142,14 @@ walk_files_collect_timelines(InstanceConfig *instance)
         {
             TimeLineHistoryEntry *tln;
             bool is_valid_tli = flase;
+            int ret;
 
-            sscanf_s(file->name, "%08X.history", &tli);
+            ret = sscanf_s(file->name, "%08X.history", &tli);
+            if (ret != 1) {
+                elog(LOG, "format filename \"%s\" wrong", file->name);
+                break;
+            }
+            
             timelines = read_timeline_history(arclog_path, tli, true);
 
             is_valid_tli = !tlinfo || tlinfo->tli != tli;

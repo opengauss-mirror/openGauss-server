@@ -37,6 +37,6 @@ typedef struct BucketInfo {
 } BucketInfo;
 
 extern char* bucketInfoToString(BucketInfo* bucket_info);
-extern bool hasValidBuckets(RangeVar* r);
+extern bool hasValidBuckets(RangeVar* r, int bucketmapsize);
 extern List* RangeVarGetBucketList(RangeVar* rangeVar);
 #endif

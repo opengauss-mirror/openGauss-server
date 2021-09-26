@@ -1,7 +1,7 @@
 /*
  * clog.h
  *
- * PostgreSQL transaction-commit-log manager
+ * openGauss transaction-commit-log manager
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -17,7 +17,7 @@
 
 /*
  * Defines for CLOG page sizes.  A page is the same BLCKSZ as is used
- * everywhere else in Postgres.
+ * everywhere else in openGauss.
  *
  * Note: because TransactionIds are 32 bits and wrap around at 0xFFFFFFFF,
  * CLOG page numbering also wraps around at 0xFFFFFFFF/CLOG_XACTS_PER_PAGE,
@@ -88,7 +88,14 @@ extern void clog_desc(StringInfo buf, XLogReaderState* record);
 
 #ifdef USE_ASSERT_CHECKING
 
-typedef enum { FIT_CLOG_EXTEND_PAGE = 0, FIT_CLOG_READ_PAGE, FIT_LWLOCK_DEADLOCK, FIT_MAX_TYPE } FIT_type;
+typedef enum {
+    FIT_CLOG_EXTEND_PAGE = 0,
+    FIT_CLOG_READ_PAGE,
+    FIT_LWLOCK_DEADLOCK,
+    FIT_SEGSPC,
+    FIT_SEGSTORE,
+    FIT_MAX_TYPE
+} FIT_type;
 
 #endif /* FAULT_INJECTION_TEST */
 

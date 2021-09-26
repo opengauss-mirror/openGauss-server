@@ -1,6 +1,7 @@
 import csv
 import datetime
 import os
+import sys
 import stat
 from collections import OrderedDict
 
@@ -126,3 +127,19 @@ def check_time_legality(time_string):
         return True
     except ValueError:
         return False
+
+
+def is_valid_conf(filepath):
+    if os.path.exists(filepath):
+        file_abs_path = filepath
+    elif os.path.exists(os.path.abspath(os.path.join(os.getcwd(), filepath))):
+        file_abs_path = os.path.abspath(os.path.join(os.getcwd(), filepath))
+    else:
+        print("FATAL: Not found the configuration file %s." % filepath, file=sys.stderr)
+        return False
+
+    if not os.access(file_abs_path, os.R_OK):
+        print("FATAL: Not have permission to read the configuration file %s." % filepath, file=sys.stderr)
+        return False
+
+    return True

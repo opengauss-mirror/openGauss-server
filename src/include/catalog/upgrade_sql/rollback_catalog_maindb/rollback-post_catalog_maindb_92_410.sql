@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS pg_catalog.gs_get_global_barriers_status() cascade;

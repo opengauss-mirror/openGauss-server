@@ -118,7 +118,6 @@ typedef struct TupleTableSlot {
     bool tts_slow;          /* saved state for slot_deform_tuple */
 
     Tuple tts_tuple;    /* physical tuple, or NULL if virtual */
-
 #ifdef PGXC
     /*
      * PGXC extension to support tuples sent from remote Datanode.
@@ -151,7 +150,7 @@ typedef struct TupleTableSlot {
 #define TupIsNull(slot) ((slot) == NULL || (slot)->tts_isempty)
 
 /* in executor/execTuples.c */
-extern TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt = true, TableAmType tupslotTableAm = TAM_HEAP);
+extern TupleTableSlot* MakeTupleTableSlot(bool has_tuple_mcxt = false, TableAmType tupslotTableAm = TAM_HEAP);
 extern TupleTableSlot* ExecAllocTableSlot(List** tupleTable, TableAmType tupslotTableAm = TAM_HEAP);
 extern void ExecResetTupleTable(List* tupleTable, bool shouldFree);
 extern TupleTableSlot* MakeSingleTupleTableSlot(TupleDesc tupdesc, bool allocSlotCxt = false, TableAmType tupslotTableAm = TAM_HEAP);
@@ -159,6 +158,7 @@ extern void ExecDropSingleTupleTableSlot(TupleTableSlot* slot);
 extern void ExecSetSlotDescriptor(TupleTableSlot* slot, TupleDesc tupdesc);
 extern TupleTableSlot* ExecStoreTuple(Tuple tuple, TupleTableSlot* slot, Buffer buffer, bool shouldFree);
 extern TupleTableSlot* ExecStoreMinimalTuple(MinimalTuple mtup, TupleTableSlot* slot, bool shouldFree);
+
 #ifdef PGXC
 extern TupleTableSlot* ExecStoreDataRowTuple(
     char* msg, size_t len, Oid msgnode_oid, TupleTableSlot* slot, bool shouldFree);

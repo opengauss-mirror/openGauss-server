@@ -1,0 +1,160 @@
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2a
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2a';
+
+-- case 2a: concurrent multi-insert and insert; second insert is delayed for 0.5 seconds
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (3,15); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 2b: concurrent multi-insert and multi-insert; multi-insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2b
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_multiinsert_2b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2b';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|';
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); \copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|'; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 2c: concurrent multi-insert and delete; delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2c
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2c';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=3; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 2d: concurrent multi-insert and update; update is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2d
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2d
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2d';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c1=1 where c1=3; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+
+-- case 2e: concurrent multi-insert and lock; lock is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2e
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2e
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2e';
+
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+insert into t1 values (15,10);
+insert into t1 values (default);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_multiInsert_lock.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 2f: concurrent multi-insert and fetch; fetch is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2f
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2f';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int) with (storage_type=ustore);
+insert into t1 values (3,2);
+insert into t1 values (5,6);
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_basic.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 2g: concurrent multi-insert and page prune; page prune is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2g
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2g
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2g';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values (60,'fbc');
+insert into t1 values (70,'gbc');
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_pagePrune.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c2 = 'abcabcabc' where c1 >= 60; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1;
+
+-- case 2h: concurrent multi-insert and toast delete; toast delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2h
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2h';
+
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_toastDelete.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=1; select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select c1, c2 from t1;
+
+-- case 2i: concurrent multi-insert and toast insert; toast insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2i
+\! echo "DoCopy_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_multiinsert_2i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_multiinsert_2i';
+
+drop table if exists t1;
+create table t1 (c1 int, c2 int, c3 text) with (storage_type=ustore);
+insert into t1 values (1,2,'abc');
+select * from t1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "\copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_toastInsert.data' delimiter '|';" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (10,15,repeat('e',10000)); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select c1, c2 from t1;
+
+
+-- drop all tables
+drop table t1;
+
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2a
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2b
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2c
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2d
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2e
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2f
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2g
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2h
+\! rm -f @abs_srcdir@/concurrent_uheap_multiinsert_2i

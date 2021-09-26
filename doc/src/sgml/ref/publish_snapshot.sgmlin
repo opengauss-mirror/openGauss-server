@@ -1,0 +1,16 @@
+<refentry id="SQL-PUBLISH_SNAPSHOT">
+<refmeta>
+<refentrytitle>PUBLISH SNAPSHOT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>PUBLISH SNAPSHOT</refname>
+<refpurpose>publish a snapshot</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+PUBLISH SNAPSHOT <qualified_name> @ <version | ident | sconst>;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

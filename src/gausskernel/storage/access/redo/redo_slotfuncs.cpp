@@ -44,6 +44,7 @@
 #include "replication/replicainternal.h"
 #include "replication/walsender.h"
 #include "replication/syncrep.h"
+#include "storage/smgr/fd.h"
 
 void XLogRecSetSlotState(XLogBlockSlotParse *blockslotstate, char *maindata, Size maindatalen)
 {
@@ -55,6 +56,7 @@ XLogRecParseState *slot_xlog_parse_to_block(XLogReaderState *record, uint32 *blo
 {
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
     XLogRecParseState *recordstatehead = NULL;
 
     (*blocknum)++;
@@ -63,7 +65,8 @@ XLogRecParseState *slot_xlog_parse_to_block(XLogReaderState *record, uint32 *blo
         return NULL;
     }
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_SLOT_TYPE, forknum, lowblknum, NULL, recordstatehead);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_SLOT_TYPE, filenode, recordstatehead);
 
     char *maindata = XLogRecGetData(record);
     Size maindatalen = XLogRecGetDataLen(record);

@@ -414,3 +414,29 @@ void setup_cancel_handler(void)
 }
 
 #endif /* WIN32 */
+
+/*
+ * GetEnvStr
+ *
+ * Note: malloc space for get the return of getenv() function, then return the malloc space.
+ *         so, this space need be free.
+ */
+char* GetEnvStr(const char* env)
+{
+    char* tmpvar = NULL;
+    const char* temp = getenv(env);
+    errno_t rc = 0;
+    if (temp != NULL) {
+        size_t len = strlen(temp);
+        if (len == 0) {
+            return NULL;
+        }
+        tmpvar = (char*)malloc(len + 1);
+        if (tmpvar != NULL) {
+            rc = strcpy_s(tmpvar, len + 1, temp);
+            securec_check_c(rc, "\0", "\0");
+            return tmpvar;
+        }
+    }
+    return NULL;
+}

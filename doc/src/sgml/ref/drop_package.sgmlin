@@ -1,0 +1,16 @@
+<refentry id="SQL-DROP_PACKAGE">
+<refmeta>
+<refentrytitle>DROP PACKAGE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>DROP PACKAGE</refname>
+<refpurpose>drop a defined package spec</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+DROP PACKAGE [ IF EXISTS ] package_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

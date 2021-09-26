@@ -19,12 +19,14 @@
 #include "lib/stringinfo.h"
 #include "storage/lock/lock.h"
 #include "storage/procsignal.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 extern void InitRecoveryTransactionEnvironment(void);
 extern void ShutdownRecoveryTransactionEnvironment(void);
 
-extern void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid, const RelFileNode& node);
+extern void ResolveRecoveryConflictWithSnapshot(TransactionId latestRemovedXid,
+                                                const RelFileNode& node, XLogRecPtr lsn = 0);
+void ResolveRecoveryConflictWithSnapshotOid(TransactionId latestRemovedXid, Oid dbid);
 extern void ResolveRecoveryConflictWithTablespace(Oid tsid);
 extern void ResolveRecoveryConflictWithDatabase(Oid dbid);
 

@@ -59,7 +59,7 @@ typedef int (*oper_dir_entry_proc)(
 
 static void help(const char* progname)
 {
-    printf("%s is an upgrade tool about align column store files for PostgreSQL.\n\n"
+    printf("%s is an upgrade tool about align column store files for openGauss.\n\n"
            "Usage:\n"
            "  %s [OPTION]...\n"
            "\nOptions:\n"

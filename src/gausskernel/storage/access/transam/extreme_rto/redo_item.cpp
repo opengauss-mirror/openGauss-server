@@ -79,6 +79,7 @@ RedoItem *CreateRedoItem(XLogReaderState *record, uint32 shareCount, uint32 desi
     item->RecentXmin = u_sess->utils_cxt.RecentXmin;
     item->syncServerMode = GetServerMode();
     item->isForceAll = isForceAll;
+    
     pg_atomic_init_u32(&item->refCount, shareCount);
     pg_atomic_init_u32(&item->replayed, 0);
     pg_atomic_init_u32(&item->blkShareCount, 0);

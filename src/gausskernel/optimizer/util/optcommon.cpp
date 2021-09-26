@@ -16,7 +16,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 
 /*
  * Optimizer common function that return a plan node's plain text, we wrapper it from

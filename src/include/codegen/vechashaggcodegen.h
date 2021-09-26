@@ -28,7 +28,7 @@
 #ifndef LLVM_VECHASHAGG_H
 #define LLVM_VECHASHAGG_H
 #include "codegen/gscodegen.h"
-#include "executor/nodeAgg.h"
+#include "executor/node/nodeAgg.h"
 #include "nodes/execnodes.h"
 #include "vecexecutor/vecnodes.h"
 
@@ -36,7 +36,6 @@ namespace dorado {
 /*
  * VecHashAggCodeGen class implements specific optimization by using LLVM
  */
-#ifdef ENABLE_LLVM_COMPILE
 class VecHashAggCodeGen : public BaseObject {
 public:
     /*
@@ -183,7 +182,7 @@ public:
      * @phi_idx		: the idxth row that we need to evaluation.
      * @return		: the result of this value if no outofbound or null is meet.
      */
-    static llvm::Value* EvalFastExprInBatchAgg(ExprState* state, GsCodeGen::LlvmBuilder builder,
+    static llvm::Value* EvalFastExprInBatchAgg(ExprState* state, GsCodeGen::LlvmBuilder& builder,
         llvm::Function* jitted_func, llvm::BasicBlock** bb_null, llvm::BasicBlock** bb_last,
         llvm::BasicBlock** bb_outofbound, llvm::Value* econtext, llvm::Value* argVector, llvm::Value* phi_idx);
 
@@ -199,8 +198,8 @@ public:
      * @in isNull	: flag used to mask the return value is null or not.
      * @return		: return the result of this expression.
      */
-    static llvm::Value* EvalSimpleExprInBatchAgg(ExprState* node, GsCodeGen::LlvmBuilder builder, llvm::Value* econtext,
-        llvm::Value* phi_idx, llvm::Value* isNull);
+    static llvm::Value* EvalSimpleExprInBatchAgg(ExprState* node, GsCodeGen::LlvmBuilder& builder,
+        llvm::Value* econtext, llvm::Value* phi_idx, llvm::Value* isNull);
 
     static llvm::Function* SonicBatchAggregationCodeGen(VecAggState* node, bool use_prefetch);
 
@@ -226,7 +225,6 @@ public:
      */
     static void WrapResetEContextCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::Value* econtext);
 };
-#endif
 
 }  // namespace dorado
 #endif

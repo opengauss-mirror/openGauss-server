@@ -119,7 +119,7 @@ static bool isInitialized = false;
  *  And reset after the package operation.
  *  Please do not modify it.
  */
-const char *sha256_digests[SHA256_DIGESTS_COUNT] = {NULL, NULL};
+const char *sha256_digests[SHA256_DIGESTS_COUNT] = {"5237e9ad5b6ecf8d0abba664972bdcb106595b9ec2f52083915e7c829d348f0d", "06354c2857fbf21e5862005a7e60ad210dc4b635dbde891d6e60cbddea465b16"};
 /* The product control file information. */
 static LicenseControl versionControl = {PRODUCT_VERSION_FILE, PRODUCT_VERSION_UNKNOWN, {0}, false};
 /* The license control file information. */
@@ -878,8 +878,19 @@ int parse_gaussdb_version_file(gaussdb_version* version_info, const char* filena
     char* gausshome = gs_getenv_r("GAUSSHOME");
     /* first, we will get GAUSSHOME path */
     if (gausshome != NULL) {
-        check_backend_env(gausshome);
-        rc = sprintf_s(filepath, sizeof(filepath), "%s/bin/%s", gausshome, filename);
+        char real_gausshome[PATH_MAX + 1] = {'\0'};
+        if (realpath(gausshome, real_gausshome) == NULL) {
+            ereport(WARNING,
+                (errmodule(MOD_EXECUTOR), errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Failed to obtain environment value $GAUSSHOME!"),
+                errdetail("N/A"),
+                errcause("Incorrect environment value."),
+                erraction("Please refer to backend log for more details.")));
+            goto error;
+        }
+        gausshome = NULL;
+        check_backend_env(real_gausshome);
+        rc = sprintf_s(filepath, sizeof(filepath), "%s/bin/%s", real_gausshome, filename);
         if (rc == -1) {
             ereport(WARNING, (errmsg("failed to call secure function.")));
             goto error;
@@ -957,7 +968,8 @@ int parse_gaussdb_version_file(gaussdb_version* version_info, const char* filena
 
     /* deserialization from configuration file */
     header = (version_header*)palloc(sizeof(version_header));
-    if (memcpy_s(header, sizeof(version_header), file_content, sizeof(version_header)) != 0) {
+    if (sizeof(version_header) > (size_t)file_size 
+        || memcpy_s(header, sizeof(version_header), file_content, sizeof(version_header)) != 0) {
         goto error;
     }
 

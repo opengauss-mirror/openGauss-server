@@ -155,9 +155,9 @@ Model *get_model(const char *model_name, bool only_model)
     bool isnullOid = false;
     AlgorithmML algorithm;
 
-    if (t_thrd.proc->workingVersionNum < 92304) {
+    if (t_thrd.proc->workingVersionNum < 92366) {
         ereport(ERROR, (errmodule(MOD_DB4AI), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-            errmsg("Before GRAND VERSION NUM 92304, we do not support gs_model_warehouse.")));
+            errmsg("Before GRAND VERSION NUM 92366, we do not support gs_model_warehouse.")));
     }
 
     HeapTuple tuple = SearchSysCache1(DB4AI_MODEL, CStringGetDatum(model_name));
@@ -203,8 +203,8 @@ Model *get_model(const char *model_name, bool only_model)
     }
     model->algorithm = algorithm;
     model->model_name = model_name;
-    model->exec_time_secs = tuplePointer->exectime;
-    model->pre_time_secs = tuplePointer->preprocesstime;
+    model->exec_time_secs = tuplePointer->exec_time;
+    model->pre_time_secs = tuplePointer->pre_process_time;
     model->processed_tuples = tuplePointer->processedtuples;
     model->discarded_tuples = tuplePointer->discardedtuples;
     model->return_type = tuplePointer->outputtype;

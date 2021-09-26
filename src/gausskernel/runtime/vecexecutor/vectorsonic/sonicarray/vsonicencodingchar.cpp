@@ -351,11 +351,18 @@ void SonicStackEncodingDatumArray::putDatumFlag(ScalarValue* vals, uint8* flag)
 void SonicStackEncodingDatumArray::putDatumArrayWithNullCheck(ScalarValue* vals, uint8* flag, int rows)
 {
     Datum* dst = (Datum*)(m_curAtom->data + m_atomIdx * sizeof(Datum));
+    int dataLen = 0;
 
     AutoContextSwitch mem_guard(m_cxt);
     for (int i = 0; i < rows; ++i) {
-        if (NOT_NULL(*flag))
-            *dst = PointerGetDatum(m_buf->Append(DatumGetPointer(*vals), VARSIZE_ANY(*vals)));
+        if (NOT_NULL(*flag)) {
+            if (this->m_desc.typeId == NAMEOID) {
+                dataLen = datumGetSize(*vals, false, -2);
+            } else {
+                dataLen = VARSIZE_ANY(*vals);
+            }
+            *dst = PointerGetDatum(m_buf->Append(DatumGetPointer(*vals), dataLen));
+        }
         dst++;
         vals++;
         flag++;

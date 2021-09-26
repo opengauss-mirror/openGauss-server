@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * reorderbuffer.cpp
- *	PostgreSQL logical replay/reorder buffer management
+ *	openGauss logical replay/reorder buffer management
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -20,7 +20,7 @@
  *	individual changes. The output plugins rely on snapshots built by
  *	snapbuild.c which hands them to us.
  *
- *	Transactions and subtransactions/savepoints in postgres are not
+ *	Transactions and subtransactions/savepoints in openGauss are not
  *	immediately linked to each other from outside the performing
  *	backend. Only at commit/abort (or special xact_assignment records) they
  *	are linked together. Which means that we will have to splice together a
@@ -71,7 +71,7 @@
 #include "access/xlog_internal.h"
 
 #include "storage/buf/bufmgr.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/sinval.h"
 
 #include "utils/lsyscache.h"
@@ -374,6 +374,10 @@ void ReorderBufferReturnChange(ReorderBuffer *rb, ReorderBufferChange *change)
             break;
         case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
             break;
+        case REORDER_BUFFER_CHANGE_UINSERT:
+        case REORDER_BUFFER_CHANGE_UUPDATE:
+        case REORDER_BUFFER_CHANGE_UDELETE:
+            break;
     }
 
     pfree(change);
@@ -417,7 +421,44 @@ ReorderBufferTupleBuf *ReorderBufferGetTupleBuf(ReorderBuffer *rb, Size tuple_le
         tuple->alloc_tuple_size = alloc_len;
         tuple->tuple.t_data = ReorderBufferTupleBufData(tuple);
     }
+    tuple->tuple.tupTableType = HEAP_TUPLE;
+    return tuple;
+}
 
+ReorderBufferUTupleBuf *ReorderBufferGetUTupleBuf(ReorderBuffer *rb, Size tupleLen)
+{
+    ReorderBufferUTupleBuf *tuple = NULL;
+    Size allocLen = add_size(tupleLen, SizeOfUHeapDiskTupleData);
+    /*
+     * Most tuples are below MaxHeapTupleSize, so we use a slab allocator for
+     * those. Thus always allocate at least MaxHeapTupleSize. Note that tuples
+     * tuples generated for oldtuples can be bigger, as they don't have
+     * out-of-line toast columns.
+     */
+    if (allocLen < MaxPossibleUHeapTupleSize)
+        allocLen = MaxPossibleUHeapTupleSize;
+
+    /* if small enough, check the slab cache */
+    if (allocLen <= MaxPossibleUHeapTupleSize && rb->nr_cached_tuplebufs) {
+        rb->nr_cached_tuplebufs--;
+        tuple = slist_container(ReorderBufferUTupleBuf, node, slist_pop_head_node(&rb->cached_tuplebufs));
+#ifdef USE_ASSERT_CHECKING
+        int rc = memset_s(&tuple->tuple, sizeof(UHeapTupleData), 0xa9, sizeof(UHeapTupleData));
+        securec_check(rc, "", "");
+
+#endif
+        tuple->tuple.disk_tuple = ReorderBufferUTupleBufData(tuple);
+#ifdef USE_ASSERT_CHECKING
+        int ret = memset_s(tuple->tuple.disk_tuple, tuple->alloc_tuple_size, 0xa8, tuple->alloc_tuple_size);
+        securec_check(ret, "", "");
+
+#endif
+    } else {
+        tuple = (ReorderBufferUTupleBuf *)MemoryContextAlloc(rb->context, sizeof(ReorderBufferUTupleBuf) + allocLen);
+        tuple->alloc_tuple_size = allocLen;
+        tuple->tuple.disk_tuple = ReorderBufferUTupleBufData(tuple);
+    }
+    tuple->tuple.tupTableType = UHEAP_TUPLE;
     return tuple;
 }
 
@@ -1308,6 +1349,7 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
             Relation relation = NULL;
             Oid reloid;
             Oid partitionReltoastrelid = InvalidOid;
+            bool stopDecoding = false;
 
             switch (change->action) {
                 case REORDER_BUFFER_CHANGE_INSERT:
@@ -1315,10 +1357,11 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                 case REORDER_BUFFER_CHANGE_DELETE:
                     Assert(snapshot_now);
 
-                    reloid = RelidByRelfilenode(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode);
+                    reloid =
+                        RelidByRelfilenode(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, false);
                     if (reloid == InvalidOid) {
                         reloid = PartitionRelidByRelfilenode(change->data.tp.relnode.spcNode,
-                                                             change->data.tp.relnode.relNode, partitionReltoastrelid);
+                            change->data.tp.relnode.relNode, partitionReltoastrelid, NULL, false);
                     }
                     /*
                      * Catalog tuple without data, emitted while catalog was
@@ -1408,7 +1451,10 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
 
                 case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
                     Assert(change->data.command_id != InvalidCommandId);
-
+                    if (change->data.command_id != FirstCommandId) {
+                        stopDecoding = true;
+                        break;
+                    }
                     if (command_id < change->data.command_id) {
                         command_id = change->data.command_id;
 
@@ -1435,6 +1481,84 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                 case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tuplecid value in changequeue")));
                     break;
+                case REORDER_BUFFER_CHANGE_UINSERT:
+                case REORDER_BUFFER_CHANGE_UDELETE:
+                case REORDER_BUFFER_CHANGE_UUPDATE:
+                    Assert(snapshot_now);
+
+                    reloid =
+                        RelidByRelfilenode(change->data.utp.relnode.spcNode, change->data.utp.relnode.relNode, false);
+                    if (reloid == InvalidOid) {
+                        reloid = PartitionRelidByRelfilenode(change->data.utp.relnode.spcNode,
+                                                             change->data.utp.relnode.relNode, partitionReltoastrelid,
+                                                             NULL, false);
+                    }
+                    /*
+                     * Catalog tuple without data, emitted while catalog was
+                     * in the process of being rewritten.
+                     */
+                    if (reloid == InvalidOid && change->data.utp.newtuple == NULL && change->data.utp.oldtuple == NULL)
+                        continue;
+                    else if (reloid == InvalidOid) {
+                        /*
+                         * description:
+                         * When we try to decode a table who is already dropped.
+                         * Maybe we could not find it relnode.In this time, we will undecode this log.
+                         * It will be solve when we use MVCC.
+                         */
+                        ereport(DEBUG1, (errmsg("could not lookup relation %s",
+                                                relpathperm(change->data.utp.relnode, MAIN_FORKNUM))));
+                        continue;
+                    }
+                    
+                    relation = RelationIdGetRelation(reloid);
+                    if (relation == NULL) {
+                        ereport(DEBUG1, (errmsg("could open relation descriptor %s",
+                                                relpathperm(change->data.utp.relnode, MAIN_FORKNUM))));
+                        continue;
+                    }
+                    
+                    if (CSTORE_NAMESPACE == get_rel_namespace(RelationGetRelid(relation))) {
+                        continue;
+                    }
+                    
+                    if (RelationIsLogicallyLogged(relation)) {
+                        /*
+                         * For now ignore sequence changes entirely. Most of
+                         * the time they don't log changes using records we
+                         * understand, so it doesn't make sense to handle the
+                         * few cases we do.
+                         */
+                        if (relation->rd_rel->relkind == RELKIND_SEQUENCE) {
+                        } else if (!IsToastRelation(relation)) { /* user-triggered change */
+                            ReorderBufferToastReplace(rb, txn, relation, change, partitionReltoastrelid);
+                            rb->apply_change(rb, txn, relation, change);
+                            /*
+                             * Only clear reassembled toast chunks if we're
+                             * sure they're not required anymore. The creator
+                             * of the tuple tells us.
+                             */
+                            if (change->data.tp.clear_toast_afterwards)
+                                ReorderBufferToastReset(rb, txn);
+                        } else if (change->action == REORDER_BUFFER_CHANGE_INSERT) {
+                            /* we're not interested in toast deletions
+                             *
+                             * Need to reassemble the full toasted Datum in
+                             * memory, to ensure the chunks don't get reused
+                             * till we're done remove it from the list of this
+                             * transaction's changes. Otherwise it will get
+                             * freed/reused while restoring spooled data from
+                             * disk.
+                             */
+                            dlist_delete(&change->node);
+                            ReorderBufferToastAppendChunk(rb, txn, relation, change);
+                        }
+                    }
+                    RelationClose(relation);
+                    break;
+            }
+            if (stopDecoding) {
+                break;
             }
         }
 
@@ -1666,7 +1790,7 @@ void ReorderBufferSetBaseSnapshot(ReorderBuffer *rb, TransactionId xid, XLogRecP
      * operate on its top-level transaction instead.
      */
     txn = ReorderBufferTXNByXid(rb, xid, true, &is_new, lsn, true);
-    if (txn->is_known_as_subxact)
+    if (txn != NULL && txn->is_known_as_subxact)
         txn = ReorderBufferTXNByXid(rb, txn->toplevel_xid, false, NULL, InvalidXLogRecPtr, false);
     if (txn == NULL)
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("can not found txn which xid = %lu", xid)));
@@ -2029,6 +2153,10 @@ static void ReorderBufferSerializeChange(ReorderBuffer *rb, ReorderBufferTXN *tx
         case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
             /* ReorderBufferChange contains everything important */
             break;
+        case REORDER_BUFFER_CHANGE_UINSERT:
+        case REORDER_BUFFER_CHANGE_UDELETE:
+        case REORDER_BUFFER_CHANGE_UUPDATE:
+            break;
     }
 
     ondisk->size = sz;
@@ -2233,6 +2361,10 @@ static void ReorderBufferRestoreChange(ReorderBuffer *rb, ReorderBufferTXN *txn,
         /* the base struct contains all the data, easy peasy */
         case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
         case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
+            break;
+        case REORDER_BUFFER_CHANGE_UINSERT:
+        case REORDER_BUFFER_CHANGE_UDELETE:
+        case REORDER_BUFFER_CHANGE_UUPDATE:
             break;
     }
 

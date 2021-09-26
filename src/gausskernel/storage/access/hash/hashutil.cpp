@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hashutil.cpp
- *	  Utility code for Postgres hash implementation.
+ *	  Utility code for openGauss hash implementation.
  *
  * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group

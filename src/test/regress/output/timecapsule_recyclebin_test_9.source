@@ -1,0 +1,1162 @@
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = on" > /dev/null 2>&1
+set client_min_messages = warning;
+---------------------------------------------------------------------------------
+DROP TABLESPACE IF EXISTS spc1;
+CREATE TABLESPACE spc1 RELATIVE LOCATION 'spc1' MAXSIZE '10240K';
+CREATE OR REPLACE FUNCTION RANDOMSTR(INT)
+RETURNS TEXT
+AS $$ SELECT SUBSTR(STRING_AGG(MD5(RANDOM()), ''), 1, $1) FROM GENERATE_SERIES(1, CEIL($1/32)::bigint) $$
+LANGUAGE SQL STRICT;
+DROP FUNCTION IF EXISTS fn_insert(relname TEXT, randLen INT);
+CREATE OR REPLACE FUNCTION fn_insert(relname TEXT, randLen INT) RETURN BOOLEAN
+AS
+BEGIN
+    BEGIN
+        FOR i IN 1..5 LOOP
+            EXECUTE IMMEDIATE 'insert into ' || relname ||' values (1, 1, 1, 1, 1, RANDOMSTR(' || randLen || '))';
+            EXECUTE IMMEDIATE 'insert into ' || relname || ' select * from ' || relname;
+        END LOOP;
+    EXCEPTION
+    WHEN insufficient_resources THEN
+        -- RAISE ;
+        RETURN false;
+    END;
+    RETURN true;
+END; 
+/
+DROP FUNCTION IF EXISTS fn_trunc(relname TEXT, mode INT);
+CREATE OR REPLACE FUNCTION fn_trunc(relname TEXT, mode INT) RETURN BOOLEAN
+AS
+BEGIN
+    BEGIN
+        IF mode = 2 THEN
+            EXECUTE IMMEDIATE 'TRUNCATE TABLE ' || relname || ' PURGE';
+        ELSE
+            EXECUTE IMMEDIATE 'TRUNCATE TABLE ' || relname;
+        END IF;
+    EXCEPTION
+    WHEN insufficient_resources THEN
+        -- RAISE ;
+        RETURN false;
+    END;
+    RETURN true;
+END; 
+/
+-- mode: 0 for `truncate`+`drop`, 1 for `truncate`, 2 for `drop`
+DROP PROCEDURE IF EXISTS sp_test_trunc_prep;
+CREATE OR REPLACE PROCEDURE sp_test_trunc_prep(randLen INT, mode INT)
+AS
+    relname TEXT := '';
+    purgeTag TEXT;
+BEGIN
+    IF mode = 1 THEN
+        purgeTag := ' PURGE';
+    END IF;
+    FOR i IN 1..10000000 LOOP
+        relname := 't_' || i;
+        BEGIN
+            EXECUTE IMMEDIATE 'CREATE TABLE ' || relname || ' (c1 BIGINT, c2 BIGINT, c3 BIGINT, c4 BIGINT, c5 BIGINT, c11 TEXT) TABLESPACE spc1';
+            EXECUTE IMMEDIATE 'CREATE INDEX idx_' || relname || ' ON ' || relname || '(c1) TABLESPACE spc1';
+        EXCEPTION
+        WHEN insufficient_resources THEN
+            RETURN ;
+        END;
+
+        FOR j IN 1..5 LOOP
+            IF fn_insert(relname, randLen) = false THEN
+                EXIT;
+            END IF;
+            if fn_trunc(relname, mode) = false THEN
+                EXIT;
+            END IF;
+        END LOOP;
+
+        IF fn_insert(relname, randLen) = false THEN
+            EXECUTE IMMEDIATE 'DROP TABLE ' || relname || ' ' || purgeTag;
+            EXIT;
+        END IF;
+
+        EXECUTE IMMEDIATE 'DROP TABLE ' || relname || ' ' || purgeTag;
+
+    END LOOP;
+END; 
+/
+DROP PROCEDURE IF EXISTS sp_test_trunc_exec;
+CREATE OR REPLACE PROCEDURE sp_test_trunc_exec(relname TEXT, loopCnt INT, randLen INT)
+AS
+BEGIN
+    EXECUTE IMMEDIATE 'DROP TABLE IF EXISTS ' || relname ;
+    EXECUTE IMMEDIATE 'CREATE TABLE ' || relname || ' (c1 BIGINT, c2 BIGINT, c3 BIGINT, c4 BIGINT, c5 BIGINT, c11 TEXT) TABLESPACE spc1';
+    EXECUTE IMMEDIATE 'CREATE INDEX idx_' || relname || ' ON ' || relname || '(c1) TABLESPACE spc1';
+
+    FOR i IN 1..loopCnt LOOP
+        IF fn_insert(relname, randLen) = false THEN
+            EXIT;
+        END IF;
+    END LOOP;
+END; 
+/
+------------------
+purge recyclebin;
+select sp_test_trunc_exec('t1', 10000000, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+truncate table t1;
+ERROR:  Insufficient storage space for tablespace "spc1"
+--?.*
+truncate table t1 purge;
+ERROR:  Insufficient storage space for tablespace "spc1"
+--?.*
+drop table t1;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t1            | d            |       0 | t             | t
+ pg_toast_     | d            |       2 | f             | f
+ pg_toast_     | d            |       3 | f             | f
+ idx_t1        | d            |       1 | f             | t
+(4 rows)
+
+purge recyclebin;
+------------------
+purge recyclebin;
+select sp_test_trunc_exec('t3', 1, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select c1 from t3 limit 2;
+ c1 
+----
+  1
+  1
+(2 rows)
+
+select sp_test_trunc_exec('t2', 1, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select c1 from t2 limit 2;
+ c1 
+----
+  1
+  1
+(2 rows)
+
+select sp_test_trunc_exec('t1', 10000000, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select c1 from t1 limit 2;
+ c1 
+----
+  1
+  1
+(2 rows)
+
+truncate table t3;
+ERROR:  Insufficient storage space for tablespace "spc1"
+--?.*
+truncate table t2;
+ERROR:  Insufficient storage space for tablespace "spc1"
+--?.*
+truncate table t1;
+ERROR:  Insufficient storage space for tablespace "spc1"
+--?.*
+drop table t3;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t3            | d            |       0 | t             | t
+ pg_toast_     | d            |       2 | f             | f
+ pg_toast_     | d            |       3 | f             | f
+ idx_t3        | d            |       1 | f             | t
+(4 rows)
+
+insert into t1 select * from t1;
+ERROR:  Insufficient storage space for tablespace "spc1"
+--?.*
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t2;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t2            | d            |       0 | t             | t
+ pg_toast_     | d            |       2 | f             | f
+ pg_toast_     | d            |       3 | f             | f
+ idx_t2        | d            |       1 | f             | t
+(4 rows)
+
+insert into t1 select * from t1;
+ERROR:  Insufficient storage space for tablespace "spc1"
+--?.*
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t1            | d            |       0 | t             | t
+ pg_toast_     | d            |       2 | f             | f
+ pg_toast_     | d            |       3 | f             | f
+ idx_t1        | d            |       1 | f             | t
+(4 rows)
+
+select sp_test_trunc_exec('t4', 10000000, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t4;
+purge recyclebin;
+------------------
+select sp_test_trunc_prep(10, 0);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 't';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 'd';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+select sp_test_trunc_prep(1024, 0);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 't';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 'd';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 1024);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+select sp_test_trunc_prep(102400, 0);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 't';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 'd';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 1024);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+------------------
+select sp_test_trunc_prep(10, 1);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 't';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 'd';
+ ?column? 
+----------
+ f
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+select sp_test_trunc_prep(1024, 1);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 1024);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+select sp_test_trunc_prep(102400, 1);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 1024);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+------------------
+select sp_test_trunc_prep(10, 2);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 't';
+ ?column? 
+----------
+ f
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 'd';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 10);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+select sp_test_trunc_prep(1024, 2);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 't';
+ ?column? 
+----------
+ f
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 'd';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 1024);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+select sp_test_trunc_prep(102400, 2);
+ sp_test_trunc_prep 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from pg_class where relname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%';
+ ?column? 
+----------
+ t
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 't';
+ ?column? 
+----------
+ f
+(1 row)
+
+select count(1) > 0 from gs_recyclebin where rcyoriginname like 't_%' and rcyoperation = 'd';
+ ?column? 
+----------
+ t
+(1 row)
+
+select sp_test_trunc_exec('t1', 10000000, 1024);
+ sp_test_trunc_exec 
+--------------------
+ 
+(1 row)
+
+select count(1) > 0 from t1;
+ ?column? 
+----------
+ t
+(1 row)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+------------------
+DROP FUNCTION RANDOMSTR(INT);
+DROP FUNCTION IF EXISTS fn_insert(relname TEXT, randLen INT);
+DROP FUNCTION IF EXISTS fn_trunc(relname TEXT, mode INT);
+DROP PROCEDURE IF EXISTS sp_test_trunc_prep;
+DROP PROCEDURE IF EXISTS sp_test_trunc_exec;
+purge recyclebin;
+DROP TABLESPACE spc1;
+DROP SCHEMA public cascade;
+CREATE SCHEMA public;
+---------------------------------------------------------------------------------
+create table t1 (c1 int);
+insert into t1 values(1);
+truncate table t1;
+insert into t1 values(2);
+truncate table t1;
+insert into t1 values(3);
+timecapsule table t1 to before truncate;
+select * from t1; -- 2
+ c1 
+----
+  1
+(1 row)
+
+timecapsule table t1 to before truncate;
+select * from t1; -- 3
+ c1 
+----
+  2
+(1 row)
+
+drop table t1;
+timecapsule table t1 to before truncate;
+ERROR:  relation "t1" does not exist
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+create table t1 (c1 int);
+insert into t1 values(1);
+drop table t1;
+create table t1 (c1 int);
+insert into t1 values(2);
+drop table t1;
+create table t1 (c1 int);
+insert into t1 values(3);
+drop table t1;
+timecapsule table t1 to before drop;
+select * from t1; -- 3
+ c1 
+----
+  1
+(1 row)
+
+drop table t1;
+timecapsule table t1 to before drop;
+select * from t1; -- 3
+ c1 
+----
+  2
+(1 row)
+
+drop table t1 purge;
+timecapsule table t1 to before drop;
+select * from t1; -- 2
+ c1 
+----
+  3
+(1 row)
+
+drop table t1 purge;
+timecapsule table t1 to before drop;
+select * from t1; -- 1
+ c1 
+----
+  1
+(1 row)
+
+drop table t1 purge;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+create table t1 (c1 int);
+insert into t1 values(1);
+truncate table t1;
+insert into t1 values(2);
+truncate table t1;
+insert into t1 values(3);
+truncate table t1;
+insert into t1 values(4);
+purge table t1;
+purge table t1;
+-- TODO: support prior to purge the earliest truncated object later.
+timecapsule table t1 to before truncate;
+select * from t1; -- 1
+ c1 
+----
+  3
+(1 row)
+
+timecapsule table t1 to before truncate;
+select * from t1; -- 4
+ c1 
+----
+  4
+(1 row)
+
+drop table t1;
+purge recyclebin;
+--------------------------
+create table t1 (c1 int, c2 int unique, c3 text);
+create index i1 on t1 (c1);
+insert into t1 values(1, 1, randomstr(4096));
+ERROR:  function randomstr(integer) does not exist
+LINE 1: insert into t1 values(1, 1, randomstr(4096));
+                                    ^
+HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
+truncate table t1;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t1            | t            |       0 | t             | t
+ pg_toast_     | t            |       2 | f             | f
+ pg_toast_     | t            |       1 | f             | f
+ t1_c2_key     | t            |       1 | f             | f
+ i1            | t            |       1 | f             | f
+(5 rows)
+
+DROP PROCEDURE IF EXISTS fn_purge;
+CREATE OR REPLACE FUNCTION fn_purge (objtype TEXT, objname TEXT) RETURN TEXT
+AS
+    cmd TEXT;
+    str TEXT;
+BEGIN
+    cmd := 'purge ' || objtype || ' ' || objname || ' '; 
+    str := 'purge ' || objtype || ' ' || substr(objname, 1, 15) || ' '; 
+    execute immediate cmd;
+    return str || ' ---> successful' ;
+
+EXCEPTION when others then
+    return str || ' ---> failed' ;
+END; 
+/
+declare
+    objname text;
+begin
+    select rcyoriginname into objname from gs_recyclebin where rcyoriginname = 'i1';
+    raise warning '%', fn_purge('INDEX', objname);
+
+    select rcyoriginname into objname from gs_recyclebin where rcyoriginname like 't1_c2%';
+    raise warning '%', fn_purge('INDEX', objname);
+
+    select 'pg_toast.' || rcyoriginname into objname from gs_recyclebin where rcyoriginname like 'pg_toast_%_index';
+    raise warning '%', fn_purge('INDEX', objname);
+
+    select 'pg_toast.' || rcyoriginname into objname from gs_recyclebin where rcyoriginname like 'pg_toast_%' and rcytype = 2;
+    raise warning '%', fn_purge('TABLE', objname);
+
+    select rcyoriginname into objname from gs_recyclebin where rcyoriginname = 't1';
+    raise warning '%', fn_purge('TABLE', objname);
+end;
+/
+WARNING:  purge INDEX i1  ---> failed
+WARNING:  purge INDEX t1_c2_key  ---> failed
+WARNING:  purge INDEX pg_toast.pg_toa  ---> failed
+WARNING:  purge TABLE pg_toast.pg_toa  ---> failed
+WARNING:  purge TABLE t1  ---> successful
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+declare
+    objname text;
+begin
+    select rcyoriginname into objname from gs_recyclebin where rcyoriginname = 'i1';
+    raise warning '%', fn_purge('INDEX', objname);
+
+    select rcyoriginname into objname from gs_recyclebin where rcyoriginname like 't1_c2%';
+    raise warning '%', fn_purge('INDEX', objname);
+
+    select 'pg_toast.' || rcyoriginname into objname from gs_recyclebin where rcyoriginname like 'pg_toast_%_index';
+    raise warning '%', fn_purge('INDEX', objname);
+
+    select 'pg_toast.' || rcyoriginname into objname from gs_recyclebin where rcyoriginname like 'pg_toast_%' and rcytype = 2;
+    raise warning '%', fn_purge('TABLE', objname);
+
+    select rcyoriginname into objname from gs_recyclebin where rcyoriginname = 't1';
+    raise warning '%', fn_purge('TABLE', objname);
+end;
+/
+WARNING:  purge INDEX i1  ---> successful
+WARNING:  purge INDEX t1_c2_key  ---> failed
+WARNING:  purge INDEX pg_toast.pg_toa  ---> failed
+WARNING:  purge TABLE pg_toast.pg_toa  ---> failed
+WARNING:  purge TABLE t1  ---> successful
+DROP PROCEDURE IF EXISTS fn_purge;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+create schema s;
+create table s.t1 (c1 int);
+drop table s.t1;
+drop schema s;
+ERROR:  cannot execute this command because other recycle objects depend on the object, use "purge recyclebin" to clean recyclebin then try again.
+drop schema s cascade;
+ERROR:  cannot execute this command because other recycle objects depend on the object, use "purge recyclebin" to clean recyclebin then try again.
+purge table s.t1;
+drop schema s;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+CREATE TABLESPACE spc1 RELATIVE LOCATION 'spc1' MAXSIZE '10240K';
+create table t1 (c1 int) tablespace spc1;
+create index i1 on t1(c1);
+truncate table t1;
+drop table t1 purge;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t1            | t            |       0 | t             | t
+ i1            | t            |       1 | f             | f
+(2 rows)
+
+drop tablespace spc1;
+ERROR:  cannot execute this command because other recycle objects depend on the object, use "purge recyclebin" to clean recyclebin then try again.
+purge table t1;
+drop tablespace spc1;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+CREATE TYPE typ_demo AS (f1 INT, f2 INT);
+CREATE TABLE t1(a INT, b typ_demo);
+CREATE TABLE t2(a INT, b INT);
+-- 基表t1依赖外部复合类型typ_demo，采用物理删除策略
+DROP TABLE t1;
+-- 基表t2未依赖外部对象，采用逻辑删除策略
+DROP TABLE t2;
+timecapsule table t1 to before drop;
+ERROR:  recycle object "t1" desired does not exist
+timecapsule table t2 to before drop;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+drop table t1;
+ERROR:  table "t1" does not exist
+drop table t2;
+drop type typ_demo;
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+CREATE FUNCTION f() RETURNS int AS $$ SELECT 1::int $$ LANGUAGE SQL;
+-- 第1个检查约束依赖外部对象f()，采用物理删除策略
+-- 第2个检查约束未依赖外部对象，采用逻辑删除策略
+CREATE TABLE t1 (c1 INT CHECK (c1 + f() > 0), c2 INT CHECK(c2 > c1));
+select contype, conkey, conexclop, consrc from pg_constraint where oid > 16383 and consrc like '%c1%';
+ contype | conkey | conexclop |      consrc      
+---------+--------+-----------+------------------
+ c       | {1}    |           | ((c1 + f()) > 0)
+ c       | {2,1}  |           | (c2 > c1)
+(2 rows)
+
+DROP TABLE t1;
+select contype, conkey, conexclop, consrc from pg_constraint where oid > 16383 and consrc like '%c1%';
+ contype | conkey | conexclop |  consrc   
+---------+--------+-----------+-----------
+ c       | {2,1}  |           | (c2 > c1)
+(1 row)
+
+drop function f();
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+create schema s;
+CREATE TABLE s.t1(c1 INT);
+insert into s.t1 values(1);
+CREATE TABLE s.t2(c1 INT);
+insert into s.t2 values(1);
+CREATE VIEW s.v1 AS SELECT 'v1' FROM s.t1, s.t2;
+CREATE VIEW s.v2 AS SELECT 'v2' FROM s.t2;
+select schemaname, substr(viewname, 1, 4) viewname, substr(definition, 1, 17) definition from pg_views where schemaname = 's';
+ schemaname | viewname |    definition     
+------------+----------+-------------------
+ s          | v1       | SELECT 'v1'::text
+ s          | v2       | SELECT 'v2'::text
+(2 rows)
+
+select rulename, substr(ev_class::regclass::text, 1, 5) ev_class from pg_rewrite where oid >16383 and ev_class::regclass::text like '%s.v%' order by oid;
+ rulename | ev_class 
+----------+----------
+ _RETURN  | s.v1
+ _RETURN  | s.v2
+(2 rows)
+
+-- 子对象v1依赖外部对象t2，采用物理删除策略
+DROP TABLE s.t1 CASCADE;
+-- 子对象v2未依赖外部对象，采用逻辑删除策略
+DROP TABLE s.t2 CASCADE;
+purge table s.t1;
+select schemaname, substr(viewname, 1, 4) viewname, substr(definition, 1, 17) definition from pg_views where schemaname = 's';
+ schemaname | viewname |    definition     
+------------+----------+-------------------
+ s          | BIN$     | SELECT 'v2'::text
+(1 row)
+
+select rulename, substr(ev_class::regclass::text, 1, 5) ev_class from pg_rewrite where oid >16383 and ev_class::regclass::text like '%s.%' order by oid;
+ rulename | ev_class 
+----------+----------
+ _RETURN  | s."BI
+(1 row)
+
+timecapsule table s.t2 to before drop;
+declare
+    vname TEXT;
+    tmp TEXT;
+begin
+    select viewname into vname from pg_views where viewname like '%BIN$%';
+    execute immediate 'select * from s."' || vname || '"' into tmp;
+    raise warning 'query v2: %', tmp;
+end;
+/
+WARNING:  query v2: v2
+DROP TABLE s.t2 CASCADE;
+timecapsule table s.t2 to before drop;
+declare
+    vname TEXT;
+    tmp TEXT;
+begin
+    select viewname into vname from pg_views where viewname like '%BIN$%';
+    execute immediate 'select * from s."' || vname || '"' into tmp;
+    raise warning 'query v2: %', tmp;
+end;
+/
+WARNING:  query v2: v2
+drop table s.t2 cascade purge;
+drop schema s;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+CREATE FUNCTION f(INT) RETURNS int AS $$ SELECT $1::int $$ LANGUAGE SQL;
+CREATE TABLE t1 (c1 INT, c2 INT);
+CREATE INDEX i1 ON t1 (f(c2));
+CREATE INDEX i2 ON t1 (c1);
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+-- 子对象i1依赖外部对象f(INT)，采用物理删除策略
+-- 子对象i2未依赖外部对象，采用逻辑删除策略
+DROP TABLE t1;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t1            | d            |       0 | t             | t
+ i2            | d            |       1 | f             | t
+(2 rows)
+
+purge recyclebin;
+drop function f(INT);
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+CREATE SEQUENCE seq;
+CREATE TABLE t1 (c1 INT DEFAULT nextval('seq'), c2 SERIAL);
+-- 子对象c1列默认值依赖外部对象（序列函数nextval），采用物理删除策略
+-- 子对象c2列类型未依赖外部对象，采用逻辑删除策略
+DROP TABLE t1;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+ t1_c2_seq     | d            |       4 | f             | f
+ t1            | d            |       0 | t             | t
+(2 rows)
+
+purge recyclebin;
+drop sequence seq;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+--------------------------
+CREATE OR REPLACE FUNCTION tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+       RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE TABLE t1 (c1 INT, c2 INT);
+CREATE TRIGGER insert_trigger
+BEFORE INSERT ON t1
+FOR EACH ROW
+EXECUTE PROCEDURE tri_insert_func();
+select tgname  from pg_trigger where oid > 16384;
+     tgname     
+----------------
+ insert_trigger
+(1 row)
+
+-- 触发器依赖外部PLPGSQL函数tri_insert_func，采用物理删除策略策略
+DROP TABLE t1;
+select tgname  from pg_trigger where oid > 16384;
+ tgname 
+--------
+(0 rows)
+
+drop FUNCTION tri_insert_func();
+purge recyclebin;
+select substr(rcyoriginname, 1, 9) rcyoriginname, rcyoperation, rcytype, rcycanrestore, rcycanpurge from gs_recyclebin order by rcyrelid;
+ rcyoriginname | rcyoperation | rcytype | rcycanrestore | rcycanpurge 
+---------------+--------------+---------+---------------+-------------
+(0 rows)
+
+---------------------------------------------------------------------------------
+-- 闪回点和当前点之间，执行过修改表结构的语句，闪回truncate失败
+CREATE TABLE RCA_NULL_003 (COL_1 VARCHAR(255) NULL default '',COL_2 clob default '');
+insert into RCA_NULL_003 values ('ddd',NULL);
+truncate table RCA_NULL_003;
+ALTER TABLE RCA_NULL_003 add COL_3 VARCHAR(255) default '';
+timecapsule table RCA_NULL_003 to before truncate;
+ERROR:  The table definition of "rca_null_003" has been changed.
+drop table RCA_NULL_003 purge;
+purge recyclebin;
+---------------------------------------------------------------------------------
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1
+reset client_min_messages;

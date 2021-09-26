@@ -970,6 +970,7 @@ void pg_bind_textdomain_codeset(const char* domain_name)
     const char* ctype = gs_setlocale_r(LC_CTYPE, NULL);
 
     if (pg_strcasecmp(ctype, "C") != 0 && pg_strcasecmp(ctype, "POSIX") != 0) {
+        localeLock.unLock();
         return;
     }
 

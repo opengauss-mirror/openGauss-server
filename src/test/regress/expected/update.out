@@ -659,7 +659,6 @@ select * from test;
 
 drop table test;
 --test update multiple fields of column which using composite type at once
-set enable_light_proxy=off;
 create type nt as(a int,b int);
 create table aa (a nt, b int,c char);
 explain (verbose on, costs off) insert into aa values(ROW(1,2),3,'4');
@@ -801,4 +800,3 @@ select * from test order by 3;
 (4 rows)
 
 drop table test;
-set enable_light_proxy=on;

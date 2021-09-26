@@ -28,7 +28,7 @@
 
 #include "c.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "lib/dllist.h"
 #include "utils/hsearch.h"
 #include "access/xlogproc.h"

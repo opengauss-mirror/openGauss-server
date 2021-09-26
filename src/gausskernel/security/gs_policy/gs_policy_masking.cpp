@@ -62,6 +62,7 @@ static const char* g_maskFunctions[] = {
     "alldigitsmasking",
     "shufflemasking",
     "randommasking",
+    "regexpmasking",
     NULL
 };
 
@@ -376,16 +377,26 @@ static bool parse_masking_action(DefElem* policy_item, MaskingActionItem* item, 
         return true;
     }
 
-    item->m_action = policy_item->defname;
-    if (validate_masking_behaviour_hook != NULL) {
-        if (!validate_masking_behaviour_hook(item->m_action.c_str())) {
-            ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                     errmsg("%s", "wrong masking function name")));
+    int index = 0;
+    bool is_found = false;
+    if (policy_item->defnamespace != NULL) {
+        item->m_action.append(policy_item->defnamespace);
+        item->m_action.append(".");
+    } else {
+        for (int i = 0; g_maskFunctions[i] != NULL; ++i) {
+            if (strcmp(g_maskFunctions[i], (policy_item->defname)) == 0 ||
+                strcasecmp("maskall", (policy_item->defname)) == 0) {
+                is_found = true;
+                break;
+            }
+        }
+        if (!is_found) {
+            item->m_action.append(get_namespace_name(GetOidBySchemaName()));
+            item->m_action.append(".");
         }
     }
-    int index = 0;
-
+    item->m_action.append(policy_item->defname);
+    bool is_validated = false;
     ListCell   *item_list = NULL;
     foreach(item_list,  (List *)policy_item->arg) {
         if (index == 0) { /* masking function params */
@@ -405,11 +416,21 @@ static bool parse_masking_action(DefElem* policy_item, MaskingActionItem* item, 
             if (item->m_params.size()) {
                 item->m_params.pop_back(); /* remove last ',' */
             }
+            if (validate_masking_behaviour_hook) {
+                is_validated = true;
+                /* check function by parameters */
+                bool invalid_params = false;
+                if (!validate_masking_behaviour_hook(item->m_action.c_str(), item->m_params.c_str(), 
+                    &invalid_params, false)) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION), errmodule(MOD_UDF),
+                        errmsg("failed to mask"),
+                            errdetail("wrong masking function %s", invalid_params ? ": invalid parameters" : " ")));
+                }
+            }
         } else if (index == 1) { /* labels to apply the policy */
             DefElem *label_defel = (DefElem *)(lfirst(item_list));
             ListCell   *label_name_item = NULL;
-            foreach(label_name_item, (List *)label_defel->arg)
-            {
+            foreach(label_name_item, (List *)label_defel->arg) {
                 RangeVar *rel = (RangeVar*)lfirst(label_name_item);
                 gs_stl::gs_string label_name;
                 construct_resource_name(rel, &label_name);
@@ -1165,7 +1186,7 @@ void drop_masking_policy(DropMaskingPolicyStmt *stmt)
     reload_masking_policies();
 }
 
-static List *relid_get_policy_label_namelist(Oid relid)
+static List *relid_get_policy_label_namelist(Oid relid, const char *column = NULL)
 {
     Relation label_rel = NULL;
     List *label_list = NIL;
@@ -1177,7 +1198,7 @@ static List *relid_get_policy_label_namelist(Oid relid)
     scan = tableam_scan_begin(label_rel, SnapshotNow, 0, NULL);
     while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         label_data = (Form_gs_policy_label)GETSTRUCT(tup);
-        if (label_data->fqdnid == relid) {
+        if (label_data->fqdnid == relid && (column == NULL || strcasecmp(column, label_data->relcolumn.data) == 0)) {
             label_list = lappend(label_list, label_data->labelname.data);
         }
     }
@@ -1210,7 +1231,7 @@ static List *get_masking_policy_oidlist(bool check_enabled)
     return oid_list;
 }
 
-bool is_masked_relation(Oid relid)
+bool is_masked_relation(Oid relid, const char *column)
 {
     bool is_masked = false;
     List *labels = NIL;
@@ -1220,7 +1241,7 @@ bool is_masked_relation(Oid relid)
     HeapTuple tup = NULL;
     Form_gs_masking_policy_actions action_data = NULL;
 
-    labels = relid_get_policy_label_namelist(relid);
+    labels = relid_get_policy_label_namelist(relid, column);
     if (labels == NIL) {
         return false;
     }
@@ -1285,6 +1306,30 @@ bool is_masked_relation_enabled(Oid relid)
     return is_match;
 }
 
+/* separate namespace and function name when user input to create masking policy */
+void parse_function_name(const char* func_name, char** parsed_funcname, Oid& schemaid)
+{
+    errno_t rc = EOK;
+    const char* sch = strchr(func_name, '.');
+    *parsed_funcname = (char *)palloc(strlen(func_name) + 1);
+    if (sch) { /* function name includes schema */
+        int name_pos = (sch - func_name);
+        rc = strncpy_s(*parsed_funcname, strlen(func_name) + 1, func_name + name_pos + 1, strlen(func_name) - name_pos);
+        securec_check(rc, "\0", "\0");
+
+        char* schema_name = NULL;
+        schema_name = (char *)palloc(name_pos + 1);
+        rc = strncpy_s(schema_name, name_pos + 1, func_name, name_pos);
+        securec_check(rc, "\0", "\0");
+        schemaid = SchemaNameGetSchemaOid(schema_name, true);
+        pfree(schema_name);
+    } else {
+        rc = strncpy_s(*parsed_funcname, strlen(func_name) + 1, func_name, strlen(func_name));
+        securec_check(rc, "\0", "\0");
+        schemaid = PG_CATALOG_NAMESPACE;
+    }
+}
+
 bool IsMaskingFunctionOid(Oid funcid)
 {
     if (!OidIsValid(funcid)) {
@@ -1292,14 +1337,40 @@ bool IsMaskingFunctionOid(Oid funcid)
     }
     Oid nspoid = get_func_namespace(funcid);
     char *funcname = get_func_name(funcid);
-    if (nspoid != PG_CATALOG_NAMESPACE) {
-        return false;
-    }
-
-    for (int i = 0; g_maskFunctions[i] != NULL; ++i) {
-        if (strcmp(g_maskFunctions[i], funcname) == 0) {
-            return true;
+    if (nspoid == PG_CATALOG_NAMESPACE) {
+        for (int i = 0; g_maskFunctions[i] != NULL; ++i) {
+            if (strcmp(g_maskFunctions[i], funcname) == 0) {
+                return true;
+            }
         }
     }
-    return false;
+    return IsUDF(funcname, nspoid); 
+}
+
+bool IsUDF(const char *funcname, Oid nspoid)
+{
+    Relation rel = NULL;
+    rel = heap_open(GsMaskingPolicyActionsId, AccessShareLock);
+    
+    TableScanDesc scan   = heap_beginscan(rel, SnapshotNow, 0, NULL);
+    HeapTuple   rtup    = NULL;
+    Form_gs_masking_policy_actions rel_data = NULL;
+    bool is_found = false;
+    char *parsed_funcname = NULL;
+    Oid nsp_oid = InvalidOid;
+    /* verify whether this function is used to be a masking function by searching gs_masking_policy_actions */
+    while ((rtup = heap_getnext(scan, ForwardScanDirection)) && !is_found) {
+        rel_data = (Form_gs_masking_policy_actions)GETSTRUCT(rtup);
+        if (rel_data == NULL) {
+            continue;
+        }
+        parse_function_name(rel_data->actiontype.data, &parsed_funcname, nsp_oid);
+        if (strcasecmp(parsed_funcname, funcname) == 0 && nspoid == nsp_oid) {
+            is_found = true;
+        }
+        pfree(parsed_funcname);
+    }
+    heap_endscan(scan);
+    heap_close(rel, AccessShareLock);
+    return is_found;
 }

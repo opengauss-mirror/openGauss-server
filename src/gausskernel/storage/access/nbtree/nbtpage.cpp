@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * nbtpage.cpp
- *	  BTree-specific page management code for the Postgres btree access
+ *	  BTree-specific page management code for the openGauss btree access
  *	  method.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -13,7 +13,7 @@
  *	  src/gausskernel/storage/access/nbtree/nbtpage.cpp
  *
  *	NOTES
- *	   Postgres btree pages look like ordinary relation pages.	The opaque
+ *	   openGauss btree pages look like ordinary relation pages.	The opaque
  *	   data at high addresses includes pointers to left and right siblings
  *	   and flag data describing page state.  The first page in a btree, page
  *	   zero, is special -- it stores meta-information describing the tree.
@@ -27,6 +27,7 @@
 #include "access/hio.h"
 #include "access/nbtree.h"
 #include "access/transam.h"
+#include "access/visibilitymap.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "miscadmin.h"
@@ -400,6 +401,25 @@ Buffer _bt_gettrueroot(Relation rel)
 }
 
 /*
+ * Verify buffer returned by ReadBuffer()
+ *
+ * ReadBuffer() may return InvalidBuffer for ROS (with parallel redo enabled).
+ * If the transaction was not originally committed, reading heap(page) using
+ * the tid from btree tuple may get an InvalidBuffer, the heap(page) should not
+ * be visible. While reading btree page, it could not get an InvalidBuffer, target
+ * page of btree should exist, we error out if get an InvalidBuffer of btree.
+ */
+void _bt_checkbuffer_valid(Relation rel, Buffer buf)
+{
+    if (buf == InvalidBuffer) {
+        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                        errmsg("read invalid buffer for index \"%s\"",
+                               RelationGetRelationName(rel)),
+                        errhint("Please REINDEX it.")));
+    }
+}
+
+/*
  *	_bt_checkpage() -- Verify that a freshly-read page looks sane.
  */
 void _bt_checkpage(Relation rel, Buffer buf)
@@ -422,6 +442,9 @@ void _bt_checkpage(Relation rel, Buffer buf)
      */
     Size _bt_specialsize = PageIs4BXidVersion(page) ? MAXALIGN(sizeof(BTPageOpaqueDataInternal))
                                                     : MAXALIGN(sizeof(BTPageOpaqueData));
+    if (RelationIsUstoreIndex(rel)) {
+        _bt_specialsize = MAXALIGN(sizeof(UBTPageOpaqueData));
+    }
     if (PageGetSpecialSize(page) != _bt_specialsize)
         ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
                         errmsg("index \"%s\" contains corrupted page at block %u", RelationGetRelationName(rel),
@@ -475,9 +498,11 @@ Buffer _bt_getbuf(Relation rel, BlockNumber blkno, int access)
     if (blkno != P_NEW) {
         /* Read an existing block of the relation */
         buf = ReadBuffer(rel, blkno);
+        _bt_checkbuffer_valid(rel, buf);
         LockBuffer(buf, access);
         _bt_checkpage(rel, buf);
     } else {
+        Assert(!RelationIsUstoreIndex(rel));
         bool needLock = false;
         Page page;
 
@@ -513,6 +538,7 @@ Buffer _bt_getbuf(Relation rel, BlockNumber blkno, int access)
                 break;
 loop:
             buf = ReadBuffer(rel, blkno);
+            _bt_checkbuffer_valid(rel, buf);
             if (ConditionalLockBuffer(buf)) {
                 page = BufferGetPage(buf);
                 if (_bt_page_recyclable(page)) {
@@ -612,6 +638,7 @@ Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access
     if (BufferIsValid(obuf))
         LockBuffer(obuf, BUFFER_LOCK_UNLOCK);
     buf = ReleaseAndReadBuffer(obuf, rel, blkno);
+    _bt_checkbuffer_valid(rel, buf);
     LockBuffer(buf, access);
     _bt_checkpage(rel, buf);
     return buf;
@@ -805,12 +832,8 @@ void _bt_delitems_delete(const Relation rel, Buffer buf, OffsetNumber *itemnos, 
          * server.
          */
         XLogRegisterData((char *)itemnos, nitems * sizeof(OffsetNumber));
-
-        if (RelationIsValid(heapRel)) {
-            recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, false, heapRel->rd_node.bucketNode);
-        } else {
-            recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, false, InvalidBktId);
-        }
+        int bucket_id = RelationIsValid(heapRel) ? heapRel->rd_node.bucketNode : InvalidBktId;
+        recptr = XLogInsert(RM_BTREE_ID, XLOG_BTREE_DELETE, false, bucket_id);
 
         PageSetLSN(page, recptr);
     }

@@ -128,12 +128,10 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
      * Since most of the expression information will be used
      * later, we still need to initialize these expression.
      */
-#ifdef ENABLE_LLVM_COMPILE
     dorado::GsCodeGen* llvmCodeGen = (dorado::GsCodeGen*)t_thrd.codegen_cxt.thr_codegen_obj;
     bool consider_codegen =
         CodeGenThreadObjectReady() &&
         CodeGenPassThreshold(((Plan*)outer_node)->plan_rows, estate->es_plannedstmt->num_nodes, ((Plan*)outer_node)->dop);
-#endif
 
     if (hash_state->js.ps.targetlist) {
         hash_state->js.ps.ps_ProjInfo = ExecBuildVecProjectionInfo(hash_state->js.ps.targetlist,
@@ -142,7 +140,6 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
             hash_state->js.ps.ps_ResultTupleSlot,
             NULL);
 
-#ifdef ENABLE_LLVM_COMPILE
         bool saved_codegen = consider_codegen;
         if (isIntergratedMachine) {
             consider_codegen =
@@ -172,7 +169,6 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
         }
 
         consider_codegen = saved_codegen;
-#endif
 
         ExecAssignVectorForExprEval(hash_state->js.ps.ps_ProjInfo->pi_exprContext);
     } else {
@@ -214,7 +210,6 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
     hash_state->eqfunctions = eqfunctions;
     hash_state->js.ps.ps_TupFromTlist = false;
 
-#ifdef ENABLE_LLVM_COMPILE
     /* Initialize runtime bloomfilter. */
     hash_state->bf_runtime.bf_var_list = hash_state->js.ps.plan->var_list;
     hash_state->bf_runtime.bf_filter_index = hash_state->js.ps.plan->filterIndexList;
@@ -226,7 +221,6 @@ VecHashJoinState* ExecInitVecHashJoin(VecHashJoin* node, EState* estate, int efl
     if (consider_codegen && !node->isSonicHash) {
         dorado::VecHashJoinCodeGen::HashJoinCodeGen(hash_state);
     }
-#endif
 
     return hash_state;
 }

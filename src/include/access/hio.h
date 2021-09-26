@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hio.h
- *	  POSTGRES heap access method input/output definitions.
+ *	  openGauss heap access method input/output definitions.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -37,6 +37,7 @@ extern void RelationPutHeapTuple(Relation relation, Buffer buffer, HeapTuple tup
 extern Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer otherBuffer, int options,
     BulkInsertState bistate, Buffer* vmbuffer, Buffer* vmbuffer_other, BlockNumber end_rel_block);
 extern Buffer RelationGetNewBufferForBulkInsert(Relation relation, Size len, Size dictSize, BulkInsertState bistate);
+extern Buffer ReadBufferBI(Relation relation, BlockNumber targetBlock, BulkInsertState bistate);
 extern void RelationAddExtraBlocks(Relation relation, BulkInsertState bistate);
 
 #endif /* HIO_H */

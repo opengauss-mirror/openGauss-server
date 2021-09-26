@@ -31,12 +31,15 @@
 #include "utils/builtins.h"
 #include "catalog/indexing.h"
 #include "catalog/pgxc_class.h"
+#include "catalog/heap.h"
 #include "pgxc/redistrib.h"
 #include "storage/lock/lock.h"
+#include "storage/smgr/segment.h"
 #include "tcop/utility.h"
 #include "utils/syscache.h"
 #include "utils/fmgroids.h"
 #include "access/heapam.h"
+#include "access/sysattr.h"
 #include "utils/snapmgr.h"
 #include "access/xact.h"
 #include "access/hash.h"
@@ -44,9 +47,11 @@
 #include "pgxc/pgxc.h"
 #include "access/reloptions.h"
 #include "access/hbucket_am.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "nodes/makefuncs.h"
-
+#include "commands/cluster.h"
+#include "commands/tablespace.h"
+#include "parser/parse_utilcmd.h"
 
 #define INITBUCKETCACHESIZE 16
 #define BLOCKSIZE (8 * 1024)
@@ -54,7 +59,7 @@
 typedef struct bucketidcacheent {
     Oid  bucketoid;
     oidvector *bucketlist;
-    bool createSubid;
+    SubTransactionId createSubid;
 } BucketIdCacheEnt;
 
 
@@ -91,6 +96,9 @@ do {                                                                            
                    errmsg("trying to delete a bucket cache entry that does not exist")));                \
 } while(0)
 
+static void RelationRedisMoveBuckets(Oid relOid1, Oid relOid2, Oid bucketOid, List *bucketList, bool isPart);
+static void RelationMoveIndexBuckets(Relation heapRelation1, Relation heapRelation2, List *bucket_list, Oid bucketOid);
+static void RelationMoveBuckets(Oid relOid1, Oid relOid2, List *bucket_list, Oid bucketOid);
 
 /*
  * @@GaussDB@@
@@ -218,28 +226,6 @@ void AtEOSubXact_BucketCache(bool isCommit, SubTransactionId mySubid,
     }
 }
 
-static void deleteHashBucketTuple(Oid bucketOid)
-{
-    Relation    pg_hashbucket;
-    HeapTuple   tup;
-
-    /* Grab an appropriate lock on the pg_hashbucket relation */
-    pg_hashbucket = heap_open(HashBucketRelationId, RowExclusiveLock);
-
-    tup = SearchSysCache1(BUCKETRELID, ObjectIdGetDatum(bucketOid));
-
-    if (!HeapTupleIsValid(tup)) {
-        ereport(ERROR,
-               (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-               errmsg("cache lookup failed for bucket %u", bucketOid)));
-    } else {
-        simple_heap_delete(pg_hashbucket, &tup->t_self);
-    }
-
-    ReleaseSysCache(tup);
-    heap_close(pg_hashbucket, RowExclusiveLock);
-}
-
 Oid insertHashBucketEntry(oidvector *bucketlist, Oid bucketid)
 {
     Relation pg_hashbucket = NULL;
@@ -262,9 +248,11 @@ Oid insertHashBucketEntry(oidvector *bucketlist, Oid bucketid)
 
     Assert(bucketlist != NULL);
 
-    values[Anum_pg_hashbucket_bucketid - 1] = ObjectIdGetDatum(bucketid);
-    values[Anum_pg_hashbucket_bucketcnt - 1] = Int32GetDatum(bucketlist->dim1);
-    values[Anum_pg_hashbucket_bucketvector - 1] = PointerGetDatum(bucketlist);
+    values[Anum_pg_hashbucket_bucketid - 1]      = ObjectIdGetDatum(bucketid);
+    values[Anum_pg_hashbucket_bucketcnts - 1]    = Int32GetDatum(bucketlist->dim1);
+    values[Anum_pg_hashbucket_bucketmapsize - 1] = Int32GetDatum(t_thrd.xact_cxt.PGXCBucketCnt);
+    values[Anum_pg_hashbucket_bucketref - 1]     = Int32GetDatum(1);
+    values[Anum_pg_hashbucket_bucketvector - 1]  = PointerGetDatum(bucketlist);
 
     /* form a tuple using values and null array, and insert it */
     tup = heap_form_tuple(RelationGetDescr(pg_hashbucket), values, nulls);
@@ -313,7 +301,7 @@ oidvector *searchHashBucketByOid(Oid bucketOid)
     {
         ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_TABLE),
-                errmsg("cache lookup failed for bucket %u", bucketOid)));
+                errmsg("searchHashBucketByOid cache lookup failed for bucket %u", bucketOid)));
     }
 
     bucketDatum = SysCacheGetAttr(BUCKETRELID, tuple, 
@@ -341,6 +329,34 @@ oidvector *searchHashBucketByOid(Oid bucketOid)
     return bucketList;
 }
 
+int searchBucketMapSizeByOid(Oid bucketOid)
+{
+    Datum      bucketDatum;
+    bool       isNull = false;
+
+    HeapTuple tuple  = SearchSysCache1(BUCKETRELID, bucketOid);
+    if (!HeapTupleIsValid(tuple))
+    {
+        ereport(ERROR,
+                (errcode(ERRCODE_UNDEFINED_TABLE),
+                errmsg("searchBucketMapSizeByOid cache lookup failed for bucket %u", bucketOid)));
+    }
+
+    bucketDatum = SysCacheGetAttr(BUCKETRELID, tuple, 
+                                  Anum_pg_hashbucket_bucketmapsize, &isNull);
+
+    /* if the raw value of bucket key is null, then report error*/
+    if (isNull)
+    {
+        ereport(ERROR,
+               (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),  
+               errmsg("null bucketmap size for tuple %u", HeapTupleGetOid(tuple))));
+    }
+    ReleaseSysCache(tuple);
+
+    return DatumGetInt32(bucketDatum);
+}
+
 static bool bucketListIsEqual(oidvector *bv1, oidvector *bv2)
 {
     if (bv1->dim1 != bv2->dim1)
@@ -363,20 +379,10 @@ static bool bucketListIsEqual(oidvector *bv1, oidvector *bv2)
 Oid searchHashBucketByBucketid(oidvector *bucketlist, Oid bucketid)
 {
     Relation pg_hashbucket = NULL;
-    ScanKeyData key[2];
+    ScanKeyData key[3];
     SysScanDesc scan = NULL;
     HeapTuple tuple = NULL;
     Oid ret = InvalidOid;
-
-    /* When inherits refilenode from a resizing table, we need to
-     * create a unique bucket oid for this relation, this could only
-     * happens in scale-in scenario.
-     */ 
-
-    if (t_thrd.xact_cxt.inheritFileNode) {
-        Assert(u_sess->attr.attr_sql.enable_cluster_resize);
-                return InvalidOid;
-    }
 
     pg_hashbucket = heap_open(HashBucketRelationId, AccessShareLock);
 
@@ -385,9 +391,13 @@ Oid searchHashBucketByBucketid(oidvector *bucketlist, Oid bucketid)
                 BTEqualStrategyNumber, F_OIDEQ,
                 ObjectIdGetDatum(bucketid));
     ScanKeyInit(&key[1],
-                Anum_pg_hashbucket_bucketcnt,
+                Anum_pg_hashbucket_bucketcnts,
                 BTEqualStrategyNumber, F_INT4EQ,
                 Int32GetDatum(bucketlist->dim1));
+    ScanKeyInit(&key[2],
+                Anum_pg_hashbucket_bucketmapsize,
+                BTEqualStrategyNumber, F_INT4EQ,
+                Int32GetDatum(t_thrd.xact_cxt.PGXCBucketCnt));
 
     scan = systable_beginscan(pg_hashbucket, HashBucketBidIndexId, true, NULL, 3, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
@@ -425,7 +435,7 @@ Oid searchHashBucketByBucketid(oidvector *bucketlist, Oid bucketid)
  * Description    : give the reloid ,return merge list which storage in pgxc_class
  * Notes        :
  */
-text* searchMergeListByRelid(Oid reloid, bool *find, bool retresult)
+text* searchMergeListByRelid(Oid reloid, bool *find, bool allowToMiss, bool retresult)
 {
     Relation pgxc_class_rel = NULL;
     ScanKeyData key[1];
@@ -448,11 +458,14 @@ text* searchMergeListByRelid(Oid reloid, bool *find, bool retresult)
         pgxcDatum = heap_getattr(tuple, Anum_pgxc_class_option,
                                    RelationGetDescr(pgxc_class_rel),
                                    &isnull);
-        Assert(!isnull);
-        if (isnull) {
-            ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), 
-                errmsg("got null for pgxc_class option %u", reloid)));
+        if (!allowToMiss) {
+            if (isnull) {
+                Assert(0);
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmsg("got null for pgxc_class option %u", reloid)));
+            }
         }
+
         if (retresult) {
             ret = DatumGetTextPCopy(pgxcDatum);
         }
@@ -570,11 +583,11 @@ bytea* merge_rel_bucket_reloption(Relation rel, int2 bucketid)
     ReleaseSysCache(rel_tuple);
     merged_reloptions_list = rel_reloptions_list;
 
-    merge_list_text = searchMergeListByRelid(RelationGetRelid(rel), &find_in_pgxcclass);
+    merge_list_text = searchMergeListByRelid(RelationGetRelid(rel), &find_in_pgxcclass, false);
 
     if(merge_list_text != NULL) {
         merge_list = VARDATA_ANY(merge_list_text);
-        item = hbkt_get_merge_item_from_str(merge_list, VARSIZE_ANY_EXHDR(merge_list_text), bucketid);
+        item = hbkt_get_one_merge_item(merge_list, VARSIZE_ANY_EXHDR(merge_list_text), bucketid);
         pfree_ext(merge_list_text);
     }
 
@@ -593,7 +606,7 @@ bytea* merge_rel_bucket_reloption(Relation rel, int2 bucketid)
             lappend(merged_reloptions_list, makeDefElem(pstrdup("append_mode_internal"), (Node*)makeInteger(REDIS_REL_NORMAL)));
     }
     merged_reloptions_list = list_delete_name(merged_reloptions_list, "start_ctid_internal");
-    merged_reloptions_list = list_delete_name(merged_reloptions_list, "start_ctid_internal");
+    merged_reloptions_list = list_delete_name(merged_reloptions_list, "end_ctid_internal");
     merged_reloptions_list = add_ctid_string_to_reloptions(merged_reloptions_list, "start_ctid_internal", &start_ctid);
     merged_reloptions_list = add_ctid_string_to_reloptions(merged_reloptions_list, "end_ctid_internal", &end_ctid);
     /* list ==> datum */
@@ -670,6 +683,8 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
     bucket->rd_node.bucketNode = bucketId;
     bucket->rd_lockInfo.lockRelId.bktId = bucketId+1;
     bucket->rd_rel->parttype = PARTTYPE_NON_PARTITIONED_RELATION;
+    bucket->rd_rel->relpages = 0;
+    bucket->rd_rel->reltuples = 0;
     bucket->rd_bucketoid = InvalidOid;
     bucket->rd_bucketkey = NULL;
     bucket->rd_smgr = NULL;
@@ -698,52 +713,64 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
     return bucket;
 }
 
+void hashbucket_info_parse_string(char *string, List **vallist)
+{
+    char *nptr = string;
+    char *endptr = NULL;
+
+    while (1) {
+        int val = strtoll(nptr, &endptr, 10);
+        if (errno == ERANGE || nptr == endptr) {
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("failed to parse digtal number in string: %m")));
+        }
+        *vallist = lappend_int(*vallist, val);
+        if (*endptr == ' ') {
+            nptr = endptr + 1;
+        } else if (*endptr == '\0') {
+            break;
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("failed to parse valid space separator in string")));
+        }
+    }
+}
+
 Datum set_hashbucket_info(PG_FUNCTION_ARGS)
 {
-    text       *hashbucketIdInfo = PG_GETARG_TEXT_P(0);
-    char       *hashbucketIdStr = NULL;
-    List       *idList = NIL;
-    ListCell   *l = NULL;
-    int       i = 0;
+    text *hashbucketIdInfo = PG_GETARG_TEXT_P(0);
+    char *hashbucketIdStr = NULL;
+    List *idList = NIL;
+    ListCell *l = NULL;
+    int i = 0;
 
-    if (!isRestoreMode || u_sess->storage_cxt.dumpHashbucketIdNum != 0)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_NAME),
-                 errmsg("should in restore mode")));
+    if (!isRestoreMode || u_sess->storage_cxt.dumpHashbucketIdNum != 0) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("should in restore mode")));
     }
-
 
     hashbucketIdStr = text_to_cstring(hashbucketIdInfo);
-    if (!SplitIdentifierString(hashbucketIdStr, ' ', &idList))
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_NAME),
-                 errmsg("invalid hashbucketId syntax")));
+    hashbucket_info_parse_string(hashbucketIdStr, &idList);
 
     if (idList == NIL)
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_NAME),
-                 errmsg("invalid hashbucketId syntax")));
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid hashbucketId syntax")));
 
-    if (idList->length == 0 || idList->length > BUCKETDATALEN)
-    {
-        ereport(ERROR,
-                (errcode(ERRCODE_INVALID_NAME),
-                 errmsg("invalid hashbucketId syntax")));
+    if (idList->length <= 1 || idList->length > BUCKETDATALEN) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid hashbucketId syntax")));
     }
 
-    u_sess->storage_cxt.dumpHashbucketIdNum = idList->length;
+    u_sess->storage_cxt.dumpHashbucketIdNum = idList->length - 1;
     u_sess->storage_cxt.dumpHashbucketIds = (int2 *)MemoryContextAllocZero(
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), idList->length * sizeof(int2));
-
-    i = 0;
-    foreach(l, idList)
-    {
-        char     *curname = (char *) lfirst(l);
-        u_sess->storage_cxt.dumpHashbucketIds[i++] = atoi(curname);
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), (idList->length - 1) * sizeof(int2));
+    foreach (l, idList) {
+        int curval = lfirst_int(l);
+        if (curval > BUCKETDATALEN || curval < 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_NAME), errmsg("invalid bucket id syntax")));
+        }
+        if (i == 0) {
+            t_thrd.xact_cxt.PGXCBucketCnt = curval;
+        } else {
+            u_sess->storage_cxt.dumpHashbucketIds[i - 1] = curval;
+        }
+        i++;
     }
 
     pfree_ext(hashbucketIdStr);
@@ -753,13 +780,16 @@ Datum set_hashbucket_info(PG_FUNCTION_ARGS)
 }
 
 
-inline Oid get_relationtuple_bucketoid(HeapTuple tup)
+Oid get_relationtuple_bucketoid(HeapTuple tup)
 {
     Datum datum;
     bool  isnull = false;
 
     datum = heap_getattr(tup, Anum_pg_class_relbucket, GetDefaultPgClassDesc(), &isnull);
-    Assert(isnull == false);
+    if (isnull == true) {
+        return InvalidOid;
+    }
+
     return DatumGetObjectId(datum);
 }
 
@@ -787,6 +817,59 @@ HeapTuple update_reltuple_bucketoid(HeapTuple tuple, Oid bucketOid)
     return ntup;
 }
 
+HeapTuple update_reltuple_bucket(HeapTuple tuple, Oid bucketOid, int2vector* bucketcol)
+{
+    Datum       values[Natts_pg_class];
+    bool        replaces[Natts_pg_class];
+    bool        nulls[Natts_pg_class];
+    HeapTuple ntup = NULL;
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_class_relbucket - 1] = true;
+    if (OidIsValid(bucketOid)) {
+        values[Anum_pg_class_relbucket - 1] = ObjectIdGetDatum(bucketOid);
+    } else {
+        nulls[Anum_pg_class_relbucket - 1] = true;
+    }
+
+    replaces[Anum_pg_class_relbucketkey - 1] = true;
+    if (bucketcol != NULL)
+        values[Anum_pg_class_relbucketkey - 1] = PointerGetDatum(bucketcol);
+    else
+        nulls[Anum_pg_class_relbucketkey - 1] = true;
+
+    ntup = heap_modify_tuple(tuple, GetDefaultPgClassDesc(),
+                             values, nulls, replaces);
+    return ntup;
+}
+
+int2vector *getBucketKey(HeapTuple tup)
+{
+    int16      *attNum = NULL;
+    int         nColumn;
+    int2vector *bkey = NULL;
+    attNum = relationGetHBucketKey(tup, &nColumn);
+    /* if the raw value of bucket key is null, then set bucketkey to NULL */
+    if (attNum == NULL) {
+        bkey = NULL;
+    } else {
+        /* Initialize int2verctor structure for attribute number array of bucket key */
+        bkey = buildint2vector(NULL, nColumn);
+        /* specify value to int2verctor and build type oid array */
+        for (int i = 0; i < nColumn; i++) {
+            bkey->values[i] = attNum[i];
+        }
+    }
+    return bkey;
+}
+
 static void swap_reltuple_bucket(HeapTuple *t1, HeapTuple *t2)
 {
     HeapTuple tup1 = *t1;
@@ -796,19 +879,367 @@ static void swap_reltuple_bucket(HeapTuple *t1, HeapTuple *t2)
     o1 = get_relationtuple_bucketoid(*t1);
     o2 = get_relationtuple_bucketoid(*t2);
 
-    /* sanity check */
-    Assert(o1 != VirtualBktOid || o2 != VirtualBktOid);
+    int2vector* bkey1 = getBucketKey(tup1);
+    int2vector* bkey2 = getBucketKey(tup2);
 
-    /* update pg class tuple */
-    *t1 = update_reltuple_bucketoid(*t1, o2);
-    *t2 = update_reltuple_bucketoid(*t2, o1);
+    *t1 = update_reltuple_bucket(*t1, o2, bkey2);
+    *t2 = update_reltuple_bucket(*t2, o1, bkey1);
+
+    Oid r1 = HeapTupleGetOid(tup1);
+    if (bkey1 == NULL && bkey2 != NULL) {
+        InsertTablebucketidAttribute(r1);
+    } else if (bkey1 != NULL && bkey2 == NULL) {
+        RemoveAttributeById(r1, BucketIdAttributeNumber);
+    }
 
     /* Clean up. */
     heap_freetuple(tup1);
     heap_freetuple(tup2);
 }
 
-void relation_swap_bucket(Oid r1, Oid r2)
+static void HbktTransferReplaceOptions(HeapTuple *t1, const HeapTuple *t2)
+{
+    Datum relReloptions2 = (Datum)0;
+    bool isnull = false;
+    relReloptions2 = SysCacheGetAttr(RELOID, *t2, Anum_pg_class_reloptions, &isnull);
+    Datum       values[Natts_pg_class];
+    bool        replaces[Natts_pg_class];
+    bool        nulls[Natts_pg_class];
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_class_reloptions - 1] = true;
+    if (relReloptions2 != (Datum)0)
+        values[Anum_pg_class_reloptions - 1] = relReloptions2;
+    else
+        nulls[Anum_pg_class_reloptions - 1] = true;
+
+    *t1 = heap_modify_tuple(*t1, GetDefaultPgClassDesc(), values, nulls, replaces);
+}
+
+static int IndexGetIndnatts(HeapTuple tup)
+{
+    Datum datum;
+    bool  isnull = false;
+
+    datum = heap_getattr(tup, Anum_pg_index_indnatts, GetDefaultPgIndexDesc(), &isnull);
+    Assert(!isnull);
+
+    return Int16GetDatum(datum);
+}
+
+static int16 *IndexGetIndkey(HeapTuple tuple, int *nColumn)
+{
+    Datum       indkeyRaw;
+    bool        isNull = false;
+    ArrayType  *IndkeyColumns = NULL;
+
+    Assert(PointerIsValid(nColumn));
+    /* Get the raw data which contain patition key's columns */
+    indkeyRaw = heap_getattr(tuple, Anum_pg_index_indkey,
+                            GetDefaultPgIndexDesc(), &isNull);
+    /* the raw value of index key is not null */
+    Assert(!isNull);
+
+    /* convert Datum to ArrayType */
+    IndkeyColumns = DatumGetArrayTypeP(indkeyRaw);
+
+    /* Get number of index key columns from int2verctor */
+    *nColumn = ARR_DIMS(IndkeyColumns)[0];
+
+    /* CHECK: the ArrayType of index key is valid */
+    if (ARR_NDIM(IndkeyColumns) != 1 || *nColumn < 0 || ARR_HASNULL(IndkeyColumns) ||
+        ARR_ELEMTYPE(IndkeyColumns) != INT2OID) {
+        ereport(ERROR,
+               (errcode(ERRCODE_ARRAY_ELEMENT_ERROR),
+               errmsg("index key column's number is not a 1-D smallint array")));
+    }
+
+    /* Get int2 array of index key column numbers */
+    return (int16 *)ARR_DATA_PTR(IndkeyColumns);
+}
+
+static int2vector *GetIndexTupleIndkey(HeapTuple tup, int *nColumn)
+{
+    int16      *attNum = NULL;
+    int2vector *indkey = NULL;
+    attNum = IndexGetIndkey(tup, nColumn);
+
+    /* Initialize int2verctor structure for attribute number array of bucket key */
+    indkey = buildint2vector(NULL, *nColumn);
+    /* specify value to int2verctor and build type oid array */
+    for (int i = 0; i < *nColumn; i++) {
+        indkey->values[i] = attNum[i];
+    }
+    return indkey;
+}
+
+HeapTuple update_reltuple_index(HeapTuple tuple, int indnatts, int2vector* indkey)
+{
+    Datum       values[Natts_pg_index];
+    bool        replaces[Natts_pg_index];
+    bool        nulls[Natts_pg_index];
+    HeapTuple ntup = NULL;
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_index_indnatts - 1] = true;
+    values[Anum_pg_index_indnatts - 1] = ObjectIdGetDatum(indnatts);
+
+    replaces[Anum_pg_index_indkey - 1] = true;
+    if (indkey != NULL)
+        values[Anum_pg_index_indkey - 1] = PointerGetDatum(indkey);
+    else
+        nulls[Anum_pg_index_indkey - 1] = true;
+
+    ntup = heap_modify_tuple(tuple, GetDefaultPgIndexDesc(),
+                             values, nulls, replaces);
+    return ntup;
+}
+
+
+void HbktTransferModifyPgIndexNattsAndIndkey(DataTransferType transferType, HeapTuple *t1, bool *cboffIndex)
+{
+    int indnatts1 = IndexGetIndnatts(*t1);
+    int nColumn = 0;
+    int2vector* indkey1 = GetIndexTupleIndkey(*t1, &nColumn);
+    int2vector *indkey = NULL;
+    int i = 0;
+    
+    if (transferType == NORMAL_TO_HASHBUCKET || transferType == SEGMENT_TO_HASHBUCKET) {
+        indkey = buildint2vector(NULL, nColumn + 1);
+        for (int i = 0; i < nColumn; i++) {
+            indkey->values[i] = indkey1->values[i];
+        }
+        indkey->values[nColumn] = BucketIdAttributeNumber;
+        indnatts1 += 1;
+        *cboffIndex = false;
+    } else {
+        int j = 0;
+        *cboffIndex = true;
+        indkey = buildint2vector(NULL, nColumn - 1);
+        for (i = 0; i < nColumn; i++) {
+            if (indkey1->values[i] == BucketIdAttributeNumber) {
+                *cboffIndex = false;
+                continue;
+            }
+            if (*cboffIndex && i == nColumn - 1) {
+                break;
+            }
+            indkey->values[j++] = indkey1->values[i];
+        }
+        if (*cboffIndex == false) {
+            indnatts1 -= 1;
+        }
+    }
+    if (*cboffIndex == false) {
+        *t1 = update_reltuple_index(*t1, indnatts1, indkey);
+    }
+    pfree_ext(indkey);
+    pfree_ext(indkey1);
+}
+
+
+HeapTuple update_reltuple_relnatts(HeapTuple tuple, Oid relnatts)
+{
+    Datum       values[Natts_pg_class];
+    bool        replaces[Natts_pg_class];
+    bool        nulls[Natts_pg_class];
+    HeapTuple ntup = NULL;
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_class_relnatts - 1] = true;
+    if (OidIsValid(relnatts)) {
+        values[Anum_pg_class_relnatts - 1] = ObjectIdGetDatum(relnatts);
+    } else {
+        nulls[Anum_pg_class_relnatts - 1] = true;
+    }
+
+    ntup = heap_modify_tuple(tuple, GetDefaultPgClassDesc(),
+                             values, nulls, replaces);
+    return ntup;
+}
+
+int pgclass_get_relnatts(HeapTuple tup)
+{
+    Datum datum;
+    bool  isnull = false;
+
+    datum = heap_getattr(tup, Anum_pg_class_relnatts, GetDefaultPgClassDesc(), &isnull);
+    Assert(!isnull);
+
+    return Int16GetDatum(datum);
+}
+
+HeapTuple HbktTransferModifyPgClassRelbucket(HeapTuple tuple, DataTransferType transferType,
+    Oid bucketOid, bool isUsable)
+{
+    Oid relbucket;
+    if (isUsable) {
+        return tuple;
+    }
+
+    if (transferType == HASHBUCKET_TO_NORMAL || transferType == SEGMENT_TO_NORMAL) {
+        relbucket= InvalidOid;
+    } else if (transferType == HASHBUCKET_TO_SEGMENT || transferType == NORMAL_TO_SEGMENT) {
+        relbucket = VirtualSegmentOid;
+    } else {
+        relbucket = bucketOid;
+    }
+
+    Datum       values[Natts_pg_class];
+    bool        replaces[Natts_pg_class];
+    bool        nulls[Natts_pg_class];
+    HeapTuple ntup = NULL;
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_class_relbucket - 1] = true;
+    if (OidIsValid(relbucket)) {
+        values[Anum_pg_class_relbucket - 1] = ObjectIdGetDatum(relbucket);
+    } else {
+        nulls[Anum_pg_class_relbucket - 1] = true;
+    }
+
+    ntup = heap_modify_tuple(tuple, GetDefaultPgClassDesc(),
+                             values, nulls, replaces);
+    return ntup;
+}
+
+HeapTuple HbktModifyRelationRelfilenode(HeapTuple reltup, DataTransferType transferType, Relation indexrel,
+    bool isUsable, Oid rel2bucketId)
+{
+    Oid newrelfilenode;
+    int4 bucketNode;
+    RelFileNode rnode;
+    Datum values[Natts_pg_class];
+    bool replaces[Natts_pg_class];
+    bool nulls[Natts_pg_class];
+    errno_t rc;
+
+    if (isUsable) {
+        return reltup;
+    }
+
+    bool isBucket = (transferType == TRANSFER_IS_INVALID ? true :
+        (transferType != HASHBUCKET_TO_HASHBUCKET ? false : !RelationIsCrossBucketIndex(indexrel)));
+    ereport(LOG, (errmsg(
+        "The relation's index(%u) is unusable, will create new relfilenode, transferType is %d, isBucket is %d.",
+        indexrel->rd_id, transferType, isBucket)));
+
+    if (transferType == HASHBUCKET_TO_NORMAL || transferType == SEGMENT_TO_NORMAL) {
+        newrelfilenode = GetNewRelFileNode(indexrel->rd_rel->reltablespace, NULL, indexrel->rd_rel->relpersistence);
+        bucketNode = InvalidBktId;
+    } else {
+        newrelfilenode = seg_alloc_segment(ConvertToRelfilenodeTblspcOid(indexrel->rd_rel->reltablespace),
+            u_sess->proc_cxt.MyDatabaseId, isBucket, InvalidBlockNumber);
+        bucketNode = SegmentBktId;
+    }
+    rnode = indexrel->rd_node;
+    rnode.relNode = newrelfilenode;
+    rnode.bucketNode = bucketNode;
+    RelationCreateStorage(rnode, indexrel->rd_rel->relpersistence, indexrel->rd_rel->relowner,
+        isBucket ? rel2bucketId : InvalidOid);
+
+    InsertStorageIntoPendingList(&indexrel->rd_node, InvalidAttrNumber, indexrel->rd_backend,
+        indexrel->rd_rel->relowner, true);
+    Assert(OidIsValid(newrelfilenode));
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_class_relfilenode - 1] = true;
+    values[Anum_pg_class_relfilenode - 1] = ObjectIdGetDatum(newrelfilenode);
+    reltup = heap_modify_tuple(reltup, GetDefaultPgClassDesc(), values, nulls, replaces);
+    return reltup;
+}
+
+HeapTuple HbktTransferModifyRelationRelnatts(HeapTuple reltup, DataTransferType transferType, bool cboffIndex)
+{
+    int indnatts1 = pgclass_get_relnatts(reltup);
+    if (transferType == NORMAL_TO_HASHBUCKET || transferType == SEGMENT_TO_HASHBUCKET) {
+        indnatts1 += 1;
+    } else if (!cboffIndex) {
+        indnatts1 -= 1;
+    }
+
+    reltup = update_reltuple_relnatts(reltup, indnatts1);
+    return reltup;
+}
+
+HeapTuple update_reltuple_reloptions(HeapTuple t1, Datum new_options)
+{
+    Datum       values[Natts_pg_class];
+    bool        replaces[Natts_pg_class];
+    bool        nulls[Natts_pg_class];
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
+    securec_check(rc, "\0", "\0");
+
+    replaces[Anum_pg_class_reloptions - 1] = true;
+    if (new_options != (Datum)0)
+        values[Anum_pg_class_reloptions - 1] = new_options;
+    else
+        nulls[Anum_pg_class_reloptions - 1] = true;
+
+    t1 = heap_modify_tuple(t1, GetDefaultPgClassDesc(), values, nulls, replaces);
+    return t1;
+}
+
+HeapTuple HbktTtransferModifyRelationReloptions(HeapTuple reltup, DataTransferType transferType, bool isUsable)
+{
+    bool isnull = false;
+    Datum new_options;
+    if (isUsable) {
+        return reltup;
+    }
+    Datum datum = SysCacheGetAttr(RELOID, reltup, Anum_pg_class_reloptions, &isnull);
+    List* old_reloptions = untransformRelOptions(datum);
+    if (transferType == NORMAL_TO_HASHBUCKET || transferType == SEGMENT_TO_HASHBUCKET) {
+        old_reloptions = lappend(old_reloptions, makeDefElem("crossbucket", (Node*)makeString("on")));
+    } else {
+        old_reloptions = list_delete_name(old_reloptions, "crossbucket");
+    }
+    new_options = transformRelOptions((Datum)0, old_reloptions, NULL, NULL, false, false);
+    list_free_ext(old_reloptions);
+    return update_reltuple_reloptions(reltup, new_options);
+}
+
+void relation_swap_bucket(Oid r1, Oid r2, bool transfer)
 {
     Relation relRelation;
     CatalogIndexState indstate;
@@ -832,6 +1263,10 @@ void relation_swap_bucket(Oid r1, Oid r2)
 
     swap_reltuple_bucket(&reltup1, &reltup2);
 
+    if (transfer) {
+        HbktTransferReplaceOptions(&reltup1, &reltup2);
+    }
+
     /*update catalog*/
     simple_heap_update(relRelation, &reltup1->t_self, reltup1);
     simple_heap_update(relRelation, &reltup2->t_self, reltup2);
@@ -848,7 +1283,7 @@ void relation_swap_bucket(Oid r1, Oid r2)
     heap_close(relRelation, RowExclusiveLock);
 }
 
-static List *get_drop_bucketlist(Oid relOid1, Oid relOid2)
+static List *get_redis_bucketlist(Oid relOid1, Oid relOid2)
 {
     oidvector *blist1 = NULL;
     oidvector *blist2 = NULL;
@@ -862,7 +1297,18 @@ static List *get_drop_bucketlist(Oid relOid1, Oid relOid2)
     blist1 = searchHashBucketByOid(rel1->rd_bucketoid);
     blist2 = searchHashBucketByOid(rel2->rd_bucketoid);
 
-    Assert(blist1->dim1 > blist2->dim1);
+    Assert(blist1->dim1 >= blist2->dim1);
+
+    /* nothing to do if they have same buckets */
+    if (blist1->dim1 == blist2->dim1) {
+        for (int i = 0; i < blist1->dim1; i++) {
+            if (blist1->values[i] != blist2->values[i]) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_TABLE),
+                    errmsg("bucket length is same but they have different buckets")));
+            }
+        }
+        return NULL;
+    }
 
     for (int i = 0; i < blist1->dim1; i++) {
         int pos = lookupHBucketid(blist2, start, blist1->values[i]);
@@ -876,65 +1322,6 @@ static List *get_drop_bucketlist(Oid relOid1, Oid relOid2)
     relation_close(rel2, NoLock);
 
     return droplist;
-}
-
-static Oid get_merge_bucketlist(Oid relOid1, Oid relOid2)
-{
-    oidvector *blist1 = NULL;
-    oidvector *blist2 = NULL;
-    Relation   rel1 = NULL;
-    Relation   rel2 = NULL;
-    Oid       *bucket = NULL;
-    int        it1 = 0;
-    int        it2 = 0;
-
-#define min(b1,b2,i1,i2) ((b1)->values[(i1)] > (b2)->values[(i2)] ?  \
-                          (b2)->values[(i2)++] : (b1)->values[(i1)++])
-
-    rel1 = relation_open(relOid1, NoLock);
-    rel2 = relation_open(relOid2, NoLock);
-
-    blist1 = searchHashBucketByOid(rel1->rd_bucketoid);
-    blist2 = searchHashBucketByOid(rel2->rd_bucketoid);
-
-    int len = blist1->dim1 + blist2->dim1;
-    int cur = 0;
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-    Assert(len <= BUCKETDATALEN);
-    bucket = (Oid *)palloc0(len * sizeof(Oid));
-    while (it1 < blist1->dim1 && it2 < blist2->dim1) {
-        Assert(blist1->values[it1] != blist2->values[it2]);
-        bucket[cur++] = min(blist1, blist2, it1, it2);
-    }
-    while (it1 < blist1->dim1) {
-        bucket[cur++] = blist1->values[it1++];
-    }
-    while (it2 < blist2->dim1) {
-        bucket[cur++] = blist2->values[it2++];
-    }
-    Assert(cur == len);
-
-    oidvector *blist = buildoidvector(bucket, len);
-    Oid bucketid = hash_any((unsigned char *)blist->values, blist->dim1 * sizeof(Oid));
-    Oid relbucketOid = searchHashBucketByBucketid(blist, bucketid);
-
-    /* Create new bucket entry */
-    if (!OidIsValid(relbucketOid)) {
-        relbucketOid = insertHashBucketEntry(blist, bucketid);
-    }
-
-    /* Drop bucket entry of rel2*/
-    deleteHashBucketTuple(rel2->rd_bucketoid);
-
-    /* Clean up.*/
-    relation_close(rel1, NoLock);
-    relation_close(rel2, NoLock);
-    pfree_ext(blist);
-    pfree_ext(bucket);
-
-    return relbucketOid;
 }
 
 static Oid get_relation_bucket(Oid relOid)
@@ -997,30 +1384,24 @@ static void update_relation_bucket(Oid relOid1, Oid bucketOid)
  *     that not in current DN, we just skip these buckets, and get the bucket we really have.
  * @ in hashMap: the hash bucket map, used to find the bucket oid by bucket id.
  */
-static void
-dropBucketList(Relation rel, List *bucketIdList)
+static void dropBucketList(Relation rel, List *bucketIdList)
 {
     Relation bucketRel;
     ListCell *cell = NULL;
     int2 bucketId;
 
     /* no need to drop storage of a partitioned table*/
-    if (RelationIsPartitioned(rel) || !bucketIdList) {
+    if (RelationIsPartitioned(rel) || !bucketIdList || RelationIsCrossBucketIndex(rel)) {
         return;
     }
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
 
-    if (bucketIdList->length >= BUCKETDATALEN)
-    {
+    if (bucketIdList->length >= BUCKETDATALEN) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_OPERATION),
             errmsg("Cannot drop all buckets")));
     }
 
-    foreach(cell, bucketIdList)
-    {
+    foreach(cell, bucketIdList) {
         bucketId = (int2)lfirst_oid(cell);
         if (bucketId >= BUCKETDATALEN) {
             ereport(ERROR,
@@ -1033,115 +1414,298 @@ dropBucketList(Relation rel, List *bucketIdList)
     }
 }
 
-static void RelationUpdateIndexBuckets(Relation heapRelation, List *bucket_list, Oid bucketOid)
+static void RelationDropIndexBuckets(Relation heapRelation, List *bucket_list, Oid bucketOid)
 {
     ListCell   *indlist = NULL;
 
     /* Ask the relcache to produce a list of the indexes of the rel */
-    foreach(indlist, RelationGetIndexList(heapRelation))
-    {
+    foreach(indlist, RelationGetIndexList(heapRelation, true)) {
         Oid      indexId = lfirst_oid(indlist);
-        Relation currentIndex;
 
         /* Open the index relation; use exclusive lock, just to be sure */
-        currentIndex = index_open(indexId, AccessExclusiveLock);
+        Relation currentIndex = index_open(indexId, AccessExclusiveLock);
+
         dropBucketList(currentIndex, bucket_list);
+
         /* Update the bucketoid */
         update_relation_bucket(indexId, bucketOid);
         CacheInvalidateRelcache(currentIndex);
+
         index_close(currentIndex, NoLock);
     }
 }
 
-static void RelationUpdateBuckets(Oid relOid, List *bucket_list, Oid bucketOid)
+static void MoveToastIndexBuckets(Relation heapRelation1, Relation heapRelation2, List *bucket_list, Oid bucketOid)
 {
-    Relation relation;
-    Oid    toastrelid;
+    errno_t rc = EOK;
+    char relIndexName1[NAMEDATALEN];
+    char relIndexName2[NAMEDATALEN];
+    rc = snprintf_s(relIndexName1, NAMEDATALEN, NAMEDATALEN - 1, "%s_index", RelationGetRelationName(heapRelation1));
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(relIndexName2, NAMEDATALEN, NAMEDATALEN - 1, "%s_index", RelationGetRelationName(heapRelation2));
+    securec_check_ss(rc, "\0", "\0");
+    Oid indexId1 = get_relname_relid(relIndexName1, RelationGetNamespace(heapRelation1));
+    Oid indexId2 = get_relname_relid(relIndexName2, RelationGetNamespace(heapRelation2));
+    RelationRedisMoveBuckets(indexId1, indexId2, bucketOid, bucket_list, false);
+}
 
-    relation = relation_open(relOid, AccessExclusiveLock);
+static void RelationMoveIndexBuckets(Relation heapRelation1, Relation heapRelation2, List *bucket_list, Oid bucketOid)
+{
+    Assert(PointerIsValid(heapRelation1));
+    Assert(PointerIsValid(heapRelation2));
+    List* indicesList = RelationGetIndexList(heapRelation1);
+    ListCell* cell = NULL;
+    char* srcIdxName = NULL;
+    char* tmpIdxName = NULL;
+    char* srcSchema = NULL;
+    Oid indexId1;
+    Oid indexId2;
+
+    foreach (cell, indicesList) {
+        indexId1 = lfirst_oid(cell);
+        /* Get src index name by oid */
+        srcIdxName = get_rel_name(indexId1);
+        if (!PointerIsValid(srcIdxName)) {
+            continue;
+        }
+        srcSchema = get_namespace_name(heapRelation1->rd_rel->relnamespace);
+        tmpIdxName = getTmptableIndexName(srcSchema, srcIdxName);
+        /*
+         * The tmp index name is same as src index name, check generateClonedIndexStmt.
+         * Get namespace from tmp table, the index of tmp table must have same namespace with tmp table
+         */
+        indexId2 = get_relname_relid(tmpIdxName, RelationGetNamespace(heapRelation2));
+        Assert(OidIsValid(indexId2));
+
+        RelationRedisMoveBuckets(indexId1, indexId2, bucketOid, bucket_list, RelationIsPartitioned(heapRelation1));
+        pfree_ext(srcIdxName);
+        pfree_ext(tmpIdxName);
+        pfree_ext(srcSchema);
+    }
+
+    list_free_ext(indicesList);
+}
+
+static void RelationDropBuckets(Oid relOid1, List *bucket_list, Oid bucketOid)
+{
+    Relation relation = relation_open(relOid1, AccessExclusiveLock);
+    Oid toastrelid = relation->rd_rel->reltoastrelid;
+
+    /* drop buckets for relation1 */
     dropBucketList(relation, bucket_list);
-    RelationUpdateIndexBuckets(relation, bucket_list, bucketOid);
+    RelationDropIndexBuckets(relation, bucket_list, bucketOid);
+
     /* Update the bucketoid */
-    update_relation_bucket(relOid, bucketOid);
+    update_relation_bucket(relOid1, bucketOid);
+
     CacheInvalidateRelcache(relation);
+
     relation_close(relation, NoLock);
 
-    toastrelid = relation->rd_rel->reltoastrelid;
     if (OidIsValid(toastrelid)) {
-        RelationUpdateBuckets(toastrelid, bucket_list, bucketOid);
+        RelationDropBuckets(toastrelid, bucket_list, bucketOid);
+    }
+}
+
+static void RelationMoveBuckets(Oid relOid1, Oid relOid2, List *bucket_list, Oid bucketOid)
+{
+    Relation relation1 = relation_open(relOid1, AccessExclusiveLock);
+    Relation relation2 = relation_open(relOid2, AccessExclusiveLock);
+    Oid toastrelid1 = relation1->rd_rel->reltoastrelid;
+    Oid toastrelid2 = relation2->rd_rel->reltoastrelid;
+
+    Assert(OidIsValid(toastrelid1) == OidIsValid(toastrelid2));
+
+    if (!RelationIsPartitioned(relation1)) {
+        /* open smgr */
+        RelationOpenSmgr(relation1);
+        RelationOpenSmgr(relation2);
+
+        /* flush all buffers of relation2 in buffer pool */
+        flush_all_buffers(relation2, InvalidOid);
+        /* move buckets from relation2 to relation1 */
+        smgrmovebuckets(relation1->rd_smgr, relation2->rd_smgr, bucket_list);
+    }
+
+    /* Update the bucketoid */
+    update_relation_bucket(relOid1, bucketOid);
+
+    CacheInvalidateRelcache(relation1);
+
+    /* deal with relation index */
+    if (RelationIsRelation(relation1)) {
+        RelationMoveIndexBuckets(relation1, relation2, bucket_list, bucketOid);
+    } else if (RelationIsToast(relation1)) {
+        MoveToastIndexBuckets(relation1, relation2, bucket_list, bucketOid);
+    }
+
+    relation_close(relation1, NoLock);
+    relation_close(relation2, NoLock);
+
+    if (OidIsValid(toastrelid1)) {
+        RelationMoveBuckets(toastrelid1, toastrelid2, bucket_list, bucketOid);
     }
 }
 
 static void PartitionDropIndexBuckets(Oid partOid, List *bucket_list)
 {
-    List* partIndexlist = NULL;
-    Relation parentIndexRel = NULL;
-    HeapTuple partIndexTuple = NULL;
-    Form_pg_partition partForm = NULL;
-    ListCell *cell = NULL;
+    ListCell *cell;
 
+    /* Do nothing if we got an empty drop list */
     if (bucket_list == NULL) {
         return;
     }
-    partIndexlist = searchPartitionIndexesByblid(partOid);
-    foreach(cell, partIndexlist)
-    {
-        partIndexTuple = (HeapTuple)lfirst(cell);
-       partForm = (Form_pg_partition)GETSTRUCT(partIndexTuple);
-       /* Open the index's parent relation with AccessShareLock */
-       parentIndexRel = index_open(partForm->parentid, AccessShareLock);
-       Partition indexPart = partitionOpen(parentIndexRel, HeapTupleGetOid(partIndexTuple), AccessExclusiveLock);
-       Relation  partIndexRel = partitionGetRelation(parentIndexRel, indexPart); 
+
+    List *partIndexlist = searchPartitionIndexesByblid(partOid);
+    foreach(cell, partIndexlist) {
+        HeapTuple partIndexTuple = (HeapTuple)lfirst(cell);
+        Form_pg_partition partForm = (Form_pg_partition)GETSTRUCT(partIndexTuple);
+
+        /* Open the index's parent relation with AccessShareLock */
+        Relation  parentIndexRel = index_open(partForm->parentid, AccessShareLock);
+        /* Open index partition */
+        Partition indexPart = partitionOpen(parentIndexRel, HeapTupleGetOid(partIndexTuple), AccessExclusiveLock);
+        /* Get index partition's dummy relation */
+        Relation  partIndexRel = partitionGetRelation(parentIndexRel, indexPart); 
+
+        /* Drop all bucktes in the drop list */
         dropBucketList(partIndexRel, bucket_list);
-       releaseDummyRelation(&partIndexRel);
-       partitionClose(parentIndexRel, indexPart, NoLock);
-   }
+
+        /* Clean up. */
+        releaseDummyRelation(&partIndexRel);
+        partitionClose(parentIndexRel, indexPart, NoLock);
+        index_close(parentIndexRel, NoLock);
+    }
 }
 
-static void PartitionUpdateBuckets(Relation heapRelation, Oid partOid, List *bucket_list, Oid bucketOid)
+static void PartitionDropBuckets(Relation heapRelation, Oid partOid, List *bucket_list, Oid bucketOid)
 {
-    Relation  partRel = NULL;
-    Partition part = NULL;
-    Oid toastrelid;
+    Partition part = partitionOpen(heapRelation, partOid, AccessExclusiveLock);
+    Relation  partRel = partitionGetRelation(heapRelation, part);
+    Oid toastrelid = partRel->rd_rel->reltoastrelid;
 
-    part = partitionOpen(heapRelation, partOid, AccessExclusiveLock);
-    partRel = partitionGetRelation(heapRelation, part);
+    /* Drop all buckets in the drop list */
     dropBucketList(partRel, bucket_list);
     PartitionDropIndexBuckets(partOid, bucket_list);
 
-    toastrelid = partRel->rd_rel->reltoastrelid;
+    /* Deal with toast if any */
     if (OidIsValid(toastrelid)) {
-        RelationUpdateBuckets(toastrelid, bucket_list, bucketOid);
+        RelationDropBuckets(toastrelid, bucket_list, bucketOid);
     }
+
+    /* Clean up. */
     releaseDummyRelation(&partRel);
     partitionClose(heapRelation, part, NoLock);
 }
 
-static void RelationSwitchBucket(Oid relOid1, Oid bucketOid, List *bucketList, bool isPart)
+static void PartitionMoveBuckets(Relation heapRelation1, Relation heapRelation2,
+                                 Partition part1, Partition part2, List *bucket_list, Oid bucketOid)
 {
-    Relation  relation;
-    ListCell *partCell = NULL;
-    List     *partTupleList = NIL;
-    Oid       partOid;
+    /* Open Partition's dummy relation */
+    Relation  partRel1 = partitionGetRelation(heapRelation1, part1);
+    Relation  partRel2 = partitionGetRelation(heapRelation2, part2);
 
-    /* Drop bucket storage for heap/index/toast */
-    if (isPart) {
-        relation = relation_open(relOid1, AccessExclusiveLock);
-        /* Get the partition oid list and do the loop */
-        partTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relOid1);
-        foreach(partCell, partTupleList)
-        {
-            partOid = HeapTupleGetOid((HeapTuple)lfirst(partCell));
-            PartitionUpdateBuckets(relation, partOid, bucketList, bucketOid);
+    /* Get toast oid of each relation */
+    Oid toastrelid1 = partRel1->rd_rel->reltoastrelid;
+    Oid toastrelid2 = partRel2->rd_rel->reltoastrelid;
+    Assert(OidIsValid(toastrelid1) == OidIsValid(toastrelid2));
+
+    RelationOpenSmgr(partRel1);
+    RelationOpenSmgr(partRel2);
+
+    /* flush all buffers of partRel2 in buffer pool */
+    flush_all_buffers(partRel2, InvalidOid);
+    smgrmovebuckets(partRel1->rd_smgr, partRel2->rd_smgr, bucket_list);
+
+    if (OidIsValid(toastrelid1)) {
+        RelationMoveBuckets(toastrelid1, toastrelid2, bucket_list, bucketOid);
+    }
+
+    /* Clean up. */
+    releaseDummyRelation(&partRel1);
+    releaseDummyRelation(&partRel2);
+}
+
+static void PartitionRedisDropBuckets(Oid relOid, List *bucketList, Oid bucketOid)
+{
+    ListCell *partCell = NULL;
+    Relation relation = relation_open(relOid, AccessExclusiveLock);
+
+    /* Get the partition oid list and do the loop */
+    List *partTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relOid);
+    foreach(partCell, partTupleList) {
+        Oid partOid = HeapTupleGetOid((HeapTuple)lfirst(partCell));
+        PartitionDropBuckets(relation, partOid, bucketList, bucketOid);
+    }
+
+    freePartList(partTupleList);
+    relation_close(relation, NoLock);
+}
+
+static void PartitionRedisMoveBuckets(Oid relOid1, Oid relOid2, List *bucketList, Oid bucketOid)
+{
+    ListCell *partCell1, *partCell2;
+    List* partList1 = NIL;
+    List* partList2 = NIL;
+    int count = 0;
+
+    Relation relation1 = relation_open(relOid1, AccessExclusiveLock);
+    Relation relation2 = relation_open(relOid2, AccessExclusiveLock);
+
+    /* Get the partition oid list and do the loop */
+    if (RelationIsIndex(relation1)) {
+        partList1 = GetIndexPartitionListByOrder(relation1, ExclusiveLock);
+        partList2 = GetIndexPartitionListByOrder(relation2, ExclusiveLock);
+    } else {
+        partList1 = relationGetPartitionList(relation1, ExclusiveLock);
+        partList2 = relationGetPartitionList(relation2, ExclusiveLock);
+    }
+    Assert(list_length(partList1) == list_length(partList2));
+
+    /* Move buckets in each partition */
+    forboth(partCell1, partList1, partCell2, partList2) {
+        Partition part1 = (Partition)lfirst(partCell1);
+        Partition part2 = (Partition)lfirst(partCell2);
+        count++;
+        if (part2 == NULL) {
+            if (part1->pd_part->indisusable) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                    errmsg("The %dth partition of relation(%u) is not exists.", count, relOid2)));
+            }
+            ereport(LOG, (errmsg("The partition's index(%u) of relation(%u) is unusable, will skip move bucket",
+                part1->pd_id, relOid1)));
+            continue;
         }
-        freePartList(partTupleList);
-        relation_close(relation, NoLock);
+        PartitionMoveBuckets(relation1, relation2, part1, part2, bucketList, bucketOid);
+    }
+
+    releasePartitionList(relation1, &partList1, ExclusiveLock);
+    releasePartitionList(relation2, &partList2, ExclusiveLock, false);
+
+    relation_close(relation1, NoLock);
+    relation_close(relation2, NoLock);
+}
+
+static void RelationRedisMoveBuckets(Oid relOid1, Oid relOid2, Oid bucketOid, List *bucketList, bool isPart)
+{
+    /* Move bucket storage for heap/index/toast */
+    if (isPart) {
+        PartitionRedisMoveBuckets(relOid1, relOid2, bucketList, bucketOid);
     }
 
     /* Deal with relation level*/
-    RelationUpdateBuckets(relOid1, bucketList, bucketOid);
+    RelationMoveBuckets(relOid1, relOid2, bucketList, bucketOid);
+}
 
-    return;
+static void RelationRedisDropBuckets(Oid relOid1, Oid bucketOid, List *bucketList, bool isPart)
+{
+    /* Drop bucket storage for heap/index/toast */
+    if (isPart) {
+        PartitionRedisDropBuckets(relOid1, bucketList, bucketOid);
+    }
+
+    /* Deal with relation level*/
+    RelationDropBuckets(relOid1, bucketList, bucketOid);
 }
 
 /*
@@ -1153,17 +1717,48 @@ int64 execute_drop_bucketlist(Oid relOid1, Oid relOid2, bool isPart)
     Oid   bucketOid;
 
     /* Get the drop bucket list */
-    bucketList = get_drop_bucketlist(relOid1, relOid2);
-    bucketOid  = get_relation_bucket(relOid2);
-    RelationSwitchBucket(relOid1, bucketOid, bucketList, isPart);
-    list_free_ext(bucketList);
+    bucketList = get_redis_bucketlist(relOid1, relOid2);
+
+    if (bucketList != NULL) {
+        bucketOid  = get_relation_bucket(relOid2);
+        RelationRedisDropBuckets(relOid1, bucketOid, bucketList, isPart);
+        list_free_ext(bucketList);
+    }
     return  1;
 }
 
+/*
+ * move a list of buckets
+ */
 int64 execute_move_bucketlist(Oid relOid1, Oid relOid2, bool isPart)
 {
-    Oid bucketOid = get_merge_bucketlist(relOid1, relOid2);
-    RelationSwitchBucket(relOid1, bucketOid, NULL, isPart);
-    RelationSwitchBucket(relOid2, VirtualBktOid, NULL, isPart);
+    List *bucketList = NIL;
+    Oid   bucketOid;
+
+    /* Get the move bucket list */
+    bucketList = get_redis_bucketlist(relOid2, relOid1);
+
+    if (bucketList != NULL) {
+        bucketOid  = get_relation_bucket(relOid2);
+        RelationRedisMoveBuckets(relOid1, relOid2, bucketOid, bucketList, isPart);
+        list_free_ext(bucketList);
+    }
     return  1;
+}
+
+bool hashbucket_eq(oidvector* bucket1, oidvector* bucket2)
+{
+    if (bucket1 == bucket2) {
+        return true;
+    }
+    if (bucket1->dim1 != bucket2->dim1) {
+        return false;
+    }
+
+    for (int i = 0; i < bucket1->dim1; i++) {
+        if (bucket1->values[i] != bucket2->values[i]) {
+            return false;
+        }
+    }
+    return true;
 }

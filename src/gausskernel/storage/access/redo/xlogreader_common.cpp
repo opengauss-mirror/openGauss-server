@@ -26,6 +26,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/xlogreader.h"
+#include "storage/smgr/segment.h"
 #include "storage/buf/bufpage.h"
 #include "access/redo_common.h"
 
@@ -37,10 +38,15 @@
  * Otherwise returns FALSE.
  */
 bool XLogRecGetBlockTag(XLogReaderState *record, uint8 block_id, RelFileNode *rnode, ForkNumber *forknum,
-                        BlockNumber *blknum)
+                        BlockNumber *blknum, XLogPhyBlock *pblk)
 {
     DecodedBkpBlock *bkpb = NULL;
 
+    if (pblk != NULL) {
+        pblk->relNode = InvalidOid;
+        pblk->block = InvalidBlockNumber;
+        pblk->lsn = InvalidXLogRecPtr;
+    }
     if (!record->blocks[block_id].in_use)
         return false;
 
@@ -51,6 +57,11 @@ bool XLogRecGetBlockTag(XLogReaderState *record, uint8 block_id, RelFileNode *rn
         *forknum = bkpb->forknum;
     if (blknum != NULL)
         *blknum = bkpb->blkno;
+    if (pblk != NULL) {
+        pblk->relNode = bkpb->seg_fileno;
+        pblk->block = bkpb->seg_blockno;
+        pblk->lsn = record->EndRecPtr;
+    }
     return true;
 }
 
@@ -107,5 +118,61 @@ void RestoreBlockImage(const char *bkp_image, uint16 hole_offset, uint16 hole_le
         rc = memcpy_s(page + (hole_offset + hole_length), BLCKSZ - (hole_offset + hole_length), bkp_image + hole_offset,
                       BLCKSZ - (hole_offset + hole_length));
         securec_check(rc, "", "");
+    }
+}
+
+void XLogRecGetPhysicalBlock(const XLogReaderState *record, uint8 blockId, 
+                             uint8 *segFileno, BlockNumber *segBlockno)
+{
+    const DecodedBkpBlock *bkpb = &record->blocks[blockId];
+
+    if (!bkpb->in_use)
+        return;
+
+    uint8 fileno = EXTENT_INVALID;
+    BlockNumber blockno = InvalidBlockNumber;
+
+    if (XLOG_NEED_PHYSICAL_LOCATION(bkpb->rnode)) {
+        fileno = bkpb->seg_fileno;
+        blockno = bkpb->seg_blockno;
+    }
+
+    Assert(segFileno != NULL);
+    Assert(segBlockno != NULL);
+
+    *segFileno = fileno;
+    *segBlockno = blockno;
+}
+
+void XLogRecGetVMPhysicalBlock(const XLogReaderState *record, uint8 blockId,
+                                uint8 *vmFileno, BlockNumber *vmblock, bool *has_vm_loc)
+{
+    const DecodedBkpBlock *bkpb = &record->blocks[blockId];
+
+    if (has_vm_loc) {
+        *has_vm_loc = false;
+    }
+    if (vmblock != NULL) {
+        *vmblock = InvalidBlockNumber;
+    }
+    if (vmFileno != NULL) {
+        *vmFileno = InvalidOid;
+    }
+
+    if (!bkpb->in_use)
+        return;
+    
+    if (bkpb->has_vm_loc) {
+        if (vmFileno != NULL) {
+            *vmFileno = bkpb->vm_seg_fileno;
+        }
+
+        if (vmblock != NULL) {
+            *vmblock = bkpb->vm_seg_blockno;
+        }
+
+        if (has_vm_loc) {
+            *has_vm_loc = true;
+        }
     }
 }

@@ -13,31 +13,31 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 import json
+import logging
 import time
 from urllib import request
 
-from .agent_logger import logger
-
-header = {'Content-Type': 'application/json'}
+_JSON_HEADER = {'Content-Type': 'application/json'}
+agent_logger = logging.getLogger('agent')
 
 
 class Sink:
     """
-    This is father class which is used for getting data from ChannelManager object and 
+    This is parent class which is used for getting data from ChannelManager object and
     sending data at a specified time interval.
     """
 
     def __init__(self):
-        self._channel_manager = None
+        self._channel = None
         self.running = False
 
     @property
-    def channel_manager(self):
-        return self._channel_manager
+    def channel(self):
+        return self._channel
 
-    @channel_manager.setter
-    def channel_manager(self, channel_manager):
-        self._channel_manager = channel_manager
+    @channel.setter
+    def channel(self, channel):
+        self._channel = channel
 
     def process(self):
         pass
@@ -52,11 +52,11 @@ class Sink:
 
 class HttpSink(Sink):
     """
-    This class inherit from Sink and use to send data to server based on http/https 
+    This class inherits from Sink and use to send data to server based on http/https
     method at a specified time interval.
     """
 
-    def __init__(self, interval, url, context):
+    def __init__(self, interval, url, context, db_host, db_port, db_type):
         """
         :param interval: int, time interval when send data.
         :param url: string, http/https url.
@@ -67,21 +67,31 @@ class HttpSink(Sink):
         self.running = False
         self._url = url
         self.context = context
+        self.db_host = db_host
+        self.db_port = db_port
+        self.db_type = db_type
 
     def process(self):
-        logger.info('begin send data to {url}'.format(url=self._url))
+        agent_logger.info('Begin send data to {url}.'.format(url=self._url))
         while self.running:
+            contents = self._channel.take()
+            if not contents:
+                time.sleep(0.5)
+                continue
+
+            contents.update(**{'flag': {'host': self.db_host, 'port': self.db_port, 'type': self.db_type}})
+            retry_times = 5
+            while retry_times:
+                try:
+                    req = request.Request(self._url, headers=_JSON_HEADER,
+                                          data=json.dumps(contents).encode('utf-8'),
+                                          method='POST')
+                    request.urlopen(req, context=self.context)
+                    break
+                except Exception as e:
+                    agent_logger.error("{error}, retry...".format(error=str(e)))
+                    retry_times -= 1
+                    if not retry_times:
+                        raise
+                time.sleep(1.0)
             time.sleep(self._interval)
-            contents = self._channel_manager.get_channel_content()
-            if contents:
-                while True:
-                    try:
-                        req = request.Request(self._url, headers=header, data=json.dumps(contents).encode('utf-8'),
-                                              method='POST')
-                        request.urlopen(req, context=self.context)
-                        break
-                    except Exception as e:
-                        logger.warn(e, exc_info=True)
-                    time.sleep(0.5)
-            else:
-                logger.warn('Not found data in each channel.')

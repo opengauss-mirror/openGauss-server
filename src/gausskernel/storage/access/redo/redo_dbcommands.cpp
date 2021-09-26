@@ -29,6 +29,7 @@
 #include "commands/comment.h"
 #include "commands/dbcommands.h"
 #include "commands/tablecmds.h"
+#include "storage/smgr/fd.h"
 
 void XLogRecSetBlockDataBaseState(XLogBlockDataBaseParse *blockdatastate, Oid srcdbid, Oid srctbsid)
 {
@@ -41,6 +42,7 @@ XLogRecParseState *DatabaseXlogCommonParseToBlock(XLogReaderState *record, uint3
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     XLogRecParseState *recordstatehead = NULL;
     RelFileNode rnode;
+    RelFileNodeForkNum filenode;
     XLogBlockParseEnum blockparsetype;
     Oid srcdatabaseid = InvalidOid;
     Oid srctablespaceid = InvalidOid;
@@ -66,7 +68,8 @@ XLogRecParseState *DatabaseXlogCommonParseToBlock(XLogReaderState *record, uint3
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
 
-    XLogRecSetBlockCommonState(record, blockparsetype, InvalidForkNumber, InvalidBlockNumber, &rnode, recordstatehead);
+    filenode = RelFileNodeForkNumFill(&rnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
+    XLogRecSetBlockCommonState(record, blockparsetype, filenode, recordstatehead);
 
     XLogRecSetBlockDataBaseState(&(recordstatehead->blockparse.extra_rec.blockdatabase), srcdatabaseid,
                                  srctablespaceid);

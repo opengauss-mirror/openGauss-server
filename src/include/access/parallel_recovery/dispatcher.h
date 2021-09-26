@@ -38,6 +38,8 @@
 #include "access/parallel_recovery/txn_redo.h"
 #include "access/redo_statistic.h"
 
+#define INVALID_WORKER_ID -1
+
 namespace parallel_recovery {
 
 typedef struct LogDispatcher {
@@ -111,6 +113,7 @@ bool XactWillRemoveRelFiles(XLogReaderState* record);
 XLogReaderState* NewReaderState(XLogReaderState* readerState, bool bCopyState = false);
 void FreeAllocatedRedoItem();
 void GetReplayedRecPtrFromWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
+void GetReplayedRecPtrFromUndoWorkers(XLogRecPtr *readPtr, XLogRecPtr *endPtr);
 void DiagLogRedoRecord(XLogReaderState* record, const char* funcName);
 List* CheckImcompleteAction(List* imcompleteActionList);
 void SetPageWorkStateByThreadId(uint32 threadState);
@@ -122,6 +125,8 @@ void SendClearMarkToAllWorkers();
 extern void SetStartupBufferPinWaitBufId(int bufid);
 extern void GetStartupBufferPinWaitBufId(int *bufids, uint32 len);
 extern uint32 GetStartupBufferPinWaitBufLen();
+
+bool TxnQueueIsEmpty(TxnRedoWorker* worker);
 }
 
 #endif

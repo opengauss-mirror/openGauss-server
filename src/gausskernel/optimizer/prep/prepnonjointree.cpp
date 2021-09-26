@@ -313,6 +313,185 @@ bool is_join_inner_side(const Node* fromNode, const Index targetRTEIndex, const 
     }
 }
 
+/*
+ * remove_useless_results_recurse
+ *             Recursive guts of remove_useless_result_rtes.
+ *
+ * This recursively processes the jointree and returns a modified jointree.
+ */
+Node *remove_useless_results_recurse(PlannerInfo *root, Node *jtnode)
+{
+    Assert(jtnode != NULL);
+    if (IsA(jtnode, RangeTblRef)) {
+        /* Can't immediately do anything with a RangeTblRef */
+    } else if (IsA(jtnode, FromExpr)) {
+        FromExpr   *f = (FromExpr *) jtnode;
+        Relids          result_relids = NULL;
+        ListCell   *cell;
+        ListCell   *prev;
+        ListCell   *next;
+
+        /*
+         * We can drop RTE_RESULT rels from the fromlist so long as at least
+         * one child remains, since joining to a one-row table changes
+         * nothing.  The easiest way to mechanize this rule is to modify the
+         * list in-place, using list_delete_cell.
+         */
+        prev = NULL;
+        for (cell = list_head(f->fromlist); cell; cell = next) {
+            Node       *child = (Node *) lfirst(cell);
+            int                     varno;
+
+            /* Recursively transform child ... */
+            child = remove_useless_results_recurse(root, child);
+            /* ... and stick it back into the tree */
+            lfirst(cell) = child;
+            next = lnext(cell);
+
+            /*
+             * If it's an RTE_RESULT with at least one sibling, we can drop
+             * it.  We don't yet know what the inner join's final relid set
+             * will be, so postpone cleanup of PHVs etc till after this loop.
+             */
+            if (list_length(f->fromlist) > 1 &&
+                (varno = get_result_relid(root, child)) != 0) {
+                f->fromlist = list_delete_cell(f->fromlist, cell, prev);
+                result_relids = bms_add_member(result_relids, varno);
+            } else {
+                prev = cell;
+            }
+        }
+
+        /*
+         * Clean up if we dropped any RTE_RESULT RTEs.  This is a bit
+         * inefficient if there's more than one, but it seems better to
+         * optimize the support code for the single-relid case.
+         */
+        if (result_relids) {
+            int                     varno = -1;
+
+            while ((varno = bms_next_member(result_relids, varno)) >= 0)
+                remove_result_refs(root, varno, (Node *) f);
+        }
+
+        /*
+         * If we're not at the top of the jointree, it's valid to simplify a
+         * degenerate FromExpr into its single child.  (At the top, we must
+         * keep the FromExpr since Query.jointree is required to point to a
+         * FromExpr.)
+         */
+        if (f != root->parse->jointree &&
+            f->quals == NULL &&
+            list_length(f->fromlist) == 1)
+            return (Node *) linitial(f->fromlist);
+    } else if (IsA(jtnode, JoinExpr)) {
+        JoinExpr   *j = (JoinExpr *) jtnode;
+        int                     varno;
+
+        /* First, recurse */
+        j->larg = remove_useless_results_recurse(root, j->larg);
+        j->rarg = remove_useless_results_recurse(root, j->rarg);
+
+        /* Apply join-type-specific optimization rules */
+        switch (j->jointype) {
+            case JOIN_INNER:
+
+                /*
+                 * An inner join is equivalent to a FromExpr, so if either
+                 * side was simplified to an RTE_RESULT rel, we can replace
+                 * the join with a FromExpr with just the other side; and if
+                 * the qual is empty (JOIN ON TRUE) then we can omit the
+                 * FromExpr as well.
+                 */
+                if ((varno = get_result_relid(root, j->larg)) != 0) {
+                    remove_result_refs(root, varno, j->rarg);
+                    if (j->quals)
+                        jtnode = (Node *)
+                                     makeFromExpr(list_make1(j->rarg), j->quals);
+                    else
+                        jtnode = j->rarg;
+                } else if ((varno = get_result_relid(root, j->rarg)) != 0) {
+                    remove_result_refs(root, varno, j->larg);
+                    if (j->quals)
+                        jtnode = (Node *)
+                                     makeFromExpr(list_make1(j->larg), j->quals);
+                    else
+                        jtnode = j->larg;
+                }
+                break;
+            case JOIN_LEFT:
+
+                /*
+                 * We can simplify this case if the RHS is an RTE_RESULT, with
+                 * two different possibilities:
+                 *
+                 * If the qual is empty (JOIN ON TRUE), then the join can be
+                 * strength-reduced to a plain inner join, since each LHS row
+                 * necessarily has exactly one join partner.  So we can always
+                 * discard the RHS, much as in the JOIN_INNER case above.
+                 *
+                 * Otherwise, it's still true that each LHS row should be
+                 * returned exactly once, and since the RHS returns no columns
+                 * (unless there are PHVs that have to be evaluated there), we
+                 * don't much care if it's null-extended or not.  So in this
+                 * case also, we can just ignore the qual and discard the left
+                 * join.
+                 */
+                if ((varno = get_result_relid(root, j->rarg)) != 0 &&
+                    (j->quals == NULL ||
+                    !find_dependent_phvs((Node *) root->parse, varno))) {
+                    remove_result_refs(root, varno, j->larg);
+                    jtnode = j->larg;
+                }
+                break;
+            case JOIN_RIGHT:
+                /* Mirror-image of the JOIN_LEFT case */
+                if ((varno = get_result_relid(root, j->larg)) != 0 &&
+                    (j->quals == NULL ||
+                    !find_dependent_phvs((Node *) root->parse, varno))) {
+                    remove_result_refs(root, varno, j->rarg);
+                    jtnode = j->rarg;
+                }
+                break;
+            case JOIN_SEMI:
+
+                /*
+                 * We may simplify this case if the RHS is an RTE_RESULT; the
+                 * join qual becomes effectively just a filter qual for the
+                 * LHS, since we should either return the LHS row or not.  For
+                 * simplicity we inject the filter qual into a new FromExpr.
+                 *
+                 * Unlike the LEFT/RIGHT cases, we just Assert that there are
+                 * no PHVs that need to be evaluated at the semijoin's RHS,
+                 * since the rest of the query couldn't reference any outputs
+                 * of the semijoin's RHS.
+                 */
+                if ((varno = get_result_relid(root, j->rarg)) != 0) {
+                    Assert(!find_dependent_phvs((Node *) root->parse, varno));
+                    remove_result_refs(root, varno, j->larg);
+                    if (j->quals)
+                        jtnode = (Node *)
+                                     makeFromExpr(list_make1(j->larg), j->quals);
+                    else
+                        jtnode = j->larg;
+                }
+                break;
+            case JOIN_FULL:
+            case JOIN_ANTI:
+                /* We have no special smarts for these cases */
+                break;
+            default:
+                elog(ERROR, "unrecognized join type: %d",
+                     (int) j->jointype);
+                break;
+        }
+    } else {
+        elog(ERROR, "unrecognized node type: %d",
+             (int) nodeTag(jtnode));
+    }
+    return jtnode;
+}
+
 /* ------------------------------------------------------------ */
 /* Common module : end                                        */
 /* ------------------------------------------------------------ */

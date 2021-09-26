@@ -84,6 +84,9 @@ inline double cal_skew_ratio(double mcv_ratio, int dop)
     dop = SET_DOP(dop);
     
     if (mcv_ratio > 0) {
+        /* Divide by 0 when mcv_ratio = 1. Actually, we just need to return a value greater than SKEW_RATIO_LIMIT */
+        if (mcv_ratio == 1)
+            return SKEW_RATIO_LIMIT + 1;
         ratio = mcv_ratio / (1 - mcv_ratio) * u_sess->pgxc_cxt.NumDataNodes * dop + 1;
     }
 

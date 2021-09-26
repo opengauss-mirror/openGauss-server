@@ -128,6 +128,8 @@ class VectorBatch;
  */
 typedef struct _DestReceiver DestReceiver;
 
+struct TupleTableSlot;
+
 struct _DestReceiver {
     /* Called for each tuple to be output: */
     void (*receiveSlot)(TupleTableSlot* slot, DestReceiver* self);

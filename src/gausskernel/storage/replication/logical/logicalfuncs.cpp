@@ -22,12 +22,14 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 
+#include "catalog/pg_authid.h"
 #include "catalog/pg_type.h"
 
 #include "nodes/makefuncs.h"
 
 #include "mb/pg_wchar.h"
 
+#include "utils/acl.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
 #include "utils/inval.h"
@@ -42,7 +44,7 @@
 #include "replication/walsender_private.h"
 #include "access/xlog_internal.h"
 
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #define MAXPG_LSNCOMPONENT 8
 
 #define str_lsn_len 128
@@ -105,9 +107,11 @@ static void LogicalOutputWrite(LogicalDecodingContext *ctx, XLogRecPtr lsn, Tran
 void check_permissions(bool for_backup)
 {
     if (!superuser() && !has_rolreplication(GetUserId()) &&
+        !is_member_of_role(GetUserId(), DEFAULT_ROLE_REPLICATION) &&
         !(for_backup && isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode)) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                        (errmsg("must be superuser or replication role to use replication slots"))));
+            (errmsg("must be system admin or replication role or a member of the gs_role_replication role "
+                "to use replication slots"))));
     }
 }
 
@@ -430,7 +434,7 @@ static Datum pg_logical_slot_get_changes_guts(FunctionCallInfo fcinfo, bool conf
         startptr = t_thrd.slot_cxt.MyReplicationSlot->data.restart_lsn;
 
         t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner,
-                                                                    "logical decoding", MEMORY_CONTEXT_STORAGE);
+            "logical decoding", THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
         /* invalidate non-timetravel entries */
         InvalidateSystemCaches();

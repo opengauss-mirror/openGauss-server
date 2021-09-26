@@ -122,15 +122,10 @@ extern void ClearCipherKeyFile(CipherkeyFile* cipher_file_content);
 extern void ClearRandKeyFile(RandkeyFile* rand_file_content);
 extern bool DecryptInputKey(GS_UCHAR* pucCipherText, GS_UINT32 ulCLen, GS_UCHAR* initrand, GS_UCHAR* initVector,
     GS_UCHAR* decryptVector, GS_UCHAR* pucPlainText, GS_UINT32* pulPLen);
-
-extern bool getTransEncryptKeyString(GS_UCHAR** cipherKey, GS_UCHAR** rndm);
-extern bool getAkSkForTransEncrypt(char* ak, int akbuflen, char* sk, int skbuflen);
 extern bool getKeyVectorFromCipherFile(const char* cipherkeyfile, const char* cipherrndfile, GS_UCHAR* key, GS_UCHAR* vector);
 extern bool encryptStringByAES128Speed(GS_UCHAR* PlainText, GS_UINT32 PlainLen, GS_UCHAR* Key, GS_UCHAR* RandSalt,
     GS_UCHAR* CipherText, GS_UINT32* CipherLen);
 extern char* getGaussHome();
-extern bool getAndCheckTranEncryptDEK();
-
 extern char* SEC_decodeBase64(const char* pucInBuf, GS_UINT32* pulOutBufLen);
 extern char* SEC_encodeBase64(const char* pucInBuf, GS_UINT32 ulInBufLen);
 extern GS_UINT32 CRYPT_encrypt(GS_UINT32 ulAlgId, const GS_UCHAR* pucKey, GS_UINT32 ulKeyLen, const GS_UCHAR* pucIV,
@@ -139,5 +134,6 @@ extern GS_UINT32 CRYPT_decrypt(GS_UINT32 ulAlgId, const GS_UCHAR* pucKey, GS_UIN
     GS_UINT32 ulIVLen, GS_UCHAR* pucCipherText, GS_UINT32 ulCLen, GS_UCHAR* pucPlainText, GS_UINT32* pulPLen);
 extern GS_UINT32 CRYPT_hmac(GS_UINT32 ulAlgType, const GS_UCHAR* pucKey, GS_UINT32 upucKeyLen, const GS_UCHAR* pucData,
     GS_UINT32 ulDataLen, GS_UCHAR* pucDigest, GS_UINT32* pulDigestLen);
+const EVP_MD* get_evp_md_by_id(GS_UINT32 ulAlgType);
 
 #endif

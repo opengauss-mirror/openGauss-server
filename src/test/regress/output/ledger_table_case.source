@@ -1,0 +1,1122 @@
+CREATE or replace FUNCTION pg_catalog.selecthist(nspname text, tablename text) RETURNS text
+LANGUAGE plpgsql
+AS $$
+declare
+    sql_ins text;
+    sql_upd text;
+    sql_del text;
+    insert_times integer;
+    update_times integer;
+    delete_times integer;
+begin
+    sql_ins := 'SELECT count(*) FROM blockchain.' || nspname || '_' || tablename || '_hist WHERE hash_ins IS NOT NULL AND hash_del IS NULL';
+    sql_upd := 'SELECT count(*) FROM blockchain.' || nspname || '_' || tablename || '_hist WHERE hash_ins IS NOT NULL AND hash_del IS NOT NULL';
+    sql_del := 'SELECT count(*) FROM blockchain.' || nspname || '_' || tablename || '_hist WHERE hash_ins IS NULL AND hash_del IS NOT NULL';
+    execute immediate sql_ins into insert_times;
+    execute immediate sql_upd into update_times;
+    execute immediate sql_del into delete_times;
+    RETURN 'insertion: ' || insert_times || ' | updation: ' || update_times || ' | deletion: ' || delete_times;
+end$$;
+CREATE USER bc_admin SYSADMIN AUDITADMIN PASSWORD 'Gauss_234';
+SET ROLE bc_admin PASSWORD 'Gauss_234';
+----------------------------------------------------------------
+-- TEST CASE 001. test basic scenario                         --
+----------------------------------------------------------------
+CREATE SCHEMA ledgernsp WITH blockchain;
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledgernsp';
+ nspblockchain 
+---------------
+ t
+(1 row)
+
+CREATE TABLE ledgernsp.usertable(id int, name text);
+SELECT * FROM ledgernsp.usertable;
+ id | name 
+----+------
+(0 rows)
+
+SELECT *, hash FROM ledgernsp.usertable;
+ id | name | hash 
+----+------+------
+(0 rows)
+
+SELECT relname FROM pg_class WHERE relname LIKE '%ledgernsp_usertable_hist%' ;
+         relname          
+--------------------------
+ ledgernsp_usertable_hist
+(1 row)
+
+-- single insertion
+INSERT INTO ledgernsp.usertable values(1, 'single insertion 1');
+INSERT INTO ledgernsp.usertable values(2, 'single insertion 2');
+INSERT INTO ledgernsp.usertable values(3, 'single insertion 3');
+INSERT INTO ledgernsp.usertable values(4, 'single insertion 4');
+INSERT INTO ledgernsp.usertable values(5, 'single insertion 5');
+INSERT INTO ledgernsp.usertable values(6, 'single insertion 6');
+INSERT INTO ledgernsp.usertable values(7, 'single insertion 7');
+INSERT INTO ledgernsp.usertable values(8, 'single insertion 8');
+INSERT INTO ledgernsp.usertable values(9, 'single insertion 9');
+SELECT * FROM ledgernsp.usertable ORDER BY id;
+ id |        name        
+----+--------------------
+  1 | single insertion 1
+  2 | single insertion 2
+  3 | single insertion 3
+  4 | single insertion 4
+  5 | single insertion 5
+  6 | single insertion 6
+  7 | single insertion 7
+  8 | single insertion 8
+  9 | single insertion 9
+(9 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'usertable');
+                selecthist                
+------------------------------------------
+ insertion: 9 | updation: 0 | deletion: 0
+(1 row)
+
+-- multiple insertion
+INSERT INTO ledgernsp.usertable values(10, 'multiple insertion 10'), (11, 'multiple insertion 11'), (12, 'multiple insertion 12'), (13, 'multiple insertion 13'), (14, 'multiple insertion 14'), (15, 'multiple insertion 15');
+SELECT * FROM ledgernsp.usertable ORDER BY id;
+ id |         name          
+----+-----------------------
+  1 | single insertion 1
+  2 | single insertion 2
+  3 | single insertion 3
+  4 | single insertion 4
+  5 | single insertion 5
+  6 | single insertion 6
+  7 | single insertion 7
+  8 | single insertion 8
+  9 | single insertion 9
+ 10 | multiple insertion 10
+ 11 | multiple insertion 11
+ 12 | multiple insertion 12
+ 13 | multiple insertion 13
+ 14 | multiple insertion 14
+ 15 | multiple insertion 15
+(15 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'usertable');
+                selecthist                 
+-------------------------------------------
+ insertion: 15 | updation: 0 | deletion: 0
+(1 row)
+
+-- update single row
+UPDATE ledgernsp.usertable set name = 'single updated insertion 1' WHERE id = 1;
+SELECT * FROM ledgernsp.usertable ORDER BY id;
+ id |            name            
+----+----------------------------
+  1 | single updated insertion 1
+  2 | single insertion 2
+  3 | single insertion 3
+  4 | single insertion 4
+  5 | single insertion 5
+  6 | single insertion 6
+  7 | single insertion 7
+  8 | single insertion 8
+  9 | single insertion 9
+ 10 | multiple insertion 10
+ 11 | multiple insertion 11
+ 12 | multiple insertion 12
+ 13 | multiple insertion 13
+ 14 | multiple insertion 14
+ 15 | multiple insertion 15
+(15 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'usertable');
+                selecthist                 
+-------------------------------------------
+ insertion: 15 | updation: 1 | deletion: 0
+(1 row)
+
+-- update multiple rows
+UPDATE ledgernsp.usertable set name = 'multiple updated insertion 3,4,5,6,7' WHERE id > 2 AND id < 8;
+SELECT * FROM ledgernsp.usertable ORDER BY id;
+ id |                 name                 
+----+--------------------------------------
+  1 | single updated insertion 1
+  2 | single insertion 2
+  3 | multiple updated insertion 3,4,5,6,7
+  4 | multiple updated insertion 3,4,5,6,7
+  5 | multiple updated insertion 3,4,5,6,7
+  6 | multiple updated insertion 3,4,5,6,7
+  7 | multiple updated insertion 3,4,5,6,7
+  8 | single insertion 8
+  9 | single insertion 9
+ 10 | multiple insertion 10
+ 11 | multiple insertion 11
+ 12 | multiple insertion 12
+ 13 | multiple insertion 13
+ 14 | multiple insertion 14
+ 15 | multiple insertion 15
+(15 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'usertable');
+                selecthist                 
+-------------------------------------------
+ insertion: 15 | updation: 6 | deletion: 0
+(1 row)
+
+-- delete single row
+DELETE FROM ledgernsp.usertable WHERE id = 1;
+SELECT * FROM ledgernsp.usertable ORDER BY id;
+ id |                 name                 
+----+--------------------------------------
+  2 | single insertion 2
+  3 | multiple updated insertion 3,4,5,6,7
+  4 | multiple updated insertion 3,4,5,6,7
+  5 | multiple updated insertion 3,4,5,6,7
+  6 | multiple updated insertion 3,4,5,6,7
+  7 | multiple updated insertion 3,4,5,6,7
+  8 | single insertion 8
+  9 | single insertion 9
+ 10 | multiple insertion 10
+ 11 | multiple insertion 11
+ 12 | multiple insertion 12
+ 13 | multiple insertion 13
+ 14 | multiple insertion 14
+ 15 | multiple insertion 15
+(14 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'usertable');
+                selecthist                 
+-------------------------------------------
+ insertion: 15 | updation: 6 | deletion: 1
+(1 row)
+
+-- delete multiple rows
+DELETE FROM ledgernsp.usertable WHERE id > 2 AND id < 8;
+SELECT * FROM ledgernsp.usertable ORDER BY id;
+ id |         name          
+----+-----------------------
+  2 | single insertion 2
+  8 | single insertion 8
+  9 | single insertion 9
+ 10 | multiple insertion 10
+ 11 | multiple insertion 11
+ 12 | multiple insertion 12
+ 13 | multiple insertion 13
+ 14 | multiple insertion 14
+ 15 | multiple insertion 15
+(9 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'usertable');
+                selecthist                 
+-------------------------------------------
+ insertion: 15 | updation: 6 | deletion: 6
+(1 row)
+
+-- test hash verify functions
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'usertable');
+ ledger_hist_check 
+-------------------
+ t
+(1 row)
+
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'usertable');
+ ledger_gchain_check 
+---------------------
+ t
+(1 row)
+
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'usertable_not_exists');
+ERROR:  table ledgernsp.usertable_not_exists not exists.
+CONTEXT:  referenced column: ledger_hist_check
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'usertable_not_exists');
+ERROR:  table ledgernsp.usertable_not_exists not exists.
+CONTEXT:  referenced column: ledger_gchain_check
+CREATE USER test_normal_user PASSWORD 'Gauss_234';
+SET ROLE test_normal_user PASSWORD 'Gauss_234';
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'usertable');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_hist_check
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'usertable');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_gchain_check
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'usertable_not_exists');
+ERROR:  table ledgernsp.usertable_not_exists not exists.
+CONTEXT:  referenced column: ledger_hist_check
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'usertable_not_exists');
+ERROR:  table ledgernsp.usertable_not_exists not exists.
+CONTEXT:  referenced column: ledger_gchain_check
+RESET ROLE;
+SET ROLE bc_admin PASSWORD 'Gauss_234';
+DROP USER test_normal_user CASCADE;
+CREATE USER test_audit_admin PASSWORD 'Gauss_234' AUDITADMIN;
+SET ROLE test_audit_admin PASSWORD 'Gauss_234';
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'usertable');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_hist_check
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'usertable');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_gchain_check
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'usertable_not_exists');
+ERROR:  table ledgernsp.usertable_not_exists not exists.
+CONTEXT:  referenced column: ledger_hist_check
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'usertable_not_exists');
+ERROR:  table ledgernsp.usertable_not_exists not exists.
+CONTEXT:  referenced column: ledger_gchain_check
+RESET ROLE;
+SET ROLE bc_admin PASSWORD 'Gauss_234';
+DROP USER test_audit_admin CASCADE;
+-- rename table
+SELECT s.nspname, t.relname FROM pg_namespace as s, pg_class as t WHERE s.oid = t.relnamespace AND t.relname = 'usertable' AND s.nspname = 'ledgernsp';
+  nspname  |  relname  
+-----------+-----------
+ ledgernsp | usertable
+(1 row)
+
+ALTER TABLE ledgernsp.usertable RENAME TO renamed_usertable;
+SELECT s.nspname, t.relname FROM pg_namespace as s, pg_class as t WHERE s.oid = t.relnamespace AND t.relname = 'usertable' AND s.nspname = 'ledgernsp';
+ nspname | relname 
+---------+---------
+(0 rows)
+
+SELECT s.nspname, t.relname FROM pg_namespace as s, pg_class as t WHERE s.oid = t.relnamespace AND t.relname LIKE '%renamed_usertable%' AND (s.nspname = 'ledgernsp' OR s.nspname = 'blockchain') ORDER BY t.relname;
+  nspname   |             relname              
+------------+----------------------------------
+ blockchain | ledgernsp_renamed_usertable_hist
+ ledgernsp  | renamed_usertable
+(2 rows)
+
+SELECT * FROM ledgernsp.renamed_usertable ORDER BY id;
+ id |         name          
+----+-----------------------
+  2 | single insertion 2
+  8 | single insertion 8
+  9 | single insertion 9
+ 10 | multiple insertion 10
+ 11 | multiple insertion 11
+ 12 | multiple insertion 12
+ 13 | multiple insertion 13
+ 14 | multiple insertion 14
+ 15 | multiple insertion 15
+(9 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'renamed_usertable');
+                selecthist                 
+-------------------------------------------
+ insertion: 15 | updation: 6 | deletion: 6
+(1 row)
+
+-- DML after table renamed.
+INSERT INTO ledgernsp.renamed_usertable values (16, 'single insertion 16 to renamed tb');
+UPDATE ledgernsp.renamed_usertable set name = 'single updated insertion 2' WHERE id = 2;
+DELETE FROM ledgernsp.renamed_usertable WHERE id >= 8 AND id < 16;
+SELECT * FROM ledgernsp.renamed_usertable ORDER BY id;
+ id |               name                
+----+-----------------------------------
+  2 | single updated insertion 2
+ 16 | single insertion 16 to renamed tb
+(2 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'renamed_usertable');
+                 selecthist                 
+--------------------------------------------
+ insertion: 16 | updation: 7 | deletion: 14
+(1 row)
+
+-- DROP TABLE
+DROP TABLE ledgernsp.renamed_usertable;
+SELECT s.nspname, t.relname FROM pg_namespace as s, pg_class as t WHERE s.oid = t.relnamespace AND t.relname LIKE '%renamed_usertable%' AND (s.nspname = 'ledgernsp' OR s.nspname = 'blockchain') ORDER BY t.relname;
+ nspname | relname 
+---------+---------
+(0 rows)
+
+-- check global chain
+SELECT dbname, username, relnsp, relname, relhash, globalhash, txcommand FROM gs_global_chain ORDER BY starttime;
+   dbname   | username |  relnsp   |      relname      |     relhash      |            globalhash            |                                                                                                            txcommand                                                                                                            
+------------+----------+-----------+-------------------+------------------+----------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ regression | bc_admin | ledgernsp | usertable         | e697da2eaa3a775b | 685847ed1fe38e18f6b0e2b18c00edee | INSERT INTO ledgernsp.usertable values(1, 'single insertion 1');
+ regression | bc_admin | ledgernsp | usertable         | 82befa9089f738a5 | 1d475ee5fc0163963eb9d2139dce6dab | INSERT INTO ledgernsp.usertable values(2, 'single insertion 2');
+ regression | bc_admin | ledgernsp | usertable         | 45f70eef1a06f15f | 639f410676ae3ba9a1ab85376eae8508 | INSERT INTO ledgernsp.usertable values(3, 'single insertion 3');
+ regression | bc_admin | ledgernsp | usertable         | 3e356cabe0142964 | 73ac24247f9bdd688d327119607803ac | INSERT INTO ledgernsp.usertable values(4, 'single insertion 4');
+ regression | bc_admin | ledgernsp | usertable         | b64a6a0854bfe66b | da053617faec7ac6a713b2954c53eee3 | INSERT INTO ledgernsp.usertable values(5, 'single insertion 5');
+ regression | bc_admin | ledgernsp | usertable         | 4aab28d58b4c0d44 | 82dff6017d44e55c5d23a38791dfc418 | INSERT INTO ledgernsp.usertable values(6, 'single insertion 6');
+ regression | bc_admin | ledgernsp | usertable         | c5bf5d843af0ff13 | 9a1c64691a8ddf67f530b67bf33c3eb4 | INSERT INTO ledgernsp.usertable values(7, 'single insertion 7');
+ regression | bc_admin | ledgernsp | usertable         | d68bf9cf94c7a9a1 | 7929cb5c98453853512dfc009ebcf885 | INSERT INTO ledgernsp.usertable values(8, 'single insertion 8');
+ regression | bc_admin | ledgernsp | usertable         | caa803d624b4a85d | b3296b248f321f939d970cf1a78d7c49 | INSERT INTO ledgernsp.usertable values(9, 'single insertion 9');
+ regression | bc_admin | ledgernsp | usertable         | e95d1734f9c142ef | d72103ca1e833e39356be5010a05f273 | INSERT INTO ledgernsp.usertable values(10, 'multiple insertion 10'), (11, 'multiple insertion 11'), (12, 'multiple insertion 12'), (13, 'multiple insertion 13'), (14, 'multiple insertion 14'), (15, 'multiple insertion 15');
+ regression | bc_admin | ledgernsp | usertable         | 1b2fc583b589030d | 162f393686960f5f0f780ee004ade077 | UPDATE ledgernsp.usertable set name = 'single updated insertion 1' WHERE id = 1;
+ regression | bc_admin | ledgernsp | usertable         | ca60393e63e0c20b | 557e6e246bef862f48b1d1f6ecd7f9b7 | UPDATE ledgernsp.usertable set name = 'multiple updated insertion 3,4,5,6,7' WHERE id > 2 AND id < 8;
+ regression | bc_admin | ledgernsp | usertable         | fe38604da03c8598 | 46f1e476ff9711978857eaf0f21810c1 | DELETE FROM ledgernsp.usertable WHERE id = 1;
+ regression | bc_admin | ledgernsp | usertable         | eabe5ac487073070 | d31036a35419a22633aa276fd367f3d2 | DELETE FROM ledgernsp.usertable WHERE id > 2 AND id < 8;
+ regression | bc_admin | ledgernsp | renamed_usertable | 29e754c788082560 | bfcb3ad3111645518b8ea1417848d0de | INSERT INTO ledgernsp.renamed_usertable values (16, 'single insertion 16 to renamed tb');
+ regression | bc_admin | ledgernsp | renamed_usertable | d16d9d767160f95c | 46791e13349acaa784d1bca9ed430478 | UPDATE ledgernsp.renamed_usertable set name = 'single updated insertion 2' WHERE id = 2;
+ regression | bc_admin | ledgernsp | renamed_usertable | 756eeb254cc26b13 | 3797af5f399eb7ca063b46f4d4e44d55 | DELETE FROM ledgernsp.renamed_usertable WHERE id >= 8 AND id < 16;
+(17 rows)
+
+-- DROP blockchain SCHEMA
+DROP SCHEMA ledgernsp CASCADE;
+SELECT * FROM pg_namespace WHERE nspname = 'ledgernsp';
+ nspname | nspowner | nsptimeline | nspacl | in_redistribution | nspblockchain 
+---------+----------+-------------+--------+-------------------+---------------
+(0 rows)
+
+----------------------------------------------------------------------
+-- TEST CASE 002. test SCHEMA [WITH blockchain]                     --
+----------------------------------------------------------------------
+CREATE SCHEMA ledger_test_alter_normal_schema;
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ f
+(1 row)
+
+ALTER SCHEMA ledger_test_alter_normal_schema WITH BLOCKCHAIN;
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ t
+(1 row)
+
+ALTER SCHEMA ledger_test_alter_normal_schema WITHOUT BLOCKCHAIN;
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ f
+(1 row)
+
+DROP SCHEMA ledger_test_alter_normal_schema CASCADE;
+CREATE SCHEMA ledger_test_alter_normal_schema;
+CREATE TABLE ledger_test_alter_normal_schema.t1(id int);
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ f
+(1 row)
+
+ALTER SCHEMA ledger_test_alter_normal_schema WITH BLOCKCHAIN;
+ERROR:  It is not supported to change "ledger_test_alter_normal_schema" to blockchain schema which includes tables.
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ f
+(1 row)
+
+DROP TABLE ledger_test_alter_normal_schema.t1 CASCADE;
+ALTER SCHEMA ledger_test_alter_normal_schema WITH BLOCKCHAIN;
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ t
+(1 row)
+
+CREATE TABLE ledger_test_alter_normal_schema.t1(id int);
+ALTER SCHEMA ledger_test_alter_normal_schema WITHOUT BLOCKCHAIN;
+ERROR:  It is not supported to change "ledger_test_alter_normal_schema" to normal schema which includes tables.
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ t
+(1 row)
+
+DROP TABLE ledger_test_alter_normal_schema.t1 CASCADE;
+ALTER SCHEMA ledger_test_alter_normal_schema WITHOUT BLOCKCHAIN;
+SELECT nspblockchain FROM pg_namespace WHERE nspname = 'ledger_test_alter_normal_schema';
+ nspblockchain 
+---------------
+ f
+(1 row)
+
+DROP SCHEMA ledger_test_alter_normal_schema CASCADE;
+CREATE SCHEMA ledger_schema WITH blockchain;
+CREATE TABLE ledger_schema.tb(a int);
+INSERT INTO ledger_schema.tb values(123);
+ALTER SCHEMA ledger_schema rename to ledger_renamed_schema;
+SELECT * FROM ledger_renamed_schema.tb;
+  a  
+-----
+ 123
+(1 row)
+
+SELECT count(*) FROM blockchain.ledger_renamed_schema_tb_hist;
+ count 
+-------
+     1
+(1 row)
+
+DROP SCHEMA ledger_renamed_schema CASCADE;
+NOTICE:  drop cascades to table ledger_renamed_schema.tb
+SELECT nspname, relname FROM pg_namespace, pg_class WHERE pg_namespace.oid = pg_class.relnamespace AND pg_class.relname LIKE '%ledger_renamed_schema_tb_hist%';
+ nspname | relname 
+---------+---------
+(0 rows)
+
+-- test switch to blockchain schema
+CREATE SCHEMA ledgernsp WITH blockchain;
+CREATE TABLE public.un_ledger_tb(a int);
+ALTER TABLE public.un_ledger_tb SET SCHEMA ledgernsp;
+ERROR:  Unsupport to switch schema of a table between ledger schema and normal schema.
+CREATE TABLE ledgernsp.ledger_tb(a int);
+ALTER TABLE ledgernsp.ledger_tb SET SCHEMA public;
+ERROR:  Unsupport to switch schema of a table between ledger schema and normal schema.
+DROP SCHEMA ledgernsp CASCADE;
+NOTICE:  drop cascades to table ledgernsp.ledger_tb
+-- test switch table's schema
+CREATE SCHEMA ledger_schm_1 WITH BLOCKCHAIN;
+CREATE SCHEMA ledger_schm_2 WITH BLOCKCHAIN;
+CREATE TABLE ledger_schm_1.tb1(a int, b text);
+CREATE TABLE public.ledger_tb_switch(a int, b text);
+INSERT INTO ledger_schm_1.tb1 VALUES (1, '1');
+INSERT INTO public.ledger_tb_switch VALUES(2, '2');
+SELECT * FROM ledger_schm_1.tb1;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+SELECT * FROM public.ledger_tb_switch;
+ a | b 
+---+---
+ 2 | 2
+(1 row)
+
+ALTER TABLE public.ledger_tb_switch SET SCHEMA ledger_schm_2;
+ERROR:  Unsupport to switch schema of a table between ledger schema and normal schema.
+ALTER TABLE ledger_schm_1.tb1 SET SCHEMA public;
+ERROR:  Unsupport to switch schema of a table between ledger schema and normal schema.
+ALTER TABLE ledger_schm_1.tb1 SET SCHEMA ledger_schm_2;
+SELECT * FROM ledger_schm_2.tb1;
+ a | b 
+---+---
+ 1 | 1
+(1 row)
+
+SELECT pg_catalog.selecthist('ledger_schm_2', 'tb1');
+                selecthist                
+------------------------------------------
+ insertion: 1 | updation: 0 | deletion: 0
+(1 row)
+
+DROP TABLE public.ledger_tb_switch;
+DROP TABLE ledger_schm_2.tb1;
+DROP SCHEMA ledger_schm_1;
+DROP SCHEMA ledger_schm_2;
+----------------------------------------------------------------------
+-- TEST CASE 003. test ledger user table CREATE                     --
+----------------------------------------------------------------------
+CREATE SCHEMA ledgernsp WITH blockchain;
+CREATE TABLE ledgernsp.regular_table(a int, b text, hash int);
+ERROR:  "hash" column is reserved for system in ledger schema.
+CREATE TABLE ledgernsp.regular_table(a int, b text); --regular table
+SELECT 1 FROM pg_class WHERE relname = 'ledgernsp_regular_table_hist';
+ ?column? 
+----------
+        1
+(1 row)
+
+CREATE TABLE ledgernsp.regular_table_with_primary(a int, b text, primary key(a)); --regular table with primary key
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "regular_table_with_primary_pkey" for table "regular_table_with_primary"
+INSERT INTO ledgernsp.regular_table_with_primary VALUES(1, '1');
+INSERT INTO ledgernsp.regular_table_with_primary VALUES(2, '2');
+INSERT INTO ledgernsp.regular_table_with_primary VALUES(3, '3');
+SELECT pg_catalog.selecthist('ledgernsp', 'regular_table_with_primary');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 0 | deletion: 0
+(1 row)
+
+UPDATE ledgernsp.regular_table_with_primary SET b = 'two updated.' WHERE a = 2;
+SELECT pg_catalog.selecthist('ledgernsp', 'regular_table_with_primary');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 1 | deletion: 0
+(1 row)
+
+DELETE ledgernsp.regular_table_with_primary;
+SELECT pg_catalog.selecthist('ledgernsp', 'regular_table_with_primary');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 1 | deletion: 3
+(1 row)
+
+DROP TABLE ledgernsp.regular_table_with_primary;
+CREATE TABLE ledgernsp.replication_table(a int, b text) DISTRIBUTE BY REPLICATION; --replacation table
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CREATE TABLE ledgernsp.hash_table(a int, b text) DISTRIBUTE BY hash(a); --hash table
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CREATE TABLE ledgernsp.partition_table(a int, b int, c text) DISTRIBUTE BY HASH (b) PARTITION BY RANGE(a) --partition table
+(
+        PARTITION P1 VALUES LESS THAN(100),
+        PARTITION P2 VALUES LESS THAN(200),
+        PARTITION P3 VALUES LESS THAN(300),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+) ENABLE ROW MOVEMENT;
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CREATE TABLE ledgernsp.partition_table(a int, b int, c text) PARTITION BY RANGE(a) --partition table
+(
+        PARTITION P1 VALUES LESS THAN(100),
+        PARTITION P2 VALUES LESS THAN(200),
+        PARTITION P3 VALUES LESS THAN(300),
+        PARTITION P4 VALUES LESS THAN(MAXVALUE)
+) ENABLE ROW MOVEMENT;
+INSERT INTO ledgernsp.partition_table VALUES(99, '99');
+INSERT INTO ledgernsp.partition_table VALUES(166, '166');
+INSERT INTO ledgernsp.partition_table VALUES(266, '266');
+INSERT INTO ledgernsp.partition_table VALUES(400, '400');
+INSERT INTO ledgernsp.partition_table VALUES(500, '500');
+INSERT INTO ledgernsp.partition_table VALUES(600, '600');
+SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
+                selecthist                
+------------------------------------------
+ insertion: 6 | updation: 0 | deletion: 0
+(1 row)
+
+UPDATE ledgernsp.partition_table SET a = 299 WHERE b = '99'; -- test row movement (will delete & insert instead of update)
+SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
+                selecthist                
+------------------------------------------
+ insertion: 7 | updation: 0 | deletion: 1
+(1 row)
+
+--test split partition
+ALTER TABLE ledgernsp.partition_table SPLIT PARTITION P4 AT (450) into (PARTITION P5, PARTITION P6);
+INSERT INTO ledgernsp.partition_table VALUES(700, '700');
+UPDATE ledgernsp.partition_table SET c = '700c' WHERE a = 700;
+DELETE ledgernsp.partition_table WHERE a = 700;
+SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
+                selecthist                
+------------------------------------------
+ insertion: 8 | updation: 1 | deletion: 2
+(1 row)
+
+--test add partition
+ALTER TABLE ledgernsp.partition_table SPLIT PARTITION P6 AT (2000) into (PARTITION P7, PARTITION P8);
+ALTER TABLE ledgernsp.partition_table DROP PARTITION P8;
+ERROR:  Unsupport to ALTER the structure of blockchain related table [partition_table].
+ALTER TABLE ledgernsp.partition_table ADD PARTITION P9 VALUES LESS THAN (MAXVALUE);
+ERROR:  upper boundary of adding partition MUST overtop last existing partition
+INSERT INTO ledgernsp.partition_table VALUES(1000, '1000');
+INSERT INTO ledgernsp.partition_table VALUES(3000, '3000');
+SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
+                selecthist                 
+-------------------------------------------
+ insertion: 10 | updation: 1 | deletion: 2
+(1 row)
+
+--test merge partition
+ALTER TABLE ledgernsp.partition_table MERGE PARTITIONS P5,P7 INTO PARTITION P6;
+SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
+                selecthist                 
+-------------------------------------------
+ insertion: 10 | updation: 1 | deletion: 2
+(1 row)
+
+INSERT INTO ledgernsp.partition_table VALUES(400, '400'); -- in P5 before.
+INSERT INTO ledgernsp.partition_table VALUES(800, '800'); -- in P7 before.
+UPDATE ledgernsp.partition_table SET c = '800c' WHERE a = 800;
+DELETE ledgernsp.partition_table WHERE a = 800;
+SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
+                selecthist                 
+-------------------------------------------
+ insertion: 12 | updation: 2 | deletion: 3
+(1 row)
+
+DELETE ledgernsp.partition_table WHERE a = 266;
+SELECT pg_catalog.selecthist('ledgernsp', 'partition_table');
+                selecthist                 
+-------------------------------------------
+ insertion: 12 | updation: 2 | deletion: 4
+(1 row)
+
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'partition_table');
+ ledger_hist_check 
+-------------------
+ t
+(1 row)
+
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'partition_table');
+ ledger_gchain_check 
+---------------------
+ t
+(1 row)
+
+DROP TABLE ledgernsp.partition_table;
+CREATE TABLE ledgernsp.hashbucket_table (a int, b text) WITH (hashbucket = on) DISTRIBUTE BY HASH(a); --test hashbucket
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CREATE TABLE ledgernsp.hashbucket_table (a int, b text) WITH (hashbucket = on); --test hashbucket
+NOTICE:  hashbucket table need segment storage, set segment to on by default
+ERROR:  The table hashbucket_table do not support hash bucket
+CREATE TABLE ledgernsp.list_table (a int, b text, c text) DISTRIBUTE BY LIST(a) --test list partition
+(
+    slice s1 values (100),
+    slice s2 values (200, 300),
+    slice s3 values (400, 500, 600),
+    slice s4 values (700, 800, 900),
+    slice s5 values (default)
+);
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+CREATE TEMPORARY TABLE ledgernsp.tmpr_table(a int, b text); --temporary table is not allowd.
+ERROR:  temporary tables cannot specify a schema name
+CREATE TABLE ledgernsp.column_store_table(a int, b text) WITH (orientation = column); --column table is not allowd.
+----------------------------------------------------------------------
+-- TEST CASE 004. test ledger user table ALTER                      --
+----------------------------------------------------------------------
+-- based on above regular table ledgernsp.regular_table
+ALTER TABLE ledgernsp.regular_table ADD (c text); --add single column
+ERROR:  Unsupport to ALTER the structure of blockchain related table [regular_table].
+ALTER TABLE ledgernsp.regular_table MODIFY (c text, d text); --add multi columns
+ERROR:  Unsupport to ALTER the structure of blockchain related table [regular_table].
+ALTER TABLE ledgernsp.regular_table SET SCHEMA public; --TODO: should not support
+ERROR:  Unsupport to switch schema of a table between ledger schema and normal schema.
+DROP TABLE ledgernsp.regular_table;
+DROP SCHEMA ledgernsp CASCADE;
+NOTICE:  drop cascades to table ledgernsp.column_store_table
+----------------------------------------------------------------------
+-- TEST CASE 005. test ledger user table MODIFIES                   --
+----------------------------------------------------------------------
+CREATE SCHEMA ledgernsp WITH blockchain;
+-- test merge into
+CREATE TABLE ledgernsp.tb_prepare_data(a int PRIMARY KEY, b text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tb_prepare_data_pkey" for table "tb_prepare_data"
+CREATE TABLE ledgernsp.tb_for_data(a int PRIMARY KEY, b text);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "tb_for_data_pkey" for table "tb_for_data"
+INSERT INTO ledgernsp.tb_prepare_data VALUES(1, 'first data');
+INSERT INTO ledgernsp.tb_prepare_data VALUES(2, 'second data');
+INSERT INTO ledgernsp.tb_for_data VALUES(1, 'one');
+SELECT * FROM ledgernsp.tb_prepare_data ORDER BY a;
+ a |      b      
+---+-------------
+ 1 | first data
+ 2 | second data
+(2 rows)
+
+SELECT * FROM ledgernsp.tb_for_data ORDER BY a;
+ a |  b  
+---+-----
+ 1 | one
+(1 row)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'tb_for_data');
+                selecthist                
+------------------------------------------
+ insertion: 1 | updation: 0 | deletion: 0
+(1 row)
+
+MERGE INTO ledgernsp.tb_for_data mgd USING ledgernsp.tb_prepare_data mgs ON (mgd.a = mgs.a) WHEN MATCHED THEN UPDATE SET mgd.b = 'updated.' WHEN NOT MATCHED THEN INSERT VALUES(mgs.a, mgs.b);
+MERGE INTO blockchain.ledgernsp_tb_for_data_hist mghd USING blockchain.ledgernsp_tb_for_data_hist mghs ON (mghd.rec_num = mghs.rec_num) WHEN MATCHED THEN UPDATE SET mghd.hash_ins = 1;
+ERROR:  internal relation doesn't allow MERGE INTO
+SELECT * FROM ledgernsp.tb_prepare_data ORDER BY a;
+ a |      b      
+---+-------------
+ 1 | first data
+ 2 | second data
+(2 rows)
+
+SELECT * FROM ledgernsp.tb_for_data ORDER BY a;
+ a |      b      
+---+-------------
+ 1 | updated.
+ 2 | second data
+(2 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'tb_for_data');
+                selecthist                
+------------------------------------------
+ insertion: 2 | updation: 1 | deletion: 0
+(1 row)
+
+DROP TABLE ledgernsp.tb_prepare_data;
+-- test UPSERT
+INSERT INTO ledgernsp.tb_for_data VALUES(1, 'one 001'), (3, 'three 003') ON DUPLICATE KEY UPDATE b = 'upserted row.';
+SELECT * FROM ledgernsp.tb_for_data ORDER BY a;
+ a |       b       
+---+---------------
+ 1 | upserted row.
+ 2 | second data
+ 3 | three 003
+(3 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'tb_for_data');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 2 | deletion: 0
+(1 row)
+
+INSERT INTO ledgernsp.tb_for_data VALUES(1, 'one 001'), (3, 'three 003') ON DUPLICATE KEY UPDATE b = 'upserted row.'; -- test upsert new row
+SELECT * FROM ledgernsp.tb_for_data ORDER BY a;
+ a |       b       
+---+---------------
+ 1 | upserted row.
+ 2 | second data
+ 3 | upserted row.
+(3 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'tb_for_data');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 4 | deletion: 0
+(1 row)
+
+-- test SELECT INTO
+SELECT * INTO ledgernsp.tb_for_selectinto FROM ledgernsp.tb_for_data;
+SELECT * FROM ledgernsp.tb_for_selectinto ORDER BY a;
+ a |       b       
+---+---------------
+ 1 | upserted row.
+ 2 | second data
+ 3 | upserted row.
+(3 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'tb_for_selectinto');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 0 | deletion: 0
+(1 row)
+
+DROP TABLE ledgernsp.tb_for_selectinto;
+-- test CREATE TABLE AS
+CREATE TABLE ledgernsp.tb_for_createas_001 AS TABLE ledgernsp.tb_for_data;
+CREATE TABLE ledgernsp.tb_for_createas_002 AS SELECT * FROM ledgernsp.tb_for_data;
+SELECT * FROM ledgernsp.tb_for_createas_001 ORDER BY a;
+ a |       b       
+---+---------------
+ 1 | upserted row.
+ 2 | second data
+ 3 | upserted row.
+(3 rows)
+
+SELECT * FROM ledgernsp.tb_for_createas_002 ORDER BY a;
+ a |       b       
+---+---------------
+ 1 | upserted row.
+ 2 | second data
+ 3 | upserted row.
+(3 rows)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'tb_for_createas_001');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 0 | deletion: 0
+(1 row)
+
+SELECT pg_catalog.selecthist('ledgernsp', 'tb_for_createas_002');
+                selecthist                
+------------------------------------------
+ insertion: 3 | updation: 0 | deletion: 0
+(1 row)
+
+DROP TABLE ledgernsp.tb_for_createas_001;
+DROP TABLE ledgernsp.tb_for_createas_002;
+----------------------------------------------------------------------
+-- TEST CASE 006. test FUNCTION OR PRODUCER modify user table       --
+----------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION ledger_data_func() RETURNS VOID AS $$
+BEGIN
+    INSERT INTO ledgernsp.tb_for_data VALUES (1, 'first');
+END;
+$$ LANGUAGE plpgsql;
+SELECT ledger_data_func();
+ERROR:  permission denied for relation tb_for_data
+DETAIL:  N/A
+CONTEXT:  SQL statement "INSERT INTO ledgernsp.tb_for_data VALUES (1, 'first')"
+PL/pgSQL function ledger_data_func() line 3 at SQL statement
+referenced column: ledger_data_func
+CREATE OR REPLACE FUNCTION ledger_sql_func() RETURNS VOID
+    AS 'INSERT INTO ledgernsp.tb_for_data VALUES (7, ''SQL func insertion.'');'
+    LANGUAGE SQL
+    VOLATILE
+    RETURNS NULL ON NULL INPUT;
+EXECUTE DIRECT ON(datanode1) 'SELECT ledger_sql_func()';
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+SELECT ledger_sql_func();
+ ledger_sql_func 
+-----------------
+ 
+(1 row)
+
+----------------------------------------------------------------------
+-- TEST CASE 007. test TRIGGER modify user table                    --
+----------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION ldgr_tri_insert_func() RETURNS TRIGGER AS
+$$
+DECLARE
+BEGIN
+    INSERT INTO ledgernsp.tb_for_data VALUES(NEW.a, NEW.b);
+    RETURN NEW;
+END
+$$ LANGUAGE PLPGSQL;
+CREATE TABLE public.pb_tb_for_trig (a int, b text);
+CREATE TRIGGER ldgr_trig_insert
+    BEFORE INSERT ON public.pb_tb_for_trig
+    FOR EACH ROW
+    EXECUTE PROCEDURE ldgr_tri_insert_func();
+INSERT INTO public.pb_tb_for_trig VALUES(8, '888');
+ERROR:  permission denied for relation tb_for_data
+DETAIL:  N/A
+CONTEXT:  SQL statement "INSERT INTO ledgernsp.tb_for_data VALUES(NEW.a, NEW.b)"
+PL/pgSQL function ldgr_tri_insert_func() line 4 at SQL statement
+----------------------------------------------------------------------
+-- TEST CASE 008. test history tables.                              --
+----------------------------------------------------------------------
+DROP SCHEMA blockchain;
+ERROR:  DROP not supported for blockchain schema.
+ALTER SCHEMA blockchain RENAME TO blockchain_renamed;
+ERROR:  The schema blockchain doesn't allow to rename
+CREATE SCHEMA blockchain;
+ERROR:  schema "blockchain" already exists
+CREATE USER test_normal_user PASSWORD 'Gauss_234';
+ALTER SCHEMA blockchain OWNER TO test_normal_user;
+DROP USER test_normal_user CASCADE;
+ERROR:  The schema 'blockchain' doesn't allow to drop
+ALTER SCHEMA blockchain OWNER TO @login_user@;
+DROP USER test_normal_user CASCADE;
+CREATE TABLE blockchain.ledgernsp_t1_hist(a int, b text);
+ERROR:  cannot create table under blockchain namspace.
+ALTER TABLE blockchain.ledgernsp_tb_for_data_hist RENAME TO ledgernsp_renamed_hist;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow ALTER
+INSERT INTO blockchain.ledgernsp_tb_for_data_hist VALUES(1, 1, 1, 1);
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow INSERT
+UPDATE blockchain.ledgernsp_tb_for_data_hist SET hash_ins = 1 WHERE rec_num = 1;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow UPDATE
+DELETE FROM blockchain.ledgernsp_tb_for_data_hist WHERE rec_num = 1;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow DELETE
+DROP TABLE blockchain.ledgernsp_tb_for_data_hist;
+ERROR:  DROP not supported for userchain table.
+ALTER TABLE blockchain.ledgernsp_tb_for_data_hist SET SCHEMA public;
+ERROR:  Un-support feature
+DETAIL:  internal relation doesn't allow ALTER
+----------------------------------------------------------------------
+-- TEST CASE 009. test gs_global_chain sys table.                   --
+----------------------------------------------------------------------
+DROP TABLE gs_global_chain;
+ERROR:  permission denied: "gs_global_chain" is a system catalog
+ALTER TABLE gs_global_chain RENAME TO gs_global_chain_renamed;
+ERROR:  permission denied: "gs_global_chain" is a system catalog
+ALTER TABLE gs_global_chain ADD (col int);
+ERROR:  permission denied: "gs_global_chain" is a system catalog
+INSERT INTO gs_global_chain(txcommand) VALUES('112233445566');
+ERROR:  permission denied: "gs_global_chain" is a system catalog
+UPDATE gs_global_chain SET txcommand = '112233445566' WHERE relnsp = 'ledgernsp';
+ERROR:  permission denied: "gs_global_chain" is a system catalog
+DELETE gs_global_chain;
+ERROR:  permission denied: "gs_global_chain" is a system catalog
+----------------------------------------------------------------------
+-- TEST CASE 010. test TRUNCATE.                                    --
+----------------------------------------------------------------------
+TRUNCATE TABLE ledgernsp.tb_for_data;
+ERROR:  It is not supported to truncate blockchain table "tb_for_data"
+TRUNCATE TABLE blockchain.ledgernsp_tb_for_data_hist;
+ERROR:  It is not supported to truncate blockchain table "ledgernsp_tb_for_data_hist"
+TRUNCATE TABLE gs_global_chain;
+ERROR:  It is not supported to truncate blockchain table "gs_global_chain"
+DROP TABLE ledgernsp.tb_for_data;
+----------------------------------------------------------------------
+-- TEST CASE 011. test COPY.                                        --
+----------------------------------------------------------------------
+CREATE TABLE ledgernsp.tb_for_cp(a int, b text);
+INSERT INTO ledgernsp.tb_for_cp VALUES (1, '1');
+COPY ledgernsp.tb_for_cp(a, b) TO stdout (delimiter ' | ');
+1 | 1
+COPY ledgernsp.tb_for_cp(a, b, hash) TO stdout (delimiter ' | ');
+1 | 1 | f04993b2dedca839
+COPY ledgernsp.tb_for_cp(a, b) FROM STDIN (delimiter ' | ');
+ERROR:  Invalid tuple hash.
+CONTEXT:  COPY tb_for_cp, line 1: "1 | 1"
+COPY ledgernsp.tb_for_cp(a, b) FROM STDIN (delimiter ' | ');
+ERROR:  extra data after last expected column
+CONTEXT:  COPY tb_for_cp, line 1: "1 | 1 | f04993b2dedca839"
+COPY ledgernsp.tb_for_cp(a, b, hash) FROM STDIN (delimiter ' | ');
+COPY blockchain.ledgernsp_tb_for_cp_hist(rec_num) TO stdout;
+0
+1
+COPY blockchain.ledgernsp_tb_for_cp_hist(rec_num) FROM STDIN;
+ERROR:  Table ledgernsp_tb_for_cp_hist of COPY FROM can not be blockchain related table.
+DROP TABLE ledgernsp.tb_for_cp;
+----------------------------------------------------------------------
+-- TEST CASE 012. test multi DROP user table.                                        --
+----------------------------------------------------------------------
+-- multi drop table.
+CREATE SCHEMA nsp_drop WITH blockchain;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+DROP TABLE nsp_drop.tb_to_drop;
+--CREATE TABLE nsp_drop.tb_to_drop(id int, name text);
+--DROP TABLE nsp_drop.tb_to_drop;
+SELECT nspname, relname FROM pg_namespace, pg_class WHERE pg_namespace.oid = pg_class.relnamespace AND pg_class.relname LIKE '%nsp_drop_tb_to_drop_hist_del_%' ORDER BY relname;
+ nspname | relname 
+---------+---------
+(0 rows)
+
+----------------------------------------------------------------------
+-- TEST CASE 013. test archive and repair hist table.               --
+----------------------------------------------------------------------
+CREATE TABLE ledgernsp.tb_for_archive_01(a int, b text);
+INSERT INTO ledgernsp.tb_for_archive_01 VALUES (1, 'insert 001');
+INSERT INTO ledgernsp.tb_for_archive_01 VALUES (2, 'insert 002');
+INSERT INTO ledgernsp.tb_for_archive_01 VALUES (3, 'insert 003');
+CREATE TABLE ledgernsp.tb_for_archive_02(a int, b text);
+INSERT INTO ledgernsp.tb_for_archive_02 VALUES (1, 'insert 001');
+INSERT INTO ledgernsp.tb_for_archive_02 VALUES (2, 'insert 002');
+INSERT INTO ledgernsp.tb_for_archive_02 VALUES (3, 'insert 003');
+EXECUTE DIRECT ON(datanode1) 'select pg_catalog.ledger_hist_archive(''ledgernsp'', ''tb_for_archive_01'')';
+ERROR:  Un-support feature
+DETAIL:  The distributed capability is not supported currently.
+INSERT INTO ledgernsp.tb_for_archive_02 VALUES (4, 'insert 004');
+UPDATE ledgernsp.tb_for_archive_02 SET b = 'updated 004' WHERE a = 4;
+select pg_catalog.ledger_gchain_archive();
+ ledger_gchain_archive 
+-----------------------
+ t
+(1 row)
+
+SELECT blocknum, dbname, username, relnsp, relname, relhash, globalhash, txcommand FROM gs_global_chain ORDER BY blocknum;
+ blocknum |   dbname   | username |    relnsp     |          relname           |     relhash      |            globalhash            | txcommand 
+----------+------------+----------+---------------+----------------------------+------------------+----------------------------------+-----------
+       16 | regression | bc_admin | ledgernsp     | usertable                  | 7e13ecce83605761 | f4c1b2eef4c218937beb09d64d7e746c | Archived.
+       17 | regression | bc_admin | ledger_schema | tb                         | b5c41dec0dc58e25 | 7f5626d1fe8f6d7fc8eb74bd62145afa | Archived.
+       18 | regression | bc_admin | ledger_schm_1 | tb1                        | f04993b2dedca839 | d1ad3bcdc7f5a8d69887d077739a4f32 | Archived.
+       23 | regression | bc_admin | ledgernsp     | regular_table_with_primary | 0000000000000000 | a43499b2d698642cc4eed5083c2476f7 | Archived.
+       40 | regression | bc_admin | ledgernsp     | partition_table            | 007e231834b78af7 | c161a4d51ead8cadd8a421101f4f5546 | Archived.
+       42 | regression | bc_admin | ledgernsp     | tb_prepare_data            | 43ce7b3ab57891f7 | f0d6555ecf394d90f0fec5e865f890aa | Archived.
+       46 | regression | bc_admin | ledgernsp     | tb_for_data                | 29f69164841c81c5 | f7284255a79bf956638b699d70f853f1 | Archived.
+       47 | regression | bc_admin | ledgernsp     | tb_for_selectinto          | 553dfbc6d3013422 | acef34d59d3c275e25c283e5e6e7a7c7 | Archived.
+       48 | regression | bc_admin | ledgernsp     | tb_for_createas_001        | 553dfbc6d3013422 | 44f41355690fce3af4c7760891934c9e | Archived.
+       49 | regression | bc_admin | ledgernsp     | tb_for_createas_002        | 553dfbc6d3013422 | 6d36e0d94281da2262f2ea7c2add0a3d | Archived.
+       51 | regression | bc_admin | ledgernsp     | tb_for_cp                  | e0932765bdb95072 | c0a2d10aa9f531e851e81bfec6ae29c6 | Archived.
+       54 | regression | bc_admin | ledgernsp     | tb_for_archive_01          | 9523a344739c94c7 | 56483dda928f467cef761e7f548aac80 | Archived.
+       59 | regression | bc_admin | ledgernsp     | tb_for_archive_02          | 80ecbc3e3938f5c1 | eb1bb2856d8ed449ae14d74935e5b0fa | Archived.
+(13 rows)
+
+SELECT pg_catalog.ledger_hist_check('ledgernsp', 'tb_for_archive_01');
+ ledger_hist_check 
+-------------------
+ t
+(1 row)
+
+SELECT pg_catalog.ledger_gchain_check('ledgernsp', 'tb_for_archive_01');
+ ledger_gchain_check 
+---------------------
+ t
+(1 row)
+
+\! find @abs_srcdir@/tmp_check/datanode1/pg_audit/hist_bak/ -type f -print | wc -l
+1
+\! find @abs_srcdir@/tmp_check/datanode1/pg_audit/hist_bak/ -type f -print | wc -l
+1
+SELECT pg_catalog.ledger_hist_repair('ledgernsp', 'tb_for_archive_01');
+ ledger_hist_repair 
+--------------------
+ 0000000000000000
+(1 row)
+
+SELECT pg_catalog.ledger_gchain_repair('ledgernsp', 'tb_for_archive_01');
+ ledger_gchain_repair 
+----------------------
+ 9523a344739c94c7
+(1 row)
+
+CREATE USER test_normal_user PASSWORD 'Gauss_234';
+SET ROLE test_normal_user PASSWORD 'Gauss_234';
+SELECT pg_catalog.ledger_hist_archive('ledgernsp', 'tb_for_archive_01');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_hist_archive
+SELECT pg_catalog.ledger_hist_archive('ledgernsp', 'tb_for_archive_not_exists');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_hist_archive
+SELECT pg_catalog.ledger_hist_repair('ledgernsp', 'tb_for_archive_01');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_hist_repair
+SELECT pg_catalog.ledger_hist_repair('ledgernsp', 'tb_for_archive_not_exists');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_hist_repair
+SELECT pg_catalog.ledger_gchain_repair('ledgernsp', 'tb_for_archive_01');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_gchain_repair
+SELECT pg_catalog.ledger_gchain_repair('ledgernsp', 'tb_for_archive_not_exists');
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_gchain_repair
+SELECT pg_catalog.ledger_gchain_archive();
+ERROR:  Permission denied.
+CONTEXT:  referenced column: ledger_gchain_archive
+RESET ROLE;
+SET ROLE bc_admin PASSWORD 'Gauss_234';
+DROP USER test_normal_user CASCADE;
+CREATE USER test_audit_admin PASSWORD 'Gauss_234' AUDITADMIN;
+SET ROLE test_audit_admin PASSWORD 'Gauss_234';
+SELECT pg_catalog.ledger_hist_archive('ledgernsp', 'tb_for_archive_01');
+ ledger_hist_archive 
+---------------------
+ t
+(1 row)
+
+SELECT pg_catalog.ledger_hist_archive('ledgernsp', 'tb_for_archive_not_exists');
+ERROR:  table ledgernsp.tb_for_archive_not_exists not exists.
+CONTEXT:  referenced column: ledger_hist_archive
+SELECT pg_catalog.ledger_gchain_archive();
+ ledger_gchain_archive 
+-----------------------
+ t
+(1 row)
+
+SELECT pg_catalog.ledger_hist_repair('ledgernsp', 'tb_for_archive_01');
+ ledger_hist_repair 
+--------------------
+ 0000000000000000
+(1 row)
+
+SELECT pg_catalog.ledger_hist_repair('ledgernsp', 'tb_for_archive_not_exists');
+ERROR:  table ledgernsp.tb_for_archive_not_exists not exists.
+CONTEXT:  referenced column: ledger_hist_repair
+SELECT pg_catalog.ledger_gchain_repair('ledgernsp', 'tb_for_archive_01');
+ ledger_gchain_repair 
+----------------------
+ 9523a344739c94c7
+(1 row)
+
+SELECT pg_catalog.ledger_gchain_repair('ledgernsp', 'tb_for_archive_not_exists');
+ERROR:  table ledgernsp.tb_for_archive_not_exists not exists.
+CONTEXT:  referenced column: ledger_gchain_repair
+RESET ROLE;
+SET ROLE bc_admin PASSWORD 'Gauss_234';
+DROP USER test_audit_admin CASCADE;
+DROP TABLE ledgernsp.tb_for_archive_01;
+DROP TABLE ledgernsp.tb_for_archive_02;
+----------------------------------------------------------------------
+-- TEST CASE 014. usertable column type support.                    --
+----------------------------------------------------------------------
+CREATE TABLE ledgernsp.bad_tb(a int, hash text);
+ERROR:  "hash" column is reserved for system in ledger schema.
+CREATE TYPE bc_compress_type AS (name text, salary numeric);
+CREATE TABLE ledgernsp.bad_tb(a bc_compress_type);
+ERROR:  Unsupport column type "bc_compress_type" of ledger user table.
+DROP TYPE bc_compress_type;
+----------------------------------------------------------------------
+-- clear enviroment.                                                --
+----------------------------------------------------------------------
+DROP SCHEMA IF EXISTS ledgernsp CASCADE;
+DROP SCHEMA IF EXISTS nsp_drop CASCADE;
+RESET ROLE;
+DROP USER bc_admin CASCADE;
+DROP FUNCTION pg_catalog.selecthist(text, text);

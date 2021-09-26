@@ -572,6 +572,14 @@ DROP TABLE t1;
 --cstore not support
 CREATE TABLE t2(height_cm int,height_in int GENERATED ALWAYS AS (height_cm * 2) STORED) WITH (ORIENTATION = COLUMN);
 
+--ustore engine test
+CREATE TABLE ustoretest (a int PRIMARY KEY, b int, c int GENERATED ALWAYS AS (a * 2) STORED) WITH (STORAGE_TYPE = USTORE, init_td=32);
+INSERT INTO ustoretest(a,b) values(2,3),(4,5);
+SELECT * FROM ustoretest;
+UPDATE ustoretest SET a=7 WHERE a=2;
+SELECT * FROM ustoretest;
+DROP TABLE ustoretest;
+
 DROP TABLE gtest0;
 DROP TABLE gtest1;
 DROP TABLE gtest2;

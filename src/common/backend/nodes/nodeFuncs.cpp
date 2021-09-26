@@ -30,6 +30,7 @@
 #include "optimizer/streamplan.h"
 #include "parser/parse_expr.h"
 #endif /* FRONTEND_PARSER */
+#include "storage/tcap.h"
 
 static bool expression_returns_set_walker(Node* node, void* context);
 static int leftmostLoc(int loc1, int loc2);
@@ -270,6 +271,10 @@ int32 exprTypmod(const Node* expr)
             /* Be smart about length-coercion functions... */
             if (exprIsLengthCoercion(expr, &coercedTypmod)) {
                 return coercedTypmod;
+            }
+            FuncExpr *fexpr = (FuncExpr *)expr;
+            if (IsClientLogicType(fexpr->funcresulttype)) {
+                return fexpr->funcresulttype_orig;
             }
         } break;
         case T_NamedArgExpr:
@@ -1370,6 +1375,9 @@ int exprLocation(const Node* expr)
         case T_RangeTableSample:
             loc = ((const RangeTableSample*)expr)->location;
             break;
+        case T_RangeTimeCapsule:
+            loc = ((const RangeTimeCapsule*)expr)->location;
+            break;
         case T_TypeName:
             loc = ((const TypeName*)expr)->location;
             break;
@@ -1859,6 +1867,13 @@ bool expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
         } break;
+        case T_TimeCapsuleClause: {
+            TimeCapsuleClause* tcc = (TimeCapsuleClause*)node;
+
+            if (p2walker(tcc->tvver, context)) {
+                return true;
+            }
+        } break;
         case T_PlaceHolderInfo:
             return p2walker(((PlaceHolderInfo*)node)->ph_var, context);
         default:
@@ -1957,11 +1972,12 @@ bool range_table_walker(List* rtable, bool (*walker)(), void* context, int flags
 
         switch (rte->rtekind) {
             case RTE_RELATION:
-                if (p2walker((Node*)rte->tablesample, context)) {
+                if (p2walker((Node *)rte->tablesample, context) || p2walker((Node *)rte->timecapsule, context)) {
                     return true;
                 }
                 /* fall through */
             case RTE_CTE:
+            case RTE_RESULT:
                 /* nothing to do */
                 break;
             case RTE_SUBQUERY:
@@ -2576,6 +2592,14 @@ Node* expression_tree_mutator(Node* node, Node* (*mutator)(Node*, void*), void* 
             MUTATE(newnode->repeatable, tsc->repeatable, Expr*);
             return (Node*)newnode;
         } break;
+        case T_TimeCapsuleClause: {
+            TimeCapsuleClause* tcc = (TimeCapsuleClause*)node;
+            TimeCapsuleClause* newnode = NULL;
+
+            FLATCOPY(newnode, tcc, TimeCapsuleClause, isCopy);
+            MUTATE(newnode->tvver, tcc->tvver, Node*);
+            return (Node*)newnode;
+        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized node type: %d", (int)nodeTag(node))));
@@ -2651,8 +2675,10 @@ List* range_table_mutator(List* rtable, Node* (*mutator)(Node*, void*), void* co
         switch (rte->rtekind) {
             case RTE_RELATION:
                 MUTATE(newrte->tablesample, rte->tablesample, TableSampleClause*);
+                MUTATE(newrte->timecapsule, rte->timecapsule, TimeCapsuleClause*);
                 break;
             case RTE_CTE:
+            case RTE_RESULT:
 #ifdef PGXC
             case RTE_REMOTE_DUMMY:
 #endif /* PGXC */
@@ -3136,6 +3162,17 @@ bool raw_expression_tree_walker(Node* node, bool (*walker)(), void* context)
                 return true;
             }
             if (p2walker(rts->repeatable, context)) {
+                return true;
+            }
+        } break;
+        case T_RangeTimeCapsule: {
+            RangeTimeCapsule* rtc = (RangeTimeCapsule*)node;
+
+            if (p2walker(rtc->relation, context)) {
+                return true;
+            }
+            /* method name is deemed uninteresting */
+            if (p2walker(rtc->tvver, context)) {
                 return true;
             }
         } break;

@@ -1,5 +1,0 @@
-# gsredistribute extension
-comment = 'function for table redistribution'
-default_version = '1.0'
-module_pathname = '$libdir/gsredistribute'
-relocatable = true

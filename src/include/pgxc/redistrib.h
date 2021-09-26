@@ -99,6 +99,7 @@ extern void RemoveRedisRelOptionsFromList(List** reloptions);
 extern Node* eval_redis_func_direct(Relation rel, bool is_func_get_start_ctid, int num_of_slice = 0, int slice_index = 0);
 extern List* add_ctid_string_to_reloptions(List *def_list, const char *item_name, ItemPointer ctid);
 extern ItemPointer eval_redis_func_direct_slice(ItemPointer start_ctid, ItemPointer end_ctid, bool is_func_get_start_ctid, int num_of_slices, int slice_index);
+extern void reset_merge_list_on_pgxc_class(Relation rel);
 
 /*
  * ItemPointerGetBlockNumber

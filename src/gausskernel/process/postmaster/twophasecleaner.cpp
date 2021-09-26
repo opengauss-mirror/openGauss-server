@@ -55,6 +55,8 @@ bool bSyncXactsCallGsclean = false;
 PGPROC* twoPhaseCleanerProc = NULL;
 
 #ifndef ENABLE_MULTIPLE_NODES
+#define MAX_ERRMSG_LENGTH 1024
+
 typedef struct DatabaseNames {
     struct DatabaseNames* next;
     char* databaseName;
@@ -81,6 +83,17 @@ static int get_prog_path(const char* argv0);
 #endif
 #ifndef ENABLE_MULTIPLE_NODES
 static bool DropTempNamespace();
+#endif
+
+#ifdef ENABLE_MULTIPLE_NODES
+static const char* getGsCleanLogLevel()
+{
+    if (module_logging_is_on(MOD_GSCLEAN)) {
+        return "DEBUG";
+    } else {
+        return "LOG";
+    }
+}
 #endif
 
 NON_EXEC_STATIC void TwoPhaseCleanerMain()
@@ -213,17 +226,19 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #ifdef USE_ASSERT_CHECKING
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -w -v -r -j %d >>%s 2>&1",
+                    "gs_clean -a -p %d -h localhost -w -v -r -j %d -l %s >> %s 2>&1",
                     g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers,
+                    getGsCleanLogLevel(),
                     t_thrd.tpcleaner_cxt.pgxc_clean_log_path);
                 securec_check_ss(rc, "\0", "\0");
 #else
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -w -v -r -j %d > /dev/null 2>&1",
+                    "gs_clean -a -p %d -h localhost -w -v -r -j %d -l %s > /dev/null 2>&1",
                     g_instance.attr.attr_network.PoolerPort,
-                    u_sess->attr.attr_storage.twophase_clean_workers);
+                    u_sess->attr.attr_storage.twophase_clean_workers,
+                    getGsCleanLogLevel());
                 securec_check_ss(rc, "\0", "\0");
 #endif
                 socket_close_on_exec();
@@ -335,8 +350,19 @@ static int get_prog_path(const char* argv0)
     Assert(NULL != exec_path);
 
     {
-        check_backend_env(exec_path);
-        rc = snprintf_s(env_gausshome_val, sizeof(env_gausshome_val), MAX_PATH_LEN - 1, "%s", exec_path);
+        char realExecPath[PATH_MAX + 1] = {'\0'};
+        if (realpath(exec_path, realExecPath) == NULL) {
+            ereport(WARNING,
+                (errmodule(MOD_TRANS_XACT), errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Failed to obtain environment value $GAUSSHOME!"),
+                errdetail("N/A"),
+                errcause("Incorrect environment value."),
+                erraction("Please refer to backend log for more details.")));
+            return -1;
+        }
+        exec_path = NULL;
+        check_backend_env(realExecPath);
+        rc = snprintf_s(env_gausshome_val, sizeof(env_gausshome_val), MAX_PATH_LEN - 1, "%s", realExecPath);
         securec_check_ss(rc, "\0", "\0");
         gausslog_dir = gs_getenv_r("GAUSSLOG");
         if ((NULL == gausslog_dir) || ('\0' == gausslog_dir[0])) {
@@ -350,8 +376,19 @@ static int get_prog_path(const char* argv0)
                 g_instance.attr.attr_common.PGXCNodeName);
             securec_check_ss(rc, "\0", "\0");
         } else {
-            check_backend_env(gausslog_dir);
-            rc = snprintf_s(env_gausslog_val, sizeof(env_gausslog_val), MAX_PATH_LEN - 1, "%s", gausslog_dir);
+            char realGausslogDir[PATH_MAX + 1] = {'\0'};
+            if (realpath(gausslog_dir, realGausslogDir) == NULL) {
+                ereport(WARNING,
+                    (errmodule(MOD_TRANS_XACT), errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                    errmsg("Failed to obtain environment value $GAUSSLOG!"),
+                    errdetail("N/A"),
+                    errcause("Incorrect environment value."),
+                    erraction("Please refer to backend log for more details.")));
+                return -1;
+            }
+            gausslog_dir = NULL;
+            check_backend_env(realGausslogDir);
+            rc = snprintf_s(env_gausslog_val, sizeof(env_gausslog_val), MAX_PATH_LEN - 1, "%s", realGausslogDir);
             securec_check_ss(rc, "\0", "\0");
             rc = snprintf_s(log_dir, sizeof(log_dir), MAX_PATH_LEN - 1, "%s/bin/%s", env_gausslog_val, PGXC_CLEAN);
             securec_check_ss(rc, "\0", "\0");
@@ -431,12 +468,18 @@ retry:
             goto retry;
         }
 
+        char connErrorMsg[MAX_ERRMSG_LENGTH] = {0};
+        errno_t rc;
+        rc = snprintf_s(connErrorMsg, MAX_ERRMSG_LENGTH, MAX_ERRMSG_LENGTH - 1,
+                        "%s", PQerrorMessage(conn));
+        securec_check_ss(rc, "\0", "\0");
+
         PQfinish(conn);
         conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
                        (errmsg("Could not connect to the %s, "
-                               "we have tried %d times, the connection info : %s",
-                               dbname, count, PQerrorMessage(conn)))));
+                               "we have tried %d times, the connection info: %s",
+                               dbname, count, connErrorMsg))));
     }
 
     return (conn);
@@ -471,12 +514,18 @@ static void GetDatabaseList(PGconn* conn, DatabaseNames** dbList)
     /* Get database list. */
     res = PQexec(conn, STMT_GET_DATABASE_LIST);
     if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        char resErrorMsg[MAX_ERRMSG_LENGTH] = {0};
+        errno_t rc;
+        rc = snprintf_s(resErrorMsg, MAX_ERRMSG_LENGTH, MAX_ERRMSG_LENGTH - 1,
+                        "%s", PQresultErrorMessage(res));
+        securec_check_ss(rc, "\0", "\0");
+
         PQclear(res);
         PQfinish(conn);
         conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("Could not obtain database list : %s",
-                               PQerrorMessage(conn))));
+                        errmsg("Could not obtain database list: %s",
+                               resErrorMsg)));
         return;
     }
 
@@ -544,12 +593,18 @@ static void GetTempSchemaList(PGconn* conn, TempSchemaInfo** tempSchemaList)
     /* Get temp schema list. */
     res = PQexec(conn, STMT_GET_TEMP_SCHEMA_LIST);
     if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        char resErrorMsg[MAX_ERRMSG_LENGTH] = {0};
+        errno_t rc;
+        rc = snprintf_s(resErrorMsg, MAX_ERRMSG_LENGTH, MAX_ERRMSG_LENGTH - 1,
+                        "%s", PQresultErrorMessage(res));
+        securec_check_ss(rc, "\0", "\0");
+
         PQclear(res);
         PQfinish(conn);
         conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("Could not obtain temp schema list : %s",
-                               PQerrorMessage(conn))));
+                        errmsg("Could not obtain temp schema list: %s",
+                               resErrorMsg)));
         return;
     }
 
@@ -557,12 +612,18 @@ static void GetTempSchemaList(PGconn* conn, TempSchemaInfo** tempSchemaList)
     for (int i = 0; i < tempSchemaCount; i++) {
         nspname = PQgetvalue(res, i, 0);
         if (strchr(&nspname[7], '_') == NULL) {
+            char resErrorMsg[MAX_ERRMSG_LENGTH] = {0};
+            errno_t rc;
+            rc = snprintf_s(resErrorMsg, MAX_ERRMSG_LENGTH, MAX_ERRMSG_LENGTH - 1,
+                            "%s", PQresultErrorMessage(res));
+            securec_check_ss(rc, "\0", "\0");
+
             PQclear(res);
             PQfinish(conn);
             conn = NULL;
             ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("Error when parse schema name : %s",
-                               PQerrorMessage(conn))));
+                        errmsg("Error when parse schema name: %s",
+                               resErrorMsg)));
             return;
         }
 
@@ -604,6 +665,7 @@ static void AddActiveBackendInfo(ActiveBackendInfo** activeBackednList,
         tempActiveBackend->next = (*activeBackednList)->next;
         (*activeBackednList)->next = tempActiveBackend;
     }
+
 }
 
 static void GetActiveBackendList(PGconn* conn, ActiveBackendInfo** activeBackendList)
@@ -629,12 +691,18 @@ static void GetActiveBackendList(PGconn* conn, ActiveBackendInfo** activeBackend
     /* Get active backend list. */
     res = PQexec(conn, STMT_ACTIVE_BACKEND_LIST);
     if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        char resErrorMsg[MAX_ERRMSG_LENGTH] = {0};
+        errno_t rc;
+        rc = snprintf_s(resErrorMsg, MAX_ERRMSG_LENGTH, MAX_ERRMSG_LENGTH - 1,
+                        "%s", PQresultErrorMessage(res));
+        securec_check_ss(rc, "\0", "\0");
+
         PQclear(res);
         PQfinish(conn);
         conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("Could not obtain active backend list : %s",
-                               PQerrorMessage(conn))));
+                        errmsg("Could not obtain active backend list: %s",
+                               resErrorMsg)));
         return;
     }
 
@@ -672,15 +740,14 @@ static void DropTempSchema(PGconn* conn, char* nspname)
 
     char toastnspName[NAMEDATALEN] = {0};
     /* SQL Statement */
-    char STMT_DROP_TEMP_SCHEMA[2 * NAMEDATALEN + 64] = {0};
+    char STMT_DROP_TEMP_SCHEMA[2 * NAMEDATALEN + 64] = {0}; // A secure enough size to concat DROP statements.
 
-    rc = snprintf_s(toastnspName, NAMEDATALEN, strlen(nspname) + 7, "pg_toast_temp_%s", nspname + 8);
+    rc = sprintf_s(toastnspName, NAMEDATALEN, "pg_toast_temp_%s", nspname + strlen("pg_temp_"));
     securec_check_ss_c(rc, "\0", "\0");
 
-    rc = snprintf_s(STMT_DROP_TEMP_SCHEMA,
+    rc = sprintf_s(STMT_DROP_TEMP_SCHEMA,
         sizeof(STMT_DROP_TEMP_SCHEMA),
-        2 * strlen(nspname) + 30,
-        "DROP SCHEMA %s, %s CASCADE;",
+        "DROP SCHEMA \"%s\", \"%s\" CASCADE;",
         nspname,
         toastnspName);
     securec_check_ss_c(rc, "\0", "\0");
@@ -689,12 +756,18 @@ static void DropTempSchema(PGconn* conn, char* nspname)
 
     /* If exec is not success, give an log and go on. */
     if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        char resErrorMsg[MAX_ERRMSG_LENGTH] = {0};
+        errno_t rc;
+        rc = snprintf_s(resErrorMsg, MAX_ERRMSG_LENGTH, MAX_ERRMSG_LENGTH - 1,
+                        "%s", PQresultErrorMessage(res));
+        securec_check_ss(rc, "\0", "\0");
+
         PQclear(res);
         PQfinish(conn);
         conn = NULL;
         ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("Could not drop temp schema %s, %s: %s\n",
-                               nspname, toastnspName, PQresultErrorMessage(res))));
+                        errmsg("Could not drop temp schema %s, %s: %s",
+                               nspname, toastnspName, resErrorMsg)));
     }
 
     PQclear(res);

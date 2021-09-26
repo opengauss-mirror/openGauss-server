@@ -30,6 +30,8 @@ ifdef krb_srvtab
 override CPPFLAGS += -DPG_KRB_SRVTAB='"$(krb_srvtab)"'
 endif
 
+SUBDIRS = guc
+
 include $(top_srcdir)/src/gausskernel/common.mk
 
 # guc-file is compiled as part of guc

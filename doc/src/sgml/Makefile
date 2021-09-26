@@ -1,6 +1,6 @@
 #----------------------------------------------------------------------------
 #
-# PostgreSQL documentation makefile
+# openGauss documentation makefile
 #
 # doc/src/sgml/Makefile
 #

@@ -37,7 +37,7 @@ gs_initdb: $(OBJS) | submake-libpgport
 	$(CC) -fPIE -pie $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 utinitdb: $(OBJS) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutinitdb.so
-	mv libutinitdb.so $(top_builddir)/src/distribute/test/ut/lib
+	mv libutinitdb.so $(top_builddir)/../distribute/test/ut/lib
 
 # We used to pull in all of libpq to get encnames and pqsignal, but that
 # exposes us to risks of version skew if we link to a shared library.

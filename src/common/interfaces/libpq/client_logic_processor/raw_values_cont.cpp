@@ -289,12 +289,7 @@ bool RawValues::get_raw_values_from_consts_vec(const ExprPartsList *expr_parts_l
     int offset, RawValuesList *raw_values_list)
 {
     for (size_t i = 0; i < expr_parts_list->size(); i++) {
-        /*
-         * get rawbvalue from a.col1 = 'value' not a.col1 =b.col2
-         */
-        if (expr_parts_list->at(i)->column_refl == NULL && expr_parts_list->at(i)->column_refr == NULL) {
-            raw_values_list->add(get_raw_values_from_ExprParts(expr_parts_list->at(i), statement_data, offset));
-        }
+        raw_values_list->add(get_raw_values_from_ExprParts(expr_parts_list->at(i), statement_data, offset));
     }
     return true;
 }

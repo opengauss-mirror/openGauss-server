@@ -57,8 +57,8 @@ unsigned char *Format::type_char_bin(const char *text, Oid type, Oid typelem, in
  * text_to_binary -
  * converts a assic string to a binary array
  */
-unsigned char *Format::text_to_binary(const char *text, Oid type, Oid typelem, int atttypmod, size_t *binary_size,
-    char *err_msg)
+unsigned char *Format::text_to_binary(const PGconn* conn,  const char *text, Oid type, Oid typelem, 
+    int atttypmod, size_t *binary_size, char *err_msg)
 {
     if (!text || !binary_size) {
         return NULL;
@@ -72,16 +72,16 @@ unsigned char *Format::text_to_binary(const char *text, Oid type, Oid typelem, i
             return char_bin(text, typelem, atttypmod, binary_size, err_msg);
         }
         case INT8OID: {
-            return int8_bin(text, typelem, atttypmod, binary_size, err_msg);
+            return int8_bin(conn, text, typelem, atttypmod, binary_size, err_msg);
         }
         case INT2OID: {
-            return int2_bin(text, typelem, atttypmod, binary_size, err_msg);
+            return int2_bin(conn, text, typelem, atttypmod, binary_size, err_msg);
         }
         case INT1OID: {
-            return int1_bin(text, typelem, atttypmod, binary_size, err_msg);
+            return int1_bin(conn, text, typelem, atttypmod, binary_size, err_msg);
         }
         case INT4OID: {
-            return int4_bin(text, typelem, atttypmod, binary_size, err_msg);
+            return int4_bin(conn, text, typelem, atttypmod, binary_size, err_msg);
         }
         case FLOAT4OID: {
             return float4_bin(text, typelem, atttypmod, binary_size, err_msg);
@@ -90,7 +90,7 @@ unsigned char *Format::text_to_binary(const char *text, Oid type, Oid typelem, i
             return float8_bin(text, typelem, atttypmod, binary_size, err_msg);
         }
         case NUMERICOID: {
-            return numeric_bin(text, typelem, atttypmod, binary_size, err_msg);
+            return numeric_bin(conn, text, typelem, atttypmod, binary_size, err_msg);
         }
         case VARCHAROID:
         case NVARCHAR2OID:

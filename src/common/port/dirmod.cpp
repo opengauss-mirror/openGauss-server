@@ -125,7 +125,7 @@ int pgrename(const char* from, const char* to)
     int loops = 0;
 
     /*
-     * We need to loop because even though PostgreSQL uses flags that allow
+     * We need to loop because even though openGauss uses flags that allow
      * rename while the file is open, other applications might have the file
      * open without those flags.  However, we won't wait indefinitely for
      * someone else to close the file, as the caller might be holding locks
@@ -175,7 +175,7 @@ int pgunlink(const char* path)
     int loops = 0;
 
     /*
-     * We need to loop because even though PostgreSQL uses flags that allow
+     * We need to loop because even though openGauss uses flags that allow
      * unlink while the file is open, other applications might have the file
      * open without those flags.  However, we won't wait indefinitely for
      * someone else to close the file, as the caller might be holding locks
@@ -457,7 +457,7 @@ bool rmtree(const char* path, bool rmtopdir, bool noent_ok)
          * This is not an academic possibility. One scenario where this
          * happens is when bgwriter has a pending unlink request for a file in
          * a database that's being dropped. In dropdb(), we call
-         * ForgetDatabaseFsyncRequests() to flush out any such pending unlink
+         * ForgetDatabaseSyncRequests() to flush out any such pending unlink
          * requests, but because that's asynchronous, it's not guaranteed that
          * the bgwriter receives the message in time.
          */

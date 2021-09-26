@@ -366,7 +366,7 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     securec_check_c(errorno, "\0", "\0");
 
     if (connstr_source != NULL) {
-        endrec = libpqGetCurrentXlogFlushLocation();
+        endrec = libpqGetCurrentXlogInsertLocation();
         PG_CHECKBUILD_AND_RETURN();
         pg_log(PG_PROGRESS, "find minRecoveryPoint success from xlog insert location %X/%X\n",
             (uint32) (endrec >> 32), (uint32) endrec);

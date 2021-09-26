@@ -1,9 +1,9 @@
 /*
  *
  * main.cpp
- *	  Stub main() routine for the postgres executable.
+ *	  Stub main() routine for the openGauss executable.
  *
- * This does some essential startup tasks for any incarnation of postgres
+ * This does some essential startup tasks for any incarnation of openGauss
  * (postmaster, standalone backend, standalone bootstrap process, or a
  * separately exec'd child of a postmaster) and then dispatches to the
  * proper FooMain() routine for the incarnation.
@@ -72,7 +72,7 @@ static void syscall_lock_init(void);
 extern int encrypte_main(int argc, char* const argv[]);
 
 /*
- * Any Postgres server process begins execution here.
+ * Any openGauss server process begins execution here.
  */
 int main(int argc, char* argv[])
 {
@@ -101,7 +101,20 @@ int main(int argc, char* argv[])
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE,
         SHARED_CONTEXT);
+		
+    g_instance.comm_cxt.comm_global_mem_cxt = AllocSetContextCreate(g_instance.instance_context,
+        "CommunnicatorGlobalMemoryContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT);
 
+    g_instance.builtin_proc_context = AllocSetContextCreate(g_instance.instance_context,
+        "builtin_procGlobalMemoryContext",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT);
     /*
      * Fire up essential subsystems: error and memory management
      *
@@ -246,11 +259,6 @@ int main(int argc, char* argv[])
     pgwin32_signal_initialize();
 #endif
 
-    /* init trace context */
-    if (gstrace_init(getpid()) == 0) {
-        on_proc_exit(gstrace_destory, 0);
-    }
-
     t_thrd.mem_cxt.gs_signal_mem_cxt = AllocSetContextCreate(
         t_thrd.top_mem_cxt, "gs_signal", ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
     if (NULL == t_thrd.mem_cxt.gs_signal_mem_cxt) {
@@ -266,7 +274,8 @@ int main(int argc, char* argv[])
         initBuiltinFuncs();
     }
 
-    if (argc > 1 && strcmp(argv[1], "--boot") == 0) {
+    bool isBoot = (argc > 1 && strcmp(argv[1], "--boot") == 0);
+    if (isBoot) {
         IsInitdb = true;
         gs_signal_monitor_startup();
         gs_signal_slots_init(1);

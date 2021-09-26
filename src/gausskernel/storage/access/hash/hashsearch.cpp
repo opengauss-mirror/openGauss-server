@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * hashsearch.cpp
- *	  search code for postgres hash tables
+ *	  search code for openGauss hash tables
  *
  * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2017, PostgreSQL Global Development Group

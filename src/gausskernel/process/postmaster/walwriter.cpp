@@ -55,7 +55,7 @@
 #include "storage/ipc.h"
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/guc.h"
 #include "utils/hsearch.h"
 #include "utils/memutils.h"
@@ -110,16 +110,15 @@ void WalWriterMain(void)
 
     ereport(LOG, (errmsg("walwriter started")));
 
-    if (g_instance.attr.attr_storage.wal_writer_cpu >= 0) {
+    if (g_instance.attr.attr_storage.walwriter_cpu_bind >= 0) {
         cpu_set_t walWriterSet;
         CPU_ZERO(&walWriterSet);
-        CPU_SET(g_instance.attr.attr_storage.wal_writer_cpu, &walWriterSet);
+        CPU_SET(g_instance.attr.attr_storage.walwriter_cpu_bind, &walWriterSet);
 
         int rc = sched_setaffinity(0, sizeof(cpu_set_t), &walWriterSet);
         if (rc == -1) {
-            ereport(WARNING,
-                (errmsg("Failed to schedule WalWriter on wal_writer_cpu, sched_setaffinity() set errno as %d.",
-                    errno)));
+            ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM), errmsg("Invalid attribute for thread pool."),
+                errdetail("Current thread num %d is out of range.", g_instance.attr.attr_storage.walwriter_cpu_bind)));
         }
     }
 
@@ -155,7 +154,8 @@ void WalWriterMain(void)
      * Create a resource owner to keep track of our resources (not clear that
      * we need this, but may as well have one).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Wal Writer", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Wal Writer",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -178,6 +178,11 @@ void WalWriterMain(void)
     int curTryCounter;
     int* oldTryCounter = NULL;
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
+        /*
+         * Close all open files after any error.  This is helpful on Windows,
+         * where holding deleted files open causes various strange errors.
+         * It's not clear we need it elsewhere, but shouldn't hurt.
+         */
         gstrace_tryblock_exit(true, oldTryCounter);
 
         /* We need restore the signal mask of current thread. */
@@ -231,13 +236,6 @@ void WalWriterMain(void)
          * fast as we can.
          */
         pg_usleep(1000000L);
-
-        /*
-         * Close all open files after any error.  This is helpful on Windows,
-         * where holding deleted files open causes various strange errors.
-         * It's not clear we need it elsewhere, but shouldn't hurt.
-         */
-        smgrcloseall();
     }
     oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
 
@@ -287,13 +285,15 @@ void WalWriterMain(void)
         wrote_something = XLogBackgroundFlush();
         LWLockRelease(WALWriteLock);
 
-        if (!wrote_something && ++times_wrote_nothing > g_instance.attr.attr_storage.xlog_idle_flushes_before_sleep) {
+        if (!wrote_something && ++times_wrote_nothing > g_instance.attr.attr_storage.walwriter_sleep_threshold) {
             /*
              * Wait for the first entry after last flushed entry to be updated
              */
             int lastFlushedEntry = g_instance.wal_cxt.lastWalStatusEntryFlushed;
+            int nextStatusEntry =
+                GET_NEXT_STATUS_ENTRY(g_instance.attr.attr_storage.wal_insert_status_entries_power, lastFlushedEntry);
             volatile WalInsertStatusEntry *pCriticalEntry =
-                &g_instance.wal_cxt.walInsertStatusTable[GET_NEXT_STATUS_ENTRY(lastFlushedEntry)];
+                &g_instance.wal_cxt.walInsertStatusTable[nextStatusEntry];
             if (g_instance.wal_cxt.isWalWriterUp && pCriticalEntry->status == WAL_NOT_COPIED) {
                 sleep_times_counter++;
                 (void)pthread_mutex_lock(&g_instance.wal_cxt.criticalEntryMutex);

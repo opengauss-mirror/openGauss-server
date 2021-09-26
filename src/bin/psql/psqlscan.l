@@ -90,6 +90,7 @@ typedef enum
     IDEN_NO,
     IDEN_SCROLL,
     IDEN_DETERMINISTIC,
+	IDEN_PACKAGE,
     IDEN_BUTT,
 }GramIdentify;
 
@@ -143,6 +144,7 @@ typedef struct PsqlScanStateData
 	int		butt_num;		/* identifier(not include identifier declared in enum GramIdentify) encountered number after DECLARE. 
 						   For sql like "Declare foo CURSOR XXX, butt_num is 1.
 						   Using this we can judge if the sql is a DECLARE CURSOR stmt */
+	bool		include_ora_comment; /* dont igore comment when ture, such as single line comment after function/procedure param */
 } PsqlScanStateData;
 
 static PsqlScanState cur_state;	/* current state while active */
@@ -489,11 +491,13 @@ other			.
 					 * Note that the whitespace rule includes both true
 					 * whitespace and single-line ("--" style) comments.
 					 * We suppress whitespace at the start of the query
-					 * buffer.  We also suppress all single-line comments,
+					 * buffer.  We also suppress all single-line comments
+					 * (except comments for function and procedure),
 					 * which is pretty dubious but is the historical
 					 * behavior.
 					 */
-					if (!(output_buf->len == 0 || yytext[0] == '-'))
+					if (!(output_buf->len == 0
+						|| (yytext[0] == '-' && (!cur_state->include_ora_comment))))
 						ECHO;
 				}
 
@@ -2105,6 +2109,8 @@ init_gram_state(PsqlScanStateData* state)
 {
 	int  i = 0;
 
+	state->include_ora_comment = false;
+
 	for (; i < IDEN_BUTT ; i++)
 		state->gram_state[i] = false;
 }
@@ -2125,6 +2131,8 @@ keywordRead(const char* text)
 		return IDEN_REPLACE;
 	else if (!upperstrcmp(text, "procedure"))
 		return IDEN_PROCEDURE;
+    else if (!upperstrcmp(text, "package"))
+        return IDEN_PACKAGE;
 	else if (!upperstrcmp(text, "return"))
 		return IDEN_RETURN;
 	else if (!upperstrcmp(text, "returns"))
@@ -2194,6 +2202,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
 			state->gram_state[IDEN_PROCEDURE] = true;
 			state->gram_state[IDEN_FUNCTION] = true;
 			state->gram_state[IDEN_TRIGGER] = true;
+			state->gram_state[IDEN_PACKAGE] = true;
 			state->count_to_read++;
 			break;
 		case IDEN_OR:
@@ -2203,14 +2212,23 @@ analyze_state(const char* text,PsqlScanStateData* state)
 		case IDEN_REPLACE:
 			state->gram_state[IDEN_PROCEDURE] = true;
 			state->gram_state[IDEN_FUNCTION] = true;
+			state->gram_state[IDEN_PACKAGE] = true;
 			state->gram_state[IDEN_TRIGGER] = true;
 			state->count_to_read++;
 			break;
 		case IDEN_PROCEDURE:
 			state->gram_state[IDEN_AS] = true;
 			state->gram_state[IDEN_IS] = true;
+			state->include_ora_comment = true;
 			state->count_to_read = -1;
 			break;
+        case IDEN_PACKAGE:
+            state->gram_state[IDEN_AS] = true;
+            state->gram_state[IDEN_IS] = true;
+            state->gram_state[IDEN_RETURN] = true;
+            state->gram_state[IDEN_RETURNS] = true;
+            state->count_to_read = -1;
+            break;
 		case IDEN_RETURN:
                         /* when meet a RETURN, we can read max identify number is 7  */
                         /* for example:RETURN INTEGER RETURNS NULL ON NULL INPUT  */
@@ -2231,11 +2249,13 @@ analyze_state(const char* text,PsqlScanStateData* state)
 		case IDEN_FUNCTION:
 			state->gram_state[IDEN_RETURN] = true;
 			state->gram_state[IDEN_RETURNS] = true;
+			state->include_ora_comment = true;
 			state->count_to_read = -1;
 			break;
 		case IDEN_AS:
 		case IDEN_IS:
 			state->count_to_read = 0;
+			state->include_ora_comment = false;
 			BEGIN(xp);
 			break;
 		case IDEN_TRIGGER:

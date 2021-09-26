@@ -26,7 +26,7 @@
 #include "catalog/pg_aggregate.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
-#include "executor/nodeAgg.h"
+#include "executor/node/nodeAgg.h"
 #include "nodes/execnodes.h"
 #include "utils/elog.h"
 #include "utils/dynahash.h"
@@ -213,6 +213,8 @@ bool isAggrefSonicEnable(Oid aggfnoid)
         case NUMERICLARGERFUNCOID:
         case COUNTOID:
         case ANYCOUNTOID:
+        case ADDTDIGESTMERGEOID:
+        case ADDTDIGESTMERGEPOID:
             return true;
             break;
         default:

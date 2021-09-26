@@ -5,7 +5,6 @@
 --
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 --test other user/schema use temp table
 create schema test_temp_2;

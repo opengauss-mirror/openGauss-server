@@ -51,6 +51,7 @@
 #include "catalog/pgxc_group.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/pgxc_node.h"
+#include "catalog/pgxc_slice.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
 #include "access/hash.h"
@@ -62,8 +63,7 @@
 
 #pragma GCC diagnostic ignored "-Wunused-function"
 
-static Expr* pgxc_find_distcol_expr(Query* query, Index varno, AttrNumber attrNum, Node* quals);
-static uint2* tryGetBucketMap(const char* groupname, char* relname, bool isOtherTempNamespace);
+static uint2* tryGetBucketMap(const char* groupname, char* relname, bool isOtherTempNamespace, int *bucketlen);
 
 extern Const* makeNullConst(Oid consttype, int32 consttypmod, Oid constcollid);
 
@@ -201,6 +201,11 @@ List* GetPreferredReplicationNode(List* relNodes)
 #endif
 }
 
+bool IsFunctionShippable(Oid foid) {
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return false;
+}
+
 /*
  * compute_modulo
  * This function performs modulo in an optimized way
@@ -284,18 +289,7 @@ List* GetRelationDistribColumn(RelationLocInfo* locInfo)
     DISTRIBUTED_FEATURE_NOT_SUPPORTED();
     return NIL;
 #else
-
-    /* No relation, so simply leave */
-    if (!locInfo)
-        return NULL;
-
-    /* No distribution column if relation is not distributed with a key */
-    if (!IsRelationDistributedByValue(locInfo))
-        return NULL;
-
-    /* Return column name */
-    return get_attname(locInfo->relid, locInfo->partAttrNum);
-
+    #error You SHOULD call the same name function in distribute directory.
 #endif
 }
 
@@ -486,9 +480,11 @@ void InitBuckets(RelationLocInfo* rel_loc_info, Relation relation)
     if (rel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
         rel_loc_info->buckets_ptr = tryGetBucketMap(NameStr(rel_loc_info->gname),
             NameStr(rel->rd_rel->relname),
-            isOtherTempNamespace(rel->rd_rel->relnamespace));
+            isOtherTempNamespace(rel->rd_rel->relnamespace),
+            &rel_loc_info->buckets_cnt);
     } else {
-        rel_loc_info->buckets_ptr = BucketMapCacheGetBucketmap(NameStr(rel_loc_info->gname));
+        rel_loc_info->buckets_ptr = BucketMapCacheGetBucketmap(NameStr(rel_loc_info->gname),
+                                                               &rel_loc_info->buckets_cnt);
     }
 
     if (relation == NULL) {
@@ -871,6 +867,21 @@ List* GetNodeGroupNodeList(Oid* members, int nmembers)
     return NIL;
 }
 
+List* SearchSliceEntryCopy(char parttype, Oid relid)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return NIL;
+}
+
+HeapTuple SearchTableEntryCopy(char parttype, Oid relid)
+{
+    Assert(false);
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+    return NULL;
+}
+
+
 /*
  * GetAllCoordNodes
  * Return a list of all Coordinators
@@ -905,15 +916,12 @@ List* GetAllCoordNodes(void)
                                 to determin report an error or warning
  * @return: uint2* - the bucket map of the giving relation.
  */
-static uint2* tryGetBucketMap(const char* groupname, char* relname, bool isOtherTempNamespace)
+static uint2* tryGetBucketMap(const char* groupname, char* relname, bool isOtherTempNamespace, int *bucketlen)
 {
     Relation rel;
     HeapTuple htup;
     int len;
     rel = heap_open(PgxcGroupRelationId, ShareLock);
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
     len = BUCKETDATALEN * sizeof(uint2);
 
     htup = SearchSysCache1(PGXCGROUPNAME, CStringGetDatum(groupname));
@@ -935,7 +943,7 @@ static uint2* tryGetBucketMap(const char* groupname, char* relname, bool isOther
     ReleaseSysCache(htup);
     heap_close(rel, ShareLock);
 
-    return (uint2*)BucketMapCacheGetBucketmap(groupname);
+    return (uint2*)BucketMapCacheGetBucketmap(groupname, bucketlen);
 }
 
 /*
@@ -1187,10 +1195,11 @@ void FreeExecNodes(ExecNodes** exec_nodes)
  * distribution column val can take in the qualified rows. So, in such cases
  * this function returns NULL.
  */
-static Expr* pgxc_find_distcol_expr(Query* query, Index varno, AttrNumber attrNum, Node* quals)
+Expr* pgxc_find_distcol_expr(void* query_arg, Index varno, AttrNumber attrNum, Node* quals)
 {
     List* lquals = NULL;
     ListCell* qual_cell = NULL;
+    Query* query = (Query*)query_arg;
 
     /* If no quals, no distribution column expression */
     if (quals == NULL)

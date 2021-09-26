@@ -13,8 +13,6 @@
 #ifndef _POSTMASTER_H
 #define _POSTMASTER_H
 
-#include "replication/replicainternal.h"
-
 extern THR_LOCAL bool comm_client_bind;
 
 extern bool FencedUDFMasterMode;
@@ -50,11 +48,6 @@ typedef enum ReplicationType {
 #define IS_DN_MULTI_STANDYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITH_MULTI_STANDBY)
 #define IS_DN_DUMMY_STANDYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITH_DUMMY_STANDBY)
 #define IS_DN_WITHOUT_STANDBYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITHOUT_STANDBY)
-
-#define WalRcvIsOnline()                                                              \
-    ((g_instance.pid_cxt.WalReceiverPID != 0 && t_thrd.walreceiverfuncs_cxt.WalRcv && \
-        t_thrd.walreceiverfuncs_cxt.WalRcv->isRuning))
-
 
 /*
  * We use a simple state machine to control startup, shutdown, and
@@ -224,8 +217,9 @@ extern void set_disable_conn_mode(void);
 #endif
 
 bool IsFromLocalAddr(Port* port);
-extern bool IsHASocketAddr(struct sockaddr* sock_addr);
+extern bool IsMatchSocketAddr(struct sockaddr* sock_addr, int compare_port);
 extern bool IsHAPort(Port* port);
+extern bool IsConnectBasePort(const Port* port);
 extern ThreadId initialize_util_thread(knl_thread_role role, void* payload = NULL);
 extern ThreadId initialize_worker_thread(knl_thread_role role, Port* port, void* payload = NULL);
 extern void startup_die(SIGNAL_ARGS);
@@ -244,4 +238,7 @@ extern uint64_t mc_timers_us(void);
 extern bool SetDBStateFileState(DbState state, bool optional);
 extern void GPCResetAll();
 extern void initRandomState(TimestampTz start_time, TimestampTz stop_time);
+extern ServerMode GetHaShmemMode(void);
+extern void InitProcessAndShareMemory();
+extern void InitShmemForDcfCallBack();
 #endif /* _POSTMASTER_H */

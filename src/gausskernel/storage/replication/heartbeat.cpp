@@ -109,18 +109,32 @@ OUT:
 
 static int deal_with_sigup()
 {
+    int j;
     if (t_thrd.heartbeat_cxt.got_SIGHUP) {
         t_thrd.heartbeat_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
-        if (g_heartbeat_server != NULL) {
-            if (!g_heartbeat_server->Restart()) {
-                return 1;
+        /*
+         * when Ha replconninfo have changed and current_mode is not NORMAL,
+         * dynamically modify the ha socket.
+         */
+        for (j = 1; j < MAX_REPLNODE_NUM; j++) {
+            if (t_thrd.postmaster_cxt.ReplConnChanged[j]) {
+                break;
             }
         }
-
-        if (g_heartbeat_client != NULL) {
-            /* The client will auto connect later. */
-            g_heartbeat_client->DisConnect();
+        if (j < MAX_REPLNODE_NUM) {
+            if (g_heartbeat_server != NULL) {
+                if (!g_heartbeat_server->Restart()) {
+                    return 1;
+                }
+            }
+            for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
+                t_thrd.postmaster_cxt.ReplConnChanged[i] = false;
+            }
+            if (g_heartbeat_client != NULL) {
+                /* The client will auto connect later. */
+                g_heartbeat_client->DisConnect();
+            }
         }
     }
     return 0;
@@ -292,7 +306,8 @@ void heartbeat_main(void)
     /*
      * Create a resource owner to keep track of our resources.
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Heartbeat", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Heartbeat",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so

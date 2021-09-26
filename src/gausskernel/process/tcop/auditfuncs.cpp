@@ -21,6 +21,7 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "commands/dbcommands.h"
 #include "knl/knl_variable.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
@@ -45,7 +46,8 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
-    char* completionTag);
+    char* completionTag,
+    bool isCTAS);
 static void pgaudit_ddl_database(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_directory(const char* objectname, const char* cmdtext);
 static void pgaudit_ddl_database_object(
@@ -1185,7 +1187,8 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
 #ifdef PGXC
     bool sentToRemote,
 #endif /* PGXC */
-    char* completionTag)
+    char* completionTag,
+    bool isCTAS)
 {
     char* object_name_pointer = NULL;
 
@@ -1198,7 +1201,8 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
 #ifdef PGXC
             sentToRemote,
 #endif /* PGXC */
-            completionTag);
+            completionTag,
+            isCTAS);
     else
         standard_ProcessUtility(parsetree,
             queryString,
@@ -1208,11 +1212,20 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
 #ifdef PGXC
             sentToRemote,
 #endif /* PGXC */
-            completionTag);
+            completionTag,
+            isCTAS);
     switch (nodeTag(parsetree)) {
         case T_CreateStmt: {
             CreateStmt* createtablestmt = (CreateStmt*)(parsetree); /* Audit create table */
             pgaudit_ddl_table(createtablestmt->relation->relname, queryString);
+        } break;
+        case T_LockStmt: {
+            LockStmt* locktablestmt = (LockStmt*)(parsetree);
+            ListCell* arg = NULL;
+            foreach (arg, locktablestmt->relations) {
+                RangeVar* rv = (RangeVar*)lfirst(arg);
+                pgaudit_ddl_table(rv->relname, queryString);
+            }
         } break;
         case T_AlterTableStmt: {
             AlterTableStmt* altertablestmt = (AlterTableStmt*)(parsetree); /* Audit alter table */
@@ -1528,6 +1541,22 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
         case T_CreateClientLogicColumn: {
             pgaudit_ddl_full_encryption_key(queryString);
         } break;
+        case T_PurgeStmt: {
+            PurgeStmt *stmt = (PurgeStmt *)parsetree;
+            if (stmt->purtype == PURGE_TABLE) {
+                pgaudit_ddl_table(stmt->purobj->relname, queryString);
+            } else if (stmt->purtype == PURGE_INDEX) {
+                pgaudit_ddl_index(stmt->purobj->relname, queryString);
+            } else { /* PURGE RECYCLEBIN */
+                char *dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+                pgaudit_ddl_database(dbname, queryString);
+            }
+        } break;
+        case T_TimeCapsuleStmt: {
+            TimeCapsuleStmt *stmt = (TimeCapsuleStmt *)parsetree;
+            pgaudit_ddl_table(stmt->relation->relname, queryString);
+        } break;
+
         default:
             break;
     }

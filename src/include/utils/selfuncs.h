@@ -100,6 +100,13 @@ typedef struct VariableStatData {
     bool isunique;                     /* matches unique index or DISTINCT clause */
     bool enablePossion;                /* indentify we can use possion or not */
     bool acl_ok;                       /* result of ACL check on table or column */
+    PlannerInfo *root;                 /* Planner info the var reference */
+    double numDistinct[2];             /* estimated numdistinct, 0: means unknown, [0]: local, [1]: global */
+    bool isEstimated;                  /* indicate that whether estimation have already been done */
+    PlannerInfo *baseRoot;             /* Planner info of the baseVar */
+    Node *baseVar;                     /* base Var, owner of the statsTuple */
+    RelOptInfo *baseRel;               /* rel of the baseVar */
+    bool needAdjust;                   /* true if need adjust on rel */
 } VariableStatData;
 
 #define ReleaseVariableStats(vardata)                    \
@@ -129,6 +136,7 @@ typedef struct {
 } GroupVarInfo;
 
 extern void set_local_rel_size(PlannerInfo* root, RelOptInfo* rel);
+extern double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo);
 extern double get_multiple_by_distkey(PlannerInfo* root, List* distkey, double rows);
 extern double estimate_agg_num_distinct(PlannerInfo* root, List* group_exprs, Plan* plan, const double* numGroups);
 extern double estimate_agg_num_distinct(PlannerInfo* root, List* group_exprs, Path* path, const double* numGroups);
@@ -168,7 +176,8 @@ extern bool get_restriction_variable(
 extern void get_join_variables(PlannerInfo* root, List* args, SpecialJoinInfo* sjinfo, VariableStatData* vardata1,
     VariableStatData* vardata2, bool* join_is_reversed);
 extern double get_variable_numdistinct(VariableStatData* vardata, bool* isdefault, bool adjust_rows = true,
-    double join_ratio = 1.0, SpecialJoinInfo* sjinfo = NULL, STATS_EST_TYPE eType = STATS_TYPE_GLOBAL);
+    double join_ratio = 1.0, SpecialJoinInfo* sjinfo = NULL, STATS_EST_TYPE eType = STATS_TYPE_GLOBAL, 
+    bool isJoinVar = false);
 extern double mcv_selectivity(VariableStatData* vardata, FmgrInfo* opproc, Datum constval, bool varonleft,
     double* sumcommonp, Oid equaloperator, bool* inmcv, double* lastcommonp = NULL);
 extern double histogram_selectivity(VariableStatData* vardata, FmgrInfo* opproc, Datum constval, bool varonleft,
@@ -224,6 +233,7 @@ extern Selectivity estimate_hash_bucketsize(
     PlannerInfo* root, Node* hashkey, double nbuckets, Path* inner_path, SpecialJoinInfo* sjinfo, double* distinctnum);
 
 extern Datum btcostestimate(PG_FUNCTION_ARGS);
+extern Datum ubtcostestimate(PG_FUNCTION_ARGS);
 extern Datum hashcostestimate(PG_FUNCTION_ARGS);
 extern Datum gistcostestimate(PG_FUNCTION_ARGS);
 extern Datum spgcostestimate(PG_FUNCTION_ARGS);

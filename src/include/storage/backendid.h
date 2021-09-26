@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * backendid.h
- *	  POSTGRES backend id communication definitions
+ *	  openGauss backend id communication definitions
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group

@@ -20,7 +20,7 @@
 #include "storage/latch.h"
 #include "storage/lock/lwlock.h"
 #include "storage/shmem.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "storage/spin.h"
 #include "utils/relcache.h"
 #include "utils/atomic.h"
@@ -39,7 +39,7 @@
  * The definition of buffer state components is below.
  */
 #define BUF_REFCOUNT_ONE 1
-#define BUF_REFCOUNT_MASK ((1U << 18) - 1)
+#define BUF_REFCOUNT_MASK ((1U << 17) - 1)
 #define BUF_USAGECOUNT_MASK 0x003C0000U
 #define BUF_USAGECOUNT_ONE (1U << 18)
 #define BUF_USAGECOUNT_SHIFT 18
@@ -55,6 +55,7 @@
  * Note: TAG_VALID essentially means that there is a buffer hashtable
  * entry associated with the buffer's tag.
  */
+#define BM_IS_META (1U << 17)
 #define BM_LOCKED (1U << 22)            /* buffer header is locked */
 #define BM_DIRTY (1U << 23)             /* data needs writing */
 #define BM_VALID (1U << 24)             /* data is valid */
@@ -75,7 +76,7 @@
  * clock sweeps to find a free buffer, so in practice we don't want the
  * value to be very large.
  */
-#define BM_MAX_USAGE_COUNT 5
+#define BM_MAX_USAGE_COUNT 15
 
 /*
  * Buffer tag identifies which disk block the buffer contains.
@@ -180,6 +181,10 @@ typedef struct BufferDesc {
     /* state of the tag, containing flags, refcount and usagecount */
     pg_atomic_uint32 state;
 
+    /* Cached physical location for segment-page storage, used for xlog */
+    uint8 seg_fileno;
+    BlockNumber seg_blockno;
+
     int buf_id;    /* buffer's index number (from 0) */
 
     ThreadId wait_backend_pid; /* backend PID of pin-count waiter */
@@ -190,6 +195,12 @@ typedef struct BufferDesc {
     /* below fields are used for incremental checkpoint */
     pg_atomic_uint64 rec_lsn;        /* recovery LSN */
     volatile uint64 dirty_queue_loc; /* actual loc of dirty page queue */
+    bool encrypt; /* enable table's level data encryption */
+    
+    volatile uint64 lsn_on_disk;
+#ifdef USE_ASSERT_CHECKING
+    volatile uint64 lsn_dirty;
+#endif
 } BufferDesc;
 
 /*
@@ -220,8 +231,15 @@ typedef union BufferDescPadded {
 } BufferDescPadded;
 
 #define GetBufferDescriptor(id) (&t_thrd.storage_cxt.BufferDescriptors[(id)].bufferdesc)
+#define GetLocalBufferDescriptor(id) (&t_thrd.storage_cxt.LocalBufferDescriptors[(id)])
 #define BufferDescriptorGetBuffer(bdesc) ((bdesc)->buf_id + 1)
 
+#define BufferGetBufferDescriptor(buffer)                          \
+    (AssertMacro(BufferIsValid(buffer)), BufferIsLocal(buffer) ?   \
+        &u_sess->storage_cxt.LocalBufferDescriptors[-(buffer)-1] : \
+        &t_thrd.storage_cxt.BufferDescriptors[(buffer)-1].bufferdesc)
+
+#define BufferDescriptorGetContentLock(bdesc) (((bdesc)->content_lock))
 /*
  * Functions for acquiring/releasing a shared buffer header's spinlock.  Do
  * not apply these to local buffers!
@@ -320,6 +338,7 @@ extern void DropRelFileNodeLocalBuffers(const RelFileNode& rnode, ForkNumber for
 extern void DropRelFileNodeAllLocalBuffers(const RelFileNode& rnode);
 extern void AtEOXact_LocalBuffers(bool isCommit);
 extern void update_wait_lockid(LWLock* lock);
+extern char* PageDataEncryptForBuffer(Page page, BufferDesc *bufdesc, bool is_segbuf = false);
 extern void FlushBuffer(void* buf, SMgrRelation reln, ReadBufferMethod flushmethod = WITH_NORMAL_CACHE);
 extern void LocalBufferFlushAllBuffer();
 #endif /* BUFMGR_INTERNALS_H */

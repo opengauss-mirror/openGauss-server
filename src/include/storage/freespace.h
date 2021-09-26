@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * freespace.h
- *	  POSTGRES free space map for quickly finding free space in relations
+ *	  openGauss free space map for quickly finding free space in relations
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -15,7 +15,7 @@
 #define FREESPACE_H_
 
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/relcache.h"
 #include "utils/partcache.h"
 
@@ -87,7 +87,8 @@ extern void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber he
 
 extern void FreeSpaceMapTruncateRel(Relation rel, BlockNumber nblocks);
 extern void FreeSpaceMapVacuum(Relation rel);
-extern void UpdateFreeSpaceMap(Relation rel, BlockNumber firtsBlkNum, BlockNumber lastBlkNum, Size freespace);
+extern void UpdateFreeSpaceMap(Relation rel, BlockNumber firtsBlkNum, BlockNumber lastBlkNum, Size freespace,
+    bool search = true);
 extern BlockNumber FreeSpaceMapCalTruncBlkNo(BlockNumber relBlkNo);
 extern void XLogBlockTruncateRelFSM(Relation rel, BlockNumber nblocks);
 extern FSMAddress fsm_get_location(BlockNumber heapblk, uint16* slot);

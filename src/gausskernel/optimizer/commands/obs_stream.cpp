@@ -37,7 +37,7 @@
 #include "commands/obs_stream.h"
 #include "libpq/ip.h"
 #include "utils/builtins.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "miscadmin.h"
 
 using namespace GDS;

@@ -1,5 +1,5 @@
 /*
- * oid2name, a PostgreSQL app to map OIDs on the filesystem
+ * oid2name, a openGauss app to map OIDs on the filesystem
  * to table and database names.
  *
  * Originally by

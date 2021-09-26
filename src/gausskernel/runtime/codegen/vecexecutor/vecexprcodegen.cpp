@@ -58,7 +58,8 @@ extern Datum ExtractPlainType(Datum* data);
 extern Datum ExtractFixedType(Datum* data);
 extern Datum ExtractCstringType(Datum* data);
 extern void initVectorFcache(Oid foid, Oid input_collation, FuncExprState* fcache, MemoryContext fcacheCxt);
-extern TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* resultTupleDesc);
+extern TypeFuncClass get_expr_result_type(Node* expr, Oid* resultTypeId, TupleDesc* resultTupleDesc,
+    int4* resultTypeId_orig);
 
 namespace dorado {
 /*
@@ -571,7 +572,8 @@ bool VecExprCodeGen::NumericOpFastJittable(ExprState* state)
     /* if left expr is var, then the right expr is const */
     if (IsA(lestate->expr, Var)) {
         Var* var = (Var*)(lestate->expr);
-        if (var->vartype != NUMERICOID || var->vartypmod == -1)
+        bool isNumericOid = (var->vartype != NUMERICOID || var->vartypmod == -1);
+        if (isNumericOid)
             return false;
 
         /* get the precision of this attrbiute column */
@@ -964,7 +966,10 @@ llvm::Function* VecExprCodeGen::QualCodeGen(List* qual, PlanState* parent, bool 
     DEFINE_CGVAR_INT64(Datum_0, 0);
     DEFINE_CGVAR_INT64(Datum_1, 1);
     DEFINE_CGVAR_INT64(m_BatchMaxSize, BatchMaxSize);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
+    DEFINE_CG_PTRTYPE(VecBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(MemContextPtrType, "struct.MemoryContextData");
 
     llvm::BasicBlock* bb_next = NULL;
     llvm::BasicBlock** bb_list = NULL;
@@ -1019,20 +1024,20 @@ llvm::Function* VecExprCodeGen::QualCodeGen(List* qual, PlanState* parent, bool 
     Vals[0] = Datum_0;
     Vals[1] = ecxt_tupmem_offset;
     curr_Context = builder.CreateInBoundsGEP(econtext, Vals);
-    curr_Context = builder.CreateAlignedLoad(curr_Context, 8, "per_tuple_memory");
+    curr_Context = builder.CreateLoad(MemContextPtrType, curr_Context, "per_tuple_memory");
     cg_oldContext = MemCxtSwitToCodeGen(&builder, curr_Context);
 
     /*
      * Start code generation on the entry of basic block.
-     * With CreateAlignedLoad we could get the element of the structure
+     * With CreateLoad we could get the element of the structure
      * according to the offset.
      */
     Vals[1] = ecxt_scanbatch_offset;
     ecxt_batch = builder.CreateInBoundsGEP(econtext, Vals);
-    ecxt_batch = builder.CreateAlignedLoad(ecxt_batch, 8, "scanbatch");
+    ecxt_batch = builder.CreateLoad(VecBatchPtrType, ecxt_batch, "scanbatch");
     Vals[1] = m_seloffset;
     pSelection = builder.CreateInBoundsGEP(ecxt_batch, Vals);
-    pSelection = builder.CreateAlignedLoad(pSelection, 8, "m_sel");
+    pSelection = builder.CreateLoad(int8PtrType, pSelection, "m_sel");
 
     /*
      * Reset selection vector to be fully loaded
@@ -1044,7 +1049,7 @@ llvm::Function* VecExprCodeGen::QualCodeGen(List* qual, PlanState* parent, bool 
 
     Vals[1] = int32_0;
     Val = builder.CreateInBoundsGEP(ecxt_batch, Vals);
-    nValues = builder.CreateAlignedLoad(Val, 4, "m_rows");
+    nValues = builder.CreateLoad(int32Type, Val, "m_rows");
 
     Val = builder.CreateICmpSGT(nValues, int32_0);
     builder.CreateCondBr(Val, for_body, ret_bb);
@@ -1132,7 +1137,7 @@ llvm::Function* VecExprCodeGen::QualCodeGen(List* qual, PlanState* parent, bool 
     /* restore the result to m_sel[i], fetch pSelection[Phi_idx] */
     pVal = builder.CreateInBoundsGEP(pSelection, Phi_idx);
     llvm::Value* res_i8 = builder.CreateZExt(result, int8Type);
-    builder.CreateAlignedStore(res_i8, pVal, 1);
+    builder.CreateStore(res_i8, pVal);
 
     llvm::Value* bool_res = builder.CreateOr(result, Phi_res);
     /* make sure Phi_idx is always less than nValues */
@@ -1162,7 +1167,7 @@ llvm::Function* VecExprCodeGen::QualCodeGen(List* qual, PlanState* parent, bool 
     Phi_idx2->addIncoming(idx_next2, for2_body);
 
     pVal = builder.CreateInBoundsGEP(pSelection, Phi_idx2);
-    builder.CreateAlignedStore(int8_0, pVal, 1);
+    builder.CreateStore(int8_0, pVal);
 
     v1 = builder.CreateICmpEQ(idx_next2, m_BatchMaxSize);
     builder.CreateCondBr(v1, ret_bb, for2_body);
@@ -1218,6 +1223,7 @@ llvm::Value* VecExprCodeGen::ScalarArrayCodeGen(ExprCodeGenArgs* args)
 
     /* data type and consts needed by LLVM */
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
@@ -1273,7 +1279,7 @@ llvm::Value* VecExprCodeGen::ScalarArrayCodeGen(ExprCodeGenArgs* args)
     lhs_value = CodeGen(&largs);
 
     /* if the scalar var is NULL, return NULL, no point in iterating the loop */
-    tmpNull = inner_builder.CreateAlignedLoad(isNull, 1, "tmpNull");
+    tmpNull = inner_builder.CreateLoad(int8Type, isNull, "tmpNull");
 
     cmp = inner_builder.CreateICmpEQ(tmpNull, null_true);
     inner_builder.CreateCondBr(cmp, if_then, if_else);
@@ -1558,7 +1564,7 @@ llvm::Value* VecExprCodeGen::ScalarArrayCodeGen(ExprCodeGenArgs* args)
          * is NULL, return NULL.
          */
         if (resultNull)
-            inner_builder.CreateAlignedStore(null_true, isNull, 1);
+            inner_builder.CreateStore(null_true, isNull);
         inner_builder.CreateBr(ret_bb);
 
         /*
@@ -1604,6 +1610,7 @@ llvm::Value* VecExprCodeGen::BooleanTestCodeGen(ExprCodeGenArgs* args)
     GsCodeGen::LlvmBuilder inner_builder(context);
 
     /* define data type needed by LLVM */
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
@@ -1654,8 +1661,8 @@ llvm::Value* VecExprCodeGen::BooleanTestCodeGen(ExprCodeGenArgs* args)
     lhs_value = CodeGen(&largs);
 
     lhs_flag = llvmargs[1];
-    lhs_flag = inner_builder.CreateAlignedLoad(lhs_flag, 1, "lflag");
-    inner_builder.CreateAlignedStore(null_false, isNull, 1);
+    lhs_flag = inner_builder.CreateLoad(int8Type, lhs_flag, "lflag");
+    inner_builder.CreateStore(null_false, isNull);
     cmp = inner_builder.CreateICmpEQ(lhs_flag, null_true);
 
     if (btestexpr->booltesttype == IS_UNKNOWN || btestexpr->booltesttype == IS_NOT_UNKNOWN) {
@@ -1754,6 +1761,7 @@ llvm::Value* VecExprCodeGen::NullTestCodeGen(ExprCodeGenArgs* args)
     GsCodeGen::LlvmBuilder inner_builder(context);
 
     /* define data type needed by LLVM */
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
@@ -1797,8 +1805,8 @@ llvm::Value* VecExprCodeGen::NullTestCodeGen(ExprCodeGenArgs* args)
     (void)CodeGen(&largs);
 
     arg_flag = llvmargs[1];
-    arg_flag = inner_builder.CreateAlignedLoad(arg_flag, 1, "argflag");
-    inner_builder.CreateAlignedStore(null_false, isNull, 1);
+    arg_flag = inner_builder.CreateLoad(int8Type, arg_flag, "argflag");
+    inner_builder.CreateStore(null_false, isNull);
 
     if (ntestexpr->nulltesttype == IS_NULL) {
         res0 = inner_builder.CreateZExt(arg_flag, int64Type);
@@ -1826,6 +1834,7 @@ llvm::Value* VecExprCodeGen::CaseCodeGen(ExprCodeGenArgs* args)
 
     /* define data type and variables needed by LLVM */
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
@@ -1906,7 +1915,7 @@ llvm::Value* VecExprCodeGen::CaseCodeGen(ExprCodeGenArgs* args)
         case_expr_arg.exprstate = case_arg;
         case_arg_value = CodeGen(&case_expr_arg);
         case_arg_null = llvmargs[1];
-        case_arg_null = inner_builder.CreateAlignedLoad(case_arg_null, 1, "case_arg_flag");
+        case_arg_null = inner_builder.CreateLoad(int8Type, case_arg_null, "case_arg_flag");
         if (case_arg_value == NULL)
             return NULL;
     }
@@ -1985,7 +1994,7 @@ llvm::Value* VecExprCodeGen::CaseCodeGen(ExprCodeGenArgs* args)
                 case_when_arg.exprstate = case_arg_expr;
                 case_value = CodeGen(&case_when_arg);
                 case_null = llvmargs[1];
-                case_null = inner_builder.CreateAlignedLoad(case_null, 1, "case_flag");
+                case_null = inner_builder.CreateLoad(int8Type, case_null, "case_flag");
                 tmp = inner_builder.CreateOr(case_arg_null, case_null);
                 tmp = inner_builder.CreateTrunc(tmp, int1Type);
                 inner_builder.CreateCondBr(tmp, if_else[clause_index], if_then[clause_index]);
@@ -2136,7 +2145,7 @@ llvm::Value* VecExprCodeGen::CaseCodeGen(ExprCodeGenArgs* args)
     clause_bb[clause_index] = next_bb;
     if (case_default == NULL) {
         clause_result[clause_index] = Datum_0;
-        inner_builder.CreateAlignedStore(null_true, isNull, 1);
+        inner_builder.CreateStore(null_true, isNull);
     } else {
         case_default_arg.exprstate = case_default;
         clause_result[clause_index] = CodeGen(&case_default_arg);
@@ -2214,7 +2223,7 @@ llvm::Value* VecExprCodeGen::AndOrLogicCodeGen(ExprCodeGenArgs* args)
     bargs.builder = &inner_builder;
     bargs.llvm_args = &llvmargs[0];
     AnyNull = inner_builder.CreateAlloca(int8Type);
-    inner_builder.CreateAlignedStore(null_false, AnyNull, 1);
+    inner_builder.CreateStore(null_false, AnyNull);
 
     /* palloc BasicBlock : we should palloc one more for return logic */
     int bool_nargs = list_length(boolargs);
@@ -2244,13 +2253,13 @@ llvm::Value* VecExprCodeGen::AndOrLogicCodeGen(ExprCodeGenArgs* args)
                 bargs.exprstate = cexpr;
                 cvalue = CodeGen(&bargs);
                 cflag = llvmargs[1];
-                cflag = inner_builder.CreateAlignedLoad(cflag, 1, "cflag");
+                cflag = inner_builder.CreateLoad(int8Type, cflag, "cflag");
                 tmp = inner_builder.CreateTrunc(cflag, int1Type);
                 inner_builder.CreateCondBr(tmp, if_then[clause_index], if_else[clause_index]);
 
                 /* if we have a null rsult, remember it */
                 inner_builder.SetInsertPoint(if_then[clause_index]);
-                inner_builder.CreateAlignedStore(null_true, AnyNull, 1);
+                inner_builder.CreateStore(null_true, AnyNull);
                 inner_builder.CreateBr(next_bb);
 
                 /* if we have a non-null false result, then return it */
@@ -2260,7 +2269,7 @@ llvm::Value* VecExprCodeGen::AndOrLogicCodeGen(ExprCodeGenArgs* args)
                 inner_builder.CreateCondBr(cmp, next_bb, clause_bb[clause_index]);
                 inner_builder.SetInsertPoint(clause_bb[clause_index]);
                 clause_result[clause_index] = cvalue;
-                inner_builder.CreateAlignedStore(null_false, isNull, 1);
+                inner_builder.CreateStore(null_false, isNull);
                 inner_builder.CreateBr(ret_bb);
                 clause_index++;
                 current_bb = next_bb;
@@ -2272,10 +2281,10 @@ llvm::Value* VecExprCodeGen::AndOrLogicCodeGen(ExprCodeGenArgs* args)
              */
             inner_builder.SetInsertPoint(next_bb);
             clause_bb[clause_index] = next_bb;
-            AnyNull = inner_builder.CreateAlignedLoad(AnyNull, 1);
+            AnyNull = inner_builder.CreateLoad(int8Type, AnyNull);
             cmp = inner_builder.CreateTrunc(AnyNull, int1Type);
             clause_result[clause_index] = inner_builder.CreateSelect(cmp, Datum_0, Datum_1);
-            inner_builder.CreateAlignedStore(AnyNull, isNull, 1);
+            inner_builder.CreateStore(AnyNull, isNull);
             inner_builder.CreateBr(ret_bb);
             inner_builder.SetInsertPoint(ret_bb);
             llvm::PHINode* Phi_ret = inner_builder.CreatePHI(int64Type, clause_index + 1);
@@ -2303,13 +2312,13 @@ llvm::Value* VecExprCodeGen::AndOrLogicCodeGen(ExprCodeGenArgs* args)
                 bargs.exprstate = cexpr;
                 cvalue = CodeGen(&bargs);
                 cflag = llvmargs[1];
-                cflag = inner_builder.CreateAlignedLoad(cflag, 1, "cflag");
+                cflag = inner_builder.CreateLoad(int8Type, cflag, "cflag");
                 tmp = inner_builder.CreateTrunc(cflag, int1Type);
                 inner_builder.CreateCondBr(tmp, if_then[clause_index], if_else[clause_index]);
 
                 /* remember we got a null here */
                 inner_builder.SetInsertPoint(if_then[clause_index]);
-                inner_builder.CreateAlignedStore(null_true, AnyNull, 1);
+                inner_builder.CreateStore(null_true, AnyNull);
                 inner_builder.CreateBr(next_bb);
 
                 /* if we have a non-null true result, then return it */
@@ -2319,7 +2328,7 @@ llvm::Value* VecExprCodeGen::AndOrLogicCodeGen(ExprCodeGenArgs* args)
                 inner_builder.CreateCondBr(cmp, clause_bb[clause_index], next_bb);
                 inner_builder.SetInsertPoint(clause_bb[clause_index]);
                 clause_result[clause_index] = cvalue;
-                inner_builder.CreateAlignedStore(null_false, isNull, 1);
+                inner_builder.CreateStore(null_false, isNull);
                 inner_builder.CreateBr(ret_bb);
                 clause_index++;
                 current_bb = next_bb;
@@ -2329,8 +2338,8 @@ llvm::Value* VecExprCodeGen::AndOrLogicCodeGen(ExprCodeGenArgs* args)
             inner_builder.SetInsertPoint(next_bb);
             clause_bb[clause_index] = next_bb;
             clause_result[clause_index] = Datum_0;
-            AnyNull = inner_builder.CreateAlignedLoad(AnyNull, 1);
-            inner_builder.CreateAlignedStore(AnyNull, isNull, 1);
+            AnyNull = inner_builder.CreateLoad(int8Type, AnyNull);
+            inner_builder.CreateStore(AnyNull, isNull);
             inner_builder.CreateBr(ret_bb);
             inner_builder.SetInsertPoint(ret_bb);
             llvm::PHINode* Phi_ret = inner_builder.CreatePHI(int64Type, clause_index + 1);
@@ -2368,6 +2377,7 @@ llvm::Value* VecExprCodeGen::NotCodeGen(ExprCodeGenArgs* args)
 
     /* Define the datatype and variable that needed */
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
@@ -2407,7 +2417,7 @@ llvm::Value* VecExprCodeGen::NotCodeGen(ExprCodeGenArgs* args)
     DEFINE_BLOCK(ret_bb, jitted_vnot);
 
     inner_builder.SetInsertPoint(entry);
-    vflag = inner_builder.CreateAlignedLoad(vflag, 1, "not_flag");
+    vflag = inner_builder.CreateLoad(int8Type, vflag, "not_flag");
     vflag = inner_builder.CreateTrunc(vflag, int1Type);
     inner_builder.CreateCondBr(vflag, be_null, be_not_null);
 
@@ -2417,7 +2427,7 @@ llvm::Value* VecExprCodeGen::NotCodeGen(ExprCodeGenArgs* args)
      */
     inner_builder.SetInsertPoint(be_null);
     res1 = expr_value;
-    inner_builder.CreateAlignedStore(null_true, isNull, 1);
+    inner_builder.CreateStore(null_true, isNull);
     inner_builder.CreateBr(ret_bb);
 
     /*
@@ -2428,7 +2438,7 @@ llvm::Value* VecExprCodeGen::NotCodeGen(ExprCodeGenArgs* args)
     cmp = inner_builder.CreateICmpNE(expr_value, Datum_0);
     res2 = inner_builder.CreateNot(cmp);
     res2 = inner_builder.CreateZExt(res2, int64Type);
-    inner_builder.CreateAlignedStore(null_false, isNull, 1);
+    inner_builder.CreateStore(null_false, isNull);
     inner_builder.CreateBr(ret_bb);
 
     /* Get the final result */
@@ -2475,6 +2485,7 @@ llvm::Value* VecExprCodeGen::NullIfCodeGen(ExprCodeGenArgs* args)
 
     /* Define the datatype and variable that needed */
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
@@ -2515,7 +2526,7 @@ llvm::Value* VecExprCodeGen::NullIfCodeGen(ExprCodeGenArgs* args)
     largs.llvm_args = &llvmargs[0];
     inargs[0] = CodeGen(&largs);
     inargnulls[0] = llvmargs[1];
-    inargnulls[0] = inner_builder.CreateAlignedLoad(inargnulls[0], 1, "lflag");
+    inargnulls[0] = inner_builder.CreateLoad(int8Type, inargnulls[0], "lflag");
 
     /* Prepare the right operand value */
     ExprCodeGenArgs rargs;
@@ -2525,13 +2536,13 @@ llvm::Value* VecExprCodeGen::NullIfCodeGen(ExprCodeGenArgs* args)
     rargs.llvm_args = &llvmargs[0];
     inargs[1] = CodeGen(&rargs);
     inargnulls[1] = llvmargs[1];
-    inargnulls[1] = inner_builder.CreateAlignedLoad(inargnulls[1], 1, "rflag");
+    inargnulls[1] = inner_builder.CreateLoad(int8Type, inargnulls[1], "rflag");
 
     cmp = inner_builder.CreateOr(inargnulls[0], inargnulls[1]);
     cmp = inner_builder.CreateTrunc(cmp, int1Type);
     inner_builder.CreateCondBr(cmp, be_null, bnot_null);
     inner_builder.SetInsertPoint(bnot_null);
-    inner_builder.CreateAlignedStore(null_false, isNull, 1);
+    inner_builder.CreateStore(null_false, isNull);
 
     /*
      * For NullIfExpr, there is no need to consider strict attribute.
@@ -2657,7 +2668,7 @@ llvm::Value* VecExprCodeGen::NullIfCodeGen(ExprCodeGenArgs* args)
 
     /* when expr in nullif is equal. */
     inner_builder.SetInsertPoint(if_then);
-    inner_builder.CreateAlignedStore(null_true, isNull, 1);
+    inner_builder.CreateStore(null_true, isNull);
     ret1 = Datum_0;
     inner_builder.CreateBr(ret_bb);
 
@@ -2666,7 +2677,7 @@ llvm::Value* VecExprCodeGen::NullIfCodeGen(ExprCodeGenArgs* args)
     inner_builder.CreateBr(be_null);
 
     inner_builder.SetInsertPoint(be_null);
-    inner_builder.CreateAlignedStore(inargnulls[0], isNull, 1);
+    inner_builder.CreateStore(inargnulls[0], isNull);
     ret2 = inargs[0];
     inner_builder.CreateBr(ret_bb);
 
@@ -2708,6 +2719,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
 
     /* Define the datatype and variable that needed */
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
@@ -2789,7 +2801,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
         largs.llvm_args = &llvmargs[0];
         inargs[0] = CodeGen(&largs);
         inargnulls[0] = llvmargs[1];
-        inargnulls[0] = inner_builder.CreateAlignedLoad(inargnulls[0], 1, "lflag");
+        inargnulls[0] = inner_builder.CreateLoad(int8Type, inargnulls[0], "lflag");
         cmpor = inargnulls[0];
         if (!inargs[0]) {
             ereport(ERROR,
@@ -2807,7 +2819,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
         rargs.llvm_args = &llvmargs[0];
         inargs[1] = CodeGen(&rargs);
         inargnulls[1] = llvmargs[1];
-        inargnulls[1] = inner_builder.CreateAlignedLoad(inargnulls[1], 1, "rflag");
+        inargnulls[1] = inner_builder.CreateLoad(int8Type, inargnulls[1], "rflag");
         cmpor = inner_builder.CreateOr(cmpor, inargnulls[1]);
         if (!inargs[1]) {
             ereport(ERROR,
@@ -2825,7 +2837,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
         targs.llvm_args = &llvmargs[0];
         inargs[2] = CodeGen(&targs);
         inargnulls[2] = llvmargs[1];
-        inargnulls[2] = inner_builder.CreateAlignedLoad(inargnulls[2], 1, "tflag");
+        inargnulls[2] = inner_builder.CreateLoad(int8Type, inargnulls[2], "tflag");
         cmpor = inner_builder.CreateOr(cmpor, inargnulls[2]);
         if (!inargs[2]) {
             ereport(ERROR,
@@ -2864,12 +2876,12 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  */
                 if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
                     res1 = inner_builder.CreateCall(func_substr, {inargs[0], inargs[1], inargs[2], isNull});
-                    llvm::Value* res_flag = inner_builder.CreateAlignedLoad(isNull, 1, "resflag");
+                    llvm::Value* res_flag = inner_builder.CreateLoad(int8Type, isNull, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
                     inner_builder.CreateCondBr(cmp, be_null, ret_bb);
                 } else {
                     res1 = inner_builder.CreateCall(func_substr, {inargs[0], inargs[1], inargs[2]});
-                    inner_builder.CreateAlignedStore(null_false, isNull, 1);
+                    inner_builder.CreateStore(null_false, isNull);
                     inner_builder.CreateBr(ret_bb);
                 }
             } break;
@@ -2887,12 +2899,12 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  */
                 if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
                     res1 = inner_builder.CreateCall(func_rtrim1, {inargs[0], isNull});
-                    llvm::Value* res_flag = inner_builder.CreateAlignedLoad(isNull, 1, "resflag");
+                    llvm::Value* res_flag = inner_builder.CreateLoad(int8Type, isNull, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
                     inner_builder.CreateCondBr(cmp, be_null, ret_bb);
                 } else {
                     res1 = inner_builder.CreateCall(func_rtrim1, inargs[0]);
-                    inner_builder.CreateAlignedStore(null_false, isNull, 1);
+                    inner_builder.CreateStore(null_false, isNull);
                     inner_builder.CreateBr(ret_bb);
                 }
             } break;
@@ -2909,12 +2921,12 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                  */
                 if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
                     res1 = inner_builder.CreateCall(func_btrim1, {inargs[0], isNull});
-                    llvm::Value* res_flag = inner_builder.CreateAlignedLoad(isNull, 1, "resflag");
+                    llvm::Value* res_flag = inner_builder.CreateLoad(int8Type, isNull, "resflag");
                     llvm::Value* cmp = inner_builder.CreateICmpEQ(res_flag, null_true, "check");
                     inner_builder.CreateCondBr(cmp, be_null, ret_bb);
                 } else {
                     res1 = inner_builder.CreateCall(func_btrim1, inargs[0]);
-                    inner_builder.CreateAlignedStore(null_false, isNull, 1);
+                    inner_builder.CreateStore(null_false, isNull);
                     inner_builder.CreateBr(ret_bb);
                 }
             } break;
@@ -2926,7 +2938,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
                 }
 
                 res1 = inner_builder.CreateCall(func_bpcahrlen, inargs[0]);
-                inner_builder.CreateAlignedStore(null_false, isNull, 1);
+                inner_builder.CreateStore(null_false, isNull);
                 inner_builder.CreateBr(ret_bb);
             } break;
             default: {
@@ -2942,7 +2954,7 @@ llvm::Value* VecExprCodeGen::FuncCodeGen(ExprCodeGenArgs* args)
         /* If one of the iput argument is NULL, return NULL */
         inner_builder.SetInsertPoint(be_null);
         res2 = Datum_0;
-        inner_builder.CreateAlignedStore(null_true, isNull, 1);
+        inner_builder.CreateStore(null_true, isNull);
         inner_builder.CreateBr(ret_bb);
 
         inner_builder.SetInsertPoint(ret_bb);
@@ -2996,6 +3008,7 @@ llvm::Value* VecExprCodeGen::OpCodeGen(ExprCodeGenArgs* args)
 
     /* Define the datatype and variable that needed */
     DEFINE_CG_TYPE(int1Type, BITOID);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
@@ -3025,7 +3038,7 @@ llvm::Value* VecExprCodeGen::OpCodeGen(ExprCodeGenArgs* args)
     largs.llvm_args = &llvmargs[0];
     inargs[0] = CodeGen(&largs);
     inargnulls[0] = llvmargs[1];
-    inargnulls[0] = inner_builder.CreateAlignedLoad(inargnulls[0], 1, "lflag");
+    inargnulls[0] = inner_builder.CreateLoad(int8Type, inargnulls[0], "lflag");
 
     /* Prepare the second operand value */
     ExprCodeGenArgs rargs;
@@ -3035,7 +3048,7 @@ llvm::Value* VecExprCodeGen::OpCodeGen(ExprCodeGenArgs* args)
     rargs.llvm_args = &llvmargs[0];
     inargs[1] = CodeGen(&rargs);
     inargnulls[1] = llvmargs[1];
-    inargnulls[1] = inner_builder.CreateAlignedLoad(inargnulls[1], 1, "rflag");
+    inargnulls[1] = inner_builder.CreateLoad(int8Type, inargnulls[1], "rflag");
     if (inargs[0] == NULL || inargs[1] == NULL)
         return NULL;
 
@@ -3802,12 +3815,12 @@ llvm::Value* VecExprCodeGen::OpCodeGen(ExprCodeGenArgs* args)
                 res1 = EvalFuncResultCodeGen(&inner_builder, fcache, isNull, &lfcinfo);
             } break;
         }
-        inner_builder.CreateAlignedStore(null_false, isNull, 1);
+        inner_builder.CreateStore(null_false, isNull);
         inner_builder.CreateBr(ret_bb);
 
         inner_builder.SetInsertPoint(be_null);
         res2 = Datum_0;
-        inner_builder.CreateAlignedStore(null_true, isNull, 1);
+        inner_builder.CreateStore(null_true, isNull);
         inner_builder.CreateBr(ret_bb);
         inner_builder.SetInsertPoint(ret_bb);
         llvm::PHINode* Phi_ret = inner_builder.CreatePHI(int64Type, 2);
@@ -4017,9 +4030,13 @@ llvm::Value* VecExprCodeGen::VarCodeGen(ExprCodeGenArgs* args)
     llvm::Value* loop_index = NULL;
 
     /* Define the datatype and variables that needed */
+    DEFINE_CG_TYPE(int8Type, BOOLOID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
+    DEFINE_CG_PTRTYPE(VecBatchPtrType, "class.VectorBatch");
+    DEFINE_CG_PTRTYPE(ScalarVectorPtrType, "class.ScalarVector");
 
     DEFINE_CGVAR_INT8(null_false, 0);
     DEFINE_CGVAR_INT8(null_true, 1);
@@ -4082,12 +4099,12 @@ llvm::Value* VecExprCodeGen::VarCodeGen(ExprCodeGenArgs* args)
         argVals[1] = ecxt_scanbatch_offset;
     }
     ecxt_batch = inner_builder.CreateInBoundsGEP(econtext, argVals);
-    ecxt_batch = inner_builder.CreateAlignedLoad(ecxt_batch, 8, "batch");
+    ecxt_batch = inner_builder.CreateLoad(VecBatchPtrType, ecxt_batch, "batch");
 
     /* get batch->m_arr from VectorBatch according to varattno */
     argVals[1] = m_arroffset;
     argVector = inner_builder.CreateInBoundsGEP(ecxt_batch, argVals);
-    argVector = inner_builder.CreateAlignedLoad(argVector, 8, "m_arr");
+    argVector = inner_builder.CreateLoad(ScalarVectorPtrType, argVector, "m_arr");
 
     /* get m_arr[var->varattno-1].m_flag */
     DEFINE_CGVAR_INT64(m_attno, var->varattno - 1);
@@ -4106,12 +4123,12 @@ llvm::Value* VecExprCodeGen::VarCodeGen(ExprCodeGenArgs* args)
         argVals[0] = m_attno;
         argVals[1] = m_flagoffset;
         argFlag = inner_builder.CreateInBoundsGEP(argVector, argVals);
-        argFlag = inner_builder.CreateAlignedLoad(argFlag, 1, "m_flag");
+        argFlag = inner_builder.CreateLoad(int8PtrType, argFlag, "m_flag");
 
         /* get m_arr[var->varattno-1].m_flag[loop_index] */
         inner_builder.SetInsertPoint(entry);
         llvm::Value* tmpNull = inner_builder.CreateInBoundsGEP(argFlag, loop_index);
-        tmpNull = inner_builder.CreateAlignedLoad(tmpNull, 1);
+        tmpNull = inner_builder.CreateLoad(int8Type, tmpNull);
 
         /*
          * As we do in c-code, we should use (flag)&V_NULL_MASK to get the actual
@@ -4126,18 +4143,18 @@ llvm::Value* VecExprCodeGen::VarCodeGen(ExprCodeGenArgs* args)
         inner_builder.SetInsertPoint(if_then);
         argVals[1] = m_valsoffset;
         argVector = inner_builder.CreateInBoundsGEP(argVector, argVals);
-        argVector = inner_builder.CreateAlignedLoad(argVector, 8, "m_vals");
+        argVector = inner_builder.CreateLoad(int64PtrType, argVector, "m_vals");
 
         /* get m_arr[var->varattno-1].m_vals[loop_index] */
         argVector = inner_builder.CreateInBoundsGEP(argVector, loop_index);
-        val1 = inner_builder.CreateAlignedLoad(argVector, 8);
-        inner_builder.CreateAlignedStore(null_false, isNull, 1);
+        val1 = inner_builder.CreateLoad(int64Type, argVector);
+        inner_builder.CreateStore(null_false, isNull);
         inner_builder.CreateBr(if_end);
 
         /* if null, return (Datum)0 */
         inner_builder.SetInsertPoint(if_else);
         val2 = val_0;
-        inner_builder.CreateAlignedStore(null_true, isNull, 1);
+        inner_builder.CreateStore(null_true, isNull);
         inner_builder.CreateBr(if_end);
 
         inner_builder.SetInsertPoint(if_end);
@@ -4149,10 +4166,10 @@ llvm::Value* VecExprCodeGen::VarCodeGen(ExprCodeGenArgs* args)
         argVals[0] = m_attno;
         argVals[1] = m_valsoffset;
         argVector = inner_builder.CreateInBoundsGEP(argVector, argVals);
-        argVector = inner_builder.CreateAlignedLoad(argVector, 8, "m_vals");
+        argVector = inner_builder.CreateLoad(int64PtrType, argVector, "m_vals");
         argVector = inner_builder.CreateInBoundsGEP(argVector, loop_index);
-        llvm::Value* res = inner_builder.CreateAlignedLoad(argVector, 8);
-        inner_builder.CreateAlignedStore(null_false, isNull, 1);
+        llvm::Value* res = inner_builder.CreateLoad(int64Type, argVector);
+        inner_builder.CreateStore(null_false, isNull);
         inner_builder.CreateRet(res);
     }
 
@@ -4190,7 +4207,7 @@ llvm::Value* VecExprCodeGen::ConstCodeGen(ExprCodeGenArgs* args)
     /* restore isNull flag */
     Const* cst = (Const*)((args->exprstate)->expr);
     tmpNull = llvmCodeGen->getIntConstant(CHAROID, cst->constisnull);
-    inner_builder.CreateAlignedStore(tmpNull, isNull, 1);
+    inner_builder.CreateStore(tmpNull, isNull);
 
     ScalarValue val = ScalarVector::DatumToScalar(cst->constvalue, cst->consttype, cst->constisnull);
     result = llvmCodeGen->getIntConstant(INT8OID, val);
@@ -4274,8 +4291,12 @@ llvm::Function* VecExprCodeGen::TargetListCodeGen(List* targetlist, PlanState* p
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_TYPE(boolType, BOOLOID);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
+    DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(VectorBatchPtrType, "class.VectorBatch");
     DEFINE_CG_PTRTYPE(ExprContextPtrType, "struct.ExprContext");
+    DEFINE_CG_PTRTYPE(ScalarVectorPtrType, "class.ScalarVector");
+    DEFINE_CG_PTRTYPE(MemContextPtrType, "struct.MemoryContextData");
 
     /* Get the offset of element in data struct */
     DEFINE_CGVAR_INT8(int8_1, 1);
@@ -4333,16 +4354,16 @@ llvm::Function* VecExprCodeGen::TargetListCodeGen(List* targetlist, PlanState* p
     Vals[0] = Datum_0;
     Vals[1] = int32_0;
     val = builder.CreateInBoundsGEP(ecxt_batch, Vals);
-    nsize = builder.CreateAlignedLoad(val, 4, "m_rows");
+    nsize = builder.CreateLoad(int32Type, val, "m_rows");
 
     /* Restore number of rows to pBatch->m_rows */
     llvm::Value* mrows = builder.CreateInBoundsGEP(pBatch, Vals);
-    builder.CreateAlignedStore(nsize, mrows, 4);
+    builder.CreateStore(nsize, mrows);
 
     /* Run in short-lived per-tuple context while computing expressions */
     Vals[1] = ecxt_tupmem_offset;
     curr_Context = builder.CreateInBoundsGEP(econtext, Vals);
-    curr_Context = builder.CreateAlignedLoad(curr_Context, 8, "per_tuple_memory");
+    curr_Context = builder.CreateLoad(MemContextPtrType, curr_Context, "per_tuple_memory");
     cg_oldContext = MemCxtSwitToCodeGen(&builder, curr_Context);
 
     /* Define the Basic Block structure */
@@ -4391,7 +4412,7 @@ llvm::Function* VecExprCodeGen::TargetListCodeGen(List* targetlist, PlanState* p
     /* First get the pointer to pBatch->m_arr */
     Vals[1] = m_arroffset;
     argArr = builder.CreateInBoundsGEP(pBatch, Vals);
-    argArr = builder.CreateAlignedLoad(argArr, 8, "m_arr");
+    argArr = builder.CreateLoad(ScalarVectorPtrType, argArr, "m_arr");
 
     foreach (cell, targetlist) {
         GenericExprState* gstate = (GenericExprState*)lfirst(cell);
@@ -4417,20 +4438,20 @@ llvm::Function* VecExprCodeGen::TargetListCodeGen(List* targetlist, PlanState* p
         Vals[0] = colind;
         Vals[1] = m_valsoffset;
         argVec = builder.CreateInBoundsGEP(argArr, Vals);
-        argVec = builder.CreateAlignedLoad(argVec, 8, "m_vals");
+        argVec = builder.CreateLoad(int64PtrType, argVec, "m_vals");
 
         argVal = builder.CreateInBoundsGEP(argVec, loop_index);
-        builder.CreateAlignedStore(res, argVal, 8);
+        builder.CreateStore(res, argVal);
 
         /* Restore the flag to pBatch->m_arr[resind]->m_flag[Phi_idx] */
         Vals[1] = m_flagoffset;
         argFlag = builder.CreateInBoundsGEP(argArr, Vals);
-        argFlag = builder.CreateAlignedLoad(argFlag, 1, "m_flag");
+        argFlag = builder.CreateLoad(int8PtrType, argFlag, "m_flag");
 
         llvm::Value* tmpFlag = builder.CreateInBoundsGEP(argFlag, loop_index);
         llvm::Value* tmpNull = isNull;
-        tmpNull = builder.CreateAlignedLoad(tmpNull, 1);
-        builder.CreateAlignedStore(tmpNull, tmpFlag, 1);
+        tmpNull = builder.CreateLoad(int8Type, tmpNull);
+        builder.CreateStore(tmpNull, tmpFlag);
 
         /*
          * Since in LLVM we deal with one block at a time, we should check
@@ -4466,7 +4487,7 @@ llvm::Function* VecExprCodeGen::TargetListCodeGen(List* targetlist, PlanState* p
         Vals[0] = colind;
         Vals[1] = int32_0;
         val1 = builder.CreateInBoundsGEP(argArr, Vals);
-        builder.CreateAlignedStore(nsize, val1, 4);
+        builder.CreateStore(nsize, val1);
     }
     builder.CreateBr(ret_bb);
     builder.SetInsertPoint(ret_bb);
@@ -4515,7 +4536,7 @@ llvm::Value* VecExprCodeGen::WrapChooExtFunCodeGen(GsCodeGen::LlvmBuilder* ptrbu
 
     /* first convert the datum to *datum */
     llvm::Value* intmp = ptrbuilder->CreateAlloca(int64Type);
-    ptrbuilder->CreateAlignedStore(argval, intmp, 8);
+    ptrbuilder->CreateStore(argval, intmp);
 
     if (COL_IS_ENCODE(argtyp)) {
         switch (argtyp) {
@@ -4932,12 +4953,12 @@ llvm::Value* VecExprCodeGen::EvalFuncResultCodeGen(
         llvm::Value* lhs_value = lfcinfo->args[0];
         llvm::Value* arg1 = ptrbuilder->CreateInBoundsGEP(inargs, Datum_0);
         lhs_value = WrapChooExtFunCodeGen(ptrbuilder, argtyp[0], lhs_value);
-        ptrbuilder->CreateAlignedStore(lhs_value, arg1, 8);
+        ptrbuilder->CreateStore(lhs_value, arg1);
 
         if (!is_func_strict) {
             llvm::Value* lhs_flag = lfcinfo->argnulls[0];
             llvm::Value* argflag1 = ptrbuilder->CreateInBoundsGEP(inargflags, Datum_0);
-            ptrbuilder->CreateAlignedStore(lhs_flag, argflag1, 1);
+            ptrbuilder->CreateStore(lhs_flag, argflag1);
         }
     }
 
@@ -4945,12 +4966,12 @@ llvm::Value* VecExprCodeGen::EvalFuncResultCodeGen(
         llvm::Value* rhs_value = lfcinfo->args[1];
         llvm::Value* arg2 = ptrbuilder->CreateInBoundsGEP(inargs, Datum_1);
         rhs_value = WrapChooExtFunCodeGen(ptrbuilder, argtyp[1], rhs_value);
-        ptrbuilder->CreateAlignedStore(rhs_value, arg2, 8);
+        ptrbuilder->CreateStore(rhs_value, arg2);
 
         if (!is_func_strict) {
             llvm::Value* rhs_flag = lfcinfo->argnulls[1];
             llvm::Value* argflag2 = ptrbuilder->CreateInBoundsGEP(inargflags, Datum_1);
-            ptrbuilder->CreateAlignedStore(rhs_flag, argflag2, 1);
+            ptrbuilder->CreateStore(rhs_flag, argflag2);
         }
     }
 
@@ -4958,12 +4979,12 @@ llvm::Value* VecExprCodeGen::EvalFuncResultCodeGen(
         llvm::Value* thd_value = lfcinfo->args[2];
         llvm::Value* arg3 = ptrbuilder->CreateInBoundsGEP(inargs, Datum_2);
         thd_value = WrapChooExtFunCodeGen(ptrbuilder, argtyp[2], thd_value);
-        ptrbuilder->CreateAlignedStore(thd_value, arg3, 8);
+        ptrbuilder->CreateStore(thd_value, arg3);
 
         if (!is_func_strict) {
             llvm::Value* thd_flag = lfcinfo->argnulls[2];
             llvm::Value* argflag3 = ptrbuilder->CreateInBoundsGEP(inargflags, Datum_2);
-            ptrbuilder->CreateAlignedStore(thd_flag, argflag3, 1);
+            ptrbuilder->CreateStore(thd_flag, argflag3);
         }
     }
 

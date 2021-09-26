@@ -94,21 +94,6 @@ struct ObjectAddresses {
 	int			maxrefs; /* current size of palloc'd array(s) */
 };
 
-/* typedef ObjectAddresses appears in dependency.h */
-
-/* threaded list of ObjectAddresses, for recursion detection */
-typedef struct ObjectAddressStack {
-    const ObjectAddress* object;     /* object being visited */
-    int flags;                       /* its current flag bits */
-    struct ObjectAddressStack* next; /* next outer stack level */
-} ObjectAddressStack;
-
-/* for find_expr_references_walker */
-typedef struct {
-    ObjectAddresses* addrs; /* addresses being accumulated */
-    List* rtables;          /* list of rangetables to resolve Vars */
-} find_expr_references_context;
-
 /*
  * There is also a SharedDependencyType enum type that determines the exact
  * semantics of an entry in pg_shdepend.  Just like regular dependency entries,
@@ -153,6 +138,19 @@ typedef enum SharedDependencyType {
 
 /* expansible list of ObjectAddresses (private in dependency.c) */
 typedef struct ObjectAddresses ObjectAddresses;
+
+/* threaded list of ObjectAddresses, for recursion detection */
+typedef struct ObjectAddressStack {
+    const ObjectAddress* object;     /* object being visited */
+    int flags;                       /* its current flag bits */
+    struct ObjectAddressStack* next; /* next outer stack level */
+} ObjectAddressStack;
+
+/* for find_expr_references_walker */
+typedef struct {
+    ObjectAddresses* addrs; /* addresses being accumulated */
+    List* rtables;          /* list of rangetables to resolve Vars */
+} find_expr_references_context;
 
 /*
  * This enum covers all system catalogs whose OIDs can appear in
@@ -205,12 +203,14 @@ typedef enum ObjectClass {
 	OCLASS_PG_JOB,           /* pg_job */
 	OCLASS_RLSPOLICY,        /* pg_rlspolicy */
 	OCLASS_DB4AI_MODEL,      /* gs_model_warehouse */
+    OCLASS_GS_CL_PROC,       /* client logic procedures */
+    OCLASS_PACKAGE,          /* gs_package */
 	MAX_OCLASS               /* MUST BE LAST */
 } ObjectClass;
 
 
 /* in dependency.c */
-
+#define PERFORM_DELETION_INVALID            0x0000
 #define PERFORM_DELETION_INTERNAL			0x0001
 #define PERFORM_DELETION_CONCURRENTLY		0x0002
 
@@ -366,4 +366,13 @@ namespace Tsdb {
 extern void performTsCudescDeletion(List* cudesc_oids);
 }
 #endif   /* ENABLE_MULTIPLE_NODES */
+
+extern void findDependentObjects(const ObjectAddress* object, int flags, ObjectAddressStack* stack,
+    ObjectAddresses* targetObjects, const ObjectAddresses* pendingObjects, Relation* depRel);
+extern void reportDependentObjects(
+    const ObjectAddresses* targetObjects, DropBehavior behavior, int msglevel, const ObjectAddress* origObject);
+extern void AcquireDeletionLock(const ObjectAddress* object, int flags);
+extern void add_object_address_ext(Oid classId, Oid objectId, int32 subId, char deptype, ObjectAddresses* addrs);
+extern void add_object_address_ext1(const ObjectAddress *obj, ObjectAddresses* addrs);
+
 #endif   /* DEPENDENCY_H */

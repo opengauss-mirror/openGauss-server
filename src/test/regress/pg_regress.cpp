@@ -35,7 +35,6 @@
 #define GTM 3
 #define SHELL 4
 
-//#define BUILD_BY_CMAKE
 #ifdef BUILD_BY_CMAKE
 char* code_base_src = NULL;
 char* current_exe_dir = NULL;
@@ -324,9 +323,6 @@ static struct timeval g_stRegrStopTimeTmp[REG_MAX_NUM];
             g_dOneGroupTotalTime = (stRegrEndTime.tv_sec - g_stRegrStartTimeTmp[0].tv_sec) +             \
                                    (stRegrEndTime.tv_usec - g_stRegrStartTimeTmp[0].tv_usec) * 0.000001; \
             g_dGroupTotalTime = g_dGroupTotalTime + g_dOneGroupTotalTime;                                \
-            /*status(_("TIME TAKEN: [%9.3lf]    MEM: [%-9s]"),                                           \
-                    g_dOneGroupTotalTime,                                                                \
-                    g_stResourceUsageDetails.acMemUsage);\ */                                            \
             g_dOneGroupTotalTime = 0;                                                                    \
         }                                                                                                \
     }
@@ -401,6 +397,9 @@ static FILE* stop_script;
 /* define ai engine ip and port */
 static char* g_aiehost = "nohostname";
 static char* g_aieport = "noport";
+
+static bool g_enable_segment = false;
+
 /* internal variables */
 static const char* progname;
 static char* logfilename;
@@ -730,7 +729,6 @@ static int regrGetResrcUsage(const pid_t pid, REGR_RESRC_STAT_STRU* result)
         goto LB_ERR_LVL_3;
     }
 
-    /* Converting kb value into bytes */
     ulTotalMemory *= 1024;
     result->dMemPct = (result->rss * 100) / ulTotalMemory;
 
@@ -1293,13 +1291,6 @@ static void start_gtm(void)
     PID_TYPE node_pid;
     FILE* gtm_conf_file = NULL;
 
-    /*
-     * Before starting GTM, set up an empty configuration file as
-     * all the necessary parameters are provided in command.
-     */
-    //	snprintf(buf, sizeof(buf), "%s/%s", temp_install, data_folder);
-    //	make_directory(buf);
-
     (void)snprintf(buf, sizeof(buf), "%s/%s/gtm.conf", temp_install, data_folder);
     gtm_conf_file = fopen(buf, PG_BINARY_W);
     if (gtm_conf_file == NULL) {
@@ -1330,7 +1321,6 @@ static void start_gtm(void)
 
     /* Save static PID number */
     myinfo.gtm_pid = node_pid;
-    // set_node_pid(PGXC_GTM, node_pid);
 }
 
 /* Start single datanode for test */
@@ -1494,7 +1484,6 @@ static void start_my_node(int i, int type, bool is_main, bool standby, int upgra
     } else {
         myinfo.dn_pid[i] = node_pid;
     }
-    // set_node_pid(node,node_pid);
     free(data_folder);
 }
 
@@ -1726,6 +1715,41 @@ static void wait_thread(thread_desc* thread)
     }
 }
 
+/* Copy data file to data dir */
+static void CopyFile()
+{
+    char dstDatadir[MAXPGPATH];
+    char cmdBuf[MAXPGPATH * 2];
+
+    errno_t rc = snprintf_s(dstDatadir, sizeof(dstDatadir), sizeof(dstDatadir) - 1, "%s/%s/pg_copydir",
+        temp_install, get_node_info_name(0, DATANODE, false));
+    securec_check_ss_c(rc, "", "");
+    rc = snprintf_s(cmdBuf, sizeof(cmdBuf), sizeof(cmdBuf) - 1,
+        SYSTEMQUOTE "mkdir -p %s ; cp ./data/* %s -r" SYSTEMQUOTE, dstDatadir, dstDatadir);
+    securec_check_ss_c(rc, "", "");
+    if (regr_system(cmdBuf)) {
+        (void)fprintf(stderr,
+            _("\n%s: cp data file failed\nCommand was: %s\n"),
+            progname,
+            cmdBuf);
+        exit_nicely(2);
+    }
+
+    /* mkdir results dir */
+    rc = snprintf_s(dstDatadir, sizeof(dstDatadir), sizeof(dstDatadir) - 1, "%s/%s/pg_copydir/results",
+        temp_install, get_node_info_name(0, DATANODE, false));
+    securec_check_ss_c(rc, "", "");
+    rc = snprintf_s(cmdBuf, sizeof(cmdBuf), sizeof(cmdBuf) - 1, SYSTEMQUOTE "mkdir -p %s" SYSTEMQUOTE, dstDatadir);
+    securec_check_ss_c(rc, "", "");
+    if (regr_system(cmdBuf)) {
+        (void)fprintf(stderr,
+            _("\n%s: mkdir failed\nCommand was: %s\n"),
+            progname,
+            cmdBuf);
+        exit_nicely(2);
+    }
+}
+
 /*
  * initdb for cn and dn
  *
@@ -1761,6 +1785,8 @@ static void initdb_node_info_parallel(bool standby)
 
     /* free the memory */
     free_thread_desc(thread);
+
+    CopyFile();
 }
 
 static void initdb_node_info(bool standby)
@@ -1823,6 +1849,8 @@ static void initdb_node_info(bool standby)
         }
         free(data_folder);
     }
+
+    CopyFile();
 
     /* no standby configed, skip to init standby. */
     if (!standby)
@@ -1894,11 +1922,25 @@ int get_local_ip(char* local_ip)
     return 0;
 }
 
+static void config_cn();
+static void config_dn(bool standby);
+static void config_standby();
+
 static void initdb_node_config_file(bool standby)
+{
+    config_cn();
+
+    config_dn(standby);
+
+    if (!standby)
+        return;
+    config_standby();
+}
+
+static void config_cn()
 {
     int i;
     char local_ip[LOCAL_IP_LEN];
-
     for (i = 0; i < myinfo.co_num; i++) {
         char* data_folder = get_node_info_name(i, COORD, false);
         FILE* pg_conf = NULL;
@@ -1943,13 +1985,14 @@ static void initdb_node_config_file(bool standby)
         /* make enable_fast_query_shipping to true */
         fputs("enable_fast_query_shipping = on\n", pg_conf);
 
-        /* To satisfy LLT, we need to modify the initial password, there is no need now. */
-        // if(change_password)
-        //	fputs("modify_initial_password = true\n", pg_conf);
-
         /* always use LLVM optimization */
         fputs("codegen_cost_threshold=0\n", pg_conf);
 
+#ifdef USE_ASSERT_CHECKING
+        if (g_enable_segment) {
+            fputs("enable_segment = on\n", pg_conf);
+        }
+#endif
         if (dop > 0) {
             (void)snprintf(buf, sizeof(buf), "query_dop = %d\n", dop);
             fputs(buf, pg_conf);
@@ -1993,7 +2036,12 @@ static void initdb_node_config_file(bool standby)
         fclose(pg_conf);
         free(data_folder);
     }
+}
 
+static void config_dn(bool standby)
+{
+    int i;
+    char local_ip[LOCAL_IP_LEN];
     for (i = 0; i < myinfo.dn_num; i++) {
         char* data_folder = get_node_info_name(i, DATANODE, false);
         FILE* pg_conf = NULL;
@@ -2021,16 +2069,16 @@ static void initdb_node_config_file(bool standby)
         if (!test_single_node) {
             (void)snprintf(buf, sizeof(buf), "pooler_port = %d\n", myinfo.dn_pool_port[i]);
             fputs(buf, pg_conf);
+
+            (void)snprintf(buf, sizeof(buf), "comm_control_port = %d\n", myinfo.dn_ctl_port[i]);
+            fputs(buf, pg_conf);
+
+            (void)snprintf(buf, sizeof(buf), "comm_sctp_port = %d\n", myinfo.dn_sctp_port[i]);
+            fputs(buf, pg_conf);
+
+            if (comm_tcp_mode == false)
+                fputs("comm_tcp_mode = false\n", pg_conf);
         }
-
-        (void)snprintf(buf, sizeof(buf), "comm_control_port = %d\n", myinfo.dn_ctl_port[i]);
-        fputs(buf, pg_conf);
-
-        (void)snprintf(buf, sizeof(buf), "comm_sctp_port = %d\n", myinfo.dn_sctp_port[i]);
-        fputs(buf, pg_conf);
-
-        if (comm_tcp_mode == false)
-            fputs("comm_tcp_mode = false\n", pg_conf);
 
         /*Turn on the guc control support_extended_features*/
         fputs("support_extended_features = on\n", pg_conf);
@@ -2040,12 +2088,14 @@ static void initdb_node_config_file(bool standby)
             fputs("enable_fast_query_shipping = on\n", pg_conf);
         }
 
-        /* To satisfy LLT, we need to modify the initial password, there is no need now.*/
-        // if(change_password)
-        //	fputs("modify_initial_password = true\n", pg_conf);
-
         /* always use LLVM optimization */
         fputs("codegen_cost_threshold=0\n", pg_conf);
+
+#ifdef USE_ASSERT_CHECKING
+        if (g_enable_segment) {
+            fputs("enable_segment = on\n", pg_conf);
+        }
+#endif
 
         if (dop > 0) {
             (void)snprintf(buf, sizeof(buf), "query_dop = %d\n", dop);
@@ -2082,6 +2132,10 @@ static void initdb_node_config_file(bool standby)
                 exit_nicely(2);
             }
             while (fgets(line_buf, sizeof(line_buf), extra_conf) != NULL) {
+                if (test_single_node && (strncmp(line_buf, "comm_tcp_mode", 13) == 0 ||
+                    strncmp(line_buf, "enable_stateless_pooler_reuse", 29) == 0)) {
+                    continue;
+                }
                 fputs(line_buf, pg_conf);
             }
             fclose(extra_conf);
@@ -2109,10 +2163,11 @@ static void initdb_node_config_file(bool standby)
         fclose(pg_conf);
         free(data_folder);
     }
+}
 
-    if (!standby)
-        return;
-
+static void config_standby()
+{
+    int i;
     for (i = 0; i < myinfo.dn_num; i++) {
         char* data_folder = get_node_info_name(i, DATANODE, false);
         FILE* pg_conf = NULL;
@@ -2835,7 +2890,6 @@ static char* GetStartNodeCmdString(int i, int type)
 static char* GetPgxcCleanCmdString(int i, int type)
 {
     int port_number;
-    // const char* data_folder = get_node_info_name(i, type, false);
     if (type == COORD) {
         port_number = test_single_node ? 0 : myinfo.co_port[i];
     } else {
@@ -3019,6 +3073,7 @@ static void convertSourcefilesIn(char* pcSourceSubdir, char* pcDestDir, char* pc
                 char* ptr = GetStartNodeCmdString(0, DATANODE);
                 replace_string(line, "@start_datanode1@", ptr);
                 free(ptr);
+#ifdef ENABLE_MULTIPLE_NODES
                 ptr = GetStartNodeCmdString(1, DATANODE);
                 replace_string(line, "@start_datanode2@", ptr);
                 free(ptr);
@@ -3028,7 +3083,7 @@ static void convertSourcefilesIn(char* pcSourceSubdir, char* pcDestDir, char* pc
                 ptr = GetStartNodeCmdString(1, COORD);
                 replace_string(line, "@start_coordinator2@", ptr);
                 free(ptr);
-
+#endif
                 ptr = GetStopGtmCmdString(0, GTM);
                 replace_string(line, "@stop_gtm@", ptr);
                 free(ptr);
@@ -3323,7 +3378,9 @@ static void initialize_environment(void)
         const char* old_pgoptions = getenv("PGOPTIONS");
         char* new_pgoptions = NULL;
 
-        old_pgoptions = old_pgoptions ? old_pgoptions : "";
+        if (!old_pgoptions) {
+            old_pgoptions = "";
+        }
         new_pgoptions = (char*)malloc(strlen(old_pgoptions) + strlen(my_pgoptions) + 12);
         (void)sprintf(new_pgoptions, "PGOPTIONS=%s %s", old_pgoptions, my_pgoptions);
         (void)putenv(new_pgoptions);
@@ -3387,7 +3444,9 @@ static void initialize_environment(void)
         pghost = getenv("PGHOST");
         pgport = getenv("PGPORT");
 #ifndef HAVE_UNIX_SOCKETS
-        pghost = (pghost ? pghost : "localhost");
+        if (!pghost) {
+            pghost = "localhost";
+        }
 #endif
 
         if (pghost && pgport) {
@@ -3909,6 +3968,14 @@ static bool results_differ(const char* testname, const char* resultsfile, const 
     best_line_count = file_line_count(diff);
     strlcpy(acBestExpectFile, expectfile, sizeof(acBestExpectFile));
 
+    /* framing smartmatch.pl script complete file name */
+    int rc = snprintf_s(smartmatch, sizeof(smartmatch), sizeof(smartmatch) - 1, "%s/%s", outputdir, "smartmatch.pl");
+    securec_check_ss_c(rc, "\0", "\0");
+    if (!file_exists(smartmatch)) {
+        int rc = snprintf_s(smartmatch, sizeof(smartmatch), sizeof(smartmatch) - 1, "%s/%s", inputdir, "smartmatch.pl");
+        securec_check_ss_c(rc, "\0", "\0");
+    }
+
     for (i = 0; i <= 9; i++) {
         char* alt_expectfile = NULL;
 
@@ -3937,6 +4004,51 @@ static bool results_differ(const char* testname, const char* resultsfile, const 
             /* This diff was a better match than the last one */
             best_line_count = l;
             strlcpy(acBestExpectFile, alt_expectfile, sizeof(acBestExpectFile));
+        }
+
+        if (file_exists(smartmatch)) {
+            /* Name to use for temporary diff file */
+            rc = snprintf_s(smartmatchfile, sizeof(smartmatchfile), sizeof(smartmatchfile) - 1, "%s.smartmatch",
+                acBestExpectFile);
+            securec_check_ss_c(rc, "\0", "\0");
+            /*
+            * Is the unordered result set is leading to test failure? check and
+            * verify the unordered result set as if test specifies that the result
+            * can vary with comments of unordered.
+            */
+            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, SYSTEMQUOTE "%s \"%s\" \"%s\" \"%s\" " SYSTEMQUOTE,
+                smartmatch, alt_expectfile, resultsfile, smartmatchfile);
+            securec_check_ss_c(rc, "\0", "\0");
+            result = system(cmd);
+            if (WEXITSTATUS(result) == 1) {
+                /* In a success of smartmatch, there is no need of smartmatch file */
+                unlink(smartmatchfile);
+                unlink(diff);
+                free(alt_expectfile);
+                return false;
+            } else if (WEXITSTATUS(result) == 2) {
+                unlink(smartmatchfile);
+                pcPrettyDiffFile = acBestExpectFile;
+            } else
+                pcPrettyDiffFile = smartmatchfile;
+        } else
+            pcPrettyDiffFile = acBestExpectFile;
+
+        /*
+        * Use the best comparison file to generate the "pretty" diff, which we
+        * append to the diffs summary file.
+        */
+        rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1,
+            SYSTEMQUOTE "diff %s \"%s\" \"%s\" >> \"%s\" 2>&1" SYSTEMQUOTE, pretty_diff_opts, pcPrettyDiffFile,
+            resultsfile, difffilename);
+        securec_check_ss_c(rc, "\0", "\0");
+        (void)run_diff(cmd, difffilename);
+
+        l = file_line_count(diff);
+        if (l < best_line_count) {
+            /* This diff was a better match than the last one */
+            best_line_count = l;
+            strlcpy(acBestExpectFile, pcPrettyDiffFile, sizeof(acBestExpectFile));
         }
         free(alt_expectfile);
     }
@@ -3968,11 +4080,6 @@ static bool results_differ(const char* testname, const char* resultsfile, const 
             strlcpy(acBestExpectFile, default_expectfile, sizeof(acBestExpectFile));
         }
     }
-
-    /* framing smartmatch.pl script complete file name */
-    (void)snprintf(smartmatch, sizeof(smartmatch), "%s/%s", outputdir, "smartmatch.pl");
-    if (!file_exists(smartmatch))
-        (void)snprintf(smartmatch, sizeof(smartmatch), "%s/%s", inputdir, "smartmatch.pl");
 
     if (file_exists(smartmatch)) {
         /* Name to use for temporary diff file */
@@ -5021,13 +5128,11 @@ static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
     (void)fflush(stdout);
     return;
 }
-#ifdef BUILD_BY_CMAKE
-#define BASE_GLOBAL_VARIABLE_NUM 213
-#else
-#define BASE_GLOBAL_VARIABLE_NUM 217
-#endif
+
+#define BASE_GLOBAL_VARIABLE_NUM 221
 
 #define CMAKE_CMD_BUF_LEN 1000
+
 static void check_global_variables()
 {
 #ifdef BUILD_BY_CMAKE
@@ -5071,7 +5176,7 @@ static void check_global_variables()
     }
 }
 
-#define BASE_PGXC_LIKE_MACRO_NUM 1422
+#define BASE_PGXC_LIKE_MACRO_NUM 1416
 static void check_pgxc_like_macros()
 {
 #ifdef BUILD_BY_CMAKE 
@@ -5098,7 +5203,7 @@ static void check_pgxc_like_macros()
         if (macros != BASE_PGXC_LIKE_MACRO_NUM) {
             CheckCleanCodeWarningInfo(BASE_PGXC_LIKE_MACRO_NUM, macros,
                 GET_VARIABLE_NAME(PGXC/STREAMPLAN/IS_SINGLE_NODE), GET_VARIABLE_NAME(BASE_PGXC_LIKE_MACRO_NUM));
-            //exit_nicely(2);
+            exit_nicely(2);
         }
     }
     pclose(fstream);
@@ -5159,17 +5264,6 @@ static void create_database(const char* dbname)
             "CREATE DATABASE \"%s\" DBCOMPATIBILITY='A' TEMPLATE=TEMPLATE0%s",
             dbname,
             (nolocale) ? " LC_COLLATE='C' LC_CTYPE='C'" : "");
-    psql_command(dbname,
-        "ALTER DATABASE \"%s\" SET lc_messages TO 'C';"
-        "ALTER DATABASE \"%s\" SET lc_monetary TO 'C';"
-        "ALTER DATABASE \"%s\" SET lc_numeric TO 'C';"
-        "ALTER DATABASE \"%s\" SET lc_time TO 'C';"
-        "ALTER DATABASE \"%s\" SET timezone_abbreviations TO 'Default';",
-        dbname,
-        dbname,
-        dbname,
-        dbname,
-        dbname);
 
     /*
      * Install any requested procedural languages.	We use CREATE OR REPLACE
@@ -5225,7 +5319,7 @@ static char* make_absolute_path(const char* in)
 
 static void help(void)
 {
-    printf(_("PostgreSQL regression test driver\n"));
+    printf(_("openGauss regression test driver\n"));
     printf(_("\n"));
     printf(_("Usage: %s [options...] [extra tests...]\n"), progname);
     printf(_("\n"));
@@ -5271,11 +5365,10 @@ static void help(void)
     printf(_("  --port=PORT               use postmaster running at PORT\n"));
     printf(_("  --user=USER               connect as USER\n"));
     printf(_("  --psqldir=DIR             use gsql in DIR (default: find in PATH)\n"));
+    printf(_("  --enable-segment          create table default with segment=on"));
     printf(_("\n"));
     printf(_("The exit status is 0 if all tests passed, 1 if some tests failed, and 2\n"));
     printf(_("if the tests could not be run for some reason.\n"));
-    printf(_("\n"));
-    printf(_("Report bugs to <pgsql-bugs@postgresql.org>.\n"));
 }
 
 static int initialize_myinfo(
@@ -6079,9 +6172,9 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
 #ifdef BUILD_BY_CMAKE
     get_value_from_env(&code_base_src, "CODE_BASE_SRC");
     get_value_from_cwd(&current_exe_dir);
-    get_value_from_env(&CMAKE_PGBINDIR, "prefix_home");
-    get_value_from_env(&CMAKE_LIBDIR, "prefix_home");
-    get_value_from_env(&CMAKE_PGSHAREDIR, "prefix_home");
+    get_value_from_env(&CMAKE_PGBINDIR, "PREFIX_HOME");
+    get_value_from_env(&CMAKE_LIBDIR, "PREFIX_HOME");
+    get_value_from_env(&CMAKE_PGSHAREDIR, "PREFIX_HOME");
 
     printf("--------------------------------------------------------------------------------------");
     printf("\ncode_base_src:%s\n", code_base_src);
@@ -6169,6 +6262,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         {"platform", required_argument, NULL, 55},
         {"g_aiehost", required_argument, NULL, 56},
         {"g_aieport", required_argument, NULL, 57},
+        {"enable-segment", no_argument, NULL, 58},
         {NULL, 0, NULL, 0}
     };
 
@@ -6434,6 +6528,9 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
             case 57:
                 g_aieport = strdup(optarg);
                 break;
+            case 58:
+                g_enable_segment = true;
+                break;
             default:
                 /* getopt_long already emitted a complaint */
                 fprintf(stderr, _("\nTry \"%s -h\" for more information.\n"), progname);
@@ -6530,8 +6627,6 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
         }
 #ifndef ENABLE_LLT
         if (myinfo.keep_data) {
-            //	header(_("removing existing gtm file"));
-            //	rmtree(temp_gtm_install, true);
 
             /* "make install" */
 #ifndef WIN32_ONLY_COMPILER
@@ -6889,7 +6984,7 @@ int regression_main(int argc, char* argv[], init_function ifunc, test_function t
                     header(_("shutting down postmaster"));
                     (void)stop_postmaster();
                     upgrade_from = 0;
-                    // switch to the new binary锟斤拷
+                    // switch to the new binary
                     setBinAndLibPath(false);
                     (void)start_postmaster();
                     header(_("sleeping"));

@@ -66,6 +66,7 @@ static int gscgroup_parse_config_file(const char* ngname, gscgroup_grp_t** ngadd
     int sret;
     char* cfgpath = NULL;
     char* exepath = NULL;
+    char real_exepath[PATH_MAX + 1] = {'\0'};
     size_t cfgpath_len = 0;
     struct passwd* passwd_user = NULL;
 
@@ -77,17 +78,20 @@ static int gscgroup_parse_config_file(const char* ngname, gscgroup_grp_t** ngadd
                 geteuid())));
         return -1;
     }
-    if (!(exepath = gs_getenv_r("GAUSSHOME"))) {
+
+    exepath = gs_getenv_r("GAUSSHOME");
+    if (!exepath || realpath(exepath, real_exepath) == NULL) {
         ereport(WARNING, (errmsg("environment variable $GAUSSHOME is not set!")));
         return -1;
     }
-    check_backend_env(exepath);
+    
+    check_backend_env(real_exepath);
     if (!ngname) {
-        cfgpath_len = strlen(exepath) + 1 + sizeof(GSCGROUP_CONF_DIR) + 1 + sizeof(GSCFG_PREFIX) + 1 + USERNAME_LEN +
-                      sizeof(GSCFG_SUFFIX) + 1;
+        cfgpath_len = strlen(real_exepath) + 1 + sizeof(GSCGROUP_CONF_DIR) + 1 + sizeof(GSCFG_PREFIX) + 1 +
+                      USERNAME_LEN + sizeof(GSCFG_SUFFIX) + 1;
     } else {
-        cfgpath_len = strlen(exepath) + 1 + sizeof(GSCGROUP_CONF_DIR) + 1 + strlen(ngname) + 1 + sizeof(GSCFG_PREFIX) +
-                      1 + USERNAME_LEN + sizeof(GSCFG_SUFFIX) + 1;
+        cfgpath_len = strlen(real_exepath) + 1 + sizeof(GSCGROUP_CONF_DIR) + 1 + strlen(ngname) + 1 +
+                      sizeof(GSCFG_PREFIX) + 1 + USERNAME_LEN + sizeof(GSCFG_SUFFIX) + 1;
     }
 
     cfgpath = (char*)malloc(cfgpath_len);
@@ -101,7 +105,7 @@ static int gscgroup_parse_config_file(const char* ngname, gscgroup_grp_t** ngadd
             cfgpath_len,
             cfgpath_len - 1,
             "%s/%s/%s_%s%s",
-            exepath,
+            real_exepath,
             GSCGROUP_CONF_DIR,
             GSCFG_PREFIX,
             passwd_user->pw_name,
@@ -111,7 +115,7 @@ static int gscgroup_parse_config_file(const char* ngname, gscgroup_grp_t** ngadd
             cfgpath_len,
             cfgpath_len - 1,
             "%s/%s/%s.%s_%s%s",
-            exepath,
+            real_exepath,
             GSCGROUP_CONF_DIR,
             ngname,
             GSCFG_PREFIX,
@@ -487,7 +491,7 @@ static void gscgroup_initialize_hashtbl(HTAB** htab)
  *             0: normal
  *
  */
-static int gscgroup_enter_hashtbl(WLMNodeGroupInfo* ng, const char* name, const char* relapath, struct cgroup* cg)
+static int gscgroup_enter_hashtbl(WLMNodeGroupInfo* ng, const char* name, struct cgroup* cg)
 {
     bool found = false;
     gscgroup_entry_t* cgentry = NULL;
@@ -963,7 +967,7 @@ int gscgroup_build_cgroups_htab(WLMNodeGroupInfo* ng)
                 return -1;
             }
 
-            (void)gscgroup_enter_hashtbl(ng, ng->vaddr[i]->grpname, relpath, cg);
+            (void)gscgroup_enter_hashtbl(ng, ng->vaddr[i]->grpname, cg);
             free(relpath);
             relpath = NULL;
 
@@ -993,7 +997,7 @@ int gscgroup_build_cgroups_htab(WLMNodeGroupInfo* ng)
                         ng->vaddr[j]->grpname);
                     securec_check_intval(sret, free(relpath), -1);
 
-                    (void)gscgroup_enter_hashtbl(ng, gscgroup_convert_cgroup(keyname), relpath, cg);
+                    (void)gscgroup_enter_hashtbl(ng, gscgroup_convert_cgroup(keyname), cg);
                     free(relpath);
                     relpath = NULL;
                 }
@@ -1043,7 +1047,7 @@ int gscgroup_build_cgroups_htab(WLMNodeGroupInfo* ng)
                     ng->vaddr[j]->grpname);
                 securec_check_intval(sret, free(relpath); free(toppath), -1);
 
-                (void)gscgroup_enter_hashtbl(ng, gscgroup_convert_cgroup(keyname), relpath, cg);
+                (void)gscgroup_enter_hashtbl(ng, gscgroup_convert_cgroup(keyname), cg);
             }
 
             free(relpath);
@@ -1229,7 +1233,7 @@ void gscgroup_init(void)
             }
 
             (void)gscgroup_enter_hashtbl(
-                &g_instance.wlm_cxt->MyDefaultNodeGroup, g_instance.wlm_cxt->gscgroup_vaddr[i]->grpname, relpath, cg);
+                &g_instance.wlm_cxt->MyDefaultNodeGroup, g_instance.wlm_cxt->gscgroup_vaddr[i]->grpname, cg);
             free(relpath);
             relpath = NULL;
 
@@ -1266,7 +1270,7 @@ void gscgroup_init(void)
                     securec_check_intval(sret, free(relpath), );
 
                     (void)gscgroup_enter_hashtbl(
-                        &g_instance.wlm_cxt->MyDefaultNodeGroup, gscgroup_convert_cgroup(keyname), relpath, cg);
+                        &g_instance.wlm_cxt->MyDefaultNodeGroup, gscgroup_convert_cgroup(keyname), cg);
                     free(relpath);
                     relpath = NULL;
                 }
@@ -1327,7 +1331,7 @@ void gscgroup_init(void)
                 securec_check_intval(sret, free(relpath); free(toppath), );
 
                 (void)gscgroup_enter_hashtbl(
-                    &g_instance.wlm_cxt->MyDefaultNodeGroup, gscgroup_convert_cgroup(keyname), relpath, cg);
+                    &g_instance.wlm_cxt->MyDefaultNodeGroup, gscgroup_convert_cgroup(keyname), cg);
             }
 
             free(relpath);
@@ -2310,7 +2314,7 @@ void gscgroup_update_hashtbl(WLMNodeGroupInfo* ng, const char* keyname)
             return;
         }
 
-        (void)gscgroup_enter_hashtbl(ng, keyname, relpath, cg);
+        (void)gscgroup_enter_hashtbl(ng, keyname, cg);
         free(relpath);
         relpath = NULL;
 
@@ -2389,7 +2393,7 @@ void gscgroup_update_hashtbl(WLMNodeGroupInfo* ng, const char* keyname)
         gscgroup_update_hashtbl(ng, tmpname);
     }
 
-    (void)gscgroup_enter_hashtbl(ng, keyname, relpath, cg);
+    (void)gscgroup_enter_hashtbl(ng, keyname, cg);
     free(relpath);
     relpath = NULL;
 }

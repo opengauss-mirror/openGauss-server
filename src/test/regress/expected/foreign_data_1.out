@@ -14,12 +14,12 @@ CREATE ROLE regress_test_role_super PASSWORD 'gauss@123' SYSADMIN;
 CREATE ROLE regress_test_indirect PASSWORD 'gauss@123';
 CREATE ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER dummy;
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 COMMENT ON FOREIGN DATA WRAPPER dummy IS 'useless';
 ERROR:  foreign-data wrapper "dummy" does not exist
 CREATE FOREIGN DATA WRAPPER postgresql VALIDATOR postgresql_fdw_validator;
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 -- At this point we should have 2 built-in wrappers and no servers.
 SELECT fdwname, fdwhandler::regproc, fdwvalidator::regproc, fdwoptions FROM pg_foreign_data_wrapper ORDER BY 1, 2, 3;
@@ -39,10 +39,10 @@ SELECT * FROM pg_user_mapping;
 
 -- CREATE FOREIGN DATA WRAPPER
 CREATE FOREIGN DATA WRAPPER foo VALIDATOR bar;            -- ERROR
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 CREATE FOREIGN DATA WRAPPER foo;
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 \dew
    List of foreign-data wrappers
@@ -51,12 +51,12 @@ DETAIL:  The feature is not currently supported
 (0 rows)
 
 CREATE FOREIGN DATA WRAPPER foo; -- duplicate
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 DROP FOREIGN DATA WRAPPER foo;
 ERROR:  foreign-data wrapper "foo" does not exist
 CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1');
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 \dew+
                            List of foreign-data wrappers
@@ -67,10 +67,10 @@ DETAIL:  The feature is not currently supported
 DROP FOREIGN DATA WRAPPER foo;
 ERROR:  foreign-data wrapper "foo" does not exist
 CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1', testing '2');   -- ERROR
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 CREATE FOREIGN DATA WRAPPER foo OPTIONS (testing '1', another '2');
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 \dew+
                            List of foreign-data wrappers
@@ -82,11 +82,11 @@ DROP FOREIGN DATA WRAPPER foo;
 ERROR:  foreign-data wrapper "foo" does not exist
 SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foo; -- ERROR
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 RESET ROLE;
 CREATE FOREIGN DATA WRAPPER foo VALIDATOR postgresql_fdw_validator;
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 \dew+
                            List of foreign-data wrappers
@@ -206,7 +206,7 @@ ERROR:  role "regress_test_role_super" does not exist
 (0 rows)
 
 CREATE FOREIGN DATA WRAPPER foo;
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 CREATE SERVER s1 FOREIGN DATA WRAPPER foo;
 ERROR:  Postgres-XC does not support SERVER yet
@@ -214,7 +214,7 @@ DETAIL:  The feature is not currently supported
 COMMENT ON SERVER s1 IS 'foreign server';
 ERROR:  server "s1" does not exist
 CREATE USER MAPPING FOR current_user SERVER s1;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 \dew+
                            List of foreign-data wrappers
@@ -265,7 +265,7 @@ CREATE SERVER s1 FOREIGN DATA WRAPPER foo;                  -- ERROR
 ERROR:  Postgres-XC does not support SERVER yet
 DETAIL:  The feature is not currently supported
 CREATE FOREIGN DATA WRAPPER foo OPTIONS ("test wrapper" 'true');
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 CREATE SERVER s1 FOREIGN DATA WRAPPER foo;
 ERROR:  Postgres-XC does not support SERVER yet
@@ -453,7 +453,7 @@ RESET ROLE;
 (0 rows)
 
 CREATE USER MAPPING FOR current_user SERVER s3;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 \deu
 List of user mappings
@@ -479,25 +479,25 @@ List of user mappings
 
 -- CREATE USER MAPPING
 CREATE USER MAPPING FOR regress_test_missing_role SERVER s1;  -- ERROR
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR current_user SERVER s1;             -- ERROR
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR current_user SERVER s4;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR user SERVER s4;                     -- ERROR duplicate
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR public SERVER s4 OPTIONS ("this mapping" 'is public');
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR user SERVER s8 OPTIONS (username 'test', password 'secret');    -- ERROR
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR user SERVER s8 OPTIONS (user 'test', password 'secret');
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 ALTER SERVER s5 OWNER TO regress_test_role;
 ERROR:  server "s5" does not exist
@@ -505,26 +505,26 @@ ALTER SERVER s6 OWNER TO regress_test_indirect;
 ERROR:  role "regress_test_indirect" does not exist
 SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE USER MAPPING FOR current_user SERVER s5;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR current_user SERVER s6 OPTIONS (username 'test');
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR current_user SERVER s7;             -- ERROR
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR public SERVER s8;                   -- ERROR
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 RESET ROLE;
 ALTER SERVER t1 OWNER TO regress_test_indirect;
 ERROR:  role "regress_test_indirect" does not exist
 SET ROLE regress_test_role PASSWORD 'gauss@123';
 CREATE USER MAPPING FOR current_user SERVER t1 OPTIONS (username 'bob', password 'boo');
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR public SERVER t1;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 RESET ROLE;
 \deu
@@ -572,7 +572,7 @@ NOTICE:  server does not exist, skipping
 DROP USER MAPPING IF EXISTS FOR public SERVER s7;
 NOTICE:  server does not exist, skipping
 CREATE USER MAPPING FOR public SERVER s8;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 SET ROLE regress_test_role PASSWORD 'gauss@123';
 DROP USER MAPPING FOR public SERVER s8;                     -- ERROR
@@ -923,7 +923,7 @@ ERROR:  foreign-data wrapper "foo" does not exist
 -- Privileges
 SET ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foobar;                             -- ERROR
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (gotcha 'true');         -- ERROR
 ERROR:  permission denied to alter foreign-data wrapper "foo"
@@ -946,7 +946,7 @@ ERROR:  server "s4" does not exist
 GRANT USAGE ON FOREIGN SERVER s4 TO regress_test_role;          -- ERROR
 ERROR:  server "s4" does not exist
 CREATE USER MAPPING FOR public SERVER s4;                       -- ERROR
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 ALTER USER MAPPING FOR regress_test_role SERVER s6 OPTIONS (gotcha 'true'); -- ERROR
 ERROR:  server "s6" does not exist
@@ -959,7 +959,7 @@ GRANT USAGE ON FOREIGN DATA WRAPPER foo TO unprivileged_role WITH GRANT OPTION;
 ERROR:  foreign-data wrapper "foo" does not exist
 SET ROLE unprivileged_role PASSWORD 'gauss@123';
 CREATE FOREIGN DATA WRAPPER foobar;                             -- ERROR
-ERROR:  Postgres-XC does not support FOREIGN DATA WRAPPER yet
+ERROR:  openGauss does not support FOREIGN DATA WRAPPER yet
 DETAIL:  The feature is not currently supported
 ALTER FOREIGN DATA WRAPPER foo OPTIONS (gotcha 'true');         -- ERROR
 ERROR:  permission denied to alter foreign-data wrapper "foo"
@@ -982,10 +982,10 @@ ERROR:  server "s6" does not exist
 GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role;
 ERROR:  server "s9" does not exist
 CREATE USER MAPPING FOR public SERVER s6;                       -- ERROR
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 CREATE USER MAPPING FOR public SERVER s9;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 ALTER USER MAPPING FOR regress_test_role SERVER s6 OPTIONS (gotcha 'true'); -- ERROR
 ERROR:  server "s6" does not exist
@@ -1007,7 +1007,7 @@ ERROR:  server "s9" does not exist
 GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role;
 ERROR:  server "s9" does not exist
 CREATE USER MAPPING FOR current_user SERVER s9;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 DROP SERVER s9 CASCADE;
 ERROR:  server "s9" does not exist
@@ -1023,7 +1023,7 @@ ERROR:  server "s9" does not exist
 GRANT USAGE ON FOREIGN SERVER s9 TO regress_test_role;          -- WARNING
 ERROR:  server "s9" does not exist
 CREATE USER MAPPING FOR current_user SERVER s9;
-ERROR:  Postgres-XC does not support USER MAPPING yet
+ERROR:  openGauss does not support USER MAPPING yet
 DETAIL:  The feature is not currently supported
 DROP SERVER s9 CASCADE;                                         -- ERROR
 ERROR:  server "s9" does not exist

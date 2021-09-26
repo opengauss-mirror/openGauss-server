@@ -271,5 +271,6 @@ extern PGXCNodeAllHandles* connect_compute_pool_for_HDFS();
 extern PGXCNodeAllHandles* make_cp_conn(ComputePoolConfig** configs, int cnum, int srvtype, const char* dbname);
 extern List* get_dnlist_for_hdfs(int fnum);
 extern void ReloadTransactionNodes(void);
+extern void PgFdwRemoteReply(StringInfo msg);
 
 #endif

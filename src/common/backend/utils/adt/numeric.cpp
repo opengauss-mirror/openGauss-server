@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * numeric.c
- *	  An exact numeric data type for the Postgres database system
+ *	  An exact numeric data type for the openGauss database system
  *
  * Original coding 1998, Jan Wieck.  Heavily revised 2003, Tom Lane.
  *
@@ -610,7 +610,7 @@ Datum numeric_transform(PG_FUNCTION_ARGS)
 /*
  * numeric() -
  *
- *	This is a special function called by the Postgres database system
+ *	This is a special function called by the openGauss database system
  *	before a value is stored in a tuple's attribute. The precision and
  *	scale of the attribute have to be applied on the value.
  */
@@ -3072,6 +3072,10 @@ Datum numeric_int1(PG_FUNCTION_ARGS)
 
     /* Convert to variable format and thence to uint8 */
     init_var_from_num(num, &x);
+
+    if (x.sign == NUMERIC_NEG) {
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
+    }
 
     if (!numericvar_to_int64(&x, &val))
         ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("tinyint out of range")));
@@ -5660,7 +5664,7 @@ static int select_div_scale(NumericVar* var1, NumericVar* var2)
 
     /*
      * The result scale of a division isn't specified in any SQL standard. For
-     * PostgreSQL we select a result scale that will give at least
+     * openGauss we select a result scale that will give at least
      * NUMERIC_MIN_SIG_DIGITS significant digits, so that numeric gives a
      * result no less accurate than float8; but use a scale not less than
      * either input's display scale.

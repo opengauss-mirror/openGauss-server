@@ -43,6 +43,7 @@
 #include "utils/syscache.h"
 #include "utils/plpgsql.h"
 #include "nodes/pg_list.h"
+#include "commands/sqladvisor.h"
 
 template void GlobalPlanCache::RemovePlanSource<ACTION_RECREATE>(CachedPlanSource* plansource, const char* stmt_name);
 
@@ -77,6 +78,17 @@ CompareSearchPath(struct OverrideSearchPath* path1, struct OverrideSearchPath* p
     }
     return true;
 }
+
+static bool GPCCompareParam(Oid* params1, Oid* params2, int paramNum)
+{
+    for (int i = 0; i < paramNum; i++) {
+        if (params1[i] != params2[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /*
  * Return false when the given compilation environment matches the current
  * session compilation environment, mainly compares GUC parameter settings.
@@ -91,6 +103,9 @@ GPCCompareEnv(GPCEnv *env1, GPCEnv *env2)
          && strncmp(env1->expected_computing_nodegroup, env2->expected_computing_nodegroup, NAMEDATALEN) == 0
          && env1->num_params == env2->num_params)
     {
+        if (!GPCCompareParam(env1->param_types, env2->param_types, env1->num_params)) {
+            return false;
+        }
         if (CompareSearchPath(env1->search_path, env2->search_path)) {
             if (env1->depends_on_role != env2->depends_on_role && env1->user_oid != env2->user_oid) {
                 return false;
@@ -145,7 +160,16 @@ void GPCKeyDeepCopy(const GPCKey *srcGpckey, GPCKey *destGpckey)
     *destGpckey = *srcGpckey;
     if (srcGpckey->query_string)
         destGpckey->query_string = pstrdup(srcGpckey->query_string);
-    if (destGpckey->env.schema_name)  {
+
+    if (destGpckey->env.num_params > 0) {
+        destGpckey->env.param_types = (Oid*)palloc(sizeof(Oid) * destGpckey->env.num_params);
+        errno_t rc = 0;
+        rc = memcpy_s(destGpckey->env.param_types, sizeof(Oid) * destGpckey->env.num_params,
+                      srcGpckey->env.param_types, sizeof(Oid) * destGpckey->env.num_params);
+        securec_check(rc, "", "");
+    }
+
+    if (destGpckey->env.schema_name) {
         destGpckey->env.search_path = (struct OverrideSearchPath *)palloc(sizeof(struct OverrideSearchPath));
         *destGpckey->env.search_path = *srcGpckey->env.search_path;
         destGpckey->env.search_path->schemas = list_copy(srcGpckey->env.search_path->schemas);
@@ -317,7 +341,7 @@ bool GlobalPlanCache::TryStore(CachedPlanSource *plansource,  PreparedStatement 
 }
 
 CachedPlanSource* GlobalPlanCache::Fetch(const char *query_string, uint32 query_len,
-                                         int num_params, SPISign* spi_sign_ptr)
+                                         int num_params, Oid* paramTypes, SPISign* spi_sign_ptr)
 {
     GPCKey key;
     key.env.filled = false;
@@ -326,6 +350,7 @@ CachedPlanSource* GlobalPlanCache::Fetch(const char *query_string, uint32 query_
     EnvFill(&key.env, false);
     key.env.search_path = NULL;
     key.env.num_params = num_params;
+    key.env.param_types = paramTypes;
     if (spi_sign_ptr != NULL)
         key.spi_signature = *spi_sign_ptr;
     else
@@ -353,12 +378,13 @@ CachedPlanSource* GlobalPlanCache::Fetch(const char *query_string, uint32 query_
         return NULL;
     } else {
         CachedPlanSource* psrc = entry->val.plansource;
+        psrc->gpc.status.AddRefcount();
         if (!psrc->gpc.status.IsValid()) {
             LWLockRelease(GetMainLWLockByIndex(lock_id));
             MoveIntoInvalidPlanList(psrc);
+            psrc->gpc.status.SubRefCount();
             return NULL;
         }
-        psrc->gpc.status.AddRefcount();
         if (ENABLE_DN_GPC)
             u_sess->pcache_cxt.private_refcount++;
         pg_atomic_fetch_add_u32(&entry->val.used_count, 1);
@@ -603,8 +629,6 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
 {
     GPC_LOG("recreate plan", oldsource, oldsource->stmt_name);
     /* these operator may throw error, make sure shared plan is invalid first */
-    oldsource->gpc.status.SetStatus(GPC_INVALID);
-    oldsource->is_valid = false;
     CachedPlanSource *newsource = NULL;
     PG_TRY();
     {
@@ -624,6 +648,7 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
         // because the meta has changed.
         newsource->is_valid = false;
         bool has_lp = false;
+
         if (spiplan != NULL) {
             t_thrd.log_cxt.error_context_stack->arg = (void *)newsource->query_string;
             newsource->spi_signature = oldsource->spi_signature;
@@ -644,7 +669,7 @@ void GlobalPlanCache::RecreateCachePlan(CachedPlanSource* oldsource, const char*
                 GPCCleanDatanodeStatement(oldsource->gplan->dn_stmt_num, stmt_name);
             }
 #endif
-       }
+        }
         (void)RevalidateCachedQuery(newsource, has_lp);
         MemoryContextSwitchTo(oldcxt);
     }
@@ -990,7 +1015,8 @@ void GlobalPlanCache::CleanUpByTime()
             }
             cur_plansource = entry->val.plansource;
             if (cur_plansource->gpc.status.RefCountZero() &&
-                INSTR_TIME_GET_DOUBLE(curTime) - INSTR_TIME_GET_DOUBLE(entry->val.last_use_time) > GPC_CLEAN_WAIT_TIME) {
+                INSTR_TIME_GET_DOUBLE(curTime) - INSTR_TIME_GET_DOUBLE(entry->val.last_use_time) >
+                u_sess->attr.attr_common.gpc_clean_timeout) {
                 GPCKey  *dest_gpckey = (GPCKey *)palloc(sizeof(GPCKey));
                 GPCKeyDeepCopy(&entry->key, dest_gpckey);
                 gpckey_list = lappend(gpckey_list, dest_gpckey);
@@ -1014,7 +1040,8 @@ void GlobalPlanCache::CleanUpByTime()
                 if (entry) {
                     cur_plansource = entry->val.plansource;
                     if (cur_plansource->gpc.status.RefCountZero() &&
-                        INSTR_TIME_GET_DOUBLE(curTime) - INSTR_TIME_GET_DOUBLE(entry->val.last_use_time) > GPC_CLEAN_WAIT_TIME) {
+                        INSTR_TIME_GET_DOUBLE(curTime) - INSTR_TIME_GET_DOUBLE(entry->val.last_use_time) >
+                        u_sess->attr.attr_common.gpc_clean_timeout) {
                         GPC_LOG("drop shared plancache by time", cur_plansource, cur_plansource->stmt_name);
                         DropCachedPlanInternal(cur_plansource);
                         hash_search(m_array[bucket_id].hash_tbl, (void *) key, HASH_REMOVE, &found);
@@ -1029,6 +1056,7 @@ void GlobalPlanCache::CleanUpByTime()
                     }
                 }
                 pfree((void *)key->query_string);
+                pfree_ext(key->env.param_types);
                 pfree_ext(key->env.search_path->schemas);
                 pfree_ext(key->env.search_path);
                 pfree_ext(key);

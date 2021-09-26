@@ -57,3 +57,4 @@ extern bool visibilitymap_set_page(Page page, BlockNumber heapBlk);
 extern void XLogBlockTruncateRelVM(Relation rel, BlockNumber nheapblocks);
 
 #endif /* VISIBILITYMAP_H */
+

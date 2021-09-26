@@ -1,0 +1,39 @@
+-- validate description texts of unusable/reindexed indexes
+create table test_table(a int, b int);
+create index test_table_idx1 on test_table(a,b);
+\d+ test_table;
+                      Table "public.test_table"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Indexes:
+    "test_table_idx1" btree (a, b) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+alter index test_table_idx1 unusable;
+\d+ test_table;
+                      Table "public.test_table"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Indexes:
+    "test_table_idx1" btree (a, b) TABLESPACE pg_default UNUSABLE
+Has OIDs: no
+Options: orientation=row, compression=no
+
+reindex index test_table_idx1;
+\d+ test_table;
+                      Table "public.test_table"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ a      | integer |           | plain   |              | 
+ b      | integer |           | plain   |              | 
+Indexes:
+    "test_table_idx1" btree (a, b) TABLESPACE pg_default
+Has OIDs: no
+Options: orientation=row, compression=no
+
+drop table test_table;

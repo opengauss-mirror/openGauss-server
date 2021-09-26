@@ -73,7 +73,10 @@ void DevectorizeOneColumn(VecToRowState* state, ScalarVector* pColumn, int rows,
                 state->m_ttsvalues[k] = PointerGetDatum(val_arr + j);
                 break;
             }
-
+            case NAMEOID: {
+                state->m_ttsvalues[k] = PointerGetDatum(val);
+                break;
+            }
             case UNKNOWNOID: {
                 tmp = ScalarVector::Decode(val);
                 char* result = NULL;
@@ -186,9 +189,7 @@ void RecordCstorePartNum(VecToRowState* state, const VecToRow* node)
                 state->part_id = ((CStoreScanState*)outerPlanState(state))->part_id;
                 break;
             case T_DfsIndexScan:
-                if (((DfsIndexScanState*)outerPlanState(state))->m_indexScan) {
-                    state->part_id = ((DfsIndexScanState*)outerPlanState(state))->part_id;
-                }
+                state->part_id = ((DfsIndexScanState*)outerPlanState(state))->part_id;
                 break;
             case T_CStoreIndexScan:
                 state->part_id = ((CStoreIndexScanState*)outerPlanState(state))->part_id;
@@ -278,10 +279,12 @@ VecToRowState* ExecInitVecToRow(VecToRow* node, EState* estate, int eflags)
                 case VARCHAROID:
                     state->devectorizeFunRuntime[i] = DevectorizeOneColumn<VARCHAROID>;
                     break;
+                case NAMEOID:
+                    state->devectorizeFunRuntime[i] = DevectorizeOneColumn<NAMEOID>;
+                    break;
                 case TIMETZOID:
                 case TINTERVALOID:
                 case INTERVALOID:
-                case NAMEOID:
                 case MACADDROID:
                 case UUIDOID:
                     state->devectorizeFunRuntime[i] = DevectorizeOneColumn<TIMETZOID>;

@@ -21,6 +21,10 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "parquet/platform.h"
+#include "parquet/statistics.h"
+#include "parquet/types.h"
+
 #include "parquet_column_reader.h"
 #include "parquet_input_stream_adapter.h"
 #include "mb/pg_wchar.h"
@@ -143,7 +147,7 @@ Datum convertToDatumT(void *primitiveBatch, uint64 rowId, parquet::Type::type ph
             switch (varType) {
                 case TIMESTAMPOID:
                 case TIMESTAMPTZOID: {
-                    auto nanoSeconds = Int96GetNanoSeconds(tmpValue);
+                    auto nanoSeconds = dfs::Int96GetNanoSeconds(tmpValue);
                     Timestamp timestamp = nanoSecondsToPsqlTimestamp(nanoSeconds);
                     result = TimestampGetDatum(timestamp);
                     break;
@@ -499,7 +503,7 @@ private:
 
         if (!matchDataTypeWithPsql()) {
             auto physicalTypeString = parquet::TypeToString(m_desc->physical_type());
-            auto logicalTypeString = parquet::LogicalTypeToString(m_desc->logical_type());
+            auto logicalTypeString = parquet::ConvertedTypeToString(m_desc->converted_type());
 
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmodule(MOD_PARQUET),
                             errmsg("Error occurred while reading column %d: PARQUET and mpp "
@@ -906,8 +910,10 @@ private:
                 switch (m_var->vartype) {
                     case TIMESTAMPOID: {
                         SET_SIMPLE_MIN_MAX_STATISTICS(tmpStat, TimestampGetDatum,
-                                                      nanoSecondsToPsqlTimestamp(Int96GetNanoSeconds(tmpStat->min())),
-                                                      nanoSecondsToPsqlTimestamp(Int96GetNanoSeconds(tmpStat->max())));
+                                                      nanoSecondsToPsqlTimestamp(dfs::
+                                                                                 Int96GetNanoSeconds(tmpStat->min())),
+                                                      nanoSecondsToPsqlTimestamp(dfs::
+                                                                                 Int96GetNanoSeconds(tmpStat->max())));
                         ret = 1;
                         break;
                     }
@@ -1342,11 +1348,7 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     bool tmpValue = data[i];
                     if (checkPredicateOnRow) {
-#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<BoolWrapper, bool>(tmpValue, predicate);
-#else
-                        isSelected[i] = HdfsPredicateCheckValue<BoolWrapper, bool>(tmpValue, predicate);
-#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1373,12 +1375,8 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                         if (!nullFilter(isSelected, i)) {
                             int64_t tmpValue = static_cast<int64_t>(data[i]);
                             if (checkPredicateOnRow) {
-#ifdef ENABLE_LLVM_COMPILE
                                 isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(tmpValue,
                                                                                                          predicate);
-#else
-                                isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(tmpValue, predicate);
-#endif
                             }
 
                             increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1395,11 +1393,7 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     int64_t tmpValue = static_cast<int64_t>(data[i]);
                     if (checkPredicateOnRow) {
-#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(tmpValue, predicate);
-#else
-                        isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(tmpValue, predicate);
-#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1416,7 +1410,7 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                         if (!nullFilter(isSelected, i)) {
                             parquet::Int96 tmpValue = data[i];
 
-                            auto nanoSeconds = Int96GetNanoSeconds(tmpValue);
+                            auto nanoSeconds = dfs::Int96GetNanoSeconds(tmpValue);
                             nanoSeconds -= (PARQUET_PSQL_EPOCH_IN_DAYS * NANOSECONDS_PER_DAY);
                             nanoSeconds += epochOffsetDiff;
                             Timestamp timestamp = (Timestamp)(nanoSeconds / NANOSECONDS_PER_MICROSECOND);
@@ -1438,11 +1432,7 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     double tmpValue = static_cast<double>(data[i]);
                     if (checkPredicateOnRow) {
-#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Float8Wrapper, double>(tmpValue, predicate);
-#else
-                        isSelected[i] = HdfsPredicateCheckValue<Float8Wrapper, double>(tmpValue, predicate);
-#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);
@@ -1456,11 +1446,7 @@ void ParquetColumnReaderImpl<ReaderType>::predicateFilter(uint64_t numValues, bo
                 if (!nullFilter(isSelected, i)) {
                     double tmpValue = static_cast<double>(data[i]);
                     if (checkPredicateOnRow) {
-#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Float8Wrapper, double>(tmpValue, predicate);
-#else
-                        isSelected[i] = HdfsPredicateCheckValue<Float8Wrapper, double>(tmpValue, predicate);
-#endif
                     }
 
                     increaseBloomFilterRows(&isSelected[i], tmpValue);

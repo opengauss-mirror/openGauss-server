@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-UPDATE [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+UPDATE [/*+ plan_hint */] [ ONLY ] table_name [ * ] [ [ AS ] alias ]
     SET {column_name = { expression | DEFAULT } |
           ( column_name [, ...] ) = {( { expression | DEFAULT } [, ...] ) |sub_query }
           }[, ...]

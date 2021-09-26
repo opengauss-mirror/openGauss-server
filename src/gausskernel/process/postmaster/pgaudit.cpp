@@ -40,7 +40,7 @@
 #include "gs_policy/curl_utils.h"
 #include "pgxc/pgxc.h"
 #include "storage/ipc.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/latch.h"
 #include "storage/pg_shmem.h"
 #include "utils/guc.h"
@@ -412,6 +412,7 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
 static void pgaudit_send_data_to_elastic();
 static void pgaudit_query_file_for_elastic();
 static void elasic_search_connection_test();
+static void CheckAuditFile(void);
 
 /*
  * Main entry point for auditor process
@@ -571,8 +572,8 @@ NON_EXEC_STATIC void PgAuditorMain()
             !t_thrd.audit.rotation_disabled) {
             int64 filesize = ftell(t_thrd.audit.sysauditFile);
             /* Do a rotation if file is too big */
-            if (filesize >= u_sess->attr.attr_security.Audit_RotationSize * 1024L ||
-                filesize >= u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) {
+            if (filesize >= (int64)u_sess->attr.attr_security.Audit_RotationSize * 1024L ||
+                filesize >= (int64)u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) {
                 t_thrd.audit.rotation_requested = size_based_rotation = true;
             }
         }
@@ -618,7 +619,10 @@ NON_EXEC_STATIC void PgAuditorMain()
 
         if (rc & WL_SOCKET_READABLE) {
             int bytesRead;
-
+            /*
+            * Check the current audit file.
+            */
+            CheckAuditFile();
             bytesRead = read(
                 sysauditPipe[0], auditbuffer + bytes_in_auditbuffer, sizeof(auditbuffer) - bytes_in_auditbuffer - 1);
             if (bytesRead < 0) {
@@ -1422,7 +1426,7 @@ static void pgaudit_cleanup(void)
         filesize = ftell(t_thrd.audit.sysauditFile);
     index = t_thrd.audit.audit_indextbl->begidx;
     while (
-        t_thrd.audit.pgaudit_totalspace + filesize >= (uint64)(u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) ||
+        t_thrd.audit.pgaudit_totalspace + filesize >= ((uint64)u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) ||
         t_thrd.audit.audit_indextbl->count > (uint32)u_sess->attr.attr_security.Audit_RemainThreshold) {
         errno_t errorno = EOK;
         struct stat statbuf;
@@ -1436,7 +1440,7 @@ static void pgaudit_cleanup(void)
             u_sess->attr.attr_security.Audit_CleanupPolicy == 0 && remain_time &&
             (t_thrd.audit.pgaudit_totalspace + filesize <= SPACE_MAXIMUM_SIZE)) {
             if ((uint64)(t_thrd.audit.pgaudit_totalspace + filesize -
-                         u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) >= t_thrd.audit.space_beyond_size) {
+                (uint64)u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) >= t_thrd.audit.space_beyond_size) {
                 ereport(WARNING,
                     (errmsg("audit file total space(%lld B) exceed guc parameter(audit_space_limit: %d KB) about %d MB",
                         (long long int)(t_thrd.audit.pgaudit_totalspace + filesize),
@@ -1810,7 +1814,7 @@ static bool audit_get_clientinfo(AuditType type, const char* object_name, AuditE
         ResourceOwner currentOwner = NULL;
         currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
         ResourceOwner tmpOwner =  ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "CheckUserOid",
-            MEMORY_CONTEXT_SECURITY);
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY));
         t_thrd.utils_cxt.CurrentResourceOwner = tmpOwner;
         useroid = get_role_oid(*username, true);
         ResourceOwnerRelease(tmpOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
@@ -2462,6 +2466,7 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
     TimestampTz datetime;
     AuditMsgHdr header;
     AuditData* adata = NULL;
+    int fd = -1;
 
     if (state == NULL || tdesc == NULL)
         return;
@@ -2496,6 +2501,19 @@ static void pgaudit_query_file(Tuplestorestate *state, TupleDesc tdesc, uint32 f
              * versions, we allow the num of fields equal to PGAUDIT_QUERY_COLS or PGAUDIT_QUERY_COLS -1.
              */
             ereport(LOG, (errmsg("invalid data in audit file \"%s\"", t_thrd.audit.pgaudit_filepath)));
+
+            // truncate the current file
+            pgaudit_close_file(fp, t_thrd.audit.pgaudit_filepath);
+            fp = NULL;
+            fd = open(t_thrd.audit.pgaudit_filepath, O_RDWR | O_TRUNC, pgaudit_filemode);
+            if (fd < 0) {
+                ereport(LOG, (errcode_for_file_access(), errmsg("could not open audit file \"%s\": %m",
+                        t_thrd.audit.pgaudit_filepath)));
+            } else {
+                close(fd);
+                fd = -1;
+            }
+
             break;
         }
 
@@ -2801,3 +2819,31 @@ static void elasic_search_connection_test()
                       ((std::string) ":9200/audit/events/_bulk?pretty");
     (void)m_curlUtils.http_post_file_request(url, "", true);
 }
+
+static void CheckAuditFile(void)
+{
+    uint32 fnum = 0;
+    AuditIndexItem *item = NULL;
+    struct stat statBuf;
+    errno_t rc;
+    item = t_thrd.audit.audit_indextbl->data + t_thrd.audit.audit_indextbl->curidx;
+    fnum = item->filenum;
+    rc = snprintf_s(t_thrd.audit.pgaudit_filepath, MAXPGPATH, MAXPGPATH - 1, pgaudit_filename,
+                    g_instance.attr.attr_security.Audit_directory, fnum);
+    securec_check_ss(rc, "\0", "\0");
+    /*
+     * If the current write file is not exist, we'll reinit the sysauditFile.
+     * Also, when we querying the auditfile and finding invalid header file,
+     * we'll truncate it. And in there we'll reinit it too.
+     * 
+     */
+    if (lstat(t_thrd.audit.pgaudit_filepath, &statBuf) == -1 ||
+        (lstat(t_thrd.audit.pgaudit_filepath, &statBuf) == 0 && statBuf.st_size == 0)) {
+        if (t_thrd.audit.sysauditFile != NULL) {
+            fclose(t_thrd.audit.sysauditFile);
+            t_thrd.audit.sysauditFile = NULL;
+            auditfile_init();
+        }
+    }
+}
+

@@ -1877,15 +1877,18 @@ char* get_AZ_value(const char* value, const char* data_dir)
 
     if (NULL == nodenameList) {
         // try dn
-
-        len = strlen(q) + 1;
+        len = strlen(q);
         s = (char *)pg_malloc_zero(len * sizeof(char));
-        nRet = snprintf_s(s, len, len - 1, "%s", q);
+        nRet = snprintf_s(s, len + 1, len, "%s", q);
         securec_check_ss_c(nRet, s, "\0");
 
         vptr = strtok_r(s, delims, &vouter_ptr);
         while (vptr != NULL) {
             p = vptr;
+            int len_p = strlen(p) + 1;
+            char *temp = (char *)pg_malloc_zero(len_p * sizeof(char));
+            nRet = snprintf_s(temp, len_p + 1, len_p, "%s,", p);
+            securec_check_ss_c(nRet, temp, "\0");
 
             if (CheckDataNameValue(p, data_dir) == false) {
                 goto failed;
@@ -3012,12 +3015,13 @@ void save_parameter_info(char* buffer, gucInfo* guc_info)
      * split with '=', get parameter and value
      * both this two, we can makesure the point ptr is not NULL.
      */
-    ptr = strtok_r(tmp_str, ":", &outer_ptr);
+    ptr = strrchr(tmp_str, ':');
     if (NULL == ptr) {
         GS_FREE(tmp_str);
         return;
     }
-    ptr = strtok_r(ptr, "=", &outer_ptr);
+    *ptr = '\0';
+    ptr = strtok_r(tmp_str, "=", &outer_ptr);
     if (NULL == ptr) {
         GS_FREE(tmp_str);
         return;
@@ -3485,6 +3489,15 @@ bool check_cn_dn_parameter_is_valid()
                 all_valid = false;
                 (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect."
                                    "not work on this mode.\n",
+                    config_param[para_num]);
+            }
+            /* segment_test_param only work on debug mode */
+            char* segmentTestParam = "segment_test_param";
+            len = (strlen(tmp) > strlen(segmentTestParam)) ? strlen(tmp) : strlen(segmentTestParam);
+            if (strncmp(tmp, segmentTestParam, len) == 0) {
+                all_valid = false;
+                (void)write_stderr("ERROR: The name of parameter \"%s\" is incorrect."
+                                "not work on this mode.\n",
                     config_param[para_num]);
             }
 #endif

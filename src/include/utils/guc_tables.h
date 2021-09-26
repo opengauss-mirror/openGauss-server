@@ -65,6 +65,7 @@ enum config_group {
     REPLICATION_SENDING,
     REPLICATION_MASTER,
     REPLICATION_STANDBY,
+    REPLICATION_PAXOS,
     QUERY_TUNING,
     QUERY_TUNING_METHOD,
     QUERY_TUNING_COST,
@@ -76,6 +77,8 @@ enum config_group {
     LOGGING_WHAT,
     /* add audit config group. */
     AUDIT_OPTIONS,
+    /* add TDE config group */
+    TRANSPARENT_DATA_ENCRYPTION,
     STATS,
     STATS_MONITORING,
     STATS_COLLECTOR,
@@ -147,6 +150,7 @@ struct config_generic {
     /* constant fields, must be set correctly in initial value: */
     const char* name;        /* name of variable - MUST BE FIRST */
     GucContext context;      /* context required to set the variable */
+    GucNodeType nodetype;  /* context required to set the application environment */
     enum config_group group; /* to help organize variables by function */
     const char* short_desc;  /* short desc. of this variable's purpose */
     const char* long_desc;   /* long desc. of this variable's purpose */

@@ -1,0 +1,423 @@
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = on" > /dev/null 2>&1
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+-- timeCapsule table t to before truncate
+-- 1. revoke schema 
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+NOTICE:  schema "user_a" does not exist, skipping
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user if exists user_a;"
+NOTICE:  role "user_a" does not exist, skipping
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "create table user_a.t2(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "insert into user_a.t2 values(0),(1),(2);"
+INSERT 0 3
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "truncate table user_a.t2;"
+TRUNCATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "revoke usage on schema user_a from user_a;"
+REVOKE
+-- The expected results: ERROR:  permission denied for schema user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_a.t2 to before truncate;" 
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_a.t2 purge;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+-- 2. revoke truncate 
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "create table user_a.t2(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "insert into user_a.t2 values(0),(1),(2);"
+INSERT 0 3
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "truncate table user_a.t2;"
+TRUNCATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "revoke truncate on user_a.t2 from user_a;"
+REVOKE
+-- The expected results: permission denied
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_a.t2 to before truncate;" 
+--?ERROR:  permission denied for relation BIN.*
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_a.t2 purge;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+-- 3. alter schema user_a owner to user_b
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+NOTICE:  schema "user_a" does not exist, skipping
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_b cascade;"
+NOTICE:  schema "user_b" does not exist, skipping
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_A.t_a_1026(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Insert into user_A.t_a_1026 values(0),(1),(2);"
+INSERT 0 3
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "truncate table user_a.t_a_1026;"
+TRUNCATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "alter schema user_A owner to user_b;"
+ALTER SCHEMA
+-- The expected results: permission denied for schema user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before truncate;"   
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+-- The expected results: ERROR:  permission denied for relation t_a_1026
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "Truncate table user_a.t_a_1026;"  
+ERROR:  permission denied for relation t_a_1026
+DETAIL:  N/A
+-- The expected results: ERROR: permission denied for recyclebin object
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before truncate;"  
+--?ERROR:  permission denied for relation BIN.*
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "grant truncate on user_a.t_a_1026 to user_b;"
+GRANT
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before truncate;"  
+ERROR:  The table definition of "t_a_1026" has been changed.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_a. t_a_1026 purge;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_b cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b cascade;"
+DROP ROLE
+-- 4. grant user_b to user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Grant user_b to user_a;"
+GRANT ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_b.t1(a int);"
+CREATE TABLE
+-- The expected results: success
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Truncate user_b.t1;"  
+TRUNCATE TABLE
+-- The expected results: success
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_b.t1 to before truncate;" 
+TimeCapsule Table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "revoke user_b from user_a;"
+REVOKE ROLE
+-- The expected results: permission denied
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_b.t1 to before truncate;"  
+ERROR:  permission denied for schema user_b
+DETAIL:  N/A
+-- The expected results: permission denied
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "truncate table user_b.t1;"  
+ERROR:  permission denied for schema user_b
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_b cascade;"
+NOTICE:  drop cascades to table user_b.t1
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b cascade;"
+DROP ROLE
+-- 5. must be owner of table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_A.t_a_1026(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Insert into user_A.t_a_1026 values(0),(1),(2);"
+INSERT 0 3
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "truncate table user_a.t_a_1026; "
+TRUNCATE TABLE
+-- expected results: permission denied
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before truncate;"
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Grant usage on schema user_a to user_b;"
+GRANT
+-- expected results: permission denied
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before truncate;"
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Grant create on schema user_a to user_b;"
+GRANT
+-- expected results: must be owner of 
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before truncate;"
+--?ERROR:  must be owner of relation BIN.*
+DETAIL:  N/A
+-- expected results:timeCapsule table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before truncate;"
+TimeCapsule Table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_a. t_a_1026 purge;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b cascade;"
+DROP ROLE
+-- timeCapsule to before drop
+-- 1. revoke usage on schema
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "create table user_a.t2(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "drop table user_a.t2;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "revoke usage on schema user_a from user_a;"
+REVOKE
+-- The expected results: ERROR:  permission denied for schema user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_a.t2 to before drop;" 
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+-- 2. alter schema user_a owner to user_b
+-- Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+-- user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_A.t_a_1026(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "drop table user_a.t_a_1026;"
+DROP TABLE
+-- Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "alter schema user_A owner to user_b;"
+ALTER SCHEMA
+-- user_a:
+-- The expected results: ERROR:  permission denied for schema user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before drop;"  
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+-- user_b:
+-- The expected results: timeCapsule table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before drop;"  
+TimeCapsule Table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_a.t_a_1026 purge;"
+DROP TABLE
+-- Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_b cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b cascade;"
+DROP ROLE
+-- 3. grant user_b to user_a
+-- Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Grant user_b to user_a;"
+GRANT ROLE
+-- user_a：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_b.t1(a int);"
+CREATE TABLE
+-- Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_b.t1; "
+DROP TABLE
+-- user_a: 
+-- The expected results:  timeCapsule table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_b.t1 to before drop;" 
+TimeCapsule Table
+-- Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_b.t1;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "revoke user_b from user_a;"
+REVOKE ROLE
+-- user_a:
+-- The expected results:  failed
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_b.t1 to before drop;" 
+ERROR:  permission denied for schema user_b
+DETAIL:  N/A
+-- Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_a cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop schema if exists user_b cascade;"
+DROP SCHEMA
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b cascade;"
+DROP ROLE
+-- 4. must be owner of table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_A.t_a_1026(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Insert into user_A.t_a_1026 values(0),(1),(2);"
+INSERT 0 3
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "drop table user_a.t_a_1026; "
+DROP TABLE
+-- expected results: permission denied
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before drop;"
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Grant usage on schema user_a to user_b;"
+GRANT
+-- expected results: permission denied
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before drop;"
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Grant create on schema user_a to user_b;"
+GRANT
+-- expected results: must be owner of 
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before drop;"
+--?ERROR:  must be owner of relation BIN.*
+DETAIL:  N/A
+-- expected results:timeCapsule table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "timeCapsule table user_a.t_a_1026 to before drop;"
+TimeCapsule Table
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop table user_a. t_a_1026 purge;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b cascade;"
+DROP ROLE
+-- purge recyclebin
+--1.Initializing user：
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_c identified by 'TestPwd@123';"
+CREATE ROLE
+--2.user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_a.tab1_(a int);" 
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_a.tab2(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Drop table user_a.tab1_;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Drop table user_a.tab2;"
+DROP TABLE
+--3.user_b
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "Create table user_b.tab3(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "Create table user_b.tab4(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "Drop table user_b.tab3;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "Drop table user_b.tab4;"
+DROP TABLE
+--4.user_c
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_c -W TestPwd@123 -c "Create table user_c.tab5(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_c -W TestPwd@123 -c "Create table user_c.tab6(a int);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_c -W TestPwd@123 -c "Drop table user_c.tab5;"
+DROP TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_c -W TestPwd@123 -c "Drop table user_c.tab6;"
+DROP TABLE
+--5.user_a:purge recyclebin
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Purge recyclebin;"
+ERROR:  autopurge failed due to unexpected error: permission denied for schema user_b. DETAIL: 0 objects purged, 0 objects lock conflicted, 0 objects not exist.
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Select rcyoriginname from gs_recyclebin;"
+ rcyoriginname 
+---------------
+ tab1_
+ tab2
+ tab3
+ tab4
+ tab5
+ tab6
+(6 rows)
+
+--6.the initializing user:purge recyclebin
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "Select rcyoriginname from gs_recyclebin;"
+ rcyoriginname 
+---------------
+(0 rows)
+
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b cascade;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_c cascade;"
+DROP ROLE
+-- timeCapsule table to before drop: There are multiple objects of the same name in the recyclebin
+Create table tab1_(a int);
+Insert into tab1_ values(0);
+Drop table tab1_;
+Create table tab1_(a int);
+Insert into tab1_ values(1);
+Drop table tab1_;
+Create table tab1_(a int);
+Insert into tab1_ values(2);
+Drop table tab1_;
+Timecapsule table tab1_ to before drop;
+-- expected: 2
+Select * from tab1_;
+ a 
+---
+ 0
+(1 row)
+
+Drop table tab1_;
+Purge recyclebin;
+-- purge index
+--1.the initializing user:
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_a identified by 'TestPwd@123';"
+CREATE ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "create user user_b identified by 'TestPwd@123';"
+CREATE ROLE
+--2.user_a
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create table user_a.tab1_(a int, b char);"
+CREATE TABLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Create index index_tab1_a on user_a.tab1_(a);"
+CREATE INDEX
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "Drop table user_a.tab1_;"
+DROP TABLE
+--3.user_b
+--expected: no privilege
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_b -W TestPwd@123 -c "purge index user_a.index_tab1_a;"
+ERROR:  permission denied for schema user_a
+DETAIL:  N/A
+--4.user_a
+--expected: success
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -U user_a -W TestPwd@123 -c "purge index user_a.index_tab1_a;"
+PURGE INDEX
+--5.the initializing user:
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "purge recyclebin;"
+PURGE RECYCLEBIN
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_a;"
+DROP ROLE
+\! @abs_bindir@/gsql -d postgres -p @portstring@ -c "drop user user_b;"
+DROP ROLE
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "enable_recyclebin = off" > /dev/null 2>&1

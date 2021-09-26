@@ -442,7 +442,7 @@ void DefineOpClass(CreateOpClassStmt* stmt)
                 }
 
                 if (item->order_family)
-                    sortfamilyOid = get_opfamily_oid(BTREE_AM_OID, item->order_family, false);
+                    sortfamilyOid = get_opfamily_oid(BTREE_AM_OID, item->order_family, false); 
                 else
                     sortfamilyOid = InvalidOid;
 
@@ -778,7 +778,7 @@ static void AlterOpFamilyAdd(
                 }
 
                 if (item->order_family)
-                    sortfamilyOid = get_opfamily_oid(BTREE_AM_OID, item->order_family, false);
+                    sortfamilyOid = get_opfamily_oid(BTREE_AM_OID, item->order_family, false); 
                 else
                     sortfamilyOid = InvalidOid;
 
@@ -1023,12 +1023,16 @@ static void assignProcTypes(OpFamilyMember* member, Oid amoid, Oid typeoid)
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", member->object)));
     procform = (Form_pg_proc)GETSTRUCT(proctup);
 
+    // No need to check Anum_pg_proc_proargtypesext attribute, because btree function
+    // will not have more than FUNC_MAX_ARGS_INROW parameters
+    Assert(procform->pronargs <= FUNC_MAX_ARGS_INROW);
+
     /*
      * btree comparison procs must be 2-arg procs returning int4, while btree
      * sortsupport procs must take internal and return void.  hash support
      * procs must be 1-arg procs returning int4.  Otherwise we don't know.
      */
-    if (amoid == BTREE_AM_OID || amoid == CBTREE_AM_OID) {
+    if (amoid == BTREE_AM_OID || amoid == UBTREE_AM_OID || amoid == CBTREE_AM_OID) {
         if (member->number == BTORDER_PROC) {
             if (procform->pronargs != 2)
                 ereport(ERROR,

@@ -27,8 +27,9 @@
 
 #include <fcntl.h> /* need open() flags */
 #include "c.h"
-#include "knl/knl_thread.h"
 #include "utils/palloc.h"
+
+#include "storage/lock/lwlock.h"
 
 static const uint32 HALF_K = 512;
 
@@ -102,6 +103,16 @@ const static uint32 DW_VIEW_COL_NAME_LEN = 32;
 #define DW_LOG_LEVEL DEBUG1
 #endif
 
+#ifdef __x86_64__ /* AMD Opteron, Intel EM64T */
+typedef unsigned char slock_t;
+#endif
+
+#if defined(__aarch64__) || defined(__aarch64)
+typedef int slock_t;
+#endif
+
+typedef uintptr_t Datum;
+
 typedef Datum (*dw_view_get_data_func)();
 
 typedef struct st_dw_view_col {
@@ -109,6 +120,8 @@ typedef struct st_dw_view_col {
     Oid data_type;
     dw_view_get_data_func get_data;
 } dw_view_col_t;
+
+Datum dw_get_node_name();
 
 typedef struct st_dw_read_asst {
     int fd;

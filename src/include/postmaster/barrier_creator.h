@@ -26,7 +26,19 @@
 #ifndef BARRIER_CREATOR_H
 #define BARRIER_CREATOR_H
 
+#define BARRIER_FILE "hadr_barrier_id"
+#define BARRIER_ARCH_INFO_LEN 100
+
+typedef struct ArchiveBarrierLsnInfo {
+    XLogRecPtr barrierLsn;
+    Oid nodeoid;
+} ArchiveBarrierLsnInfo;
+
 extern void barrier_creator_main(void);
 extern void barrier_creator_thread_shutdown(void);
+extern uint64_t GetObsBarrierIndex(const List *archiveSlotNames);
+
+extern void BarrierArchMain(knl_thread_arg* arg);
+extern bool IsFirstCn(void);
 
 #endif /* BARRIER_CREATOR_H */

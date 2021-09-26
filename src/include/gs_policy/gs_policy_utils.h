@@ -114,6 +114,13 @@ typedef gs_stl::gs_set<PgPolicyMaskingActionStruct> masking_actions_set;
 
 struct PgPolicyPrivilegesAccessStruct {
     PgPolicyPrivilegesAccessStruct() : m_id(0), m_type(""), m_label_name(""), m_policy_oid(0) {}
+    PgPolicyPrivilegesAccessStruct(const PgPolicyPrivilegesAccessStruct &arg)
+    {
+        m_id = arg.m_id;
+        m_type = arg.m_type;
+        m_label_name = arg.m_label_name;
+        m_policy_oid = arg.m_policy_oid;
+    }
     bool operator == (const PgPolicyPrivilegesAccessStruct &arg) const;
     bool operator < (const PgPolicyPrivilegesAccessStruct &arg) const;
     int operator - (const PgPolicyPrivilegesAccessStruct &arg) const;
@@ -304,12 +311,6 @@ extern bool verify_ip_role_app(const char *obj_type, const char *obj_value, gs_s
 extern bool validate_logical_expression(const gs_stl::gs_string logical_expr_str, int *offset);
 
 extern bool scan_to_delete_from_relation(long long row_id, Relation relation, unsigned int index_id);
-
-extern bool remove_filters(const filters_set filters_to_remove, Relation relation, filters_set *existing_filters,
-                           unsigned int index_id, gs_stl::gs_string *err_msg);
-
-extern bool remove_filters(const filters_set filters_to_remove, unsigned int relation_id, unsigned int index_id,
-                           gs_stl::gs_string *err_msg);
 
 extern void construct_resource_name(const RangeVar *rel, gs_stl::gs_string *target_name_s);
 

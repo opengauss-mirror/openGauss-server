@@ -795,7 +795,9 @@ static void setup_firstcall(FuncCallContext* funcctx, HStore* hs, FunctionCallIn
         if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
             elog(ERROR, "return type must be a row type");
 
-        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        if (tupdesc != NULL) {
+            funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        }
     }
 
     MemoryContextSwitchTo(oldcontext);

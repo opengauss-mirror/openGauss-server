@@ -36,7 +36,7 @@
 #include "prflog_private.h"
 #include "securec.h"
 #include "bin/elog.h"
-
+#include "port.h"
 #define PRINT_DELIM(_fd) fprintf((_fd), ",")
 #define PRINT_NEWLN(_fd) fprintf((_fd), "\n")
 
@@ -197,6 +197,7 @@ int gslog_dumper::set_logfile(const char* logfile)
     close_logfile();
 
     /* check whether log file exists */
+    canonicalize_path(m_in_logfile);
     m_infd = fopen(m_in_logfile, "rb");
     if (NULL == m_infd) {
         m_error_no = errno;

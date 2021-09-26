@@ -57,9 +57,9 @@ typedef struct dw_single_flush_item {
 
 /* Used by double_write to mark the buffers which are not flushed in the given buf_id array. */
 static const int DW_INVALID_BUFFER_ID = -1;
-/* steal high bit from pagenum as the flag of hashbucket */
-#define IS_HASH_BKT_MASK (0x8000)
-#define GET_REL_PGAENUM(pagenum) (pagenum & ~IS_HASH_BKT_MASK)
+/* steal high bit from pagenum as the flag of hashbucket or segpage */
+#define IS_HASH_BKT_SEGPAGE_MASK (0x8000)
+#define GET_REL_PGAENUM(pagenum) (pagenum & ~IS_HASH_BKT_SEGPAGE_MASK)
 
 /**
  * Dirty data pages in one batch
@@ -119,7 +119,7 @@ const uint32 DW_SUPPORT_SINGLE_FLUSH_VERSION = 92266;
 
 /* dw single flush file information */
 /* file head + storage buffer tag page + data page */
-const int DW_SINGLE_FILE_SIZE = (1 + 161 + 32768) * 8192;
+const int DW_SINGLE_FILE_SIZE = (1 + 161 + 32768) * BLCKSZ;
 
 /* Reserve 8 bytes for bufferTag upgrade. now usepage num is 32768 * sizeof(dw_single_flush_item) / 8192 */
 const int DW_SINGLE_BUFTAG_PAGE_NUM = 161;
@@ -216,7 +216,7 @@ int64 dw_seek_file(int fd, int64 offset, int32 origin);
 
 void dw_pread_file(int fd, void* buf, int size, int64 offset);
 
-void dw_pwrite_file(int fd, const void* buf, int size, int64 offset);
+void dw_pwrite_file(int fd, const void* buf, int size, int64 offset, const char* fileName);
 
 /**
  * generate the file for the database first boot
@@ -273,6 +273,7 @@ inline bool dw_page_writer_running()
 }
 
 extern uint16 dw_single_flush(BufferDesc *buf_desc);
+extern uint16 dw_single_flush_without_buffer(BufferTag tag, Block block);
 extern bool dw_single_file_recycle(bool trunc_file);
 extern bool backend_can_flush_dirty_page();
 extern void dw_force_reset_single_file();

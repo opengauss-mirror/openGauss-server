@@ -25,6 +25,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/cbmparsexlog.h"
+#include "access/ustore/undo/knl_uundoapi.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
@@ -36,8 +37,9 @@
 #include "postmaster/cbmwriter.h"
 #include "postmaster/postmaster.h"
 #include "storage/copydir.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/lock/lwlock.h"
+#include "storage/smgr/segment.h"
 #include "utils/builtins.h"
 
 extern void *palloc_extended(Size size, int flags);
@@ -231,7 +233,24 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
 
         Assert(cur_array_entry.cbmTag.rNode.spcNode != InvalidOid);
 
-        if (IsValidColForkNum(cur_array_entry.cbmTag.forkNum)) {
+        if (IS_UNDO_RELFILENODE(cur_array_entry.cbmTag.rNode)) {
+            /* undo file and transaction slot */
+            char file_path[UNDO_FILE_PATH_LEN] = {'\0'};
+            char dir_path[UNDO_FILE_DIR_LEN] = {'\0'};
+            DECLARE_NODE_COUNT();
+            GET_UPERSISTENCE_BY_ZONEID((int)cur_array_entry.cbmTag.rNode.relNode, nodeCount);
+            GetUndoFileDirectory(dir_path, UNDO_FILE_DIR_LEN, upersistence);
+            if (cur_array_entry.cbmTag.rNode.dbNode == UNDO_DB_OID) {
+                rc = snprintf_s(file_path, UNDO_FILE_PATH_LEN, UNDO_FILE_PATH_LEN - 1,
+                        "%s/%05X", dir_path, cur_array_entry.cbmTag.rNode.relNode);
+            } else {
+                rc = snprintf_s(file_path, UNDO_FILE_PATH_LEN, UNDO_FILE_PATH_LEN - 1,
+                        "%s/%05X.meta", dir_path, cur_array_entry.cbmTag.rNode.relNode);
+            }
+            securec_check_ss(rc, "\0", "\0");
+            values[6] = CStringGetTextDatum(file_path);
+        } else if (IsValidColForkNum(cur_array_entry.cbmTag.forkNum)) {
+            /* column store change */
             char file_path[MAXPGPATH] = {'\0'};
             CFileNode cfile_node(cur_array_entry.cbmTag.rNode, ColForkNum2ColumnId(cur_array_entry.cbmTag.forkNum),
                                  MAIN_FORKNUM);
@@ -241,23 +260,25 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
             values[6] = CStringGetTextDatum(file_path);
             cu_storage.Destroy();
         } else if (cur_array_entry.cbmTag.rNode.relNode != InvalidOid) {
-            Assert(cur_array_entry.cbmTag.forkNum == MAIN_FORKNUM ||
-                   cur_array_entry.cbmTag.forkNum == VISIBILITYMAP_FORKNUM ||
-                   cur_array_entry.cbmTag.forkNum == FSM_FORKNUM || cur_array_entry.cbmTag.forkNum == INIT_FORKNUM);
+            /* row store file change */
+            Assert(cur_array_entry.cbmTag.forkNum <= MAX_FORKNUM);
             char *file_path = relpathperm(cur_array_entry.cbmTag.rNode, cur_array_entry.cbmTag.forkNum);
             values[6] = CStringGetTextDatum(file_path);
             pfree(file_path);
         } else if (cur_array_entry.cbmTag.rNode.dbNode != InvalidOid) {
+            /* database create/drop and non-shared relmap change */
             char *db_path = GetDatabasePath(cur_array_entry.cbmTag.rNode.dbNode, cur_array_entry.cbmTag.rNode.spcNode);
             values[6] = CStringGetTextDatum(db_path);
             pfree(db_path);
         } else if (cur_array_entry.cbmTag.rNode.spcNode == GLOBALTABLESPACE_OID) {
+            /* shared relmap change */
             Assert(cur_array_entry.changeType & PAGETYPE_TRUNCATE);
 
             char *db_path = GetDatabasePath(cur_array_entry.cbmTag.rNode.dbNode, cur_array_entry.cbmTag.rNode.spcNode);
             values[6] = CStringGetTextDatum(db_path);
             pfree(db_path);
         } else {
+            /* tablespace create/drop */
             int len = strlen("pg_tblspc") + 1 + OIDCHARS + 1 + strlen(g_instance.attr.attr_common.PGXCNodeName) + 1 +
                       strlen(TABLESPACE_VERSION_DIRECTORY) + 2;
             char *tblspc_path = (char *)palloc(len);
@@ -272,13 +293,15 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
         values[8] = BoolGetDatum(cur_array_entry.changeType & PAGETYPE_CREATE);
         values[9] = BoolGetDatum(cur_array_entry.changeType & PAGETYPE_TRUNCATE);
 
-        if (BlockNumberIsValid(cur_array_entry.truncBlockNum))
+        nulls[10] = true;
+        if (BlockNumberIsValid(cur_array_entry.truncBlockNum)) {
             values[10] = ObjectIdGetDatum(cur_array_entry.truncBlockNum);
-        else
-            nulls[10] = true;
+            nulls[10] = false;
+        }
 
         values[11] = ObjectIdGetDatum(cur_array_entry.totalBlockNum);
 
+        nulls[12] = true;
         if (cur_array_entry.totalBlockNum > 0) {
             max_block_str_length = MAX_STRLEN_PER_BLOCKNO * cur_array_entry.totalBlockNum + 1;
             changed_block_str = (char *)palloc_extended(max_block_str_length * sizeof(char),
@@ -303,8 +326,8 @@ Datum pg_cbm_get_changed_block(PG_FUNCTION_ARGS)
             values[12] = CStringGetTextDatum(changed_block_str);
 
             pfree(changed_block_str);
-        } else
-            nulls[12] = true;
+            nulls[12] = false;
+        }
 
         pfree_ext(cur_array_entry.changedBlock);
 

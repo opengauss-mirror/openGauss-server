@@ -27,7 +27,7 @@
 
 #include "access/xact.h"
 #include "miscadmin.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "lz4.h"
 #include "storage/lz4_file.h"
 #include "utils/memutils.h" /* For MemoryContext stuff */

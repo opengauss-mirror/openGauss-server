@@ -33,9 +33,9 @@
 #include "utils/rel_gs.h"
 #include "access/genam.h"
 #include "access/relscan.h"
-#include "executor/execdebug.h"
-#include "executor/nodeIndexonlyscan.h"
-#include "executor/nodeIndexscan.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeIndexonlyscan.h"
+#include "executor/node/nodeIndexscan.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "utils/array.h"
@@ -260,6 +260,7 @@ DfsIndexScanState* ExecInitDfsIndexScan(DfsIndexScan* node, EState* estate, int 
 
         /* Initialize the cstorescanstate for index relation. */
         index_state->m_indexScan = ExecInitCStoreScan(index_scan, NULL, estate, eflags, true);
+        index_state->part_id = index_state->m_indexScan->part_id;
         index_state->m_btreeIndexScan = NULL;
         index_state->m_btreeIndexOnlyScan = NULL;
 
@@ -296,6 +297,7 @@ DfsIndexScanState* ExecInitDfsIndexScan(DfsIndexScan* node, EState* estate, int 
                 node->indexqual,
                 node->indexorderby);
             index_state->m_btreeIndexScan = btree_index_scan;
+            index_state->part_id = index_state->m_btreeIndexScan->ss.part_id;
             index_state->m_btreeIndexOnlyScan = NULL;
             index_state->m_sort = btree_index_scan->m_sort;
             index_state->m_dfsIndexScanFunc = ExecDfsIndexScanT<BTREE_INDEX>;
@@ -311,6 +313,7 @@ DfsIndexScanState* ExecInitDfsIndexScan(DfsIndexScan* node, EState* estate, int 
                 node->indexqual,
                 node->indexorderby);
             index_state->m_btreeIndexOnlyScan = btree_index_only_scan;
+            index_state->part_id = index_state->m_btreeIndexOnlyScan->ss.part_id;
             index_state->m_btreeIndexScan = NULL;
             index_state->m_sort = btree_index_only_scan->m_sort;
 
@@ -327,10 +330,6 @@ DfsIndexScanState* ExecInitDfsIndexScan(DfsIndexScan* node, EState* estate, int 
     /* Build the list of columns which need not to be read by dfs scan. */
     index_state->m_dfsPreparedCols = BuildDfsPreparedCols(node->indexScantlist, node->indextlist);
 
-    // add partition nums
-    if (index_state->m_indexScan) {
-        index_state->part_id = index_state->m_indexScan->part_id;
-    }
     return index_state;
 }
 

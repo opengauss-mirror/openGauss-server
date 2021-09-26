@@ -68,10 +68,11 @@
 #include "knl/knl_variable.h"
 
 #include "access/nbtree.h"
+#include "access/tableam.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "miscadmin.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
 #include "utils/aiomem.h"
@@ -81,36 +82,83 @@
 #include "commands/tablespace.h"
 #include "access/transam.h"
 #include "utils/builtins.h"
-
-
-/*
- * Status record for spooling/sorting phase.  (Note we may have two of
- * these due to the special requirements for uniqueness-checking with
- * dead tuples.)
- */
-struct BTSpool {
-    Tuplesortstate *sortstate; /* state data for tuplesort.c */
-    Relation index;
-    bool isunique;
-};
+#include "utils/logtape.h"
+#include "utils/tuplesort.h"
+#include "catalog/index.h"
+#include "postmaster/bgworker.h"
 
 static Page _bt_blnewpage(uint32 level);
 static void _bt_slideleft(Page page);
 static void _bt_sortaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumber itup_off);
 static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2);
+static void _bt_parallel_build_main(const BgWorkerContext *bwc);
+static void _bt_parallel_cleanup(const BgWorkerContext *bwc);
+
+/*
+ * Unified Atomic Iterator iterates next and returns the current value.
+ */
+uint64 uniter_next(pg_atomic_uint64 *curiter, uint32 cycle0, uint32 cycle1)
+{
+    unified_atomic_iterator_t uniter;
+    uint64 value;
+    uint32 iter0 = INVALID_ATOMIC_ITERATOR;
+    uint32 iter1 = INVALID_ATOMIC_ITERATOR;
+
+    value = pg_atomic_barrier_read_u64(curiter);
+next:
+    uniter.value = value;
+
+    if (cycle0 > 0 && cycle1 == 0) {
+        /* only iter0 is valid */
+        iter0 = uniter.iters[0] + 1;
+    } else if (cycle0 == 0 && cycle1 > 0) {
+        /* only iter1 is valid */
+        iter1 = uniter.iters[1] + 1;
+    } else if (cycle0 > 0 && cycle1 > 0) {
+        /* both iter0 and iter1 are valid */
+        iter0 = uniter.iters[0] + 1;
+        iter1 = uniter.iters[1];
+        if (iter0 == cycle0) {
+            iter1++;
+            iter0 = 0;
+        }
+    } else {
+        /* both are invalid, should not be here */
+        ereport(PANIC, (errmsg("Unexpected error occurred during index parallel building.")));
+    }
+
+    uniter.iters[0] = iter0;
+    uniter.iters[1] = iter1;
+
+    if (!pg_atomic_compare_exchange_u64(curiter, &value, uniter.value)) {
+        goto next;
+    }
+    /* fix the initial value */
+    uniter.value = value;
+    if (cycle0 == 0 && uniter.iters[0] >= 0) {
+        uniter.iters[0] = INVALID_ATOMIC_ITERATOR;
+    }
+    if (cycle1 == 0 && uniter.iters[1] >= 0) {
+        uniter.iters[1] = INVALID_ATOMIC_ITERATOR;
+    }
+    value = uniter.value;
+
+    return value;
+}
 
 /*
  * Interface routines
  *
  * create and initialize a spool structure
  */
-BTSpool *_bt_spoolinit(Relation index, bool isunique, bool isdead, void *meminfo)
+BTSpool *_bt_spoolinit(Relation heap, Relation index, bool isunique, bool isdead, void *meminfo)
 {
     BTSpool *btspool = (BTSpool *)palloc0(sizeof(BTSpool));
     int btKbytes;
     UtilityDesc *desc = (UtilityDesc *)meminfo;
     int maxKbytes = isdead ? 0 : desc->query_mem[1];
 
+    btspool->heap = heap;
     btspool->index = index;
     btspool->isunique = isunique;
 
@@ -126,7 +174,7 @@ BTSpool *_bt_spoolinit(Relation index, bool isunique, bool isdead, void *meminfo
         btKbytes = isdead ? SIMPLE_THRESHOLD : desc->query_mem[0];
     else
         btKbytes = isdead ? u_sess->attr.attr_memory.work_mem : u_sess->attr.attr_memory.maintenance_work_mem;
-    btspool->sortstate = tuplesort_begin_index_btree(index, isunique, btKbytes, false, maxKbytes);
+    btspool->sortstate = tuplesort_begin_index_btree(index, isunique, btKbytes, NULL, false, maxKbytes);
 
     /* We seperate 32MB for spool2, so cut this from the estimation */
     if (isdead) {
@@ -149,9 +197,9 @@ void _bt_spooldestroy(BTSpool *btspool)
 /*
  * spool an index entry into the sort file.
  */
-void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull)
+void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull, IndexTransInfo* transInfo)
 {
-    tuplesort_putindextuplevalues(btspool->sortstate, btspool->index, self, values, isnull);
+    tuplesort_putindextuplevalues(btspool->sortstate, btspool->index, self, values, isnull, transInfo);
 }
 
 /*
@@ -225,14 +273,8 @@ static Page _bt_blnewpage(uint32 level)
     return page;
 }
 
-/*
- * emit a completed btree page, and release the working storage.
- */
-static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
+static void _bt_segment_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
 {
-    bool need_free = false;
-    errno_t errorno = EOK;
-
     if (blkno >= wstate->btws_pages_written) {
         // check tablespace size limitation when extending BTREE file.
         STORAGE_SPACE_OPERATION(wstate->index, ((uint64)BLCKSZ) * (blkno - wstate->btws_pages_written + 1));
@@ -241,11 +283,56 @@ static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
     /* Ensure rd_smgr is open (could have been closed by relcache flush!) */
     RelationOpenSmgr(wstate->index);
 
+    /* First make sure the block is extended and set as all-zero */
+    while (blkno >= wstate->btws_pages_written) {
+        Buffer buf = ReadBuffer(wstate->index, P_NEW);
+        Assert(BufferGetBlockNumber(buf) == wstate->btws_pages_written);
+        ReleaseBuffer(buf);
+        wstate->btws_pages_written++;
+    }
+
+    Buffer buf = ReadBuffer(wstate->index, blkno);
+    _bt_checkbuffer_valid(wstate->index, buf);
+
+    LockBuffer(buf, BT_WRITE);
+    /* Write data to block. We must use xlog in segment-page storage, as it needs set page's LSN in any cases. */
+    XLogRecPtr xlog_ptr = log_newpage(&wstate->index->rd_node, MAIN_FORKNUM, blkno, page, true);
+
+    errno_t rc = memcpy_s(BufferGetBlock(buf), BLCKSZ, page, BLCKSZ);
+    securec_check(rc, "\0", "\0");
+    PageSetLSN(BufferGetPage(buf), xlog_ptr);
+    MarkBufferDirty(buf);
+    UnlockReleaseBuffer(buf);
+    pfree(page);
+    page = NULL;
+}
+
+/*
+ * emit a completed btree page, and release the working storage.
+ */
+static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
+{
+    if (IsSegmentFileNode(wstate->index->rd_node)) {
+        _bt_segment_blwritepage(wstate, page, blkno);
+        return; 
+    }
+
+    bool need_free = false;
+    errno_t errorno = EOK;
+
     /* XLOG stuff */
     if (wstate->btws_use_wal) {
         /* We use the heap NEWPAGE record type for this */
         log_newpage(&wstate->index->rd_node, MAIN_FORKNUM, blkno, page, true);
     }
+    
+    if (blkno >= wstate->btws_pages_written) {
+        // check tablespace size limitation when extending BTREE file.
+        STORAGE_SPACE_OPERATION(wstate->index, ((uint64)BLCKSZ) * (blkno - wstate->btws_pages_written + 1));
+    }
+
+    /* Ensure rd_smgr is open (could have been closed by relcache flush!) */
+    RelationOpenSmgr(wstate->index);
 
     /*
      * If we have to write pages nonsequentially, fill in the space with
@@ -294,9 +381,7 @@ static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
         ADIO_END();
     }
 
-    char *bufToWrite = PageDataEncryptIfNeed(page);
-
-    PageSetChecksumInplace((Page)bufToWrite, blkno);
+    PageSetChecksumInplace(page, blkno);
 
     /*
      * Now write the page.	There's no need for smgr to schedule an fsync for
@@ -304,11 +389,11 @@ static void _bt_blwritepage(BTWriteState *wstate, Page page, BlockNumber blkno)
      */
     if (blkno == wstate->btws_pages_written) {
         /* extending the file... */
-        smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, (char *)bufToWrite, true);
+        smgrextend(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, (char *)page, true);
         wstate->btws_pages_written++;
     } else {
         /* overwriting a block we zero-filled before */
-        smgrwrite(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, (char *)bufToWrite, true);
+        smgrwrite(wstate->index->rd_smgr, MAIN_FORKNUM, blkno, (char *)page, true);
     }
 
     ADIO_RUN()
@@ -403,6 +488,7 @@ static void _bt_sortaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumb
     BTPageOpaqueInternal opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
     IndexTupleData trunctuple;
 
+
     if (!P_ISLEAF(opaque) && itup_off == P_FIRSTKEY) {
         trunctuple = *itup;
         trunctuple.t_info = sizeof(IndexTupleData);
@@ -414,7 +500,16 @@ static void _bt_sortaddtup(Page page, Size itemsize, IndexTuple itup, OffsetNumb
     }
 
     if (PageAddItem(page, (Item)itup, itemsize, itup_off, false, false) == InvalidOffsetNumber)
-        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("failed to add item to the index page")));
+        ereport(ERROR, 
+                (errmodule(MOD_INDEX),
+                 errcode(ERRCODE_INDEX_CORRUPTED),
+                 errmsg("failed to add item to the index page"),
+                 errdetail("item size: %lu, Tid: block %u, offset %u,",
+                           (unsigned long)itemsize,
+                           BlockIdGetBlockNumber(&(itup->t_tid.ip_blkid)),
+                           itup->t_tid.ip_posid),
+                 errcause("System error."),
+                 erraction("Check WARNINGS for the details.")));
 }
 
 /* ----------
@@ -483,12 +578,17 @@ void _bt_buildadd(BTWriteState *wstate, BTPageState *state, IndexTuple itup)
      * during creation of an index, we don't go through there.
      */
     if (itupsz > (Size)BTMaxItemSize(npage))
-        ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
-                        errmsg("index row size %lu exceeds maximum %lu for index \"%s\"", (unsigned long)itupsz,
-                               (unsigned long)BTMaxItemSize(npage), RelationGetRelationName(wstate->index)),
-                        errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
-                                "Consider a function index of an MD5 hash of the value, "
-                                "or use full text indexing.")));
+        ereport(ERROR, 
+                (errmodule(MOD_INDEX),
+                 errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                 errmsg("index row size %lu exceeds maximum %lu for index \"%s\"", (unsigned long)itupsz,
+                        (unsigned long)BTMaxItemSize(npage), RelationGetRelationName(wstate->index)),
+                 errhint("Values larger than 1/3 of a buffer page cannot be indexed.\n"
+                         "Consider a function index of an MD5 hash of the value, "
+                         "or use full text indexing."),
+                 errdetail("Block Number: %u, last off: %u.", nblkno, last_off),
+                 errcause("Values larger than 1/3 of a buffer page cannot be indexed."),
+                 erraction("Consider a function index of an MD5 hash of the value, or use full text indexing.")));
 
     /*
      * Check to see if page is "full".	It's definitely full if the item won't
@@ -803,14 +903,14 @@ static void _bt_load(BTWriteState *wstate, BTSpool *btspool, BTSpool *btspool2)
 }
 
 /*
- * if itup <= itup2, return true;
- * if itup > itup2, return false.
+ * if itup < itup2, return true;
+ * if itup > itup2, return false;
+ * if itup == itup2, Take TID as the tie-breaker.
  * itup == NULL && itup2 == NULL take care by caller
  */
 bool _index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup, IndexTuple itup2)
 {
     /* defaultly load itup, including the itup != NULL && itup2 == NULL case. */
-    bool result = true;
     int i;
 
     if (itup == NULL && itup2 != NULL) {
@@ -851,12 +951,17 @@ bool _index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, Ind
 
         // check compare value, if 0 continue, else break.
         if (compare > 0) {
-            result = false;
-            break;
-        } else if (compare < 0)
-            break;
+            return false;
+        } else if (compare < 0) {
+            return true;
+        }
     }
-    return result;
+
+    /* we got here, key attrs are all equal, take TID as tie-breaker */
+    int compare = ItemPointerCompare(&itup->t_tid, &itup2->t_tid);
+    /* TIDs can still be equal in global index  */
+
+    return compare <= 0;
 }
 
 List *insert_ordered_index(List *list, TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup,
@@ -878,8 +983,14 @@ List *insert_ordered_index(List *list, TupleDesc tupdes, ScanKey indexScanKey, i
         return lcons(ele, list);
     }
     itup2 = ((BTOrderedIndexListElement *)linitial(list))->itup;
-    if (itup == NULL && itup2 == NULL) {
-        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("index compare error, both are NULL")));
+    if (itup2 == NULL) {
+        ereport(ERROR, 
+                (errmodule(MOD_INDEX),
+                 errcode(ERRCODE_INDEX_CORRUPTED),
+                 errmsg("fail to insert a tuple to an orderd index, the ordered tuple list is corrupted"),
+                 errdetail("offset itup: %u, Number of attributes: %d.", heapModifiedOffset, keysz),
+                 errcause("System error."),
+                 erraction("Contact engineer to support.")));
     }
     /* Does the datum belong at the front? */
     if (_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2)) {
@@ -896,8 +1007,14 @@ List *insert_ordered_index(List *list, TupleDesc tupdes, ScanKey indexScanKey, i
             break;
         }
         itup2 = ((BTOrderedIndexListElement *)lfirst(curr))->itup;
-        if (itup == NULL && itup2 == NULL) {
-            ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED), errmsg("index compare error, both are NULL")));
+        if (itup2 == NULL) {
+            ereport(ERROR, 
+                    (errmodule(MOD_INDEX),
+                     errcode(ERRCODE_INDEX_CORRUPTED),
+                     errmsg("fail to insert a tuple to an orderd index, the ordered tuple list is corrupted"),
+                     errdetail("offset itup: %u, Number of attributes: %d.", heapModifiedOffset, keysz),
+                     errcause("System error."),
+                     erraction("Contact engineer to support.")));
         }
         if (_index_tuple_compare(tupdes, indexScanKey, keysz, itup, itup2)) {
             break; /* it belongs after 'prev', before 'curr' */
@@ -913,3 +1030,641 @@ List *insert_ordered_index(List *list, TupleDesc tupdes, ScanKey indexScanKey, i
     lappend_cell(list, prev, ele);
     return list;
 }
+
+/*
+ * tuplesort_estimate_shared - estimate required shared memory allocation
+ *
+ * nWorkers is an estimate of the number of workers (it's the number that
+ * will be requested).
+ */
+Size tuplesort_estimate_shared(int nWorkers)
+{
+    Size tapesSize;
+
+    Assert(nWorkers > 0);
+
+    /* Make sure that BufFile shared state is MAXALIGN'd */
+    tapesSize = mul_size(sizeof(TapeShare), nWorkers);
+    tapesSize = MAXALIGN(add_size(tapesSize, offsetof(Sharedsort, tapes)));
+
+    return tapesSize;
+}
+
+static BTShared* _bt_parallel_initshared(BTSpool *btspool, int *workmem, int scantuplesortstates, bool isplain)
+{
+    Sharedsort *sharedsort;
+    Sharedsort *sharedsort2;
+    BTShared *btshared;
+    Size estsort;
+    uint32 nparts = 0;
+
+    if (RelationIsGlobalIndex(btspool->index)) {
+        nparts = getPartitionNumber(btspool->heap->partMap);
+    }
+
+    /* Store shared build state, for which we reserved space */
+    btshared = (BTShared *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE),
+                                                  sizeof(BTShared) + (nparts) * sizeof(double));
+
+    /* Initialize immutable state */
+    if (RelationIsPartition(btspool->heap)) {
+        btshared->heaprelid = btspool->heap->parentId;
+        btshared->indexrelid = btspool->index->parentId;
+        btshared->heappartid = RelationGetRelid(btspool->heap);
+        btshared->indexpartid = RelationGetRelid(btspool->index);
+    } else {
+        btshared->heaprelid = RelationGetRelid(btspool->heap);
+        btshared->indexrelid = RelationGetRelid(btspool->index);
+        btshared->heappartid = InvalidOid;
+        btshared->indexpartid = InvalidOid;
+    }
+
+    btshared->isplain = isplain;
+    btshared->curiter = 0;
+    btshared->isunique = btspool->isunique;
+    btshared->scantuplesortstates = scantuplesortstates;
+    SpinLockInit(&btshared->mutex);
+    /* Initialize mutable state */
+    btshared->reltuples = 0.0;
+    btshared->havedead = false;
+    btshared->indtuples = 0.0;
+    btshared->brokenhotchain = false;
+    btshared->workmem[0] = workmem[0];
+    btshared->workmem[1] = workmem[1];
+
+    if (isplain) {
+        HeapParallelscanInitialize(&btshared->heapdesc, btspool->heap);
+    } else if (RelationIsGlobalIndex(btspool->index)) {
+        btshared->alltuples = (double *)((char *)btshared + sizeof(BTShared));
+        btshared->nparts = nparts;
+    }
+
+    /*
+     * Store shared tuplesort-private state, for which we reserved space.
+     * Then, initialize opaque state using tuplesort routine.
+     */
+    estsort = tuplesort_estimate_shared(scantuplesortstates);
+    sharedsort = (Sharedsort *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), estsort);
+    tuplesort_initialize_shared(sharedsort, scantuplesortstates);
+
+    /* Unique case requires a second spool, and associated shared state */
+    if (!btspool->isunique) {
+        sharedsort2 = NULL;
+    } else {
+        /*
+         * Store additional shared tuplesort-private state, for which we
+         * reserved space.  Then, initialize opaque state using tuplesort
+         * routine.
+         */
+        sharedsort2 = (Sharedsort *)MemoryContextAllocZero(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), estsort);
+        tuplesort_initialize_shared(sharedsort2, scantuplesortstates);
+    }
+    btshared->sharedsort  = sharedsort;
+    btshared->sharedsort2 = sharedsort2;
+    return btshared;
+}
+
+/*
+ * Create parallel context, and launch workers for leader.
+ *
+ * buildstate argument should be initialized (with the exception of the
+ * tuplesort state in spools, which may later be created based on shared
+ * state initially set up here).
+ *
+ * request is the target number of parallel worker processes to launch.
+ *
+ * Sets buildstate's BTLeader, which caller must use to shut down parallel
+ * mode by passing it to _bt_end_parallel() at the very end of its index
+ * build.  If not even a single worker process can be launched, this is
+ * never set, and caller should proceed with a serial index build.
+ */
+static void _bt_begin_parallel(BTBuildState *buildstate, int request, int *workmem, bool isplain)
+{
+    BTShared *btshared;
+    BTLeader *btleader = (BTLeader *)palloc0(sizeof(BTLeader));
+
+    Assert(request > 0);
+
+    btshared = _bt_parallel_initshared(buildstate->spool, workmem, request, isplain);
+
+    /* Launch workers, saving status for leader/caller */
+    LaunchBackgroundWorkers(request, btshared, _bt_parallel_build_main, _bt_parallel_cleanup);
+
+    btleader->nparticipanttuplesorts = request;
+    btleader->btshared = btshared;
+
+    /* Save leader state now that it's clear build will be parallel */
+    buildstate->btleader = btleader;
+}
+
+static inline void collect_global_index_result(BTShared *btshared, const uint32 ipart, const double reltuples,
+    bool isglobal)
+{
+    if (isglobal) {
+        SpinLockAcquire(&btshared->mutex);
+        int i = Min(ipart, btshared->nparts - 1);
+        btshared->alltuples[i] += reltuples;
+        SpinLockRelease(&btshared->mutex);
+    }
+}
+
+static inline void release_target_relation(Relation *targetheap_ptr, Relation *targetindex_ptr)
+{
+    if (targetheap_ptr != NULL && *targetheap_ptr != NULL) {
+        releaseDummyRelation(targetheap_ptr);
+    }
+    if (targetindex_ptr != NULL && *targetindex_ptr != NULL) {
+        releaseDummyRelation(targetindex_ptr);
+    }
+}
+
+/* 
+ * Unified routine to do index building parallel scan crossing
+ * multiple layers (partition or hashbucket or both).
+ */
+static double _bt_parallel_scan_cross_level(Relation heap, Relation index, IndexInfo *indexinfo,
+    IndexBuildCallback callback, void *callbackstate, BTShared *btshared)
+{
+    unified_atomic_iterator_t uniter;
+    Relation targetheap = NULL;
+    Relation targetindex = NULL;
+    Partition heappart = NULL;
+    Partition indexpart = NULL;
+    List *heapparts = NULL;
+    List *indexparts = NULL;
+    oidvector *bucketlist = NULL;
+    uint32 nbkts = 0;
+    uint32 nparts = 0;
+    uint32 ibkt, ipart;
+    int2 bucketid = InvalidBktId;
+    double reltuples;
+    double result = 0;
+
+    Assert(heap != NULL);
+    Assert(index != NULL);
+
+    if (RelationIsPartitioned(heap)) {
+        heapparts = relationGetPartitionList(heap, NoLock);
+        indexparts = (!RelationIsGlobalIndex(index) ? indexGetPartitionList(index, NoLock) : indexparts);
+        nparts = list_length(heapparts);
+    }
+
+    if (RELATION_OWN_BUCKET(heap)) {
+        bucketlist = searchHashBucketByOid(heap->rd_bucketoid);
+        nbkts = bucketlist->dim1;
+    }
+
+    while (true) {
+        reltuples = 0;
+        uniter.value = uniter_next((pg_atomic_uint64 *)&btshared->curiter, nbkts, nparts);
+        ibkt = uniter.iters[0];
+        ipart = uniter.iters[1];
+
+        if (ipart != INVALID_ATOMIC_ITERATOR) {
+            if (ipart >= nparts) {
+                break;
+            }
+            heappart = (Partition)list_nth(heapparts, ipart);
+            indexpart = ((indexparts != NULL) ? (Partition)list_nth(indexparts, ipart) : indexpart);
+        }
+
+        if (ibkt != INVALID_ATOMIC_ITERATOR) {
+            if (ibkt >= nbkts) {
+                break;
+            }
+            bucketid = bucketlist->values[ibkt];
+        }
+
+        if (bucketid != InvalidBktId) {
+            targetheap = bucketGetRelation(heap, heappart, bucketid);
+            targetindex = ((indexpart != NULL) ? bucketGetRelation(index, indexpart, bucketid) : targetindex);
+        } else if (heappart != NULL) {
+            targetheap = partitionGetRelation(heap, heappart);
+            targetindex = ((indexpart != NULL) ? partitionGetRelation(index, indexpart) : targetindex);
+        } else {
+            /* should not be here */
+            ereport(PANIC, (errmsg("Unexpected error occurred during index parallel building.")));
+        }
+
+        reltuples += tableam_index_build_scan((targetheap == NULL) ? heap : targetheap,
+                                              (targetindex == NULL) ? index : targetindex,
+                                              indexinfo, true, callback, callbackstate, NULL);
+
+        collect_global_index_result(btshared, ipart, reltuples, RelationIsGlobalIndex(index));
+
+        result += reltuples;
+
+        release_target_relation(&targetheap, &targetindex);
+    }
+
+    if (heapparts != NULL) {
+        releasePartitionList(heap, &heapparts, NoLock);
+    }
+    if (indexparts != NULL) {
+        releasePartitionList(index, &indexparts, NoLock);
+    }
+
+    return result;
+}
+
+/*
+ * Perform a worker's portion of a parallel sort.
+ *
+ * This generates a tuplesort for passed btspool, and a second tuplesort
+ * state if a second btspool is need (i.e. for unique index builds).  All
+ * other spool fields should already be set when this is called.
+ *
+ * sortmem is the amount of working memory to use within each worker,
+ * expressed in KBs.
+ *
+ * When this returns, workers are done, and need only release resources.
+ */
+static void _bt_parallel_scan_and_sort(BTSpool *btspool, BTSpool *btspool2, BTShared *btshared)
+{
+    SortCoordinate coordinate;
+    BTBuildState buildstate;
+    HeapScanDesc scan;
+    double reltuples;
+    IndexInfo *indexInfo;
+
+    /* Initialize local tuplesort coordination state */
+    coordinate = (SortCoordinate)palloc0(sizeof(SortCoordinateData));
+    coordinate->isWorker = true;
+    coordinate->nParticipants = -1;
+    coordinate->sharedsort = btshared->sharedsort;
+
+    int sortmem = btshared->workmem[0] / btshared->scantuplesortstates;
+
+    /* Begin "partial" tuplesort */
+    btspool->sortstate = tuplesort_begin_index_btree(btspool->index, btspool->isunique, sortmem, coordinate, false, 0);
+
+    /*
+     * Just as with serial case, there may be a second spool.  If so, a
+     * second, dedicated spool2 partial tuplesort is required.
+     */
+    if (btspool2) {
+        SortCoordinate coordinate2;
+
+        /*
+         * We expect that the second one (for dead tuples) won't get very
+         * full, so we give it only work_mem (unless sortmem is less for
+         * worker).  Worker processes are generally permitted to allocate
+         * work_mem independently.
+         */
+        coordinate2 = (SortCoordinate)palloc0(sizeof(SortCoordinateData));
+        coordinate2->isWorker = true;
+        coordinate2->nParticipants = -1;
+        coordinate2->sharedsort = btshared->sharedsort2;
+        btspool2->sortstate =
+            tuplesort_begin_index_btree(btspool->index, false, btshared->workmem[1], coordinate2, false, 0);
+    }
+
+    /* Fill in buildstate for _bt_build_callback() */
+    buildstate.isUnique = btshared->isunique;
+    buildstate.haveDead = false;
+    buildstate.heapRel = btspool->heap;
+    buildstate.spool = btspool;
+    buildstate.spool2 = btspool2;
+    buildstate.indtuples = 0;
+    buildstate.btleader = NULL;
+
+    /* Join parallel scan */
+    indexInfo = BuildIndexInfo(btspool->index);
+    indexInfo->ii_Concurrent = false;
+
+    /* do the heap scan */
+    if (btshared->isplain) {
+        /* plain table or partition */
+        scan = HeapBeginscanParallel(btspool->heap, &btshared->heapdesc);
+        reltuples = tableam_index_build_scan(btspool->heap, btspool->index, indexInfo, true, btbuildCallback,
+                                             (void*)&buildstate, (TableScanDesc)scan);
+    } else {
+        /* global partitioned index or crossbucket index */
+        reltuples = _bt_parallel_scan_cross_level(btspool->heap, btspool->index, indexInfo, btbuildCallback,
+            (void*)&buildstate, btshared);
+    }
+
+    /*
+     * Execute this worker's part of the sort.
+     *
+     * Unlike leader and serial cases, we cannot avoid calling
+     * tuplesort_performsort() for spool2 if it ends up containing no dead
+     * tuples (this is disallowed for workers by tuplesort).
+     */
+    tuplesort_performsort(btspool->sortstate);
+    if (btspool2)
+        tuplesort_performsort(btspool2->sortstate);
+
+    /*
+     * Done.  Record ambuild statistics, and whether we encountered a broken
+     * HOT chain.
+     */
+    SpinLockAcquire(&btshared->mutex);
+    btshared->reltuples += reltuples;
+    if (buildstate.haveDead)
+        btshared->havedead = true;
+    btshared->indtuples += buildstate.indtuples;
+    if (indexInfo->ii_BrokenHotChain)
+        btshared->brokenhotchain = true;
+    SpinLockRelease(&btshared->mutex);
+
+    /* We can end tuplesorts immediately */
+    tuplesort_end(btspool->sortstate);
+    if (btspool2)
+        tuplesort_end(btspool2->sortstate);
+}
+
+/*
+ * Perform work within a launched parallel process.
+ */
+static void _bt_parallel_build_main(const BgWorkerContext *bwc)
+{
+    BTShared *btshared = (BTShared *)bwc->bgshared;
+    Relation  targetheap;
+    Relation  targetindex;
+    Partition heappart = NULL;
+    Partition indexpart = NULL;
+    BTSpool *btspool;
+    BTSpool *btspool2;
+
+    /* Open relations within worker. */
+    Relation heap = heap_open(btshared->heaprelid, NoLock);
+    Relation index = index_open(btshared->indexrelid, NoLock);
+
+    if (OidIsValid(btshared->heappartid)) {
+        heappart = partitionOpen(heap, btshared->heappartid,  NoLock);
+        indexpart = partitionOpen(index, btshared->indexpartid, NoLock);
+        targetheap = partitionGetRelation(heap, heappart);
+        targetindex = partitionGetRelation(index, indexpart);
+    } else {
+        targetheap = heap;
+        targetindex = index;
+    }
+
+    /* Initialize worker's own spool. */
+    btspool = (BTSpool *)palloc0(sizeof(BTSpool));
+    btspool->heap = targetheap;
+    btspool->index = targetindex;
+    btspool->isunique = btshared->isunique;
+
+    if (!btshared->isunique) {
+        btspool2 = NULL;
+    } else {
+        /* Allocate memory for worker's own private secondary spool. */
+        btspool2 = (BTSpool *)palloc0(sizeof(BTSpool));
+        /* Initialize worker's own secondary spool. */
+        btspool2->heap = btspool->heap;
+        btspool2->index = btspool->index;
+        btspool2->isunique = false;
+    }
+
+    /* Perform sorting of spool, and possibly a spool2. */
+    _bt_parallel_scan_and_sort(btspool, btspool2, btshared);
+
+    if (OidIsValid(btshared->heappartid)) {
+        releaseDummyRelation(&targetheap);
+        releaseDummyRelation(&targetindex);
+        partitionClose(index, indexpart, NoLock);
+        partitionClose(heap, heappart, NoLock);
+    }
+
+    index_close(index, NoLock);
+    heap_close(heap, NoLock);
+}
+
+static void _bt_parallel_cleanup(const BgWorkerContext *bwc)
+{
+    BTShared *btshared = (BTShared *)bwc->bgshared;
+
+    /* delete shared fileset */
+    Assert(btshared->sharedsort);
+    SharedFileSetDeleteAll(&btshared->sharedsort->fileset);
+    if (btshared->sharedsort2) {
+        SharedFileSetDeleteAll(&btshared->sharedsort2->fileset);
+    }
+
+    pfree_ext(btshared->sharedsort);
+    pfree_ext(btshared->sharedsort2);
+}
+
+/*
+ * Within leader, wait for end of heap scan.
+ *
+ * When called, parallel heap scan started by _bt_begin_parallel() will
+ * already be underway within worker processes (when leader participates
+ * as a worker, we should end up here just as workers are finishing).
+ *
+ * Fills in fields needed for ambuild statistics, and lets caller set
+ * field indicating that some worker encountered a broken HOT chain.
+ *
+ * Returns the total number of heap tuples scanned.
+ */
+static double _bt_parallel_heapscan(BTBuildState *buildstate, bool *brokenhotchain, double **alltuples)
+{
+    BTLeader *btleader = buildstate->btleader;
+    BTShared *btshared = btleader->btshared;
+    double reltuples;
+
+    BgworkerListWaitFinish(&btleader->nparticipanttuplesorts);
+
+    /* no need to lock due to all bgworkers were terminated */
+    pg_memory_barrier();
+
+    /* all done, update to the actual number of participants */
+    if (btshared->sharedsort != NULL) {
+        btshared->sharedsort->actualParticipants = btleader->nparticipanttuplesorts;
+    }
+    if (btshared->sharedsort2 != NULL) {
+        btshared->sharedsort2->actualParticipants = btleader->nparticipanttuplesorts;
+    }
+
+    buildstate->haveDead = btshared->havedead;
+    buildstate->indtuples = btshared->indtuples;
+    *brokenhotchain = btshared->brokenhotchain;
+    reltuples = btshared->reltuples;
+
+    if (btshared->alltuples != NULL) {
+        Assert(*alltuples == NULL);
+        *alltuples = (double *)palloc0(btshared->nparts * sizeof(double));
+        for (uint32 i = 0; i < btshared->nparts; i++) {
+            (*alltuples)[i] = btshared->alltuples[i];
+        }
+    }
+
+    return reltuples;
+}
+
+static double _bt_spools_heapscan_utility(Relation heap, Relation index,  BTBuildState *buildstate,
+    IndexInfo *indexInfo, double **allPartTuples)
+{
+    double reltuples = 0;
+    if (RelationIsCrossBucketIndex(index) && !RELATION_OWN_BUCKET(heap)) {
+        /* should be coordinator */
+        return 0;
+    }
+
+    /* Fill spool using either serial or parallel heap scan */
+    if (!buildstate->btleader) {
+serial_build:
+        if (RelationIsGlobalIndex(index)) {
+            *allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, btbuildCallback, (void *)buildstate);
+        } else if (RelationIsCrossBucketIndex(index)) {
+            reltuples = IndexBuildHeapScanCrossBucket(heap, index, indexInfo, btbuildCallback, (void *)buildstate);
+        } else {
+            reltuples = tableam_index_build_scan(heap, index, indexInfo, true, btbuildCallback, (void *)buildstate,
+                NULL);
+        }
+    } else {
+        reltuples = _bt_parallel_heapscan(buildstate, &indexInfo->ii_BrokenHotChain, allPartTuples);
+        BTShared *btshared = buildstate->btleader->btshared;
+        int nruns = btshared->sharedsort->actualParticipants;
+        if (nruns == 0) {
+            /* failed to startup any bgworker, retry to do serial build */
+            goto serial_build;
+        }
+    }
+
+    return reltuples;
+}
+
+/*
+ * Create and initialize one or two spool structures, and save them in caller's
+ * buildstate argument.  May also fill-in fields within indexInfo used by index
+ * builds.
+ *
+ * Scans the heap, possibly in parallel, filling spools with IndexTuples.  This
+ * routine encapsulates all aspects of managing parallelism.  Caller need only
+ * call _bt_end_parallel() in parallel case after it is done with spool/spool2.
+ *
+ * Returns the total number of heap tuples scanned.
+ */
+double _bt_spools_heapscan(Relation heap, Relation index, BTBuildState *buildstate, IndexInfo *indexInfo,
+    double **allPartTuples)
+{
+    UtilityDesc *desc = &indexInfo->ii_desc;
+    BTSpool *btspool = (BTSpool *)palloc0(sizeof(BTSpool));
+    int maxKbytes = desc->query_mem[1];
+    SortCoordinate coordinate = NULL;
+    double reltuples = 0;
+    int workmem[2];
+
+    /*
+     * We size the sort area as maintenance_work_mem rather than work_mem to
+     * speed index creation.  This should be OK since a single backend can't
+     * run multiple index creations in parallel (see also: notes on
+     * parallelism and maintenance_work_mem below).
+     */
+    btspool->heap = heap;
+    btspool->index = index;
+    btspool->isunique = indexInfo->ii_Unique;
+
+    /* Save as primary spool */
+    buildstate->spool = btspool;
+
+    /*
+     * We size the sort area as maintenance_work_mem rather than work_mem to
+     * speed index creation.  This should be OK since a single backend can't
+     * run multiple index creations in parallel.  Note that creation of a
+     * unique index actually requires two BTSpool objects.	We expect that the
+     * second one (for dead tuples) won't get very full, so we give it only
+     * work_mem.
+     */
+    workmem[0] = (desc->query_mem[0] > 0) ? (desc->query_mem[0] - SIMPLE_THRESHOLD) :
+                                            u_sess->attr.attr_memory.maintenance_work_mem;
+    workmem[1] = (desc->query_mem[0] > 0) ? SIMPLE_THRESHOLD : u_sess->attr.attr_memory.work_mem;
+
+    /* Attempt to launch parallel worker scan when required */
+    if (indexInfo->ii_ParallelWorkers > 0) {
+        Assert(!indexInfo->ii_Concurrent);
+        bool isplain = !RelationIsGlobalIndex(index) && !RelationIsCrossBucketIndex(index);
+        _bt_begin_parallel(buildstate, indexInfo->ii_ParallelWorkers, workmem, isplain);
+    }
+
+    /*
+     * If parallel build requested and at least one worker process was
+     * successfully launched, set up coordination state
+     */
+    if (buildstate->btleader) {
+        coordinate = (SortCoordinate)palloc0(sizeof(SortCoordinateData));
+        coordinate->isWorker = false;
+        coordinate->nParticipants = buildstate->btleader->nparticipanttuplesorts;
+        coordinate->sharedsort = buildstate->btleader->btshared->sharedsort;
+    }
+
+    /*
+     * Begin serial/leader tuplesort.
+     *
+     * In cases where parallelism is involved, the leader receives the same
+     * share of maintenance_work_mem as a serial sort (it is generally treated
+     * in the same way as a serial sort once we return).  Parallel worker
+     * Tuplesortstates will have received only a fraction of
+     * maintenance_work_mem, though.
+     *
+     * We rely on the lifetime of the Leader Tuplesortstate almost not
+     * overlapping with any worker Tuplesortstate's lifetime.  There may be
+     * some small overlap, but that's okay because we rely on leader
+     * Tuplesortstate only allocating a small, fixed amount of memory here.
+     * When its tuplesort_performsort() is called (by our caller), and
+     * significant amounts of memory are likely to be used, all workers must
+     * have already freed almost all memory held by their Tuplesortstates
+     * (they are about to go away completely, too).  The overall effect is
+     * that maintenance_work_mem always represents an absolute high watermark
+     * on the amount of memory used by a CREATE INDEX operation, regardless of
+     * the use of parallelism or any other factor.
+     */
+    buildstate->spool->sortstate =
+        tuplesort_begin_index_btree(index, indexInfo->ii_Unique, workmem[0], coordinate, false, maxKbytes);
+
+    /*
+     * If building a unique index, put dead tuples in a second spool to keep
+     * them out of the uniqueness check.  We expect that the second spool (for
+     * dead tuples) won't get very full, so we give it only work_mem.
+     */
+    if (indexInfo->ii_Unique) {
+        BTSpool *btspool2 = (BTSpool *)palloc0(sizeof(BTSpool));
+        SortCoordinate coordinate2 = NULL;
+
+        /* Initialize secondary spool */
+        btspool2->heap = heap;
+        btspool2->index = index;
+        btspool2->isunique = false;
+        /* Save as secondary spool */
+        buildstate->spool2 = btspool2;
+
+        if (buildstate->btleader) {
+            /*
+             * Set up non-private state that is passed to
+             * tuplesort_begin_index_btree() about the basic high level
+             * coordination of a parallel sort.
+             */
+            coordinate2 = (SortCoordinate)palloc0(sizeof(SortCoordinateData));
+            coordinate2->isWorker = false;
+            coordinate2->nParticipants = buildstate->btleader->nparticipanttuplesorts;
+            coordinate2->sharedsort = buildstate->btleader->btshared->sharedsort2;
+        }
+        /*
+         * We expect that the second one (for dead tuples) won't get very
+         * full, so we give it only work_mem
+         */
+        buildstate->spool2->sortstate = tuplesort_begin_index_btree(index, false, workmem[1], coordinate2, false, 0);
+    }
+
+    reltuples = _bt_spools_heapscan_utility(heap, index, buildstate, indexInfo, allPartTuples);
+    /* okay, all heap tuples are spooled */
+    if (buildstate->spool2 && !buildstate->haveDead) {
+        /* spool2 turns out to be unnecessary */
+        _bt_spooldestroy(buildstate->spool2);
+        buildstate->spool2 = NULL;
+    }
+
+    return reltuples;
+}
+
+/*
+ * Shut down workers, destroy parallel context, and end parallel mode.
+ */
+void _bt_end_parallel()
+{
+    BgworkerListSyncQuit();
+}
+

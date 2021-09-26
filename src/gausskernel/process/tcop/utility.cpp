@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * utility.cpp
- *	  Contains functions which control the execution of the POSTGRES utility
+ *	  Contains functions which control the execution of the openGauss utility
  *	  commands.  At one time acted as an interface between the Lisp and C
  *	  systems.
  *
@@ -71,7 +71,7 @@
 #include "commands/vacuum.h"
 #include "commands/verify.h"
 #include "commands/view.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "foreign/fdwapi.h"
 #include "instruments/instr_unique_sql.h"
 #include "gaussdb_version.h"
@@ -87,9 +87,10 @@
 #include "postmaster/bgwriter.h"
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteRemove.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/lmgr.h"
 #include "storage/procarray.h"
+#include "storage/tcap.h"
 #include "tcop/pquery.h"
 #include "tcop/utility.h"
 #include "tsearch/ts_locale.h"
@@ -103,6 +104,8 @@
 #include "gs_policy/policy_common.h"
 #include "client_logic/client_logic.h"
 #include "db4ai/create_model.h"
+#include "gs_ledger/userchain.h"
+#include "gs_ledger/ledger_utils.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "pgxc/pgFdwRemote.h"
 #include "pgxc/globalStatistic.h"
@@ -399,6 +402,7 @@ static void check_xact_readonly(Node* parse_tree)
         case T_AlterRoleSetStmt:
         case T_AlterObjectSchemaStmt:
         case T_AlterOwnerStmt:
+        case T_AlterSchemaStmt:
         case T_AlterSeqStmt:
         case T_AlterTableStmt:
         case T_RenameStmt:
@@ -479,6 +483,8 @@ static void check_xact_readonly(Node* parse_tree)
         case T_DropSynonymStmt:
         case T_CreateClientLogicGlobal:
         case T_CreateClientLogicColumn:
+        case T_CreatePackageStmt:
+        case T_CreatePackageBodyStmt:
             PreventCommandIfReadOnly(CreateCommandTag(parse_tree));
             break;
         case T_VacuumStmt: {
@@ -1411,7 +1417,8 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
 #ifdef PGXC
     bool sent_to_remote,
 #endif /* PGXC */
-    char* completion_tag)
+    char* completion_tag,
+    bool isCTAS)
 {
     /* required as of 8.4 */
     AssertEreport(query_string != NULL, MOD_EXECUTOR, "query string is NULL");
@@ -1431,7 +1438,8 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
 #ifdef PGXC
             sent_to_remote,
 #endif /* PGXC */
-            completion_tag);
+            completion_tag,
+            isCTAS);
     else
         standard_ProcessUtility(parse_tree,
             query_string,
@@ -1441,7 +1449,8 @@ void ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo pa
 #ifdef PGXC
             sent_to_remote,
 #endif /* PGXC */
-            completion_tag);
+            completion_tag,
+            isCTAS);
 }
 
 // @Temp Table.
@@ -1521,6 +1530,12 @@ bool isAllTempObjects(Node* parse_tree, const char* query_string, bool sent_to_r
             break;
         case T_CreateSchemaStmt: {
             char* nsp_name = ((CreateSchemaStmt*)parse_tree)->schemaname;
+            if (isTempNamespaceName(nsp_name) || isToastTempNamespaceName(nsp_name))
+                return true;
+            break;
+        }
+        case T_AlterSchemaStmt: {
+            char* nsp_name = ((AlterSchemaStmt*)parse_tree)->schemaname;
             if (isTempNamespaceName(nsp_name) || isToastTempNamespaceName(nsp_name))
                 return true;
             break;
@@ -1724,7 +1739,8 @@ bool find_hashbucket_options(List* stmts)
             DefElem* def = (DefElem*)lfirst(opt);
             char* lower_string = lowerstr(def->defname);
 
-            if (strstr(lower_string, "hashbucket")) {
+            if (strstr(lower_string, "hashbucket") || 
+                strstr(lower_string, "bucketcnt")) {
                 return true;
             }
         }
@@ -1739,9 +1755,10 @@ bool find_hashbucket_options(List* stmts)
  */
 #ifdef PGXC
 void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListInfo params, 
-                   bool is_top_level, bool sent_to_remote)
+                   bool is_top_level, bool sent_to_remote, bool isCTAS)
 #else
-void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListInfo params, bool is_top_level)
+void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListInfo params, bool is_top_level,
+    bool isCTAS)
 #endif
 
 {
@@ -1762,6 +1779,7 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
     bool is_first_node = false;
     char* query_string_with_info = (char*)query_string;
     char* query_string_with_data = (char*)query_string;
+    Oid namespace_id = InvalidOid;
 
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         first_exec_node = find_first_exec_cn();
@@ -1779,9 +1797,9 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
 
     /* Run parse analysis ... */
     if (u_sess->attr.attr_sql.enable_parallel_ddl)
-        stmts = transformCreateStmt((CreateStmt*)parse_tree, query_string, NIL, true, is_first_node);
+        stmts = transformCreateStmt((CreateStmt*)parse_tree, query_string, NIL, true, &namespace_id, is_first_node);
     else
-        stmts = transformCreateStmt((CreateStmt*)parse_tree, query_string, NIL, false);
+        stmts = transformCreateStmt((CreateStmt*)parse_tree, query_string, NIL, false, &namespace_id);
 
     /*
      * If stmts is NULL, then the table is exists.
@@ -1895,6 +1913,10 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
 
                 step->exec_nodes = NULL;
                 step->is_temp = is_temp;
+                /* current CN is not the first node, need release the namespace lock, avoid distributed deadlocks. */
+                if (namespace_id != InvalidOid) {
+                    UnlockDatabaseObject(NamespaceRelationId, namespace_id, 0, AccessShareLock);
+                }
                 ExecRemoteUtility_ParallelDDLMode(step, first_exec_node);
                 pfree_ext(step);
             }
@@ -1903,7 +1925,7 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
 
     if (u_sess->attr.attr_sql.enable_parallel_ddl) {
         if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && !is_first_node)
-            stmts = transformCreateStmt((CreateStmt*)parse_tree, query_string, uuids, false);
+            stmts = transformCreateStmt((CreateStmt*)parse_tree, query_string, uuids, false, &namespace_id);
     }
 #endif
 
@@ -2024,7 +2046,7 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
             AssertEreport(!rquery->exec_nodes, MOD_EXECUTOR, "remote query is not DN");
             rquery->exec_nodes = makeNode(ExecNodes);
             /* Set group oid here for sending bucket map to dn */
-            rquery->exec_nodes->distribution.group_oid = group_oid;
+            t_thrd.xact_cxt.PGXCGroupOid = group_oid;
             if (find_hashbucket_options(stmts)) {
                 rquery->is_send_bucket_map = true;
             }
@@ -2098,7 +2120,7 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
             rel_oid = DefineRelation((CreateStmt*)stmt,
                                     ((CreateStmt*)stmt)->relkind == RELKIND_MATVIEW ?
                                                                     RELKIND_MATVIEW : RELKIND_RELATION,
-                                    InvalidOid);
+                                    InvalidOid, isCTAS);
             /*
              * Let AlterTableCreateToastTable decide if this one
              * needs a secondary relation too.
@@ -2111,9 +2133,10 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
 
             (void)heap_reloptions(RELKIND_TOASTVALUE, toast_options, true);
 
-            AlterTableCreateToastTable(rel_oid, toast_options, ((CreateStmt *)stmt)->oldToastNode);
+            AlterTableCreateToastTable(rel_oid, toast_options, AccessShareLock);
             AlterCStoreCreateTables(rel_oid, toast_options, (CreateStmt*)stmt);
             AlterDfsCreateTables(rel_oid, toast_options, (CreateStmt*)stmt);
+            AlterCreateChainTables(rel_oid, toast_options, (CreateStmt *)stmt);
 #ifdef ENABLE_MULTIPLE_NODES
             Datum reloptions = transformRelOptions(
                 (Datum)0, ((CreateStmt*)stmt)->options, NULL, validnsps, true, false);
@@ -2154,7 +2177,8 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
 #ifdef PGXC
                 true,
 #endif /* PGXC */
-                NULL);
+                NULL,
+                isCTAS);
         }
 
         /* Need CCI between commands */
@@ -2162,9 +2186,12 @@ void CreateCommand(CreateStmt* parse_tree, const char* query_string, ParamListIn
             CommandCounterIncrement();
     }
 
-    /* reset */
-    t_thrd.xact_cxt.inheritFileNode = false;
     parse_tree->uuids = NIL;
+    /* all job done reset create schema flag */
+    if (IS_MAIN_COORDINATOR) {
+        u_sess->catalog_cxt.setCurCreateSchema = false;
+        pfree_ext(u_sess->catalog_cxt.curCreateSchema);
+    }
 }
 
 void ReindexCommand(ReindexStmt* stmt, bool is_top_level)
@@ -2284,12 +2311,75 @@ bool check_ts_create_idx(const Node* parsetree, Oid* nspname)
 }
 #endif
 
+void ExecAlterDatabaseSetStmt(Node* parse_tree, const char* query_string, bool sent_to_remote)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                   errmodule(MOD_COMMAND),
+                   errmsg("Alter database set guc value is not supported."),
+                   errhint("Use gs_guc to set global guc value.")));
+#endif
+#ifdef PGXC
+    if (IS_PGXC_COORDINATOR) {
+        char* first_exec_node = find_first_exec_cn();
+        bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+
+        if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+            ExecUtilityStmtOnNodes_ParallelDDLMode(
+                query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
+            AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
+            ExecUtilityStmtOnNodes_ParallelDDLMode(
+                query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
+        } else {
+            AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
+            ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
+        }
+    } else {
+        AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
+    }
+#else
+    AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
+#endif
+}
+
+void ExecAlterRoleSetStmt(Node* parse_tree, const char* query_string, bool sent_to_remote)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmodule(MOD_COMMAND),
+                errmsg("Alter user set guc value is not supported."),
+                errhint("Use gs_guc to set global guc value.")));
+#endif
+#ifdef PGXC
+        if (IS_PGXC_COORDINATOR) {
+            char* first_exec_node = find_first_exec_cn();
+            bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+
+            if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+                ExecUtilityStmtOnNodes_ParallelDDLMode(
+                    query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
+                AlterRoleSet((AlterRoleSetStmt*)parse_tree);
+                ExecUtilityStmtOnNodes_ParallelDDLMode(
+                    query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
+            } else {
+                AlterRoleSet((AlterRoleSetStmt*)parse_tree);
+                ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
+            }
+        } else {
+            AlterRoleSet((AlterRoleSetStmt*)parse_tree);
+        }
+#else
+    AlterRoleSet((AlterRoleSetStmt*)parse_tree);
+#endif
+}
+
 void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamListInfo params, bool is_top_level,
     DestReceiver* dest,
 #ifdef PGXC
     bool sent_to_remote,
 #endif /* PGXC */
-    char* completion_tag)
+    char* completion_tag,
+    bool isCTAS)
 {
     /* This can recurse, so check for excessive recursion */
     check_stack_depth();
@@ -2740,6 +2830,30 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #endif
             break;
 
+        case T_AlterSchemaStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            if (IS_PGXC_COORDINATOR) {
+                char* first_exec_node = find_first_exec_cn();
+                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+
+                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
+                    AlterSchemaCommand((AlterSchemaStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
+                } else {
+                    AlterSchemaCommand((AlterSchemaStmt*)parse_tree);
+                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
+                }
+            } else {
+                AlterSchemaCommand((AlterSchemaStmt*)parse_tree);
+            }
+#else
+            AlterSchemaCommand((AlterSchemaStmt*)parse_tree);
+#endif
+            break;
+
         case T_CreateForeignTableStmt:
 #ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && IS_SINGLE_NODE) {
@@ -2752,9 +2866,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             /* fall through */
         case T_CreateStmt: {
 #ifdef PGXC
-            CreateCommand((CreateStmt*)parse_tree, query_string, params, is_top_level, sent_to_remote);
+            CreateCommand((CreateStmt*)parse_tree, query_string, params, is_top_level, sent_to_remote, isCTAS);
 #else
-            CreateCommand((CreateStmt*)parse_tree, query_string, params, is_top_level);
+            CreateCommand((CreateStmt*)parse_tree, query_string, params, is_top_level, isCTAS);
 #endif
         } break;
 
@@ -2877,7 +2991,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade) {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                        errmsg("Postgres-XC does not support FOREIGN DATA WRAPPER yet"),
+                        errmsg("openGauss does not support FOREIGN DATA WRAPPER yet"),
                         errdetail("The feature is not currently supported")));
             }
 #endif
@@ -2914,7 +3028,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #ifdef PGXC
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support FOREIGN DATA WRAPPER yet"),
+                    errmsg("openGauss does not support FOREIGN DATA WRAPPER yet"),
                     errdetail("The feature is not currently supported")));
 #endif
 #endif
@@ -2950,7 +3064,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #ifdef PGXC
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support USER MAPPING yet"),
+                    errmsg("openGauss does not support USER MAPPING yet"),
                     errdetail("The feature is not currently supported")));
 #endif
 #endif	
@@ -2962,7 +3076,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #ifdef PGXC
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support USER MAPPING yet"),
+                    errmsg("openGauss does not support USER MAPPING yet"),
                     errdetail("The feature is not currently supported")));
 #endif
 #endif	
@@ -2974,7 +3088,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #ifdef PGXC
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("Postgres-XC does not support USER MAPPING yet"),
+                    errmsg("openGauss does not support USER MAPPING yet"),
                     errdetail("The feature is not currently supported")));
 #endif
 #endif	
@@ -3165,6 +3279,12 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                         if (OidIsValid(rel_id)) {
                             Oid check_id = rel_id;
                             char relkind = get_rel_relkind(rel_id);
+                            /*
+                             * If a view is droped using drop index or drop table cmd, the errmsg will
+                             * be somewhat ambiguous since it does not exist in pgxc_class. So we check
+                             * in advance to give clear error message.
+                             */
+                            CheckDropViewValidity(object_type, relkind, rel->relname);
                             if (relkind == RELKIND_INDEX || relkind == RELKIND_GLOBAL_INDEX) {
                                 check_id = IndexGetRelation(rel_id, false);
                             }
@@ -3367,6 +3487,15 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                         free_object_addresses(new_objects);
 #endif
                 } break;
+                case OBJECT_PACKAGE:
+                case OBJECT_PACKAGE_BODY: {
+#ifdef ENABLE_MULTIPLE_NODES
+                        ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("NOT-SUPPORT: Not support DROP PACKAGE in distributed database")));
+#endif
+                    RemoveObjects((DropStmt*)parse_tree, true);
+                } break;
                 case OBJECT_GLOBAL_SETTING: {
                     bool is_temp = false;
                     RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
@@ -3476,7 +3605,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     }
                     if (IS_PGXC_COORDINATOR && !IsConnFromCoord() &&
                         (exec_type == EXEC_ON_ALL_NODES || exec_type == EXEC_ON_COORDS)) {
-                        if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+                        if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node && !sent_to_remote) {
                             RemoteQuery* step = makeNode(RemoteQuery);
                             step->combine_type = COMBINE_TYPE_SAME;
                             step->sql_statement = (char*)query_string;
@@ -3505,6 +3634,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_TruncateStmt:
+            PG_TRY();
+            {
+                u_sess->exec_cxt.isExecTrunc = true;
 #ifdef PGXC
             /*
              * In Postgres-XC, TRUNCATE needs to be launched to remote nodes
@@ -3515,6 +3647,23 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #else
         ExecuteTruncate((TruncateStmt*)parse_tree);
 #endif
+                u_sess->exec_cxt.isExecTrunc = false;
+            }
+            PG_CATCH();
+            {
+                u_sess->exec_cxt.isExecTrunc = false;
+                PG_RE_THROW();
+            }
+            PG_END_TRY();
+
+            break;
+
+        case T_PurgeStmt:
+            ExecutePurge((PurgeStmt*)parse_tree);
+            break;
+
+        case T_TimeCapsuleStmt:
+            ExecuteTimeCapsule((TimeCapsuleStmt*)parse_tree);
             break;
 
         case T_CommentStmt:
@@ -3547,13 +3696,25 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                         errmsg("operation copy with file is forbidden in security mode.")));
             }
             uint64 processed;
+            uint64 histhash;
+            bool has_histhash;
             processed = DoCopy((CopyStmt*)parse_tree, query_string);
+            has_histhash = ((CopyStmt*)parse_tree)->hashstate.has_histhash;
+            histhash = ((CopyStmt*)parse_tree)->hashstate.histhash;
             if (completion_tag != NULL) {
-                errorno = snprintf_s(completion_tag,
+                if (has_histhash && !IsConnFromApp()) {
+                    errorno = snprintf_s(completion_tag,
+                    COMPLETION_TAG_BUFSIZE,
+                    COMPLETION_TAG_BUFSIZE - 1,
+                    "COPY " UINT64_FORMAT " " UINT64_FORMAT,
+                    processed, histhash);
+                } else {
+                    errorno = snprintf_s(completion_tag,
                     COMPLETION_TAG_BUFSIZE,
                     COMPLETION_TAG_BUFSIZE - 1,
                     "COPY " UINT64_FORMAT,
                     processed);
+                }
                 securec_check_ss(errorno, "\0", "\0");
             }
             report_utility_time(parse_tree);
@@ -3688,6 +3849,23 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             } else {
                 if (IS_SINGLE_NODE) {
                     CheckObjectInBlackList(((RenameStmt*)parse_tree)->renameType, query_string);
+                    RenameStmt* stmt = (RenameStmt*)parse_tree;
+                    /* Try to use the object relation if possible */
+                    if (stmt->relation) {
+                        Oid rel_id = RangeVarGetRelid(stmt->relation, AccessShareLock, true);
+                        if (OidIsValid(rel_id)) {
+                            // Check relations's internal mask
+                            Relation rel = relation_open(rel_id, NoLock);
+                            if ((RelationGetInternalMask(rel) & INTERNAL_MASK_DALTER))
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("Un-support feature"),
+                                        errdetail("internal relation doesn't allow ALTER")));
+
+                            relation_close(rel, NoLock);
+                            UnlockRelationOid(rel_id, AccessShareLock);
+                        }
+                    }
                 }
                 ExecRenameStmt((RenameStmt*)parse_tree);
             }
@@ -3778,6 +3956,22 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             } else {
                 if (IS_SINGLE_NODE) {
                     CheckObjectInBlackList(((AlterObjectSchemaStmt*)parse_tree)->objectType, query_string);
+                    AlterObjectSchemaStmt* stmt = (AlterObjectSchemaStmt*)parse_tree;
+                    if (stmt->relation) {
+                        Oid rel_id = RangeVarGetRelid(stmt->relation, AccessShareLock, true);
+                        if (OidIsValid(rel_id)) {
+                            // Check relations's internal mask
+                            Relation rel = relation_open(rel_id, NoLock);
+                            if ((RelationGetInternalMask(rel) & INTERNAL_MASK_DALTER))
+                                ereport(ERROR,
+                                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                        errmsg("Un-support feature"),
+                                        errdetail("internal relation doesn't allow ALTER")));
+
+                            relation_close(rel, NoLock);
+                            UnlockRelationOid(rel_id, AccessShareLock);
+                        }
+                    }
                 }
                 ExecAlterObjectSchemaStmt((AlterObjectSchemaStmt*)parse_tree);
             }
@@ -3886,6 +4080,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 atstmt->relation->relname);
 
             if (OidIsValid(rel_id)) {
+                TrForbidAccessRbObject(RelationRelationId, rel_id, atstmt->relation->relname);
+
                 /* Run parse analysis ... */
                 stmts = transformAlterTableStmt(rel_id, atstmt, query_string);
 
@@ -4412,7 +4608,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
         case T_CreateFunctionStmt: /* CREATE FUNCTION */
         {
-            CreateFunction((CreateFunctionStmt*)parse_tree, query_string);
+            CreateFunction((CreateFunctionStmt*)parse_tree, query_string, InvalidOid);
 #ifdef PGXC
             Oid group_oid;
             bool multi_group = false;
@@ -4443,6 +4639,24 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             }
 #endif
         } break;
+
+        case T_CreatePackageStmt: /* CREATE PACKAGE SPECIFICATION*/
+        {
+#ifdef ENABLE_MULTIPLE_NODES
+                ereport(ERROR, (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                    errmsg("not support create package in distributed database")));
+#endif
+            CreatePackageCommand((CreatePackageStmt*)parse_tree, query_string);
+        } break;
+        case T_CreatePackageBodyStmt: /* CREATE PACKAGE SPECIFICATION*/
+        {
+#ifdef ENABLE_MULTIPLE_NODES
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PACKAGE_DEFINITION),
+                    errmsg("not support create package in distributed database")));
+#endif
+            CreatePackageBodyCommand((CreatePackageBodyStmt*)parse_tree, query_string);
+        } break;
+
 
         case T_AlterFunctionStmt: /* ALTER FUNCTION */
 #ifdef PGXC
@@ -4501,6 +4715,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
             /* forbid user to set or change inner options */
             ForbidOutUsersToSetInnerOptions(stmt->options);
+            ForbidToSetTdeOptionsForNonTdeTbl(stmt->options);
 
 #ifdef PGXC
             bool is_temp = false;
@@ -4601,18 +4816,14 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 g_instance.attr.attr_common.allowSystemTableMods = true;
             }
 #endif
-#ifdef ENABLE_MOT
-            Oid indexRelOid = DefineIndex(rel_id,
+#ifdef ENABLE_MULTIPLE_NODES
+            DefineIndex(rel_id,
                 stmt,
                 InvalidOid,                                /* no predefined OID */
                 false,                                     /* is_alter_table */
                 true,                                      /* check_rights */
                 !u_sess->upg_cxt.new_catalog_need_storage, /* skip_build */
                 false);                                    /* quiet */
-            if (RelationIsCUFormatByOid(rel_id) && (stmt->primary || stmt->unique)) {
-                DefineDeltaUniqueIndex(rel_id, stmt, indexRelOid);
-            }
-            CreateForeignIndex(stmt, indexRelOid);
 #else
             Oid indexRelOid = DefineIndex(rel_id,
                 stmt,
@@ -4828,7 +5039,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         case T_DoStmt:
             /* This change is from PG11 commit/rollback patch */
             ExecuteDoStmt((DoStmt*) parse_tree, 
-                (!u_sess->SPI_cxt.is_allow_commit_rollback || IsTransactionBlock()));
+                (!u_sess->SPI_cxt.is_allow_commit_rollback));
             break;
 
         case T_CreatedbStmt:
@@ -4903,27 +5114,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #endif
             break;
         case T_AlterDatabaseSetStmt:
-#ifdef PGXC
-            if (IS_PGXC_COORDINATOR) {
-                char* first_exec_node = find_first_exec_cn();
-                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
-
-                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
-                    ExecUtilityStmtOnNodes_ParallelDDLMode(
-                        query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
-                    AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
-                    ExecUtilityStmtOnNodes_ParallelDDLMode(
-                        query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
-                } else {
-                    AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
-                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
-                }
-            } else {
-                AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
-            }
-#else
-        AlterDatabaseSet((AlterDatabaseSetStmt*)parse_tree);
-#endif
+            ExecAlterDatabaseSetStmt(parse_tree, query_string, sent_to_remote);
             break;
 
         case T_DropdbStmt: {
@@ -5334,7 +5525,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     if (IsTransactionBlock()) {
                         if (PoolManagerSetCommand(POOL_CMD_LOCAL_SET, mask_string, stmt->name) < 0) {
                             /* Add retry query error code ERRCODE_SET_QUERY for error "ERROR SET query". */
-                            ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("Postgres-XC: ERROR SET query")));
+                            ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("openGauss: ERROR SET query")));
                         }
                     }
                 } else {
@@ -5342,7 +5533,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     if (!IsTransactionBlock() && !(dest->mydest == DestSPI)) {
                         if (PoolManagerSetCommand(POOL_CMD_GLOBAL_SET, mask_string, stmt->name) < 0) {
                             /* Add retry query error code ERRCODE_SET_QUERY for error "ERROR SET query". */
-                            ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("Postgres-XC: ERROR SET query")));
+                            ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("openGauss: ERROR SET query")));
                         }
                     } else {
                         ExecUtilityStmtOnNodes(mask_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
@@ -5368,7 +5559,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         case T_VariableShowStmt: {
             VariableShowStmt* n = (VariableShowStmt*)parse_tree;
 
-            GetPGVariable(n->name, n->likename, dest);
+            GetPGVariable(n->name, dest);
         } break;
         case T_ShutdownStmt: {
             ShutdownStmt* n = (ShutdownStmt*)parse_tree;
@@ -5435,7 +5626,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
-#endif /* PGXC */
+#endif
             DefineDomain((CreateDomainStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)
@@ -5494,27 +5685,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #endif
             break;
         case T_AlterRoleSetStmt:
-#ifdef PGXC
-            if (IS_PGXC_COORDINATOR) {
-                char* first_exec_node = find_first_exec_cn();
-                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
-
-                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
-                    ExecUtilityStmtOnNodes_ParallelDDLMode(
-                        query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
-                    AlterRoleSet((AlterRoleSetStmt*)parse_tree);
-                    ExecUtilityStmtOnNodes_ParallelDDLMode(
-                        query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
-                } else {
-                    AlterRoleSet((AlterRoleSetStmt*)parse_tree);
-                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
-                }
-            } else {
-                AlterRoleSet((AlterRoleSetStmt*)parse_tree);
-            }
-#else
-        AlterRoleSet((AlterRoleSetStmt*)parse_tree);
-#endif
+            ExecAlterRoleSetStmt(parse_tree, query_string, sent_to_remote);
             break;
 
         case T_DropRoleStmt:
@@ -5682,7 +5853,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 char *guc_name = GetGucName(query_string, tmpName);
                 if (PoolManagerSetCommand(POOL_CMD_LOCAL_SET, query_string, guc_name) < 0) {
                     /* Add retry query error code ERRCODE_SET_QUERY for error "ERROR SET query". */
-                    ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("Postgres-XC: ERROR SET query")));
+                    ereport(ERROR, (errcode(ERRCODE_SET_QUERY), errmsg("openGauss: ERROR SET query")));
                 }
             }
 #endif
@@ -7599,6 +7770,10 @@ const char* CreateCommandTag(Node* parse_tree)
             tag = "CREATE SCHEMA";
             break;
 
+        case T_AlterSchemaStmt:
+            tag = "ALTER SCHEMA";
+            break;
+
         case T_CreateStmt:
             tag = "CREATE TABLE";
             break;
@@ -7780,6 +7955,14 @@ const char* CreateCommandTag(Node* parse_tree)
                     tag = (dpStmt->isProcedure) ? "DROP PROCEDURE" : "DROP FUNCTION";
                     break;
                 }
+                case OBJECT_PACKAGE: {
+                    tag = "DROP PACKAGE";
+                    break;
+                }
+                case OBJECT_PACKAGE_BODY: {
+                    tag = "DROP PACKAGE BODY";
+                    break;
+                }
                 case OBJECT_AGGREGATE:
                     tag = "DROP AGGREGATE";
                     break;
@@ -7830,6 +8013,26 @@ const char* CreateCommandTag(Node* parse_tree)
 
         case T_TruncateStmt:
             tag = "TRUNCATE TABLE";
+            break;
+
+        case T_PurgeStmt:
+            switch (((PurgeStmt*)parse_tree)->purtype) {
+                case PURGE_TABLE:
+                    tag = "PURGE TABLE";
+                    break;
+                case PURGE_INDEX:
+                    tag = "PURGE INDEX";
+                    break;
+                case PURGE_TABLESPACE:
+                    tag = "PURGE TABLESPACE";
+                    break;
+                case PURGE_RECYCLEBIN:
+                    tag = "PURGE RECYCLEBIN";
+                    break;
+                default:
+                    tag = "?\?\?";
+                    break;
+            }
             break;
 
         case T_CommentStmt:
@@ -7953,6 +8156,14 @@ const char* CreateCommandTag(Node* parse_tree)
         case T_CreateFunctionStmt: {
             CreateFunctionStmt* cfstmt = (CreateFunctionStmt*)parse_tree;
             tag = (cfstmt->isProcedure) ? "CREATE PROCEDURE" : "CREATE FUNCTION";
+            break;
+        }
+        case T_CreatePackageStmt: {
+            tag = "CREATE PACKAGE";
+            break;
+        }
+        case T_CreatePackageBodyStmt: {
+            tag = "CREATE PACKAGE BODY";
             break;
         }
         case T_IndexStmt:
@@ -8127,6 +8338,10 @@ const char* CreateCommandTag(Node* parse_tree)
 
         case T_LockStmt:
             tag = "LOCK TABLE";
+            break;
+
+        case T_TimeCapsuleStmt:
+            tag = "TimeCapsule Table";
             break;
 
         case T_ConstraintsSetStmt:
@@ -8601,6 +8816,8 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
         case AT_NoForceRls:
             tag = "NO FORCE ROW LEVEL SECURITY";
             break;
+        case AT_EncryptionKeyRotation:
+            tag = "ENCRYPTION KEY ROTATION";
         case AT_AddInherit:
             tag = "ADD INHERIT";
             break;
@@ -8628,6 +8845,9 @@ const char* CreateAlterTableCommandTag(const AlterTableType subtype)
             break;
         case AT_DeleteNodeList:
             tag = "DELETE NODE LIST";
+            break;
+        case AT_UpdateSliceLike:
+            tag = "UPDATE SLICE LIKE";
             break;
 #endif
         case AT_GenericOptions:
@@ -8709,6 +8929,7 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             break;
 
         case T_CreateSchemaStmt:
+        case T_AlterSchemaStmt:
             lev = LOGSTMT_DDL;
             break;
             
@@ -8835,6 +9056,15 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
         case T_DefineStmt:
             lev = LOGSTMT_DDL;
             break;
+
+        case T_CreatePackageStmt:
+            lev = LOGSTMT_DDL;
+            break;
+
+        case T_CreatePackageBodyStmt:
+            lev = LOGSTMT_DDL;
+            break;
+
 
         case T_CompositeTypeStmt:
             lev = LOGSTMT_DDL;
@@ -9004,6 +9234,10 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
             break;
 
         case T_LockStmt:
+            lev = LOGSTMT_ALL;
+            break;
+
+        case T_TimeCapsuleStmt:
             lev = LOGSTMT_ALL;
             break;
 
@@ -9292,6 +9526,50 @@ static void drop_stmt_pre_treatment(
     bool res_is_temp = false;
     RemoteQueryExecType res_exec_type = EXEC_ON_ALL_NODES;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    switch (stmt->removeType) {
+        case OBJECT_TABLE: {
+            /*
+             * Check whether the tables are in blockchain schema.
+             */
+            ListCell* cell = NULL;
+            foreach (cell, stmt->objects) {
+                RangeVar* rel = makeRangeVarFromNameList((List*)lfirst(cell));
+                Oid rel_id = RangeVarGetRelid(rel, AccessShareLock, true);
+
+                if (is_ledger_hist_table(rel_id)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for userchain table.")));
+                }
+                if (OidIsValid(rel_id)) {
+                    UnlockRelationOid(rel_id, AccessShareLock);
+                }
+            }
+        } break;
+        case OBJECT_SCHEMA: {
+            ListCell* cell = NULL;
+            foreach (cell, stmt->objects) {
+                List* objname = (List*)lfirst(cell);
+                char* name = NameListToString(objname);
+
+                if (get_namespace_oid(name, true) == PG_BLOCKCHAIN_NAMESPACE) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for blockchain schema.")));
+                } else if (!u_sess->attr.attr_common.IsInplaceUpgrade &&
+                    get_namespace_oid(name, true) == PG_SQLADVISOR_NAMESPACE) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for sqladvisor schema.")));
+                }
+            }
+        } break;
+        default:
+            break;
+    }
+#endif
+
     /* Nothing to do if not local Coordinator */
     if (IS_PGXC_DATANODE || IsConnFromCoord())
         return;
@@ -9343,6 +9621,12 @@ static void drop_stmt_pre_treatment(
                 if (!OidIsValid(rel_id) && stmt->missing_ok)
                     continue;
 
+                if (is_ledger_hist_table(rel_id)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for userchain table.")));
+                }
+
                 if (is_first) {
                     res_exec_type = ExecUtilityFindNodes(stmt->removeType, rel_id, &res_is_temp);
                     is_first = false;
@@ -9373,6 +9657,17 @@ static void drop_stmt_pre_treatment(
                     res_exec_type = EXEC_ON_DATANODES;
                 } else {
                     has_nontemp = true;
+                }
+
+                if (get_namespace_oid(name, true) == PG_BLOCKCHAIN_NAMESPACE) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for blockchain schema.")));
+                } else if (!u_sess->attr.attr_common.IsInplaceUpgrade &&
+                    get_namespace_oid(name, true) == PG_SQLADVISOR_NAMESPACE) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for sqladvisor schema.")));
                 }
 
                 if (has_temp && has_nontemp)
@@ -9451,6 +9746,30 @@ bool IsVariableinBlackList(const char* name)
     }
 
     return isInBlackList;
+}
+
+/*
+ * return true if the extension can be uninstall
+ */
+bool DropExtensionIsSupported(const char* query_string)
+{
+    char* lower_string = lowerstr(query_string);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages") ||
+        strstr(lower_string, "mysql_fdw") || strstr(lower_string, "oracle_fdw") ||
+        strstr(lower_string, "postgres_fdw") || strstr(lower_string, "dblink") ||
+        strstr(lower_string, "db_b_parser") || strstr(lower_string, "db_a_parser") ||
+        strstr(lower_string, "db_c_parser") || strstr(lower_string, "db_pg_parser"))) {
+#else
+    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages"))) {
+#endif
+        pfree_ext(lower_string);
+        return true;
+    } else {
+        pfree_ext(lower_string);
+        return false;
+    }
 }
 
 /*
@@ -11048,6 +11367,13 @@ static void do_global_analyze_rel(VacuumStmt* stmt, Oid rel_id, const char* quer
         pfree_ext(query_string_with_info);
         query_string_with_info = NULL;
     }
+    
+    /*
+     * Other CNs have already gotten statistics. Now, We can resume the time counter which was stoped before
+     * update statistics on local CN.
+     */
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && IsAutoVacuumWorkerProcess())
+        resume_sig_alarm(true);
 
     return;
 }
@@ -11211,7 +11537,7 @@ static void do_global_analyze_mpp_table(VacuumStmt* stmt, const char* query_stri
                     &table_num);
             } else if (IsPGFDWTableAnalyze(rel_id)) {
                 relation_close(rel, AccessShareLock);
-                /* do analyze for postgres foreign table. */
+                /* do analyze for openGauss foreign table. */
                 do_global_analyze_pgfdw_Rel(stmt, rel_id, query_string, has_var, sent_to_remote, is_top_level);
             } else {
                 /* do analyze for one relation of normal or hdfs foreign table. */
@@ -11320,6 +11646,15 @@ static void do_vacuum_mpp_table_other_node(VacuumStmt* stmt, const char* query_s
     if (stmt->options & VACOPT_MERGE) {
 #ifdef ENABLE_MULTIPLE_NODES
         if (Tsdb::IsDeltaMergeStmt(stmt)) {
+            if (!g_instance.attr.attr_common.enable_tsdb) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_LOG),
+                    errmsg("Can't DoDeltaMerge when 'enable_tsdb' is off"),
+                    errdetail("When the guc is off, it is forbidden to DoDeltaMerge"),
+                    errcause("Unexpected error"),
+                    erraction("Turn on the 'enable_tsdb'."),
+                    errmodule(MOD_VACUUM)));
+            }
             Tsdb::DoDeltaMerge(stmt->relation);
         } else {
             begin_delta_merge(stmt);
@@ -11391,7 +11726,8 @@ void DoVacuumMppTable(VacuumStmt* stmt, const char* query_string, bool is_top_le
     }
 
     /* It is no means to vacuum a foreign table */
-    if ((stmt->isForeignTables || stmt->isPgFdwForeignTables) && (stmt->options & VACOPT_VACUUM)) {
+    if (stmt->relation != NULL && (stmt->isForeignTables || stmt->isPgFdwForeignTables) 
+        && (stmt->options & VACOPT_VACUUM)) {
         ereport(WARNING, (errmsg("skipping \"%s\" --- cannot vacuum a foreign table", stmt->relation->relname)));
         return;
     }
@@ -11999,6 +12335,15 @@ static bool need_full_dn_execution(const char* group_name)
     if ((installation_group_name && strcmp(group_name, installation_group_name) == 0) ||
         (redistribution_group_name && strcmp(group_name, redistribution_group_name) == 0)) {
         return true;
+    }
+
+    Oid group_oid = get_pgxc_groupoid(group_name, false);
+    const char* group_parent_name = get_pgxc_groupparent(group_oid);
+    if (group_parent_name != NULL) {
+        if ((installation_group_name && strcmp(group_parent_name, installation_group_name) == 0) ||
+            (redistribution_group_name && strcmp(group_parent_name, redistribution_group_name) == 0)) {
+            return true;
+        }
     }
     return false;
 }

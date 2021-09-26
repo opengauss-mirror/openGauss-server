@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * nbtree.h
- *	  header file for postgres btree access method implementation.
+ *	  header file for openGauss btree access method implementation.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -23,6 +23,9 @@
 #include "catalog/pg_index.h"
 #include "lib/stringinfo.h"
 #include "storage/buf/bufmgr.h"
+#include "utils/tuplesort.h"
+#include "access/relscan.h"
+#include "nodes/execnodes.h"
 
 /* There's room for a 16-bit vacuum cycle ID in BTPageOpaqueData */
 typedef uint16 BTCycleId;
@@ -73,6 +76,34 @@ typedef struct BTPageOpaqueData {
 
 typedef BTPageOpaqueData* BTPageOpaque;
 
+/*
+ * UBTPageOpaqueInternal can be directly converted to BTPageOpaqueInternal for use, but
+ * UBTPageOpaque can't convert to BTPageOpaque. Must used carefully.
+ */
+typedef struct UBTPageOpaqueDataInternal {
+    BlockNumber btpo_prev; /* left sibling, or P_NONE if leftmost */
+    BlockNumber btpo_next; /* right sibling, or P_NONE if rightmost */
+    union {
+        uint32 level;                /* tree level --- zero for leaf pages */
+        ShortTransactionId xact_old; /* next transaction ID, if deleted */
+    } btpo;
+    uint16 btpo_flags;      /* flag bits, see below */
+    BTCycleId btpo_cycleid; /* vacuum cycle ID of latest split */
+
+    TransactionId last_delete_xid;
+    TransactionId xid_base;
+    int16 activeTupleCount;
+} UBTPageOpaqueDataInternal;
+
+typedef UBTPageOpaqueDataInternal* UBTPageOpaqueInternal;
+
+typedef struct UBTPageOpaqueData {
+    UBTPageOpaqueDataInternal bt_internal;
+    TransactionId xact; /* next transaction ID, if deleted */
+} UBTPageOpaqueData;
+
+typedef UBTPageOpaqueData* UBTPageOpaque;
+
 /* Bits defined in btpo_flags */
 #define BTP_LEAF (1 << 0)        /* leaf page, i.e. not internal page */
 #define BTP_ROOT (1 << 1)        /* root page (has no parent) */
@@ -117,7 +148,7 @@ typedef struct BTMetaPageData {
 /* Upgrade support for btree split/delete optimization. */
 #define BTREE_SPLIT_DELETE_UPGRADE_VERSION 92136
 #define BTREE_SPLIT_UPGRADE_FLAG 0x01
-#define BTREE_DELETE_UPGRADE_FLAG 0x02
+#define BTREE_DELETE_UPGRADE_FLAG XLR_BTREE_UPGRADE_FLAG
 
 /*
  * Maximum size of a btree index entry, including its tuple header.
@@ -140,6 +171,7 @@ typedef struct BTMetaPageData {
 #define BTREE_MIN_FILLFACTOR 10
 #define BTREE_DEFAULT_FILLFACTOR 90
 #define BTREE_NONLEAF_FILLFACTOR 70
+#define BTREE_SINGLEVAL_FILLFACTOR	96
 
 /*
  *	Test whether two btree entries are "the same".
@@ -435,15 +467,14 @@ typedef struct xl_btree_delete_page {
  * Backup Blk 0: leaf block
  * Backup Blk 1: top parent
  */
-typedef struct xl_btree_mark_page_halfdead
-{
-	OffsetNumber poffset;		/* deleted tuple id in parent page */
+typedef struct xl_btree_mark_page_halfdead {
+    OffsetNumber poffset; /* deleted tuple id in parent page */
 
-	/* information needed to recreate the leaf page: */
-	BlockNumber leafblk;		/* leaf block ultimately being deleted */
-	BlockNumber leftblk;		/* leaf block's left sibling, if any */
-	BlockNumber rightblk;		/* leaf block's right sibling */
-	BlockNumber topparent;		/* topmost internal page in the branch */
+    /* information needed to recreate the leaf page: */
+    BlockNumber leafblk;   /* leaf block ultimately being deleted */
+    BlockNumber leftblk;   /* leaf block's left sibling, if any */
+    BlockNumber rightblk;  /* leaf block's right sibling */
+    BlockNumber topparent; /* topmost internal page in the branch */
 } xl_btree_mark_page_halfdead;
 
 #define SizeOfBtreeMarkPageHalfDead (offsetof(xl_btree_mark_page_halfdead, topparent) + sizeof(BlockNumber))
@@ -459,21 +490,19 @@ typedef struct xl_btree_mark_page_halfdead
  * Backup Blk 3: leaf block (if different from target)
  * Backup Blk 4: metapage (if rightsib becomes new fast root)
  */
-typedef struct xl_btree_unlink_page
-{
-	BlockNumber leftsib;		/* target block's left sibling, if any */
-	BlockNumber rightsib;		/* target block's right sibling */
+typedef struct xl_btree_unlink_page {
+    BlockNumber leftsib;  /* target block's left sibling, if any */
+    BlockNumber rightsib; /* target block's right sibling */
 
-	/*
-	 * Information needed to recreate the leaf page, when target is an
-	 * internal page.
-	 */
-	BlockNumber leafleftsib;
-	BlockNumber leafrightsib;
-	BlockNumber topparent;		/* next child down in the branch */
-
-	TransactionId btpo_xact;	/* value of btpo.xact for use in recovery */
-	/* xl_btree_metadata FOLLOWS IF XLOG_BTREE_UNLINK_PAGE_META */
+    /*
+     * Information needed to recreate the leaf page, when target is an
+     * internal page.
+     */
+    BlockNumber leafleftsib;
+    BlockNumber leafrightsib;
+    BlockNumber topparent; /* next child down in the branch */
+    TransactionId btpo_xact; /* value of btpo.xact for use in recovery */
+                             /* xl_btree_metadata FOLLOWS IF XLOG_BTREE_UNLINK_PAGE_META */
 } xl_btree_unlink_page;
 
 #define SizeOfBtreeUnlinkPage	(offsetof(xl_btree_unlink_page, btpo_xact) + sizeof(TransactionId))
@@ -595,6 +624,8 @@ typedef struct xl_btree_newroot {
 
 #define BT_READ BUFFER_LOCK_SHARE
 #define BT_WRITE BUFFER_LOCK_EXCLUSIVE
+/* BT_NO_LOCK is actually BUFFER_LOCK_UNLOCK(0 value) and should be used carefully */
+#define BT_NO_LOCK BUFFER_LOCK_UNLOCK
 
 /*
  *	BTStackData -- As we descend a tree, we push the (location, downlink)
@@ -646,12 +677,15 @@ typedef struct BTScanPosItem { /* what we remember about each match */
     OffsetNumber indexOffset;  /* index item's location within page */
     LocationIndex tupleOffset; /* IndexTuple's offset in workspace, if any */
     Oid partitionOid;          /* partition table oid in workspace, if any */
+    int2 bucketid;             /* bucketid in workspace, if any */
 } BTScanPosItem;
 
 typedef struct BTScanPosData {
     Buffer buf; /* if valid, the buffer is pinned */
 
     BlockNumber nextPage; /* page's right link when we scanned it */
+
+    TransactionId xid_base;
 
     /*
      * moreLeft and moreRight track whether we think there may be matching
@@ -698,6 +732,7 @@ typedef struct BTArrayKeyInfo {
 typedef struct BTScanOpaqueData {
     /* these fields are set by _bt_preprocess_keys(): */
     bool qual_ok;     /* false if qual can never be satisfied */
+    bool xs_want_xid; /* indicate that the index scan want xid. Put it here for alignment */
     int numberOfKeys; /* number of preprocessed scan keys */
     ScanKey keyData;  /* array of preprocessed scan keys */
 
@@ -719,6 +754,15 @@ typedef struct BTScanOpaqueData {
      */
     char* currTuples; /* tuple storage for currPos */
     char* markTuples; /* tuple storage for markPos */
+
+    /*
+     * used in ubtree only, indicate the last returned index tuple which is modified
+     * by current transaction. see UBTreeCheckCid() for more information.
+     */
+    char* lastSelfModifiedItup;
+    uint16 lastSelfModifiedItupBufferSize;
+    IndexInfo* indexInfo;
+    EState* fakeEstate;
 
     /*
      * If the marked position is on the same page as current position, we
@@ -746,6 +790,63 @@ typedef BTScanOpaqueData* BTScanOpaque;
 #define SK_BT_INDOPTION_SHIFT 24 /* must clear the above bits */
 #define SK_BT_DESC (INDOPTION_DESC << SK_BT_INDOPTION_SHIFT)
 #define SK_BT_NULLS_FIRST (INDOPTION_NULLS_FIRST << SK_BT_INDOPTION_SHIFT)
+
+/*
+ * BTScanInsertData is the btree-private state needed to find an initial
+ * position for an indexscan, or to insert new tuples -- an "insertion
+ * scankey" (not to be confused with a search scankey).  It's used to descend
+ * a B-Tree using _bt_search.
+ *
+ * heapkeyspace indicates if we expect all keys in the index to be physically
+ * unique because heap TID is used as a tiebreaker attribute, and if index may
+ * have truncated key attributes in pivot tuples.  This is actually a property
+ * of the index relation itself (not an indexscan).  heapkeyspace indexes are
+ * indexes whose version is >= version 4.  It's convenient to keep this close
+ * by, rather than accessing the metapage repeatedly.
+ *
+ * anynullkeys indicates if any of the keys had NULL value when scankey was
+ * built from index tuple (note that already-truncated tuple key attributes
+ * set NULL as a placeholder key value, which also affects value of
+ * anynullkeys).  This is a convenience for unique index non-pivot tuple
+ * insertion, which usually temporarily unsets scantid, but shouldn't iff
+ * anynullkeys is true.  Value generally matches non-pivot tuple's HasNulls
+ * bit, but may not when inserting into an INCLUDE index (tuple header value
+ * is affected by the NULL-ness of both key and non-key attributes).
+ *
+ * When nextkey is false (the usual case), _bt_search and _bt_binsrch will
+ * locate the first item >= scankey.  When nextkey is true, they will locate
+ * the first item > scan key.
+ *
+ * pivotsearch is set to true by callers that want to re-find a leaf page
+ * using a scankey built from a leaf page's high key.  Most callers set this
+ * to false.
+ *
+ * scantid is the heap TID that is used as a final tiebreaker attribute.  It
+ * is set to NULL when index scan doesn't need to find a position for a
+ * specific physical tuple.  Must be set when inserting new tuples into
+ * heapkeyspace indexes, since every tuple in the tree unambiguously belongs
+ * in one exact position (it's never set with !heapkeyspace indexes, though).
+ * Despite the representational difference, nbtree search code considers
+ * scantid to be just another insertion scankey attribute.
+ *
+ * scankeys is an array of scan key entries for attributes that are compared
+ * before scantid (user-visible attributes).  keysz is the size of the array.
+ * During insertion, there must be a scan key for every attribute, but when
+ * starting a regular index scan some can be omitted.  The array is used as a
+ * flexible array member, though it's sized in a way that makes it possible to
+ * use stack allocations.  See nbtree/README for full details.
+ */
+typedef struct BTScanInsertData {
+    bool heapkeyspace;
+    bool anynullkeys;
+    bool nextkey;
+    bool pivotsearch;                     /* seems not used yet (always false) */
+    ItemPointer scantid;                  /* tiebreaker for scankeys */
+    int keysz;                            /* Size of scankeys array */
+    ScanKeyData scankeys[INDEX_MAX_KEYS]; /* Must appear last */
+} BTScanInsertData;
+
+typedef BTScanInsertData* BTScanInsert;
 
 // BTPageState and BTWriteState are moved here from nbtsort.cpp
 /*
@@ -775,7 +876,9 @@ typedef struct BTPageState {
  * Overall status record for index writing phase.
  */
 typedef struct BTWriteState {
+    Relation heap;
     Relation index;
+    BTScanInsert inskey;		    /* generic insertion scankey */
     bool btws_use_wal;              /* dump pages to WAL? */
     BlockNumber btws_pages_alloced; /* # pages allocated */
     BlockNumber btws_pages_written; /* # pages written out */
@@ -797,6 +900,147 @@ typedef struct BTCheckElement {
 } BTCheckElement;
 
 /*
+ * prototypes for functions in nbtsort.c
+ */
+
+/*
+ * Status record for spooling/sorting phase.  (Note we may have two of
+ * these due to the special requirements for uniqueness-checking with
+ * dead tuples.)
+ */
+struct BTSpool {
+    Tuplesortstate *sortstate; /* state data for tuplesort.c */
+    Relation heap;
+    Relation index;
+    bool isunique;
+};
+
+/*
+ * Status for index builds performed in parallel.  This is allocated in a
+ * dynamic shared memory segment.  Note that there is a separate tuplesort TOC
+ * entry, private to tuplesort.c but allocated by this module on its behalf.
+ */
+typedef struct BTShared {
+    /*
+     * These fields are not modified during the sort.  They primarily exist
+     * for the benefit of worker processes that need to create BTSpool state
+     * corresponding to that used by the leader.
+     */
+    Oid heaprelid;
+    Oid indexrelid;
+    Oid heappartid;
+    Oid indexpartid;
+    bool isunique;
+    int scantuplesortstates;
+
+    /*
+     * mutex protects all fields before heapdesc.
+     *
+     * These fields contain status information of interest to B-Tree index
+     * builds that must work just the same when an index is built in parallel.
+     */
+    slock_t mutex;
+
+    /*
+     * Mutable state that is maintained by workers, and reported back to
+     * leader at end of parallel scan.
+     *
+     * reltuples is the total number of input heap tuples.
+     *
+     * havedead indicates if RECENTLY_DEAD tuples were encountered during
+     * build.
+     *
+     * indtuples is the total number of tuples that made it into the index.
+     *
+     * brokenhotchain indicates if any worker detected a broken HOT chain
+     * during build.
+     */
+    double reltuples;
+    double *alltuples;
+    uint32 nparts;
+    bool isplain;
+    bool havedead;
+    double indtuples;
+    bool brokenhotchain;
+    int workmem[2];
+    pg_atomic_uint64 curiter;
+    Sharedsort *sharedsort;
+    Sharedsort *sharedsort2;
+
+    /*
+     * This variable-sized field must come last.
+     */
+    ParallelHeapScanDescData heapdesc;
+} BTShared;
+
+/*
+ * Status for leader in parallel index build.
+ */
+typedef struct BTLeader {
+    /*
+     * nparticipanttuplesorts is the exact number of worker processes
+     * successfully launched, plus one leader process if it participates as a
+     * worker (only DISABLE_LEADER_PARTICIPATION builds avoid leader
+     * participating as a worker).
+     */
+    int nparticipanttuplesorts;
+
+    /*
+     * Leader process convenience pointers to shared state (leader avoids TOC
+     * lookups).
+     *
+     * btshared is the shared state for entire build.  sharedsort is the
+     * shared, tuplesort-managed state passed to each process tuplesort.
+     * sharedsort2 is the corresponding btspool2 shared state, used only when
+     * building unique indexes.
+     */
+    BTShared *btshared;
+} BTLeader;
+
+/* Working state for btbuild and its callback */
+typedef struct {
+    bool isUnique;
+    bool haveDead;
+    Relation heapRel;
+    BTSpool* spool;
+
+    /*
+     * spool2 is needed only when the index is an unique index. Dead tuples
+     * are put into spool2 instead of spool in order to avoid uniqueness
+     * check.
+     */
+    BTSpool* spool2;
+    double indtuples;
+
+    /*
+     * btleader is only present when a parallel index build is performed, and
+     * only in the leader process. (Actually, only the leader has a
+     * BTBuildState.  Workers have their own spool and spool2, though.)
+     */
+    BTLeader   *btleader;
+} BTBuildState;
+
+/* 
+ * Unified Atomic Iterator, which is used for iterating hashbuckets
+ * and partitions atomically in multiple threads. It contains two
+ * internal iterators, the first one is for the inner-most layer,
+ * the second is for the outer layer. Whether both iterators are
+ * valid depends on the granularity of the target relation. If the
+ * target relation is a hashbucket, only the first iterator is valid,
+ * it is same to paritition-only relation. If the target relation is 
+ * the parent table which contains both partitions and hashbuckets,
+ * both iterators will be activated and iterate starting from the first
+ * bucket of the first partition, then move forward like the second hand
+ * and the minute hand of a clock.
+ */
+typedef union unified_atomic_iterator {
+    uint64 value;
+    uint32 iters[2];
+} unified_atomic_iterator_t;
+
+#define INVALID_ATOMIC_ITERATOR PG_UINT32_MAX
+
+/*
  * prototypes for functions in nbtree.c (external entry points for btree)
  */
 extern Datum btbuild(PG_FUNCTION_ARGS);
@@ -814,7 +1058,7 @@ extern Datum btbulkdelete(PG_FUNCTION_ARGS);
 extern Datum btvacuumcleanup(PG_FUNCTION_ARGS);
 extern Datum btcanreturn(PG_FUNCTION_ARGS);
 extern Datum btoptions(PG_FUNCTION_ARGS);
-/* 
+/*
  * this is the interface of merge 2 or more index for btree index
  * we also have similar interfaces for other kind of indexes, like hash/gist/gin
  * thought, we are not going to implement them right now.
@@ -831,9 +1075,9 @@ extern void _bt_finish_split(Relation rel, Buffer bbuf, BTStack stack);
 extern IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup);
 extern TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf,
     OffsetNumber offset, ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool *is_unique, GPIScanDesc gpiDesc,
-    CUDescScan* cudesc);
+    CBIScanDesc cbiScan, CUDescScan* cudesc);
 extern bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
-    GPIScanDesc gpiScan, CUDescScan* cudescScan, BTCheckElement* element);
+    GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element);
 
 /*
  * prototypes for functions in nbtpage.c
@@ -841,6 +1085,7 @@ extern bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqu
 extern void _bt_initmetapage(Page page, BlockNumber rootbknum, uint32 level);
 extern Buffer _bt_getroot(Relation rel, int access);
 extern Buffer _bt_gettrueroot(Relation rel);
+extern void _bt_checkbuffer_valid(Relation rel, Buffer buf);
 extern void _bt_checkpage(Relation rel, Buffer buf);
 extern Buffer _bt_getbuf(Relation rel, BlockNumber blkno, int access);
 extern Buffer _bt_relandgetbuf(Relation rel, Buffer obuf, BlockNumber blkno, int access);
@@ -862,6 +1107,7 @@ extern OffsetNumber _bt_binsrch(Relation rel, Buffer buf, int keysz, ScanKey sca
 extern int32 _bt_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNumber offnum);
 extern bool _bt_first(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_next(IndexScanDesc scan, ScanDirection dir);
+extern Buffer _bt_walk_left(Relation rel, Buffer buf);
 extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost);
 extern bool _bt_gettuple_internal(IndexScanDesc scan, ScanDirection dir);
 extern bool _bt_check_natts(const Relation index, Page page, OffsetNumber offnum);
@@ -883,6 +1129,8 @@ extern void _bt_restore_array_keys(IndexScanDesc scan);
 extern void _bt_preprocess_keys(IndexScanDesc scan);
 extern IndexTuple _bt_checkkeys(
     IndexScanDesc scan, Page page, OffsetNumber offnum, ScanDirection dir, bool* continuescan);
+extern bool _bt_check_rowcompare(ScanKey skey, IndexTuple tuple, TupleDesc tupdesc,
+    ScanDirection dir, bool *continuescan);
 extern void _bt_killitems(IndexScanDesc scan, bool haveLock);
 extern BTCycleId _bt_vacuum_cycleid(Relation rel);
 extern BTCycleId _bt_start_vacuum(Relation rel);
@@ -890,31 +1138,13 @@ extern void _bt_end_vacuum(Relation rel);
 extern void _bt_end_vacuum_callback(int code, Datum arg);
 extern Size BTreeShmemSize(void);
 extern void BTreeShmemInit(void);
-
-/*
- * prototypes for functions in nbtsort.c
- */
-typedef struct BTSpool BTSpool; /* opaque type known only within nbtsort.c */
-
-/* Working state for btbuild and its callback */
-typedef struct {
-    bool isUnique;
-    bool haveDead;
-    Relation heapRel;
-    BTSpool* spool;
-
-    /*
-     * spool2 is needed only when the index is an unique index. Dead tuples
-     * are put into spool2 instead of spool in order to avoid uniqueness
-     * check.
-     */
-    BTSpool* spool2;
-    double indtuples;
-} BTBuildState;
-
-extern BTSpool* _bt_spoolinit(Relation index, bool isunique, bool isdead, void* meminfo);
+extern double _bt_spools_heapscan(Relation heap, Relation index, BTBuildState *buildstate, IndexInfo *indexInfo,
+    double **allPartTuples);
+extern void _bt_end_parallel();
+extern BTSpool* _bt_spoolinit(Relation heap, Relation index, bool isunique, bool isdead, void* meminfo);
 extern void _bt_spooldestroy(BTSpool* btspool);
-extern void _bt_spool(BTSpool* btspool, ItemPointer self, Datum* values, const bool* isnull);
+extern void _bt_spool(BTSpool *btspool, ItemPointer self, Datum *values, const bool *isnull,
+    IndexTransInfo *transInfo = NULL);
 extern void _bt_leafbuild(BTSpool* btspool, BTSpool* spool2);
 // these 4 functions are move here from nbtsearch.cpp(static functions)
 extern void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup);
@@ -923,6 +1153,8 @@ BTPageState* _bt_pagestate(BTWriteState* wstate, uint32 level);
 extern bool _index_tuple_compare(TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup, IndexTuple itup2);
 extern List* insert_ordered_index(List* list, TupleDesc tupdes, ScanKey indexScanKey, int keysz, IndexTuple itup,
     BlockNumber heapModifiedOffset, IndexScanDesc srcIdxRelScan);
+extern uint64 uniter_next(pg_atomic_uint64 *curiter, uint32 cycle0, uint32 cycle1);
+
 /*
  * prototypes for functions in nbtxlog.c
  */
@@ -936,5 +1168,6 @@ extern void btree_clear_imcompleteAction();
 extern bool IsBtreeVacuum(const XLogReaderState* record);
 extern void _bt_restore_page(Page page, char* from, int len);
 extern void DumpBtreeDeleteInfo(XLogRecPtr lsn, OffsetNumber offsetList[], uint64 offsetNum);
-
+extern void btbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
+                            void *state);
 #endif /* NBTREE_H */

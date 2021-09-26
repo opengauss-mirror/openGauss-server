@@ -164,8 +164,11 @@ typedef struct trace_config {
     /* a magic number for validation */
     uint32_t trc_cfg_magic_no;
 
-    /* mark which process are traced */
+    /* user's identifier, now it is kernel's listening port. */
     uint32_t key;
+
+    /* mark which process are traced */
+    pid_t pid;
 
     /* whether or not trace is activated */
     volatile bool bEnabled;

@@ -494,9 +494,15 @@ create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='o');
 ERROR:  parameter "on_commit_delete_rows" requires a Boolean value
 create global temp table gtt_test11(c1 int) with(on_commit_delete_rows='');
 ERROR:  parameter "on_commit_delete_rows" requires a Boolean value
+--ok
+create global temp table gtt_test12(c0 TEXT , c1 boolean , UNIQUE(c0, c1), CHECK(gtt_test12.c1));
+NOTICE:  CREATE TABLE / UNIQUE will create implicit index "gtt_test12_c0_c1_key" for table "gtt_test12"
+insert into gtt_test12(c0) values('8x');
+alter table only gtt_test12 alter c0 set data type CLOB;
+reindex index gtt_test12_c0_c1_key;
 reset search_path;
 drop schema gtt_function cascade;
-NOTICE:  drop cascades to 34 other objects
+NOTICE:  drop cascades to 35 other objects
 DETAIL:  drop cascades to table gtt_function.gtt1
 drop cascades to table gtt_function.gtt2
 drop cascades to table gtt_function.gtt3
@@ -531,5 +537,6 @@ drop cascades to table gtt_function.gtt_test7
 drop cascades to table gtt_function.gtt_test8
 drop cascades to table gtt_function.gtt_test9
 drop cascades to table gtt_function.gtt_test10
+drop cascades to table gtt_function.gtt_test12
 drop table public.gtt_test_new;
 drop user gtt_user;

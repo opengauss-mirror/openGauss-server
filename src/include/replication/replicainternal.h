@@ -35,7 +35,8 @@
 typedef enum {
     NoDemote = 0,
     SmartDemote,
-    FastDemote
+    FastDemote,
+    ExtremelyFast
 } DemoteMode;
 
 typedef enum {
@@ -74,10 +75,11 @@ typedef enum {
     TIMELINE_REBUILD,
     SYSTEMID_REBUILD,
     VERSION_REBUILD,
-    MODE_REBUILD
+    MODE_REBUILD,
+    DCF_LOG_LOSS_REBUILD
 } HaRebuildReason;
 
-typedef enum { NONE_BUILD = 0, AUTO_BUILD, FULL_BUILD, INC_BUILD } BuildMode;
+typedef enum { NONE_BUILD = 0, AUTO_BUILD, FULL_BUILD, INC_BUILD, STANDBY_FULL_BUILD } BuildMode;
 
 typedef struct buildstate {
     BuildMode build_mode;
@@ -98,6 +100,15 @@ typedef struct gaussstate {
     HaRebuildReason ha_rebuild_reason;
 } GaussState;
 
+typedef struct newnodeinfo {
+    unsigned int stream_id;
+    unsigned int node_id;
+    char ip[IP_LEN];
+    unsigned int port;
+    unsigned int role;
+    unsigned int wait_timeout_ms;
+} NewNodeInfo;
+
 #ifdef EXEC_BACKEND
 /*
  * Indicate one connect channel
@@ -105,11 +116,9 @@ typedef struct gaussstate {
 typedef struct replconninfo {
     char localhost[IP_LEN];
     int localport;
-    int localservice;
     int localheartbeatport;
     char remotehost[IP_LEN];
     int remoteport;
-    int remoteservice;
     int remoteheartbeatport;
     bool isCascade;
 } ReplConnInfo;

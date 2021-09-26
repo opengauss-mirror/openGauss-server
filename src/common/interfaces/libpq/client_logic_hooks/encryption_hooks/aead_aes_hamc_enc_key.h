@@ -24,6 +24,40 @@
 #ifndef HAVE_AES256_CBC_HMAC_ENCRYPTION_KEY
 #define HAVE_AES256_CBC_HMAC_ENCRYPTION_KEY
 
+#include "openssl/hmac.h"
+#include "openssl/ossl_typ.h"
+#include "cipher.h"
+
+class HmacCtxGroup {
+public:
+    HmacCtxGroup()
+    {
+        ctx_worker = NULL;
+        ctx_template = NULL;
+    }
+
+    ~HmacCtxGroup()
+    {
+        free_hmac_ctx_all();
+    }
+
+    void free_hmac_ctx_all()
+    {
+        free_hmac_ctx(&ctx_worker);
+        free_hmac_ctx(&ctx_template);
+    }
+
+    HMAC_CTX* ctx_worker;
+    HMAC_CTX* ctx_template;
+private:
+    void free_hmac_ctx(HMAC_CTX** ctx_tmp)
+    {
+        if (*ctx_tmp != NULL) {
+            HMAC_CTX_free(*ctx_tmp);
+            *ctx_tmp = NULL;
+        }
+    }
+};
 
 /*
  * Encryption key class containing 4 keys. This class is used by SqlAeadAes256CbcHmac256Algorithm and
@@ -49,9 +83,12 @@ public:
     const unsigned char *get_mac_key() const;
     const unsigned char *get_iv_key() const;
 
+    HmacCtxGroup hmac_ctx_group_iv;       /* store ctx to reuse for IV call */
+    HmacCtxGroup hmac_ctx_group_mac;      /* store ctx to reuse for hmac generation or hmac check call */
+
 private:
     bool HKDF(const unsigned char *key, int key_len, const unsigned char *data, int data_len,
-        unsigned char *result) const;
+        unsigned char *result);
 
 private:
     /* Encryption Key Salt format. This is used to derive the encryption key from the root key. */
@@ -71,6 +108,8 @@ private:
     unsigned char _mac_key[MAX_SIZE + 1] = {0};
     /* IV Key */
     unsigned char _iv_key[MAX_SIZE + 1] = {0};
+
+    HmacCtxGroup hmac_ctx_group_root;     /* store ctx to reuse for generating the 3 keys */
 };
 
 #endif /* HAVE_AES256_CBC_HMAC_ENCRYPTION_KEY */

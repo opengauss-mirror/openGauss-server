@@ -277,7 +277,7 @@ static void reindex_system_catalogs(const char* dbname_tem, const char* host, co
 
 static void help(const char* progname_tem)
 {
-    printf(_("%s reindexes a PostgreSQL database.\n\n"), progname_tem);
+    printf(_("%s reindexes a openGauss database.\n\n"), progname_tem);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [DBNAME]\n"), progname_tem);
     printf(_("\nOptions:\n"));

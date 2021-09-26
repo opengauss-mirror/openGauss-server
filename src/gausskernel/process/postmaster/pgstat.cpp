@@ -58,7 +58,7 @@
 #include "postmaster/pagewriter.h"
 #include "replication/catchup.h"
 #include "storage/backendid.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/lmgr.h"
@@ -199,9 +199,17 @@ typedef struct TwoPhasePgStatRecord {
     PgStat_Counter tuples_inserted;    /* tuples inserted in xact */
     PgStat_Counter tuples_updated;     /* tuples updated in xact */
     PgStat_Counter tuples_deleted;     /* tuples deleted in xact */
+    PgStat_Counter tuples_inplace_updated;
     PgStat_Counter inserted_pre_trunc; /* tuples inserted prior to truncate */
     PgStat_Counter updated_pre_trunc;  /* tuples updated prior to truncate */
     PgStat_Counter deleted_pre_trunc;  /* tuples deleted prior to truncate */
+    PgStat_Counter inplace_updated_pre_trunc;
+    /* The following members with _accum suffix will not be erased by truncate */
+    PgStat_Counter tuples_inserted_accum;
+    PgStat_Counter tuples_updated_accum;
+    PgStat_Counter tuples_deleted_accum;
+    PgStat_Counter tuples_inplace_updated_accum;
+
     Oid t_id;                          /* table's OID */
     bool t_shared;                     /* is it a shared catalog? */
     bool t_truncated;                  /* was the relation truncated? */
@@ -390,6 +398,7 @@ static void pgstat_recv_deadlock(const PgStat_MsgDeadlock* msg);
 static void pgstat_recv_tempfile(PgStat_MsgTempFile* msg, int len);
 static void pgstat_recv_memReserved(const PgStat_MsgMemReserved* msg);
 static void pgstat_recv_autovac_stat(PgStat_MsgAutovacStat* msg, int len);
+static void PgstatRecvPrunestat(PgStat_MsgPrune* msg, int len);
 
 static void pgstat_send_badblock_stat(void);
 static void pgstat_recv_badblock_stat(PgStat_MsgBadBlock* msg, int len);
@@ -401,8 +410,6 @@ static void pgstat_recv_filestat(PgStat_MsgFile* msg, int len);
 static void prepare_calculate(SqlRTInfoArray* sql_rt_info, int* counter);
 static void pgstat_recv_sql_responstime(PgStat_SqlRT* msg, int len);
 
-void LWLockReportWaitStart(LWLock*);
-void LWLockReportWaitEnd(void);
 void initGlobalBadBlockStat();
 
 static void initMySessionStatEntry(void);
@@ -830,7 +837,7 @@ void pgstat_report_stat(bool force)
     regular_msg.m_nentries = 0;
     shared_msg.m_nentries = 0;
 
-    DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
+    DEBUG_MOD_START_TIMER(MOD_PGSTAT);
 
     for (tsa = u_sess->stat_cxt.pgStatTabList; tsa != NULL; tsa = tsa->tsa_next) {
         /* count the length of u_sess->stat_cxt.pgStatTabList */
@@ -910,7 +917,7 @@ void pgstat_report_stat(bool force)
     /* send badblock statistics */
     pgstat_send_badblock_stat();
 
-    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "send collected usage statistics to collector");
+    DEBUG_MOD_STOP_TIMER(MOD_PGSTAT, "send collected usage statistics to collector");
 
     /* check the list' length and destroy it if needed */
     if (force_to_destory) {
@@ -1474,6 +1481,30 @@ void pgstat_report_vacuum(Oid tableoid, uint32 statFlag, bool shared, PgStat_Cou
 }
 
 /* ---------
+ * PgstatReportPrunestat() -
+ *
+ *	Tell the collector how many blocks we scanned and successfully pruned
+ * ---------
+ */
+void PgstatReportPrunestat(Oid tableoid, uint32 statFlag,
+                            bool shared, PgStat_Counter scanned,
+                            PgStat_Counter pruned)
+{
+    PgStat_MsgPrune msg;
+
+    if (g_instance.stat_cxt.pgStatSock == PGINVALID_SOCKET)
+        return;
+
+    pgstat_setheader(&msg.m_hdr, PGSTAT_MTYPE_PRUNESTAT);
+    msg.m_databaseid = shared ? InvalidOid : u_sess->proc_cxt.MyDatabaseId;
+    msg.m_tableoid = tableoid;
+    msg.m_statFlag = statFlag;
+    msg.m_scanned_blocks = scanned;
+    msg.m_pruned_blocks = pruned;
+    pgstat_send(&msg, sizeof(msg));
+}
+
+/* ---------
  * pgstat_report_data_changed() -
  *
  * Tell the collector about the table we just insert/delete/update/
@@ -1577,7 +1608,7 @@ void pgstat_report_analyze(Relation rel, PgStat_Counter livetuples, PgStat_Count
 
         for (trans = rel->pgstat_info->trans; trans; trans = trans->upper) {
             livetuples -= trans->tuples_inserted - trans->tuples_deleted;
-            deadtuples -= trans->tuples_updated + trans->tuples_deleted;
+            deadtuples -= (trans->tuples_updated - trans->tuples_inplace_updated) + trans->tuples_deleted;
         }
         /* count stuff inserted by already-aborted subxacts, too */
         deadtuples -= rel->pgstat_info->t_counts.t_delta_dead_tuples;
@@ -2031,6 +2062,7 @@ void pgstat_count_heap_insert(Relation rel, int n)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
         pgstat_info->trans->tuples_inserted += n;
+        pgstat_info->trans->tuples_inserted_accum += n;
     }
 }
 
@@ -2049,6 +2081,7 @@ void pgstat_count_heap_update(Relation rel, bool hot)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
         pgstat_info->trans->tuples_updated++;
+        pgstat_info->trans->tuples_updated_accum++;
 
         /* t_tuples_hot_updated is nontransactional, so just advance it */
         if (hot)
@@ -2071,6 +2104,7 @@ void pgstat_count_heap_delete(Relation rel)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
         pgstat_info->trans->tuples_deleted++;
+        pgstat_info->trans->tuples_deleted_accum++;
     }
 }
 
@@ -2088,6 +2122,7 @@ static void pgstat_truncate_save_counters(PgStat_TableXactStatus* trans)
         trans->inserted_pre_trunc = trans->tuples_inserted;
         trans->updated_pre_trunc = trans->tuples_updated;
         trans->deleted_pre_trunc = trans->tuples_deleted;
+        trans->inplace_updated_pre_trunc = trans->tuples_inplace_updated;
         trans->truncated = true;
     }
 }
@@ -2101,6 +2136,7 @@ static void pgstat_truncate_restore_counters(PgStat_TableXactStatus* trans)
         trans->tuples_inserted = trans->inserted_pre_trunc;
         trans->tuples_updated = trans->updated_pre_trunc;
         trans->tuples_deleted = trans->deleted_pre_trunc;
+        trans->tuples_inplace_updated = trans->inplace_updated_pre_trunc;
     }
 }
 
@@ -2122,6 +2158,31 @@ void pgstat_count_truncate(Relation rel)
         pgstat_info->trans->tuples_inserted = 0;
         pgstat_info->trans->tuples_updated = 0;
         pgstat_info->trans->tuples_deleted = 0;
+        pgstat_info->trans->tuples_inplace_updated = 0;
+    }
+}
+
+/*
+ * pgstat_count_uheap_update - count a tuple update inplace
+ */
+void
+PgstatCountHeapUpdateInplace(Relation rel)
+{
+    PgStat_TableStatus *pgstat_info = rel->pgstat_info;
+
+    if (pgstat_info != NULL) {
+        /* We have to log the effect at the proper transactional level */
+        int nest_level = GetCurrentTransactionNestLevel();
+
+        if (pgstat_info->trans == NULL || pgstat_info->trans->nest_level != nest_level) {
+            add_tabstat_xact_level(pgstat_info, nest_level);
+        }
+
+        /* increase, similar to pgstat_count_heap_update */
+        pgstat_info->trans->tuples_updated++;
+        pgstat_info->trans->tuples_updated_accum++;
+
+        pgstat_info->trans->tuples_inplace_updated++;
     }
 }
 
@@ -2184,6 +2245,7 @@ static inline void init_tuplecount_truncate(PgStat_TableStatus* tabstat)
     tabstat->t_counts.t_tuples_inserted_post_truncate = 0;
     tabstat->t_counts.t_tuples_updated_post_truncate = 0;
     tabstat->t_counts.t_tuples_deleted_post_truncate = 0;
+    tabstat->t_counts.t_tuples_inplace_updated_post_truncate = 0;
     tabstat->t_counts.t_delta_live_tuples = 0;
     tabstat->t_counts.t_delta_dead_tuples = 0;
 }
@@ -2231,9 +2293,10 @@ void AtEOXact_PgStat(bool isCommit)
             if (!isCommit)
                 pgstat_truncate_restore_counters(trans);
             /* count attempted actions regardless of commit/abort */
-            tabstat->t_counts.t_tuples_inserted += trans->tuples_inserted;
-            tabstat->t_counts.t_tuples_updated += trans->tuples_updated;
-            tabstat->t_counts.t_tuples_deleted += trans->tuples_deleted;
+            tabstat->t_counts.t_tuples_inserted += trans->tuples_inserted_accum;
+            tabstat->t_counts.t_tuples_updated += trans->tuples_updated_accum;
+            tabstat->t_counts.t_tuples_deleted += trans->tuples_deleted_accum;
+            tabstat->t_counts.t_tuples_inplace_updated += trans->tuples_inplace_updated_accum;
             if (isCommit) {
                 tabstat->t_counts.t_truncated = trans->truncated;
                 if (trans->truncated) {
@@ -2243,17 +2306,20 @@ void AtEOXact_PgStat(bool isCommit)
                     tabstat->t_counts.t_tuples_inserted_post_truncate += trans->tuples_inserted;
                     tabstat->t_counts.t_tuples_updated_post_truncate += trans->tuples_updated;
                     tabstat->t_counts.t_tuples_deleted_post_truncate += trans->tuples_deleted;
+                    tabstat->t_counts.t_tuples_inplace_updated_post_truncate += trans->tuples_inplace_updated;
                 }
                 /* insert adds a live tuple, delete removes one */
                 tabstat->t_counts.t_delta_live_tuples += trans->tuples_inserted - trans->tuples_deleted;
                 /* update and delete each create a dead tuple */
-                tabstat->t_counts.t_delta_dead_tuples += trans->tuples_updated + trans->tuples_deleted;
+                tabstat->t_counts.t_delta_dead_tuples +=
+                    (trans->tuples_updated - trans->tuples_inplace_updated) + trans->tuples_deleted;
                 /* insert, update, delete each count as one change event */
                 tabstat->t_counts.t_changed_tuples +=
                     trans->tuples_inserted + trans->tuples_updated + trans->tuples_deleted;
             } else {
                 /* inserted tuples are dead, deleted tuples are unaffected */
-                tabstat->t_counts.t_delta_dead_tuples += trans->tuples_inserted + trans->tuples_updated;
+                tabstat->t_counts.t_delta_dead_tuples +=
+                    trans->tuples_inserted + (trans->tuples_updated - trans->tuples_inplace_updated);
                 /* an aborted xact generates no changed_tuple events */
             }
             tabstat->trans = NULL;
@@ -2303,11 +2369,18 @@ void AtEOSubXact_PgStat(bool isCommit, int nestDepth)
                         trans->upper->tuples_inserted = trans->tuples_inserted;
                         trans->upper->tuples_updated = trans->tuples_updated;
                         trans->upper->tuples_deleted = trans->tuples_deleted;
+                        trans->upper->tuples_inplace_updated = trans->tuples_inplace_updated;
                     } else {
                         trans->upper->tuples_inserted += trans->tuples_inserted;
                         trans->upper->tuples_updated += trans->tuples_updated;
                         trans->upper->tuples_deleted += trans->tuples_deleted;
+                        trans->upper->tuples_inplace_updated += trans->tuples_inplace_updated;
                     }
+                    /* accumulated stats shall not be replaced */
+                    trans->upper->tuples_inserted_accum += trans->tuples_inserted_accum;
+                    trans->upper->tuples_updated_accum += trans->tuples_updated_accum;
+                    trans->upper->tuples_deleted_accum += trans->tuples_deleted_accum;
+                    trans->upper->tuples_inplace_updated_accum += trans->tuples_inplace_updated_accum;
                     tabstat->trans = trans->upper;
                     pfree(trans);
                 } else {
@@ -2334,11 +2407,13 @@ void AtEOSubXact_PgStat(bool isCommit, int nestDepth)
                 /* first restore values obliterated by truncate */
                 pgstat_truncate_restore_counters(trans);
                 /* count attempted actions regardless of commit/abort */
-                tabstat->t_counts.t_tuples_inserted += trans->tuples_inserted;
-                tabstat->t_counts.t_tuples_updated += trans->tuples_updated;
-                tabstat->t_counts.t_tuples_deleted += trans->tuples_deleted;
+                tabstat->t_counts.t_tuples_inserted += trans->tuples_inserted_accum;
+                tabstat->t_counts.t_tuples_updated += trans->tuples_updated_accum;
+                tabstat->t_counts.t_tuples_deleted += trans->tuples_deleted_accum;
+                tabstat->t_counts.t_tuples_inplace_updated += trans->tuples_inplace_updated_accum;
                 /* inserted tuples are dead, deleted tuples are unaffected */
-                tabstat->t_counts.t_delta_dead_tuples += trans->tuples_inserted + trans->tuples_updated;
+                tabstat->t_counts.t_delta_dead_tuples += 
+                    trans->tuples_inserted + (trans->tuples_updated - trans->tuples_inplace_updated);
                 tabstat->trans = trans->upper;
                 pfree(trans);
             }
@@ -2376,9 +2451,15 @@ void AtPrepare_PgStat(void)
             record.tuples_inserted = trans->tuples_inserted;
             record.tuples_updated = trans->tuples_updated;
             record.tuples_deleted = trans->tuples_deleted;
+            record.tuples_inplace_updated = trans->tuples_inplace_updated;
+            record.tuples_inserted_accum = trans->tuples_inserted_accum;
+            record.tuples_updated_accum = trans->tuples_updated_accum;
+            record.tuples_deleted_accum = trans->tuples_deleted_accum;
+            record.tuples_inplace_updated_accum = trans->tuples_inplace_updated_accum;
             record.inserted_pre_trunc = trans->inserted_pre_trunc;
             record.updated_pre_trunc = trans->updated_pre_trunc;
             record.deleted_pre_trunc = trans->deleted_pre_trunc;
+            record.inplace_updated_pre_trunc = trans->inplace_updated_pre_trunc;
             record.t_id = tabstat->t_id;
             record.t_shared = tabstat->t_shared;
             record.t_statFlag = tabstat->t_statFlag;
@@ -2439,9 +2520,10 @@ void pgstat_twophase_postcommit(TransactionId xid, uint16 info, void* recdata, u
     pgstat_info = get_tabstat_entry(rec->t_id, rec->t_shared, rec->t_statFlag);
 
     /* Same math as in AtEOXact_PgStat, commit case */
-    pgstat_info->t_counts.t_tuples_inserted += rec->tuples_inserted;
-    pgstat_info->t_counts.t_tuples_updated += rec->tuples_updated;
-    pgstat_info->t_counts.t_tuples_deleted += rec->tuples_deleted;
+    pgstat_info->t_counts.t_tuples_inserted += rec->tuples_inserted_accum;
+    pgstat_info->t_counts.t_tuples_updated += rec->tuples_updated_accum;
+    pgstat_info->t_counts.t_tuples_deleted += rec->tuples_deleted_accum;
+    pgstat_info->t_counts.t_tuples_inplace_updated += rec->tuples_inplace_updated_accum;
     pgstat_info->t_counts.t_truncated = rec->t_truncated;
     if (rec->t_truncated) {
         init_tuplecount_truncate(pgstat_info);
@@ -2450,9 +2532,11 @@ void pgstat_twophase_postcommit(TransactionId xid, uint16 info, void* recdata, u
         pgstat_info->t_counts.t_tuples_inserted_post_truncate += rec->tuples_inserted;
         pgstat_info->t_counts.t_tuples_updated_post_truncate += rec->tuples_updated;
         pgstat_info->t_counts.t_tuples_deleted_post_truncate += rec->tuples_deleted;
+        pgstat_info->t_counts.t_tuples_inplace_updated_post_truncate += rec->tuples_inplace_updated;
     }
     pgstat_info->t_counts.t_delta_live_tuples += rec->tuples_inserted - rec->tuples_deleted;
-    pgstat_info->t_counts.t_delta_dead_tuples += rec->tuples_updated + rec->tuples_deleted;
+    pgstat_info->t_counts.t_delta_dead_tuples += 
+        (rec->tuples_updated - rec->tuples_inplace_updated) + rec->tuples_deleted;
     pgstat_info->t_counts.t_changed_tuples += rec->tuples_inserted + rec->tuples_updated + rec->tuples_deleted;
 }
 
@@ -2475,11 +2559,14 @@ void pgstat_twophase_postabort(TransactionId xid, uint16 info, void* recdata, ui
         rec->tuples_inserted = rec->inserted_pre_trunc;
         rec->tuples_updated = rec->updated_pre_trunc;
         rec->tuples_deleted = rec->deleted_pre_trunc;
+        rec->tuples_inplace_updated = rec->inplace_updated_pre_trunc;
     }
-    pgstat_info->t_counts.t_tuples_inserted += rec->tuples_inserted;
-    pgstat_info->t_counts.t_tuples_updated += rec->tuples_updated;
-    pgstat_info->t_counts.t_tuples_deleted += rec->tuples_deleted;
-    pgstat_info->t_counts.t_delta_dead_tuples += rec->tuples_inserted + rec->tuples_updated;
+    pgstat_info->t_counts.t_tuples_inserted += rec->tuples_inserted_accum;
+    pgstat_info->t_counts.t_tuples_updated += rec->tuples_updated_accum;
+    pgstat_info->t_counts.t_tuples_deleted += rec->tuples_deleted_accum;
+    pgstat_info->t_counts.t_tuples_inplace_updated += rec->tuples_inplace_updated_accum;
+    pgstat_info->t_counts.t_delta_dead_tuples +=
+        rec->tuples_inserted + (rec->tuples_updated - rec->tuples_inplace_updated);
 }
 
 /* ----------
@@ -2995,15 +3082,17 @@ void pgstat_bestart(void)
     } while ((beentry->st_changecount & 1) == 0);
 
     beentry->st_procpid = t_thrd.proc_cxt.MyProcPid;
-    if (!ENABLE_THREAD_POOL)
+    if (!ENABLE_THREAD_POOL) {
         beentry->st_sessionid = t_thrd.proc_cxt.MyProcPid;
-    else {
+    } else {
         if (IS_THREAD_POOL_WORKER && u_sess->session_id > 0)
             beentry->st_sessionid = u_sess->session_id;
         else
             beentry->st_sessionid = t_thrd.proc_cxt.MyProcPid;
     }
-
+    beentry->globalSessionId.sessionId = 0;
+    beentry->globalSessionId.nodeId = 0;
+    beentry->globalSessionId.seq = 0;
     beentry->st_proc_start_timestamp = proc_start_timestamp;
     beentry->st_activity_start_timestamp = 0;
     beentry->st_state_start_timestamp = 0;
@@ -3228,6 +3317,9 @@ static void pgstat_beshutdown_hook(int code, Datum arg)
 
     beentry->st_procpid = 0;   /* mark pid invalid */
     beentry->st_sessionid = 0; /* mark sessionid invalid */
+    beentry->globalSessionId.sessionId = 0;
+    beentry->globalSessionId.nodeId = 0;
+    beentry->globalSessionId.seq = 0;
 
     pgstat_increment_changecount_after(beentry);
 
@@ -3288,6 +3380,9 @@ void pgstat_beshutdown_session(int ctrl_index)
         pgstat_increment_changecount_before(beentry);
         beentry->st_procpid = 0;   /* mark pid invalid */
         beentry->st_sessionid = 0; /* mark sessionid invalid */
+        beentry->globalSessionId.sessionId = 0;
+        beentry->globalSessionId.nodeId = 0;
+        beentry->globalSessionId.seq = 0;
         pgstat_increment_changecount_after(beentry);
 
         /*
@@ -3505,6 +3600,22 @@ void pgstat_report_xact_timestamp(TimestampTz tstamp)
      */
     pgstat_increment_changecount_before(beentry);
     beentry->st_xact_start_timestamp = tstamp;
+    pgstat_increment_changecount_after(beentry);
+}
+
+void pgstat_report_global_session_id(GlobalSessionId globalSessionId)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    return;
+#endif
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (IS_PGSTATE_TRACK_UNDEFINE || globalSessionId.sessionId == 0)
+        return;
+    pgstat_increment_changecount_before(beentry);
+    beentry->globalSessionId.sessionId = globalSessionId.sessionId;
+    beentry->globalSessionId.nodeId = globalSessionId.nodeId;
+    beentry->globalSessionId.seq = globalSessionId.seq;
     pgstat_increment_changecount_after(beentry);
 }
 
@@ -4145,29 +4256,9 @@ const char* pgstat_get_wait_event(uint32 wait_event_info)
     return event_name;
 }
 
-/*
- * Report start of wait event for light-weight locks.
- *
- * This function will be used by all the light-weight lock calls which
- * needs to wait to acquire the lock.  This function distinguishes wait
- * event based on lock id.
- */
-void LWLockReportWaitStart(LWLock* lock)
-{
-    pgstat_report_waitevent(PG_WAIT_LWLOCK | lock->tranche);
-}
-
 void LWLockReportWaitFailed(LWLock* lock)
 {
     pgstat_report_wait_lock_failed(PG_WAIT_LWLOCK | lock->tranche);
-}
-
-/*
- * Report end of wait event for light-weight locks.
- */
-void LWLockReportWaitEnd(void)
-{
-    pgstat_report_waitevent(WAIT_EVENT_END);
 }
 
 /* ----------
@@ -4381,6 +4472,24 @@ const char* pgstat_get_wait_io(WaitEventIO w)
             break;
             /* no default case, so that compiler will warn */
         case IO_EVENT_NUM:
+            break;
+        case WAIT_EVENT_UNDO_FILE_PREFETCH:
+            event_name = "UndoFilePrefetch";
+            break;
+        case WAIT_EVENT_UNDO_FILE_READ:
+            event_name = "UndoFileRead";
+            break;
+        case WAIT_EVENT_UNDO_FILE_WRITE:
+            event_name = "UndoFileWrite";
+            break;
+        case WAIT_EVENT_UNDO_FILE_FLUSH:
+            event_name = "UndoFileFlush";
+            break;
+        case WAIT_EVENT_UNDO_FILE_SYNC:
+            event_name = "UndoFileSync";
+            break;
+        case WAIT_EVENT_UNDO_FILE_EXTEND:
+            event_name = "UndoFileExtend";
             break;
     }
     return event_name;
@@ -4820,7 +4929,7 @@ void pgstat_cancel_invalid_gtm_conn(void)
                 ereport(WARNING, (errmsg("could not send signal to thread %lu: %m", beentry->st_procpid)));
             else
                 ereport(LOG,
-                    (errmsg("Success to send SIGUSR2 to postgres thread: %lu in "
+                    (errmsg("Success to send SIGUSR2 to openGauss thread: %lu in "
                             "pgstat_cancel_invalid_gtm_conn",
                         beentry->st_procpid)));
         }
@@ -5223,6 +5332,10 @@ void PgstatCollectorMain()
                     pgstat_recv_cleanup_hotkeys((PgStat_MsgCleanupHotkeys*)&msg, len);
                     break;
 
+                case PGSTAT_MTYPE_PRUNESTAT:
+                    PgstatRecvPrunestat((PgStat_MsgPrune*)&msg, len);
+                    break;
+
                 default:
                     break;
             }
@@ -5390,6 +5503,7 @@ static PgStat_StatTabEntry* pgstat_get_tab_entry(
         result->tuples_updated = 0;
         result->tuples_deleted = 0;
         result->tuples_hot_updated = 0;
+        result->tuples_inplace_updated = 0;
         result->n_live_tuples = 0;
         result->n_dead_tuples = 0;
         result->changes_since_analyze = 0;
@@ -5408,6 +5522,8 @@ static PgStat_StatTabEntry* pgstat_get_tab_entry(
         result->autovac_analyze_count = 0;
         result->autovac_status = 0;
         result->data_changed_timestamp = 0;
+        result->success_prune_cnt = 0;
+        result->total_prune_cnt = 0;
     }
 
     return result;
@@ -5917,8 +6033,8 @@ static void backend_read_statsfile(void)
             (errmsg("using stale statistics instead of current ones "
                     "because stats collector is not responding")));
 
-    /* Autovacuum launcher wants stats about all databases */
-    if (IsAutoVacuumLauncherProcess())
+    /* Autovacuum launcher and the global stats tracker want stats about all databases */
+    if (IsAutoVacuumLauncherProcess() || IsGlobalStatsTrackerProcess())
         u_sess->stat_cxt.pgStatDBHash = pgstat_read_statsfile(InvalidOid, false);
     else
         u_sess->stat_cxt.pgStatDBHash = pgstat_read_statsfile(u_sess->proc_cxt.MyDatabaseId, false);
@@ -6175,9 +6291,6 @@ static void pgstat_recv_inquiry(PgStat_MsgInquiry* msg, int len)
 
 static void inline init_tabentry_truncate(PgStat_StatTabEntry* tabentry, PgStat_TableEntry* tabmsg)
 {
-    tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted_post_truncate;
-    tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated_post_truncate;
-    tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted_post_truncate;
     tabentry->n_live_tuples = 0;
     tabentry->n_dead_tuples = 0;
 }
@@ -6240,14 +6353,15 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->numscans = tabmsg->t_counts.t_numscans;
             tabentry->tuples_returned = tabmsg->t_counts.t_tuples_returned;
             tabentry->tuples_fetched = tabmsg->t_counts.t_tuples_fetched;
-            if (tabmsg->t_counts.t_truncated) {
-                init_tabentry_truncate(tabentry, tabmsg);
-            } else {
-                tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted;
-                tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
-                tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
-            }
+            tabentry->tuples_inserted = tabmsg->t_counts.t_tuples_inserted;
+            tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
+            tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
+            tabentry->tuples_inplace_updated = tabmsg->t_counts.t_tuples_inplace_updated;
             tabentry->tuples_hot_updated = tabmsg->t_counts.t_tuples_hot_updated;
+            if (tabmsg->t_counts.t_truncated) {
+                tabentry->n_live_tuples = 0;
+                tabentry->n_dead_tuples = 0;
+            }
             tabentry->n_live_tuples = tabmsg->t_counts.t_delta_live_tuples;
             tabentry->n_dead_tuples = tabmsg->t_counts.t_delta_dead_tuples;
             tabentry->changes_since_analyze = tabmsg->t_counts.t_changed_tuples;
@@ -6267,6 +6381,8 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->autovac_analyze_count = 0;
             tabentry->autovac_status = 0;
             tabentry->data_changed_timestamp = 0;
+            tabentry->success_prune_cnt = 0;
+            tabentry->total_prune_cnt = 0;
         } else {
             /*
              * Otherwise add the values to the existing entry.
@@ -6274,15 +6390,16 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->numscans += tabmsg->t_counts.t_numscans;
             tabentry->tuples_returned += tabmsg->t_counts.t_tuples_returned;
             tabentry->tuples_fetched += tabmsg->t_counts.t_tuples_fetched;
+            tabentry->tuples_inserted += tabmsg->t_counts.t_tuples_inserted;
+            tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
+            tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
+            tabentry->tuples_inplace_updated += tabmsg->t_counts.t_tuples_inplace_updated;
+            tabentry->tuples_hot_updated += tabmsg->t_counts.t_tuples_hot_updated;
             /* If table was truncated, first reset the live/dead counters */
             if (tabmsg->t_counts.t_truncated) {
-                init_tabentry_truncate(tabentry, tabmsg);
-            } else {
-                tabentry->tuples_inserted += tabmsg->t_counts.t_tuples_inserted;
-                tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
-                tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
+                tabentry->n_live_tuples = 0;
+                tabentry->n_dead_tuples = 0;
             }
-            tabentry->tuples_hot_updated += tabmsg->t_counts.t_tuples_hot_updated;
             tabentry->n_live_tuples += tabmsg->t_counts.t_delta_live_tuples;
             tabentry->n_dead_tuples += tabmsg->t_counts.t_delta_dead_tuples;
             tabentry->changes_since_analyze += tabmsg->t_counts.t_changed_tuples;
@@ -6333,6 +6450,7 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->tuples_updated = tabmsg->t_counts.t_tuples_updated;
             tabentry->tuples_deleted = tabmsg->t_counts.t_tuples_deleted;
             tabentry->tuples_hot_updated = tabmsg->t_counts.t_tuples_hot_updated;
+            tabentry->tuples_inplace_updated = tabmsg->t_counts.t_tuples_inplace_updated;
             tabentry->n_live_tuples = tabmsg->t_counts.t_delta_live_tuples;
             tabentry->n_dead_tuples = tabmsg->t_counts.t_delta_dead_tuples;
             tabentry->changes_since_analyze = tabmsg->t_counts.t_changed_tuples;
@@ -6352,6 +6470,8 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->autovac_analyze_count = 0;
             tabentry->autovac_status = 0;
             tabentry->data_changed_timestamp = 0;
+            tabentry->success_prune_cnt = 0;
+            tabentry->total_prune_cnt = 0;
         } else {
             /*
              * Otherwise add the values to the existing entry.
@@ -6363,6 +6483,7 @@ static void pgstat_recv_tabstat(PgStat_MsgTabstat* msg, int len)
             tabentry->tuples_updated += tabmsg->t_counts.t_tuples_updated;
             tabentry->tuples_deleted += tabmsg->t_counts.t_tuples_deleted;
             tabentry->tuples_hot_updated += tabmsg->t_counts.t_tuples_hot_updated;
+            tabentry->tuples_inplace_updated += tabmsg->t_counts.t_tuples_inplace_updated;
             tabentry->n_live_tuples += tabmsg->t_counts.t_delta_live_tuples;
             tabentry->n_dead_tuples += tabmsg->t_counts.t_delta_dead_tuples;
             tabentry->changes_since_analyze += tabmsg->t_counts.t_changed_tuples;
@@ -6640,6 +6761,28 @@ static void pgstat_recv_vacuum(PgStat_MsgVacuum* msg, int len)
         tabentry->vacuum_count++;
     }
 }
+
+/* ----------
+ * PgstatRecvPrunestat() -
+ *
+ *	Process a pruning message
+ * ----------
+ */
+static void PgstatRecvPrunestat(PgStat_MsgPrune* msg, int len)
+{
+    PgStat_StatDBEntry* dbentry = NULL;
+    PgStat_StatTabEntry* tabentry = NULL;
+
+    /*
+     * Store the data in the table's hashtable entry.
+     */
+    dbentry = pgstat_get_db_entry(msg->m_databaseid, true);
+    tabentry = pgstat_get_tab_entry(dbentry, msg->m_tableoid, true, msg->m_statFlag);
+
+    tabentry->success_prune_cnt += msg->m_pruned_blocks;
+    tabentry->total_prune_cnt += msg->m_scanned_blocks;
+}
+
 
 /* ----------
  * pgstat_recv_data_changed() -
@@ -8334,7 +8477,8 @@ void getSharedMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc)
  */
 void getThreadMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, uint32* procIdx)
 {
-    uint32 max_thread_count = g_instance.proc_base->allProcCount - g_instance.attr.attr_storage.max_prepared_xacts;
+    uint32 max_thread_count = g_instance.proc_base->allProcCount -
+        g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS;
     volatile PGPROC* proc = NULL;
     uint32 idx = 0;
 

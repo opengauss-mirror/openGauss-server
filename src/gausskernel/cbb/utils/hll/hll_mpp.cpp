@@ -114,103 +114,300 @@
  *
  * -------------------------------------------------------------------------
  */
+#include <postgres.h>
 
-#include <postgres.h>  // Needs to be first.
-#include <inttypes.h>
 #include "catalog/pg_type.h"
 #include "catalog/pg_aggregate.h"
+#include "commands/extension.h"
 #include "nodes/nodeFuncs.h"
-#include "fmgr.h"
-#include "lib/stringinfo.h"
 #include "libpq/pqformat.h"
-#include "miscadmin.h"
-#include "nodes/print.h"
-#include "optimizer/var.h"
-#include "utils/array.h"
-#include "utils/builtins.h"
+#include "utils/hll.h"
+#include "utils/hll_mpp.h"
 #include "utils/bytea.h"
-#include "hll.h"
-#include "utils/int8.h"
-#include "utils/memutils.h"
 
-/*
- * @Description: alloc a multiset and wrap it in a varlen bytea
- *
- *      multiset_t is a fixed length type, somewhere around 128k
- *      at first we to use PASSBYVALUE, however pg_type.typlen field
- *      is type of int2 which can only hold max 256. So we have to
- *      wrap multiset_t in a varlen type(bytea) and the length in
- *      the varlen header in order the datumCopy() works well on it
- *
- * @param[IN] rcontext: the memory context to alloc mem
- * @return the wrapped multiset.
- */
-bytea* setup_multiset(MemoryContext rcontext)
+PG_FUNCTION_INFO_V1(hll_add_trans0);
+PG_FUNCTION_INFO_V1(hll_add_trans1);
+PG_FUNCTION_INFO_V1(hll_add_trans2);
+PG_FUNCTION_INFO_V1(hll_add_trans3);
+PG_FUNCTION_INFO_V1(hll_add_trans4);
+PG_FUNCTION_INFO_V1(hll_union_collect);
+PG_FUNCTION_INFO_V1(hll_union_trans);
+PG_FUNCTION_INFO_V1(hll_pack);
+PG_FUNCTION_INFO_V1(hll_trans_recv);
+PG_FUNCTION_INFO_V1(hll_trans_send);
+PG_FUNCTION_INFO_V1(hll_trans_in);
+PG_FUNCTION_INFO_V1(hll_trans_out);
+
+static void handleParameter(HllPara *hllpara, FunctionCallInfo fcinfo);
+static bool contain_hll_agg_walker(Node *node, int *context);
+static int contain_hll_agg(Node *node);
+
+static Datum hll_add_trans_n(FunctionCallInfo fcinfo);
+
+/* Support disabling hash aggregation functionality for PG > 9.6 */
+#if PG_VERSION_NUM >= 90600
+
+#define EXTENSION_NAME "hll"
+#define ADD_AGG_NAME "hll_add_agg"
+#define UNION_AGG_NAME "hll_union_agg"
+#define HLL_AGGREGATE_COUNT 6
+
+static Oid hllAggregateArray[HLL_AGGREGATE_COUNT];
+static bool aggregateValuesInitialized = false;
+static bool ForceGroupAgg = false;
+static create_upper_paths_hook_type previous_upper_path_hook;
+
+void _PG_init(void);
+void _PG_fini(void);
+#if (PG_VERSION_NUM >= 110000)
+static void hll_aggregation_restriction_hook(PlannerInfo *root, UpperRelationKind stage, RelOptInfo *input_rel,
+    RelOptInfo *output_rel, void *extra);
+#else
+static void hll_aggregation_restriction_hook(PlannerInfo *root, UpperRelationKind stage, RelOptInfo *input_rel,
+    RelOptInfo *output_rel);
+#endif
+static void InitializeHllAggregateOids(void);
+static Oid FunctionOid(const char *schemaName, const char *functionName, int argumentCount, bool missingOk);
+static void MaximizeCostOfHashAggregate(Path *path);
+static bool HllAggregateOid(Oid aggregateOid);
+static void RegisterConfigVariables(void);
+
+/* _PG_init is the shared library initialization function */
+void _PG_init(void)
 {
-    MemoryContext oldcontext;
-    multiset_t* msp = NULL;
-    bytea* b = NULL;
+    /*
+     * Register HLL configuration variables.
+     */
+    RegisterConfigVariables();
 
-    oldcontext = MemoryContextSwitchTo(rcontext);
-
-    b = (bytea*)palloc0(sizeof(multiset_t) + VARHDRSZ);
-
-    SET_VARSIZE(b, sizeof(multiset_t) + VARHDRSZ);
-
-    msp = (multiset_t*)VARDATA(b);
-
-    msp->ms_type = MST_UNINIT;
-
-    MemoryContextSwitchTo(oldcontext);
-
-    return b;
+    previous_upper_path_hook = create_upper_paths_hook;
+    create_upper_paths_hook = hll_aggregation_restriction_hook;
 }
 
-/* function for check parameters of hll */
-void check_hll_para_range(int32 log2m, int32 regwidth, int64 expthresh, int32 sparseon)
+/* _PG_fini uninstalls extension hooks */
+void _PG_fini(void)
 {
-    if (log2m < HLL_MIN_LOG2M || log2m > HLL_MAX_LOG2M)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("log2m = %d is out of range, it should be in range %d to %d",
-                    log2m,
-                    HLL_MIN_LOG2M,
-                    HLL_MAX_LOG2M)));
+    create_upper_paths_hook = previous_upper_path_hook;
+}
 
-    if (regwidth < HLL_MIN_REGWIDTH || regwidth > HLL_MAX_REGWIDTH)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("regwidth = %d is out of range, it should be in range %d to %d",
-                    regwidth,
-                    HLL_MIN_REGWIDTH,
-                    HLL_MAX_REGWIDTH)));
+/*
+ * hll_aggregation_restriction_hook is assigned to create_upper_paths_hook to
+ * check whether there exist a path with hash aggregate. If that aggregate is
+ * introduced by hll, it's cost is maximized to force planner to not to select
+ * hash aggregate.
+ *
+ * Since the signature of the hook changes after PG 11, we define the signature
+ * and the previous hook call part of this function depending on the PG version.
+ */
+static oid
+#if (PG_VERSION_NUM >= 110000)
+hll_aggregation_restriction_hook(PlannerInfo *root, UpperRelationKind stage, RelOptInfo *input_rel,
+    RelOptInfo *output_rel, void *extra)
+#else
+hll_aggregation_restriction_hook(PlannerInfo *root, UpperRelationKind stage, RelOptInfo *input_rel,
+    RelOptInfo *output_rel)
+#endif
+{
+    Oid extensionOid = InvalidOid;
 
-    if (expthresh < HLL_MIN_EXPTHRESH || expthresh > HLL_MAX_EXPTHRESH)
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("expthresh = %ld is out of range, it should be in range %d to %d",
-                    expthresh,
-                    HLL_MIN_EXPTHRESH,
-                    HLL_MAX_EXPTHRESH)));
+    /* If previous hook exist, call it first to get most update path */
+    if (previous_upper_path_hook != NULL) {
+#if (PG_VERSION_NUM >= 110000)
+        previous_upper_path_hook(root, stage, input_rel, output_rel, extra);
+#else
+        previous_upper_path_hook(root, stage, input_rel, output_rel);
+#endif
+    }
 
-    if (sparseon != HLL_MIN_SPARSEON && sparseon != HLL_MAX_SPARSEON)
+    /* If HLL extension is not loaded, do nothing */
+    extensionOid = get_extension_oid(EXTENSION_NAME, true);
+    if (!OidIsValid(extensionOid)) {
+        return;
+    }
+
+    /* If we have the extension, that means we also have aggregations */
+    if (!aggregateValuesInitialized) {
+        InitializeHllAggregateOids();
+    }
+
+    /*
+     * If the client force the group agg, maximize the cost of the path with
+     * the hash agg to force planner to choose group agg instead.
+     */
+    if (ForceGroupAgg) {
+        if (stage == UPPERREL_GROUP_AGG || stage == UPPERREL_FINAL) {
+            ListCell *pathCell = list_head(output_rel->pathlist);
+            foreach (pathCell, output_rel->pathlist) {
+                Path *path = (Path *)lfirst(pathCell);
+                if (path->pathtype == T_Agg && ((AggPath *)path)->aggstrategy == AGG_HASHED) {
+                    MaximizeCostOfHashAggregate(path);
+                }
+            }
+        }
+    }
+}
+
+/*
+ * InitializeHllAggregateOids initializes the array of hll aggregate oids.
+ */
+static void InitializeHllAggregateOids()
+{
+    Oid extensionId = get_extension_oid(EXTENSION_NAME, false);
+    Oid hllSchemaOid = get_extension_schema(extensionId);
+    const char *hllSchemaName = get_namespace_name(hllSchemaOid);
+    char *aggregateName = NULL;
+    Oid aggregateOid = InvalidOid;
+    int addAggArgumentCounter;
+
+    /* Initialize HLL_UNION_AGG oid */
+    aggregateName = UNION_AGG_NAME;
+    aggregateOid = FunctionOid(hllSchemaName, aggregateName, 1, true);
+    hllAggregateArray[0] = aggregateOid;
+
+    /* Initialize HLL_ADD_AGG with different signatures */
+    aggregateName = ADD_AGG_NAME;
+    for (addAggArgumentCounter = 1; addAggArgumentCounter < HLL_AGGREGATE_COUNT; addAggArgumentCounter++) {
+        aggregateOid = FunctionOid(hllSchemaName, aggregateName, addAggArgumentCounter, true);
+        hllAggregateArray[addAggArgumentCounter] = aggregateOid;
+    }
+
+    aggregateValuesInitialized = true;
+}
+
+/*
+ * FunctionOid searches for a given function identified by schema, functionName
+ * and argumentCount. It reports error if the function is not found or there
+ * are more than one match. If the missingOK parameter is set and there are
+ * no matches, then the function returns InvalidOid.
+ */
+static Oid FunctionOid(const char *schemaName, const char *functionName, int argumentCount, bool missingOK)
+{
+    FuncCandidateList functionList = NULL;
+    Oid functionOid = InvalidOid;
+
+    char *qualifiedFunctionName = quote_qualified_identifier(schemaName, functionName);
+    List *qualifiedFunctionNameList = stringToQualifiedNameList(qualifiedFunctionName);
+    List *argumentList = NIL;
+    const bool findVariadics = false;
+    const bool findDefaults = false;
+
+    functionList = FuncnameGetCandidates(qualifiedFunctionNameList, argumentCount, argumentList, findVariadics,
+        findDefaults, true);
+
+    if (functionList == NULL) {
+        if (missingOK) {
+            return InvalidOid;
+        }
+
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_FUNCTION), errmsg("function \"%s\" does not exist", functionName)));
+    } else if (functionList->next != NULL) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("sparseon should be %d or %d", HLL_MIN_SPARSEON, HLL_MAX_SPARSEON)));
+            (errcode(ERRCODE_AMBIGUOUS_FUNCTION), errmsg("more than one function named \"%s\"", functionName)));
+    }
+
+    /* get function oid from function list's head */
+    functionOid = functionList->oid;
+
+    return functionOid;
+}
+
+/*
+ * MaximizeCostOfHashAggregate maximizes the cost of the path if it tries
+ * to run hll aggregate function with hash aggregate.
+ */
+static void MaximizeCostOfHashAggregate(Path *path)
+{
+    List *varList = pull_var_clause((Node *)path->pathtarget->exprs, PVC_INCLUDE_AGGREGATES);
+    ListCell *varCell = NULL;
+
+    foreach (varCell, varList) {
+        Var *var = (Var *)lfirst(varCell);
+
+        if (nodeTag(var) == T_Aggref) {
+            Aggref *aggref = (Aggref *)var;
+
+            if (HllAggregateOid(aggref->aggfnoid)) {
+                path->total_cost = INT_MAX;
+            }
+        }
+    }
+}
+
+/*
+ * HllAggregateOid checkes whether the given Oid is an id of any hll aggregate
+ * function using the pre-initialized hllAggregateArray.
+ */
+static bool HllAggregateOid(Oid aggregateOid)
+{
+    int arrayCounter;
+
+    for (arrayCounter = 0; arrayCounter < HLL_AGGREGATE_COUNT; arrayCounter++) {
+        if (aggregateOid == hllAggregateArray[arrayCounter]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/* Register HLL configuration variables. */
+static void RegisterConfigVariables(void)
+{
+    DefineCustomBoolVariable("hll.force_groupagg",
+        gettext_noop("Forces using group aggregate with hll aggregate functions"), NULL, &ForceGroupAgg, false,
+        PGC_USERSET, 0, NULL, NULL, NULL);
+}
+
+#endif
+
+/* similar to function hll_emptyn */
+static void handleParameter(HllPara *hllpara, FunctionCallInfo fcinfo)
+{
+    int32_t log2Registers = u_sess->attr.attr_sql.hll_default_log2m;
+    int32_t log2Explicitsize = u_sess->attr.attr_sql.hll_default_log2explicit;
+    int32_t log2Sparsesize = u_sess->attr.attr_sql.hll_default_log2sparse;
+    int32_t duplicateCheck = u_sess->attr.attr_sql.hll_duplicate_check;
+
+    switch (PG_NARGS()) {
+        case HLL_AGG_PARAMETER4:
+            if (!PG_ARGISNULL(5) && PG_GETARG_INT32(5) != -1) {
+                duplicateCheck = PG_GETARG_INT32(5);
+            }
+        case HLL_AGG_PARAMETER3:
+            if (!PG_ARGISNULL(4) && PG_GETARG_INT64(4) != -1) {
+                log2Sparsesize = (int32_t)PG_GETARG_INT64(4);
+            }
+        case HLL_AGG_PARAMETER2:
+            if (!PG_ARGISNULL(3) && PG_GETARG_INT32(3) != -1) {
+                log2Explicitsize = PG_GETARG_INT32(3);
+            }
+        case HLL_AGG_PARAMETER1:
+            if (!PG_ARGISNULL(2) && PG_GETARG_INT32(2) != -1) {
+                log2Registers = PG_GETARG_INT32(2);
+            }
+        case HLL_AGG_PARAMETER0:
+            break;
+        default: /* can never reach here */
+            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("no such parameters of input")));
+    }
+    HllCheckPararange(log2Registers, log2Explicitsize, log2Sparsesize, duplicateCheck);
+
+    hllpara->log2Registers = (uint8_t)log2Registers;
+    hllpara->log2Explicitsize = (uint8_t)log2Explicitsize;
+    hllpara->log2Sparsesize = (uint8_t)log2Sparsesize;
+    hllpara->duplicateCheck = (uint8_t)duplicateCheck;
 }
 
 /*
  * @Description: transfunc for agg func hll_add_agg()
  *
- *      these function works on the first phase of aggeration.
- *      namely the transfunc. And they are *not* strict regrading
- *      of NULL handling upon the first invoke of the function in
- *      the aggretation.
+ * these function works on the first phase of aggeration.
+ * namely the transfunc. And they are *not* strict regrading
+ * of NULL handling upon the first invoke of the function in
+ * the aggretation.
  *
- *      we provide hll_add_trans function with different number
- *      of parameters which maximum to four and minimum to zero,
- *      and we also give two mode NORMAL and COMPRESSED which
- *      influce memory cost. And they are controlled by u_sess->attr.attr_sql.enable_compress_hll
+ * we provide hll_add_trans function with different number
+ * of parameters which maximum to four and minimum to zero
  */
 Datum hll_add_trans0(PG_FUNCTION_ARGS)
 {
@@ -237,401 +434,177 @@ Datum hll_add_trans4(PG_FUNCTION_ARGS)
     return hll_add_trans_n(fcinfo);
 }
 
-void handleParameter(int32* log2m, int32* regwidth, int64* expthresh, int32* sparseon, FunctionCallInfo fcinfo)
-{
-    switch (fcinfo->nargs) {
-        case HLL_PARAMETER0:
-            *log2m = u_sess->attr.attr_sql.g_default_log2m;
-            *regwidth = u_sess->attr.attr_sql.g_default_regwidth;
-            *expthresh = u_sess->attr.attr_sql.g_default_expthresh;
-            *sparseon = u_sess->attr.attr_sql.g_default_sparseon;
-            break;
-        case HLL_PARAMETER1:
-            *log2m = PG_ARGISNULL(2) ? u_sess->attr.attr_sql.g_default_log2m : PG_GETARG_INT32(2);
-            *regwidth = u_sess->attr.attr_sql.g_default_regwidth;
-            *expthresh = u_sess->attr.attr_sql.g_default_expthresh;
-            *sparseon = u_sess->attr.attr_sql.g_default_sparseon;
-            break;
-        case HLL_PARAMETER2:
-            *log2m = PG_ARGISNULL(2) ? u_sess->attr.attr_sql.g_default_log2m : PG_GETARG_INT32(2);
-            *regwidth = PG_ARGISNULL(3) ? u_sess->attr.attr_sql.g_default_regwidth : PG_GETARG_INT32(3);
-            *expthresh = u_sess->attr.attr_sql.g_default_expthresh;
-            *sparseon = u_sess->attr.attr_sql.g_default_sparseon;
-            break;
-        case HLL_PARAMETER3:
-            *log2m = PG_ARGISNULL(2) ? u_sess->attr.attr_sql.g_default_log2m : PG_GETARG_INT32(2);
-            *regwidth = PG_ARGISNULL(3) ? u_sess->attr.attr_sql.g_default_regwidth : PG_GETARG_INT32(3);
-            *expthresh = PG_ARGISNULL(4) ? u_sess->attr.attr_sql.g_default_expthresh : PG_GETARG_INT64(4);
-            *sparseon = u_sess->attr.attr_sql.g_default_sparseon;
-            break;
-        case HLL_PARAMETER4:
-            *log2m = PG_ARGISNULL(2) ? u_sess->attr.attr_sql.g_default_log2m : PG_GETARG_INT32(2);
-            *regwidth = PG_ARGISNULL(3) ? u_sess->attr.attr_sql.g_default_regwidth : PG_GETARG_INT32(3);
-            *expthresh = PG_ARGISNULL(4) ? u_sess->attr.attr_sql.g_default_expthresh : PG_GETARG_INT64(4);
-            *sparseon = PG_ARGISNULL(5) ? u_sess->attr.attr_sql.g_default_sparseon : PG_GETARG_INT32(5);
-            break;
-        default:
-            ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("no such parameters of input")));
-    }
-}
 /*
  * @Description:
- *      this function will be called when u_sess->attr.attr_sql.enable_compress_hll is OFF
- *      a hashval will be added to multiset_t type and just return it.
- *
- * @param[IN] multiset_t: NULL indicates the first call, multiset_t
-                           passed as input.
- * @param[IN] hashval: the hashval need to be add to multiset_t.
- * @return multiset_t.
- */
-Datum hll_add_trans_normal(PG_FUNCTION_ARGS)
-{
-    MemoryContext aggctx;
-    multiset_t* msap = NULL;
-    bytea* msab = NULL;
-    int32 log2m;
-    int32 regwidth;
-    int64 expthresh;
-    int32 sparseon;
-
-    /* We must be called as a transition routine or we fail. */
-    if (!AggCheckCallContext(fcinfo, &aggctx))
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_add_trans_normal outside transition context")));
-
-    /* handle numbers of parameter we need to take */
-    handleParameter(&log2m, &regwidth, &expthresh, &sparseon, fcinfo);
-    /* check all parameters of hll */
-    check_hll_para_range(log2m, regwidth, expthresh, sparseon);
-    expthresh = integer_exp2(expthresh);
-
-    /* If the first argument is a NULL on first call, init an hll_empty */
-    if (PG_ARGISNULL(0)) {
-        msab = setup_multiset(aggctx);
-        msap = (multiset_t*)VARDATA(msab);
-
-        check_modifiers(log2m, regwidth, expthresh, sparseon);
-
-        errno_t rc = memset_s(msap, sizeof(multiset_t), '\0', sizeof(multiset_t));
-        securec_check(rc, "\0", "\0");
-
-        msap->ms_type = MST_EMPTY;
-        msap->ms_nbits = regwidth;
-        msap->ms_nregs = 1 << (unsigned int)log2m;
-        msap->ms_log2nregs = (unsigned int) log2m;
-        msap->ms_expthresh = expthresh;
-        msap->ms_sparseon = sparseon;
-    } else {
-        msab = (bytea*)PG_GETARG_POINTER(0);
-        msap = (multiset_t*)VARDATA(msab);
-    }
-
-    // Is the second argument non-null?
-    if (!PG_ARGISNULL(1)) {
-        int64 hashval = PG_GETARG_INT64(1);
-        multiset_add(msap, hashval);
-    }
-
-    PG_RETURN_BYTEA_P(msab);
-}
-
-/*
- * @Description:
- *      this function will be called when u_sess->attr.attr_sql.enable_compress_hll is ON
- *      first the input is a hll (compressed multiset_t) then unpack it
- *      to multiset_t and add hashval to it. finally we need pack mutiset_t
- *      to hll and return it.
+ * this function will be called by hll_add_agg, similar to function hll_add.
  *
  * @param[IN] hll: NULL indicates the first call, hll passed as input.
  * @param[IN] hashval: the hashval need to be add to multiset_t.
  * @return hll.
  */
-Datum hll_add_trans_compressed(PG_FUNCTION_ARGS)
+static Datum hll_add_trans_n(FunctionCallInfo fcinfo)
 {
-    MemoryContext aggctx;
-    multiset_t msa;
-    bytea* cb = NULL;
-    size_t csz;
-    int32 log2m;
-    int32 regwidth;
-    int64 expthresh;
-    int32 sparseon;
-
     /* We must be called as a transition routine or we fail. */
-    if (!AggCheckCallContext(fcinfo, &aggctx))
-        ereport(
-            ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_add_trans_compressed outside transition context")));
+    MemoryContext aggctx = NULL;
+    if (!AggCheckCallContext(fcinfo, &aggctx)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_add_trans_n outside transition context")));
+    }
 
     /* handle numbers of parameter we need to take */
-    handleParameter(&log2m, &regwidth, &expthresh, &sparseon, fcinfo);
-    /* check all parameters of hll */
-    check_hll_para_range(log2m, regwidth, expthresh, sparseon);
-    expthresh = integer_exp2(expthresh);
+    HllPara hllpara;
+    handleParameter(&hllpara, fcinfo);
+
+    Hll hll(aggctx);
+    hll.HllInit();
 
     /*
      If the first argument is a NULL on first call, init an hll_empty
-     If it's NON-NULL, unpacked it in compressed mode
+     If it's NON-NULL, unpacked it
      */
     if (PG_ARGISNULL(0)) {
-        check_modifiers(log2m, regwidth, expthresh, sparseon);
-
-        (&msa)->ms_type = MST_EMPTY;
-        (&msa)->ms_nbits = regwidth;
-        (&msa)->ms_nregs = 1 << (unsigned int)log2m;
-        (&msa)->ms_log2nregs = (unsigned int)log2m;
-        (&msa)->ms_expthresh = expthresh;
-        (&msa)->ms_sparseon = sparseon;
+        hll.HllEmpty();
+        hll.HllSetPara(hllpara);
     } else {
-        bytea* ab = NULL;
-        size_t asz;
-
-        ab = PG_GETARG_BYTEA_P(0);
-        asz = VARSIZE(ab) - VARHDRSZ;
-        // unpack hll to multiset_t
-        multiset_unpack(&msa, (uint8_t*)VARDATA(ab), asz, NULL);
-    }
-
-    // Is the second argument non-null?
-    if (!PG_ARGISNULL(1)) {
-        int64 hashval = PG_GETARG_INT64(1);
-        multiset_add(&msa, hashval);
-    }
-
-    // packed multiset_t to hll then return it
-    csz = multiset_packed_size(&msa);
-
-    cb = (bytea*)palloc0(VARHDRSZ + csz);
-    SET_VARSIZE(cb, VARHDRSZ + csz);
-    multiset_pack(&msa, (uint8_t*)VARDATA(cb), csz);
-
-    PG_RETURN_BYTEA_P(cb);
-}
-
-/*
-* call NORMAL or COMPRESSED function by u_sess->attr.attr_sql.enable_compress_hll
-*/
-Datum hll_add_trans_n(PG_FUNCTION_ARGS)
-{
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_add_trans_compressed(fcinfo);
-    } else {
-        return hll_add_trans_normal(fcinfo);
-    }
-}
-
-/*
- * @Description: collectfunc for agg func hll_add_agg() and hll_union_agg()
- *
- *		we also need unpacked input hll to multiset_t and union them like in
- *		hll_union_collect_normal, then packed it as output
- *
- * @param[IN] hll: NULL indicates the first call, passed in the
- *                        transvalue in the successive call
- * @param[IN] hll: the other multiset_t to be unioned.
- * @return the unioned hll as the transvalue.
- */
-Datum hll_union_collect_compressed(PG_FUNCTION_ARGS)
-{
-    MemoryContext aggctx;
-
-    bytea* cb = NULL;
-    multiset_t msa;
-    size_t csz;
-
-    /* now inputs are all hll, we need unpack them, calculate and return hll. */
-    if (!AggCheckCallContext(fcinfo, &aggctx))
-        ereport(ERROR,
-            (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_union_collect_compressed outside transition context")));
-
-    if (PG_ARGISNULL(0)) {
-        (&msa)->ms_type = MST_UNINIT;
-    } else {
-        bytea* ab = PG_GETARG_BYTEA_P(0);
-        size_t asz = VARSIZE(ab) - VARHDRSZ;
-
-        multiset_unpack(&msa, (uint8_t*)VARDATA(ab), asz, NULL);
-    }
-
-    if (!PG_ARGISNULL(1)) {
-        multiset_t msc;
-        bytea* bb = (bytea*)PG_GETARG_BYTEA_P(1);
-        size_t bsz = VARSIZE(bb) - VARHDRSZ;
-
-        multiset_unpack(&msc, (uint8_t*)VARDATA(bb), bsz, NULL);
-        /* Was the first argument uninitialized? */
-        if ((&msa)->ms_type == MST_UNINIT) {
-            /* Yes, clone the metadata from the second arg. */
-            copy_metadata(&msa, &msc);
-            (&msa)->ms_type = MST_EMPTY;
-        } else {
-            /* Nope, make sure the metadata is compatible. */
-            check_metadata(&msa, &msc);
-        }
-
-        multiset_union(&msa, &msc);
-    }
-
-    csz = multiset_packed_size(&msa);
-
-    cb = (bytea*)palloc0(VARHDRSZ + csz);
-    SET_VARSIZE(cb, VARHDRSZ + csz);
-
-    multiset_pack(&msa, (uint8_t*)VARDATA(cb), csz);
-
-    PG_RETURN_BYTEA_P(cb);
-}
-
-/*
- * @Description: collectfunc for agg func hll_add_agg() and hll_union_agg()
- *
- *      this function works on the second stage for both hll_add_agg()
- *      and hll_union_agg(). it union two varlen multiset_t and the unioned
- *      varlen multiset_t is returned.
- *
- * @param[IN] multiset_t: NULL indicates the first call, passed in the
- *                        transvalue in the successive call
- * @param[IN] multiset_t: the other multiset_t to be unioned.
- * @return the unioned multiset_t as the transvalue.
- */
-Datum hll_union_collect_normal(PG_FUNCTION_ARGS)
-{
-    MemoryContext aggctx;
-
-    bytea* msab = NULL;
-    bytea* msbb = NULL;
-
-    multiset_t* msap = NULL;
-    multiset_t* msbp = NULL;
-
-    /* now inputs are all hll, we need unpack them, calculate and return hll. */
-    if (!AggCheckCallContext(fcinfo, &aggctx))
-        ereport(
-            ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_union_collect_normal outside transition context")));
-
-    // Is the first argument a NULL?
-    if (PG_ARGISNULL(0)) {
-        msab = setup_multiset(aggctx);
-        msap = (multiset_t*)VARDATA(msab);
-    } else {
-        msab = (bytea*)PG_GETARG_POINTER(0);
-        msap = (multiset_t*)VARDATA(msab);
+        bytea *byteval1 = PG_GETARG_BYTEA_P(0);
+        size_t hllsize1 = BYTEVAL_LENGTH(byteval1);
+        hll.HllObjectUnpack((uint8_t *)VARDATA(byteval1), hllsize1);
     }
 
     /* Is the second argument non-null? */
     if (!PG_ARGISNULL(1)) {
-        msbb = (bytea*)PG_GETARG_POINTER(1);
-        msbp = (multiset_t*)VARDATA(msbb);
-
-        /* Was the first argument uninitialized? */
-        if (msap->ms_type == MST_UNINIT) {
-            /* Yes, clone the metadata from the second arg. */
-            copy_metadata(msap, msbp);
-            msap->ms_type = MST_EMPTY;
-        } else {
-            /* Nope, make sure the metadata is compatible. */
-            check_metadata(msap, msbp);
-        }
-
-        multiset_union(msap, msbp);
+        uint64_t hashvalue = (uint64_t)PG_GETARG_INT64(1);
+        hll.HllAdd(hashvalue);
     }
 
-    PG_RETURN_BYTEA_P(msab);
+    /* packed hll then return it, hllsize should allocate at least 1 more byte */
+    size_t hllsize2 = HLL_HEAD_SIZE + hll.HllDatalen() + 1;
+    bytea *byteval2 = (bytea *)palloc0(VARHDRSZ + hllsize2);
+    SET_VARSIZE(byteval2, VARHDRSZ + hllsize2);
+    hll.HllObjectPack((uint8_t *)VARDATA(byteval2), hllsize2);
+    hll.HllFree();
+
+    PG_RETURN_BYTEA_P(byteval2);
 }
 
 /*
-* @ Description
-*
-*  here we have NORMAL and COMPRESSED mode for
-*  hll_union_collect functions, same like hll_add_trans_n
-*  and hll_union_trans.
-*/
+ * @Description: collectfunc for agg func hll_add_agg() and hll_union_agg(), similar to function hll_union.
+ *
+ * @param[IN] hll: NULL indicates the first call, passed in the
+ * transvalue in the successive call
+ * @param[IN] hll: the other hll to be unioned.
+ * @return the unioned hll as the transvalue.
+ */
 Datum hll_union_collect(PG_FUNCTION_ARGS)
 {
     /*
-        If both arguments are null then we return null, because we shouldn't
-        return any hll with UNINIT type state.
-    */
+     * If both arguments are null then we return null, because we shouldn't
+     * return any hll with UNINIT type state.
+     */
     if (PG_ARGISNULL(0) && PG_ARGISNULL(1)) {
         PG_RETURN_NULL();
     }
 
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_union_collect_compressed(fcinfo);
-    } else {
-        return hll_union_collect_normal(fcinfo);
+    /* now inputs are all hll, we need unpack them, calculate and return hll. */
+    MemoryContext aggctx = NULL;
+    if (!AggCheckCallContext(fcinfo, &aggctx)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_union_collect outside transition context")));
     }
+
+    Hll hll1(aggctx);
+    hll1.HllInit();
+    if (!PG_ARGISNULL(0)) {
+        bytea *byteval1 = PG_GETARG_BYTEA_P(0);
+        size_t hllsize1 = BYTEVAL_LENGTH(byteval1);
+        hll1.HllObjectUnpack((uint8_t *)VARDATA(byteval1), hllsize1);
+    }
+
+    if (!PG_ARGISNULL(1)) {
+        Hll hll2(aggctx);
+        hll2.HllInit();
+
+        bytea *byteval2 = PG_GETARG_BYTEA_P(1);
+        size_t hllsize2 = BYTEVAL_LENGTH(byteval2);
+        hll2.HllObjectUnpack((uint8_t *)VARDATA(byteval2), hllsize2);
+
+        if (hll1.HllGetType() != HLL_UNINIT) {
+            HllCheckParaequal(*hll1.HllGetPara(), *hll2.HllGetPara());
+        }
+        hll1.HllUnion(hll2);
+        hll2.HllFree();
+    }
+
+    /* packed multiset_t to hll then return it, hllsize should allocate at least 1 more byte */
+    size_t hllsize3 = HLL_HEAD_SIZE + hll1.HllDatalen() + 1;
+    bytea *byteval3 = (bytea *)palloc0(VARHDRSZ + hllsize3);
+    SET_VARSIZE(byteval3, VARHDRSZ + hllsize3);
+    hll1.HllObjectPack((uint8_t *)VARDATA(byteval3), hllsize3);
+    hll1.HllFree();
+
+    PG_RETURN_BYTEA_P(byteval3);
+}
+
+/*
+ * @Description: transfunc for agg func hll_union_agg()
+ *
+ * this function works on the first stage for agg func hll_union_agg()
+ *
+ * @param[IN] hll: the transvalue for aggeration
+ * @param[IN] hll: passed column(type is hll) for hll_union_agg()
+ * @return hll
+ */
+Datum hll_union_trans(PG_FUNCTION_ARGS)
+{
+    /*
+     * If both arguments are null then we return null, because we shouldn't
+     * return any hll with UNINIT type state.
+     */
+    if (PG_ARGISNULL(0) && PG_ARGISNULL(1)) {
+        PG_RETURN_NULL();
+    }
+
+    /* now inputs are all hll, we need unpack them, calculate and return hll. */
+    MemoryContext aggctx = NULL;
+    if (!AggCheckCallContext(fcinfo, &aggctx)) {
+        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_union_trans outside transition context")));
+    }
+
+    Hll hll1(aggctx);
+    hll1.HllInit();
+    if (!PG_ARGISNULL(0)) {
+        bytea *byteval1 = PG_GETARG_BYTEA_P(0);
+        size_t hllsize1 = BYTEVAL_LENGTH(byteval1);
+        hll1.HllObjectUnpack((uint8_t *)VARDATA(byteval1), hllsize1);
+    }
+
+    if (!PG_ARGISNULL(1)) {
+        Hll hll2(aggctx);
+        hll2.HllInit();
+
+        bytea *byteval2 = PG_GETARG_BYTEA_P(1);
+        size_t hllsize2 = BYTEVAL_LENGTH(byteval2);
+        hll2.HllObjectUnpack((uint8_t *)VARDATA(byteval2), hllsize2);
+
+        if (hll1.HllGetType() > HLL_UNINIT) {
+            HllCheckParaequal(*hll1.HllGetPara(), *hll2.HllGetPara());
+        }
+        hll1.HllUnion(hll2);
+        hll2.HllFree();
+    }
+
+    /* packed multiset_t to hll then return it, hllsize should allocate at least 1 more byte */
+    size_t hllsize3 = HLL_HEAD_SIZE + hll1.HllDatalen() + 1;
+    bytea *byteval3 = (bytea *)palloc0(VARHDRSZ + hllsize3);
+    SET_VARSIZE(byteval3, VARHDRSZ + hllsize3);
+    hll1.HllObjectPack((uint8_t *)VARDATA(byteval3), hllsize3);
+    hll1.HllFree();
+
+    PG_RETURN_BYTEA_P(byteval3);
 }
 
 /*
  * @Description: finalfunc for agg func hll_add_agg() and hll_union_agg()
  *
- *      this function works on the final stage for hll agg funcs
-.*      if u_sess->attr.attr_sql.enable_compress_hll is one we call hll_pack_compressed
-.*      return input directly.
- */
-Datum hll_pack_compressed(PG_FUNCTION_ARGS)
-{
-    bytea* msab = NULL;
-    size_t asz;
-    multiset_t msa;
-
-    // unpack transtype first
-    msab = PG_GETARG_BYTEA_P(0);
-    asz = VARSIZE(msab) - VARHDRSZ;
-
-    multiset_unpack(&msa, (uint8_t*)VARDATA(msab), asz, NULL);
-
-    /* Was the aggregation uninitialized? */
-    if (msa.ms_type == MST_UNINIT) {
-        PG_RETURN_NULL();
-    } else {
-        PG_RETURN_BYTEA_P(msab);
-    }
-}
-
-/*
- * @Description: finalfunc for agg func hll_add_agg() and hll_union_agg()
- *
- *      this function works on the final stage for hll agg funcs
- *      it *pack* the big 128k multiset_t into a tider type *hll*
- *      which is 1.2k in size. the packed value is returned to caller
- *      as the aggeration result.
- *
- * @param[IN] multiset_t: the varlen multiset_t to be packed
- * @return the packed hll type is returned.
- */
-Datum hll_pack_normal(PG_FUNCTION_ARGS)
-{
-    bytea* cb = NULL;
-    size_t csz;
-
-    multiset_t* msap = NULL;
-    bytea* msab = NULL;
-
-    msab = (bytea*)PG_GETARG_POINTER(0);
-    msap = (multiset_t*)VARDATA(msab);
-
-    /* Was the aggregation uninitialized? */
-    if (msap->ms_type == MST_UNINIT) {
-        PG_RETURN_NULL();
-    } else {
-        csz = multiset_packed_size(msap);
-        cb = (bytea*)palloc0(VARHDRSZ + csz);
-        SET_VARSIZE(cb, VARHDRSZ + csz);
-
-        multiset_pack(msap, (uint8_t*)VARDATA(cb), csz);
-
-        /* We don't need to pfree the msap memory because it is zone
-         * allocated inside postgres.
-         *
-         * Furthermore, sometimes final functions are called multiple
-         * times so deallocating it the first time leads to badness.
-         */
-        PG_RETURN_BYTEA_P(cb);
-    }
-}
-
-/*
- * call hll_pack_compressed or hll_pack_normal based on u_sess->attr.attr_sql.enable_compress_hll
+ * this function works on the final stage for hll agg funcs
  */
 Datum hll_pack(PG_FUNCTION_ARGS)
 {
@@ -639,330 +612,57 @@ Datum hll_pack(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_pack_compressed(fcinfo);
-    } else {
-        return hll_pack_normal(fcinfo);
-    }
-}
+    MemoryContext ctx = CurrentMemoryContext;
+    Hll hll(ctx);
+    hll.HllInit();
 
-/*
- * @Description: transfunc for agg func hll_union_agg()
- *
- *      this function works on the first stage for agg func
- *      hll_union_agg() which union a transvalue(multiset_t)
- *      and a packed(hll) together and a valen multiset_t
- *      is returned.
- *
- * @param[IN] multiset_t: the transvalue for aggeration
- * @param[IN] hll: passed column(type is hll) for hll_union_agg()
- * @return the varlen multiset_t
- */
-Datum hll_union_trans_normal(PG_FUNCTION_ARGS)
-{
-    MemoryContext aggctx;
+    bytea *byteval = PG_GETARG_BYTEA_P(0);
+    size_t hllsize = BYTEVAL_LENGTH(byteval);
+    hll.HllObjectUnpack((uint8_t *)VARDATA(byteval), hllsize);
+    HllType type = hll.HllGetType();
 
-    bytea* msab = NULL;
-    multiset_t* msap = NULL;
-    multiset_t msb;
+    hll.HllFree();
 
-    /* We must be called as a transition routine or we fail. */
-    if (!AggCheckCallContext(fcinfo, &aggctx))
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_union_trans_normal outside transition context")));
-
-    /* Is the first argument a NULL? */
-    if (PG_ARGISNULL(0)) {
-        msab = setup_multiset(aggctx);
-        msap = (multiset_t*)VARDATA(msab);
-    } else {
-        msab = (bytea*)PG_GETARG_POINTER(0);
-        msap = (multiset_t*)VARDATA(msab);
-    }
-
-    /* Is the second argument non-null? */
-    if (!PG_ARGISNULL(1)) {
-        /* This is the packed "argument" vector. */
-        bytea* bb = PG_GETARG_BYTEA_P(1);
-        size_t bsz = VARSIZE(bb) - VARHDRSZ;
-
-        multiset_unpack(&msb, (uint8_t*)VARDATA(bb), bsz, NULL);
-
-        /* Was the first argument uninitialized? */
-        if (msap->ms_type == MST_UNINIT) {
-            /* Yes, clone the metadata from the second arg. */
-            copy_metadata(msap, &msb);
-            msap->ms_type = MST_EMPTY;
-        } else {
-            /* Nope, make sure the metadata is compatible. */
-            check_metadata(msap, &msb);
-        }
-
-        multiset_union(msap, &msb);
-    }
-
-    PG_RETURN_BYTEA_P(msab);
-}
-
-/*
- * @Description: transfunc for agg func hll_union_agg()
- *
-.*	As same as hll_union_trans_normal, but we also need
-.*	unpacked input hll and packed multiset_t to hll as output
- *
- * @param[IN] hll: the transvalue for aggeration
- * @param[IN] hll: passed column(type is hll) for hll_union_agg()
- * @return hll
- */
-Datum hll_union_trans_compressed(PG_FUNCTION_ARGS)
-{
-    MemoryContext aggctx;
-
-    multiset_t msa;
-    multiset_t msb;
-    bytea* cb = NULL;
-    size_t csz;
-
-    /* We must be called as a transition routine or we fail. */
-    if (!AggCheckCallContext(fcinfo, &aggctx))
-        ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("hll_union_trans_compressed context")));
-
-    /* Is the first argument a NULL? */
-    if (PG_ARGISNULL(0)) {
-        msa.ms_type = MST_UNINIT;
-    } else {
-        bytea* ab = PG_GETARG_BYTEA_P(0);
-        size_t asz = VARSIZE(ab) - VARHDRSZ;
-
-        multiset_unpack(&msa, (uint8_t*)VARDATA(ab), asz, NULL);
-    }
-
-    /* Is the second argument non-null? */
-    if (!PG_ARGISNULL(1)) {
-        /* This is the packed "argument" vector. */
-        bytea* bb = PG_GETARG_BYTEA_P(1);
-        size_t bsz = VARSIZE(bb) - VARHDRSZ;
-
-        multiset_unpack(&msb, (uint8_t*)VARDATA(bb), bsz, NULL);
-
-        /* Was the first argument uninitialized? */
-        if (msa.ms_type == MST_UNINIT) {
-            /* Yes, clone the metadata from the second arg. */
-            copy_metadata(&msa, &msb);
-            msa.ms_type = MST_EMPTY;
-        } else {
-            /* Nope, make sure the metadata is compatible. */
-            check_metadata(&msa, &msb);
-        }
-
-        multiset_union(&msa, &msb);
-    }
-
-    csz = multiset_packed_size(&msa);
-
-    cb = (bytea*)palloc0(VARHDRSZ + csz);
-    SET_VARSIZE(cb, VARHDRSZ + csz);
-    multiset_pack(&msa, (uint8_t*)VARDATA(cb), csz);
-
-    PG_RETURN_BYTEA_P(cb);
-}
-
-Datum hll_union_trans(PG_FUNCTION_ARGS)
-{
-    /*
-      here if two arguments are both null, we just return null,
-      because we shouldn't return uninit hll to cn.
-    */
-    if (PG_ARGISNULL(0) && PG_ARGISNULL(1)) {
+    /* Was the aggregation uninitialized? */
+    if (type == HLL_UNINIT) {
         PG_RETURN_NULL();
-    }
-
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_union_trans_compressed(fcinfo);
     } else {
-        return hll_union_trans_normal(fcinfo);
+        PG_RETURN_BYTEA_P(byteval);
     }
 }
 
-/*
- * @Description:
- *      we don;t need packed it in hll_trans_recv_compressed
- *      and just return hll directly
- */
-Datum hll_trans_recv_compressed(PG_FUNCTION_ARGS)
-{
-    Datum dd = DirectFunctionCall1(bytearecv, PG_GETARG_DATUM(0));
-    return dd;
-}
-
-/*
- * @Description: recv func for hll_trans_type(multiset_t) in MORMAL
- *
- *      this function accept a binary format and do
- *      (1) convert the binary format to bytea format using bytearecv
- *      (2) alloc a varlen multiset_t
- *      (3) unpack the bytea into the multiset_t
- *
- */
-Datum hll_trans_recv_normal(PG_FUNCTION_ARGS)
-{
-    Datum dd = DirectFunctionCall1(bytearecv, PG_GETARG_DATUM(0));
-    bytea* ab = DatumGetByteaP(dd);
-    size_t asz = VARSIZE(ab) - VARHDRSZ;
-
-    bytea* msab = setup_multiset(CurrentMemoryContext);
-    multiset_t* msap = (multiset_t*)VARDATA(msab);
-
-    multiset_unpack(msap, (uint8_t*)VARDATA(ab), asz, NULL);
-
-    return PointerGetDatum(msab);
-}
-
-/*
- * @Description:
- *  split to hll_trans_recv_normal and hll_trans_recv_compressed
- *  controlled by u_sess->attr.attr_sql.enable_compress_hll.
- */
 Datum hll_trans_recv(PG_FUNCTION_ARGS)
 {
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_trans_recv_compressed(fcinfo);
-    } else {
-        return hll_trans_recv_normal(fcinfo);
-    }
-}
-
-Datum hll_trans_send_compressed(PG_FUNCTION_ARGS)
-{
-    bytea* bp = (bytea*)PG_GETARG_POINTER(0);
-
-    StringInfoData buf;
-    pq_begintypsend(&buf);
-    pq_sendbytes(&buf, VARDATA(bp), VARSIZE(bp) - VARHDRSZ);
-    PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
-}
-
-/*
- * @Description: send func for hll_trans_type(or multiset_t)
- *
- *      this function accept a varlen multiset_t do
- *      (1) convert the multiset_t into packed format
- *      (2) send the packed data
- *
- *      by pack the varlen multiset_t we save some network traffic
- */
-Datum hll_trans_send_normal(PG_FUNCTION_ARGS)
-{
-    bytea* msab = (bytea*)PG_GETARG_POINTER(0);
-    multiset_t* msap = (multiset_t*)VARDATA(msab);
-    size_t csz = multiset_packed_size(msap);
-    bytea* bp = (bytea*)palloc0(VARHDRSZ + csz);
-
-    SET_VARSIZE(bp, VARHDRSZ + csz);
-
-    multiset_pack(msap, (uint8_t*)VARDATA(bp), csz);
-
-    StringInfoData buf;
-    pq_begintypsend(&buf);
-    pq_sendbytes(&buf, VARDATA(bp), VARSIZE(bp) - VARHDRSZ);
-    PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
+    return DirectFunctionCall1(bytearecv, PG_GETARG_DATUM(0));
 }
 
 Datum hll_trans_send(PG_FUNCTION_ARGS)
 {
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_trans_send_compressed(fcinfo);
-    } else {
-        return hll_trans_send_normal(fcinfo);
-    }
-}
+    bytea *byteval = (bytea *)PG_GETARG_POINTER(0);
 
-Datum hll_trans_in_compressed(PG_FUNCTION_ARGS)
-{
-    Datum dd = DirectFunctionCall1(byteain, PG_GETARG_DATUM(0));
-    return dd;
-}
-
-/*
- * @Description: input func for hll_trans_type(or multiset_t)
- *
- *      this function accept a cstring format and do
- *      (1) convert the cstring format to bytea format using byteain
- *      (2) alloc a varlen multiset_t
- *      (3) unpack the bytea into the multiset_t
- *
- *      by pack the varlen multiset_t we save some network traffic
- *
- */
-Datum hll_trans_in_normal(PG_FUNCTION_ARGS)
-{
-    Datum dd = DirectFunctionCall1(byteain, PG_GETARG_DATUM(0));
-    bytea* bp = DatumGetByteaP(dd);
-    size_t sz = VARSIZE(bp) - VARHDRSZ;
-
-    bytea* msb = setup_multiset(CurrentMemoryContext);
-    multiset_t* msp = (multiset_t*)VARDATA(msb);
-    multiset_unpack(msp, (uint8_t*)VARDATA(bp), sz, NULL);
-
-    PG_RETURN_BYTEA_P(msb);
+    StringInfoData buf;
+    pq_begintypsend(&buf);
+    pq_sendbytes(&buf, VARDATA(byteval), BYTEVAL_LENGTH(byteval));
+    PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
 Datum hll_trans_in(PG_FUNCTION_ARGS)
 {
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_trans_in_compressed(fcinfo);
-    } else {
-        return hll_trans_in_normal(fcinfo);
-    }
-}
-
-Datum hll_trans_out_compressed(PG_FUNCTION_ARGS)
-{
-    Datum dd = DirectFunctionCall1(byteaout, PG_GETARG_DATUM(0));
-    return dd;
-}
-
-/*
- * @Description: output func for hll_trans_type(or multiset_t)
- *
- *      this function accept a varlen multiset_t and do
- *      (1) convert the multiset_t into packed format
- *      (2) send the packed data
- *
- *      by pack the varlen multiset_t we save some network traffic
- *
- */
-Datum hll_trans_out_normal(PG_FUNCTION_ARGS)
-{
-    bytea* msab = (bytea*)PG_GETARG_POINTER(0);
-    multiset_t* msap = (multiset_t*)VARDATA(msab);
-
-    size_t csz = multiset_packed_size(msap);
-    bytea* cb = (bytea*)palloc0(VARHDRSZ + csz);
-
-    SET_VARSIZE(cb, VARHDRSZ + csz);
-    multiset_pack(msap, (uint8_t*)VARDATA(cb), csz);
-
-    Datum dd = DirectFunctionCall1(byteaout, PointerGetDatum(cb));
-
-    return dd;
+    return DirectFunctionCall1(byteain, PG_GETARG_DATUM(0));
 }
 
 Datum hll_trans_out(PG_FUNCTION_ARGS)
 {
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        return hll_trans_out_compressed(fcinfo);
-    } else {
-        return hll_trans_out_normal(fcinfo);
-    }
+    return DirectFunctionCall1(byteaout, PG_GETARG_DATUM(0));
 }
 
-static bool contain_hll_agg_walker(Node* node, int* context)
+static bool contain_hll_agg_walker(Node *node, int *context)
 {
     if (node == NULL)
         return false;
 
     if (IsA(node, Aggref)) {
-        Aggref* arf = (Aggref*)node;
+        Aggref *arf = (Aggref *)node;
         if (arf->aggfnoid == HLL_ADD_TRANS0_OID || arf->aggfnoid == HLL_ADD_TRANS1_OID ||
             arf->aggfnoid == HLL_ADD_TRANS2_OID || arf->aggfnoid == HLL_ADD_TRANS3_OID ||
             arf->aggfnoid == HLL_ADD_TRANS4_OID || arf->aggfnoid == HLL_UNION_TRANS_OID)
@@ -973,7 +673,7 @@ static bool contain_hll_agg_walker(Node* node, int* context)
     return expression_tree_walker(node, (bool (*)())contain_hll_agg_walker, context);
 }
 
-static int contain_hll_agg(Node* node)
+static int contain_hll_agg(Node *node)
 {
     int count = 0;
 
@@ -984,24 +684,18 @@ static int contain_hll_agg(Node* node)
 /*
  * @Description: the function is uesd for estimate used memory in hll mode.
  *
- *      we use function contain_hll_agg and contain_hll_agg_walker to parse query node
- *      to get numbers of hll_agg functions.
+ * we use function contain_hll_agg and contain_hll_agg_walker to parse query node
+ * to get numbers of hll_agg functions.
  *
  * @return: the size of hash_table_size in hll mode which is used for estimate e-memory.
  */
-double estimate_hllagg_size(double numGroups, List* tleList)
+double estimate_hllagg_size(double numGroups, List *tleList)
 {
-    int tmp = contain_hll_agg((Node*)tleList);
+    int tmp = contain_hll_agg((Node *)tleList);
     double hash_table_size;
 
-    if (u_sess->attr.attr_sql.enable_compress_hll) {
-        // a HLL takes regwidth * 2^log2m bits to store
-        int64 hll_size = (int64)(
-            (u_sess->attr.attr_sql.g_default_regwidth * ((int64)pow(2, u_sess->attr.attr_sql.g_default_log2m))) / 8);
-        hash_table_size = ((numGroups * tmp * hll_size) / 1024L);
-    } else {
-        hash_table_size = ((numGroups * tmp * ((int64)(131 * 1024))) / 1024L);
-    }
+    int64_t hll_size = (int64_t)(HLL_HEAD_SIZE + BITS_TO_VALUE(u_sess->attr.attr_sql.hll_default_log2m));
+    hash_table_size = ((numGroups * tmp * hll_size) / 1024L);
 
     return hash_table_size * 2;
 }

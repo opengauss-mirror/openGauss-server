@@ -8,7 +8,6 @@
 create type complex as (r float8, i float8);
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 create temp table fullname (first text, last text);
 

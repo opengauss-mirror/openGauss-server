@@ -1,6 +1,6 @@
 #----------------------------------------------------------------------------
 #
-# Postgres-XC makesgml tool makefile
+# openGauss makesgml tool makefile
 #
 # Copyright(c) 2010-2012 Postgres-XC Development Group
 #

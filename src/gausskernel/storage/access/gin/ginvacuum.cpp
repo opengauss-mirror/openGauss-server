@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * ginvacuum.cpp
- *	  delete & vacuum routines for the postgres GIN
+ *	  delete & vacuum routines for the openGauss GIN
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -55,7 +55,7 @@ ItemPointer ginVacuumItemPointers(GinVacuumState *gvs, ItemPointerData *items, i
      * Iterate over TIDs array
      */
     for (i = 0; i < nitem; i++) {
-        if (gvs->callback(items + i, gvs->callback_state, InvalidOid)) {
+        if (gvs->callback(items + i, gvs->callback_state, InvalidOid, InvalidBktId)) {
             gvs->result->tuples_removed += 1;
             if (!tmpitems) {
                 /*

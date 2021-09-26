@@ -1,7 +1,6 @@
 DROP SCHEMA test_insert_update_009 CASCADE;
 CREATE SCHEMA test_insert_update_009;
 SET CURRENT_SCHEMA TO test_insert_update_009;
-SET enable_light_proxy=off;
 
 -- test t1 with no index
 CREATE TABLE t1 (
@@ -274,5 +273,4 @@ SELECT * FROM t3 ORDER BY col5;
 INSERT INTO t3 (col2, col3) (SELECT max(col2), max(col3) FROM t3) ON DUPLICATE KEY UPDATE col1 = col2 + col3;
 SELECT * FROM t3 ORDER BY col5;
 
-RESET enable_light_proxy;
 DROP SCHEMA test_insert_update_009 CASCADE;

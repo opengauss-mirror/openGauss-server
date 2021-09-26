@@ -59,6 +59,8 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_TYPE(bictlType, "struct.bictl");
@@ -114,7 +116,7 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
     Vals[0] = int64_0;
     Vals[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(bictlval, Vals);
-    builder.CreateAlignedStore(hcxt, tmpval, 8);
+    builder.CreateStore(hcxt, tmpval);
 
     /* get the hash val : hashCell->m_val[aggidx].val */
     Vals4[0] = int64_0;
@@ -129,7 +131,7 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
     Vals4[2] = aggidx;
     Vals4[3] = int32_1;
     cellflag = builder.CreateInBoundsGEP(cell, Vals4);
-    tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellflag");
+    tmpval = builder.CreateLoad(int8Type, cellflag, "cellflag");
 
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
@@ -145,15 +147,15 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
         /* copy the sum data to hash table */
         tmpval = WrapaddVariableCodeGen(&builder, hcxt, pval);
     }
-    builder.CreateAlignedStore(tmpval, cellval, 8);
-    builder.CreateAlignedStore(int8_0, cellflag, 1);
+    builder.CreateStore(tmpval, cellval);
+    builder.CreateStore(int8_0, cellflag);
     builder.CreateBr(agg_end);
 
     /* cell be not null, do aggregation */
     builder.SetInsertPoint(agg_else);
     if (aggref->aggstage == 0) {
         /* load the hash cell value from the pointer to hashcell */
-        llvm::Value* real_cellval = builder.CreateAlignedLoad(cellval, 8, "cellval");
+        llvm::Value* real_cellval = builder.CreateLoad(int64Type, cellval, "cellval");
         /* leftarg maybe bi64 or bi128 */
         leftarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
         /* store pVal[i](int8) to bi64 */
@@ -164,7 +166,7 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
         Vals[0] = int64_0;
         Vals[1] = int32_0;
         llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals);
-        builder.CreateAlignedStore(real_cellval, store_pos_val, 8);
+        builder.CreateStore(real_cellval, store_pos_val);
 
         /* get leftarg->choice.n_header */
         Vals4[0] = int64_0;
@@ -172,7 +174,7 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "header");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "header");
 
         /* check numeric is bi128 or not */
         llvm::Value* tmp_is_bi128 = builder.CreateAnd(tmpval, val_bimask);
@@ -189,19 +191,19 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(agg_end);
 
         /* with one argument be bi128 */
         builder.SetInsertPoint(bi128_add_bi128);
         WrapBiAggAddMatrixCodeGen(&builder, arg1, int32_0, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(agg_end);
     } else {
         /* load the hash cell value from the pointer to hashcell */
-        llvm::Value* real_cellval = builder.CreateAlignedLoad(cellval, 8, "cellval");
+        llvm::Value* real_cellval = builder.CreateLoad(int64Type, cellval, "cellval");
         /* leftarg maybe bi64 or bi128 */
         leftarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
         /* rightarg maybe bi64 or bi128 */
@@ -211,7 +213,7 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
         Vals[0] = int64_0;
         Vals[1] = int32_0;
         llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals);
-        builder.CreateAlignedStore(real_cellval, store_pos_val, 8);
+        builder.CreateStore(real_cellval, store_pos_val);
 
         /* get leftarg->choice.n_header */
         Vals4[0] = int64_0;
@@ -219,14 +221,14 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "header");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "header");
 
         /* check numeric is bi128 or not */
         argop1 = builder.CreateAnd(tmpval, val_bimask);
         argop1 = builder.CreateICmpEQ(argop1, val_numeric128);
 
         tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "header");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "header");
         argop2 = builder.CreateAnd(tmpval, val_bimask);
         argop2 = builder.CreateICmpEQ(argop2, val_numeric128);
 
@@ -239,16 +241,16 @@ llvm::Function* int8_sum_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(agg_end);
 
         builder.SetInsertPoint(bi128_add_bi128);
         argop1 = builder.CreateZExt(argop1, int32Type);
         argop2 = builder.CreateZExt(argop2, int32Type);
         WrapBiAggAddMatrixCodeGen(&builder, argop1, argop2, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(agg_end);
     }
 
@@ -275,6 +277,8 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_TYPE(bictlType, "struct.bictl");
@@ -342,7 +346,7 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
     Vals[0] = int64_0;
     Vals[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(bictlval, Vals);
-    builder.CreateAlignedStore(mcontext, tmpval, 8);
+    builder.CreateStore(mcontext, tmpval);
 
     /* get the hash val : hashCell->m_val[aggidx].val */
     Vals4[0] = int64_0;
@@ -367,7 +371,7 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
     cellflag2 = builder.CreateInBoundsGEP(cell, Vals4);
 
     /* load the cell flag and check it*/
-    tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellflag");
+    tmpval = builder.CreateLoad(int8Type, cellflag, "cellflag");
 
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
@@ -379,10 +383,10 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         /* store the first value to bi64 */
         tmpval = WrapmakeNumeric64CodeGen(&builder, pval, int8_0);
         tmpval = WrapaddVariableCodeGen(&builder, mcontext, tmpval);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        builder.CreateStore(tmpval, cellval);
 
         /* count set to be one */
-        builder.CreateAlignedStore(int64_1, cellval2, 8);
+        builder.CreateStore(int64_1, cellval2);
     } else {
         /*
          * construct an array, with the first element be the count
@@ -391,27 +395,27 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         WrapDeconstructArrayCodeGen(&builder, pval, datumarr, ndatum);
 
         /* do cell->m_val[idx].val = addVariable(datumarray[1]) */
-        llvm::Value* tmpdarr = builder.CreateAlignedLoad(datumarr, 8, "datumarr");
+        llvm::Value* tmpdarr = builder.CreateLoad(int64PtrType, datumarr, "datumarr");
         tmpval = builder.CreateInBoundsGEP(tmpdarr, int64_1);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "datumarr1");
+        tmpval = builder.CreateLoad(int64Type, tmpval, "datumarr1");
         tmpval = WrapaddVariableCodeGen(&builder, mcontext, tmpval);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        builder.CreateStore(tmpval, cellval);
 
         /* do cell->m_val[idx + 1].val = addVariable(datumarray[0]) */
-        tmpval = builder.CreateAlignedLoad(tmpdarr, 8, "datumarr0");
+        tmpval = builder.CreateLoad(int64Type, tmpdarr, "datumarr0");
         tmpval = WrapaddVariableCodeGen(&builder, mcontext, tmpval);
-        builder.CreateAlignedStore(tmpval, cellval2, 8);
+        builder.CreateStore(tmpval, cellval2);
     }
 
-    builder.CreateAlignedStore(int8_0, cellflag, 1);
-    builder.CreateAlignedStore(int8_0, cellflag2, 1);
+    builder.CreateStore(int8_0, cellflag);
+    builder.CreateStore(int8_0, cellflag2);
     builder.CreateBr(agg_end);
 
     /* cell be not null, do aggregation */
     builder.SetInsertPoint(agg_else);
     if (aggref->aggstage == 0) {
         /* load the hash cell value from the pointer to hashcell */
-        real_cellval = builder.CreateAlignedLoad(cellval, 8, "cellval");
+        real_cellval = builder.CreateLoad(int64Type, cellval, "cellval");
         /* leftarg is bi64 or bi128 */
         leftarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
         /* store pVal[i](int8) to bi64 */
@@ -422,7 +426,7 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         Vals[0] = int64_0;
         Vals[1] = int32_0;
         store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals);
-        builder.CreateAlignedStore(real_cellval, store_pos_val, 8);
+        builder.CreateStore(real_cellval, store_pos_val);
 
         /* get leftarg->choice.n_header */
         Vals4[0] = int64_0;
@@ -430,7 +434,7 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
 
         tmpval = builder.CreateAnd(tmpval, val_bimask);
         argop1 = builder.CreateICmpEQ(tmpval, val_numeric128);
@@ -443,23 +447,23 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(add_count);
 
         /* with one argument be bi128 */
         builder.SetInsertPoint(bi128_add_bi128);
         argop1 = builder.CreateZExt(argop1, int32Type);
         WrapBiAggAddMatrixCodeGen(&builder, argop1, int32_0, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(add_count);
 
         builder.SetInsertPoint(add_count);
         /* count++ : cell->m_val[idx + 1].val++ */
-        tmpval = builder.CreateAlignedLoad(cellval2, 8, "count");
+        tmpval = builder.CreateLoad(int64Type, cellval2, "count");
         tmpval = builder.CreateAdd(tmpval, int64_1);
-        builder.CreateAlignedStore(tmpval, cellval2, 8);
+        builder.CreateStore(tmpval, cellval2);
         builder.CreateBr(agg_end);
     } else {
         /*
@@ -469,19 +473,19 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         WrapDeconstructArrayCodeGen(&builder, pval, datumarr, ndatum);
 
         /* corresponding to leftarg = (Numeric)(cell->m_val[idx].val) */
-        real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+        real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
         leftarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
 
         /* corresponding to rightarg = (Numeric)(datumarray[1]) */
-        llvm::Value* tmpdarr = builder.CreateAlignedLoad(datumarr, 8, "datumarr");
+        llvm::Value* tmpdarr = builder.CreateLoad(int64PtrType, datumarr, "datumarr");
         tmpval = builder.CreateInBoundsGEP(tmpdarr, int64_1);
-        rightarg = builder.CreateAlignedLoad(tmpval, 8, "datumarr1");
+        rightarg = builder.CreateLoad(int64Type, tmpval, "datumarr1");
 
         /* ctl.store_pos = cell->m_val[idx].val */
         Vals[0] = int64_0;
         Vals[1] = int32_0;
         store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals);
-        builder.CreateAlignedStore(real_cellval, store_pos_val, 8);
+        builder.CreateStore(real_cellval, store_pos_val);
 
         /* check the leftarg or rightarg is BI128 or not */
         /* get arg->choice.n_header */
@@ -490,12 +494,12 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
         tmpval = builder.CreateAnd(tmpval, val_bimask);
         argop1 = builder.CreateICmpEQ(tmpval, val_numeric128);
 
         tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
         tmpval = builder.CreateAnd(tmpval, val_bimask);
         argop2 = builder.CreateICmpEQ(tmpval, val_numeric128);
 
@@ -509,8 +513,8 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(add_count);
 
         /* with one argument be bi128 */
@@ -518,16 +522,16 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         argop1 = builder.CreateZExt(argop1, int32Type);
         argop2 = builder.CreateZExt(argop2, int32Type);
         WrapBiAggAddMatrixCodeGen(&builder, argop1, argop2, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(add_count);
 
         builder.SetInsertPoint(add_count);
         /* calculate count: count = oldcount + count
          * the count num can be stored by int64, call bi64add64 directly.
          */
-        llvm::Value* real_cellval2 = builder.CreateAlignedLoad(cellval2, 8, "cellval2");
-        builder.CreateAlignedStore(real_cellval2, store_pos_val, 8);
+        llvm::Value* real_cellval2 = builder.CreateLoad(int64Type, cellval2, "cellval2");
+        builder.CreateStore(real_cellval2, store_pos_val);
         func_bi64addbi64 = llvmCodeGen->module()->getFunction("Jitted_bi64add64");
         if (NULL == func_bi64addbi64) {
             func_bi64addbi64 = bi64add64_codegen(true);
@@ -536,7 +540,7 @@ llvm::Function* int8_avg_codegen(Aggref* aggref)
         /* extract ctl.store_pos and datumarray[0] */
         llvm::Value* tmplarg = builder.CreateIntToPtr(real_cellval2, numericPtrType);
 
-        tmpval = builder.CreateAlignedLoad(tmpdarr, 8, "datumarr0");
+        tmpval = builder.CreateLoad(int64Type, tmpdarr, "datumarr0");
         llvm::Value* tmprarg = builder.CreateIntToPtr(tmpval, numericPtrType);
         builder.CreateCall(func_bi64addbi64, {tmplarg, tmprarg, bictlval});
         builder.CreateBr(agg_end);
@@ -565,6 +569,8 @@ llvm::Function* numeric_sum_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_TYPE(bictlType, "struct.bictl");
@@ -631,7 +637,7 @@ llvm::Function* numeric_sum_codegen(Aggref* aggref)
     Vals4[3] = int32_1;
     cellflag = builder.CreateInBoundsGEP(cell, Vals4);
     aggidx = builder.CreateTrunc(aggidx, int32Type);
-    tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellflag");
+    tmpval = builder.CreateLoad(int8Type, cellflag, "cellflag");
 
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
@@ -646,14 +652,14 @@ llvm::Function* numeric_sum_codegen(Aggref* aggref)
     /* corresponding to addVariable(context, NumericGetDatum(leftarg)) */
     tmpval = WrapaddVariableCodeGen(&builder, mcontext, tmpval);
 
-    builder.CreateAlignedStore(tmpval, cellval, 8);
-    builder.CreateAlignedStore(int8_0, cellflag, 1);
+    builder.CreateStore(tmpval, cellval);
+    builder.CreateStore(int8_0, cellflag);
     builder.CreateBr(agg_end);
 
     /* cell be not null, do aggregation */
     builder.SetInsertPoint(agg_else);
     /* corresponding to leftarg = (Numeric)(cell->m_val[idx].val) */
-    llvm::Value* real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+    llvm::Value* real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
     llvm::Value* leftarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
 
     /* get BI numeric val from datum */
@@ -664,12 +670,12 @@ llvm::Function* numeric_sum_codegen(Aggref* aggref)
     Vals[0] = int64_0;
     Vals[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(bictlval, Vals);
-    builder.CreateAlignedStore(mcontext, tmpval, 8);
+    builder.CreateStore(mcontext, tmpval);
 
     /* ctl.store_pos = cell->m_val[idx].val */
     Vals[1] = int32_0;
     llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals);
-    builder.CreateAlignedStore(real_cellval, store_pos_val, 8);
+    builder.CreateStore(real_cellval, store_pos_val);
 
     /* get numFlags : NUMERIC_NB_FLAGBITS(arg) */
     Vals4[0] = int64_0;
@@ -677,11 +683,11 @@ llvm::Function* numeric_sum_codegen(Aggref* aggref)
     Vals4[2] = int32_0;
     Vals4[3] = int32_0;
     tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
     llvm::Value* lnumFlags = builder.CreateAnd(tmpval, val_mask);
 
     tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
     llvm::Value* rnumFlags = builder.CreateAnd(tmpval, val_mask);
 
     /* check : NUMERIC_FLAG_IS_BI(numFlags) */
@@ -702,16 +708,16 @@ llvm::Function* numeric_sum_codegen(Aggref* aggref)
         func_bi64addbi64 = bi64add64_codegen(true);
     }
     builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-    tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-    builder.CreateAlignedStore(tmpval, cellval, 8);
+    tmpval = builder.CreateLoad(int64Type, store_pos_val);
+    builder.CreateStore(tmpval, cellval);
     builder.CreateBr(agg_end);
 
     builder.SetInsertPoint(bi128_add_bi128);
     oparg1 = builder.CreateZExt(oparg1, int32Type);
     oparg2 = builder.CreateZExt(oparg2, int32Type);
     WrapBiAggAddMatrixCodeGen(&builder, oparg1, oparg2, leftarg, rightarg, bictlval);
-    tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-    builder.CreateAlignedStore(tmpval, cellval, 8);
+    tmpval = builder.CreateLoad(int64Type, store_pos_val);
+    builder.CreateStore(tmpval, cellval);
     builder.CreateBr(agg_end);
 
     /* call numeric add */
@@ -743,11 +749,17 @@ llvm::Function* vsnumeric_sum_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_TYPE(bictlType, "struct.bictl");
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(sonicEncodingDatumArrayPtrType, "class.SonicEncodingDatumArray");
+    DEFINE_CG_PTRTYPE(memCxtPtrType, "struct.MemoryContextData");
+    DEFINE_CG_PTRTYPE(atomPtrType, "struct.atom");
+    DEFINE_CG_PTRPTRTYPE(atomPtrPtrType, "struct.atom");
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
 
     DEFINE_CGVAR_INT8(int8_0, 0);
     DEFINE_CGVAR_INT8(int8_1, 1);
@@ -799,18 +811,18 @@ llvm::Function* vsnumeric_sum_codegen(Aggref* aggref)
     /* get data->m_cxt */
     Vals3[2] = int32_pos_sdarray_cxt;
     llvm::Value* mcxt = builder.CreateInBoundsGEP(sdata, Vals3);
-    mcxt = builder.CreateAlignedLoad(mcxt, 8, "context");
+    mcxt = builder.CreateLoad(memCxtPtrType, mcxt, "context");
 
     /* get the nth flag of sonicdata : first calculate arrIdx and atomIdx */
     Vals3[2] = int32_pos_sdarray_nbit;
     llvm::Value* nbit = builder.CreateInBoundsGEP(sdata, Vals3);
-    nbit = builder.CreateAlignedLoad(nbit, 4, "arridx");
+    nbit = builder.CreateLoad(int32Type, nbit, "arridx");
     llvm::Value* arrIdx = builder.CreateLShr(loc, nbit);
     arrIdx = builder.CreateSExt(arrIdx, int64Type);
 
     Vals3[2] = int32_pos_sdarray_atomsize;
     llvm::Value* atomsize = builder.CreateInBoundsGEP(sdata, Vals3);
-    atomsize = builder.CreateAlignedLoad(atomsize, 4, "atomsize");
+    atomsize = builder.CreateLoad(int32Type, atomsize, "atomsize");
     atomsize = builder.CreateSub(atomsize, int32_1);
     llvm::Value* atomIdx = builder.CreateAnd(atomsize, loc);
     atomIdx = builder.CreateSExt(atomIdx, int64Type);
@@ -818,25 +830,25 @@ llvm::Function* vsnumeric_sum_codegen(Aggref* aggref)
     /* sdata->m_arr[arrIdx] */
     Vals3[2] = int32_pos_sdarray_arr;
     llvm::Value* atom = builder.CreateInBoundsGEP(sdata, Vals3);
-    atom = builder.CreateAlignedLoad(atom, 8, "atomptr");
+    atom = builder.CreateLoad(atomPtrPtrType, atom, "atomptr");
     atom = builder.CreateInBoundsGEP(atom, arrIdx);
-    atom = builder.CreateAlignedLoad(atom, 8, "atom");
+    atom = builder.CreateLoad(atomPtrType, atom, "atom");
 
     /* get address of sdata->m_arr[arrIdx]->data[atomIdx] */
     Vals2[1] = int32_pos_atom_data;
     llvm::Value* data = builder.CreateInBoundsGEP(atom, Vals2);
-    data = builder.CreateAlignedLoad(data, 8, "data");
+    data = builder.CreateLoad(int8PtrType, data, "data");
     data = builder.CreateBitCast(data, int64PtrType);
     llvm::Value* dataaddr = builder.CreateInBoundsGEP(data, atomIdx);
 
     /* sdata->m_arr[arrIdx]->nullFlag[atomIdx] */
     Vals2[1] = int32_pos_atom_nullflag;
     llvm::Value* nullflag = builder.CreateInBoundsGEP(atom, Vals2);
-    nullflag = builder.CreateAlignedLoad(nullflag, 8, "nullflagptr");
+    nullflag = builder.CreateLoad(int8PtrType, nullflag, "nullflagptr");
     nullflag = builder.CreateInBoundsGEP(nullflag, atomIdx);
 
     /* if the case of data->getNthNullFlag(arrIdx, atomIdx) == NULL */
-    tmpval = builder.CreateAlignedLoad(nullflag, 1, "nullFlag");
+    tmpval = builder.CreateLoad(int8Type, nullflag, "nullFlag");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
     builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -851,15 +863,15 @@ llvm::Function* vsnumeric_sum_codegen(Aggref* aggref)
     /* corresponding to addVariable(context, NumericGetDatum(leftarg)) */
     tmpval = WrapaddVariableCodeGen(&builder, mcxt, tmpval);
 
-    builder.CreateAlignedStore(tmpval, dataaddr, 8);
-    builder.CreateAlignedStore(int8_0, nullflag, 1);
+    builder.CreateStore(tmpval, dataaddr);
+    builder.CreateStore(int8_0, nullflag);
     builder.CreateBr(agg_end);
 
     /* leftarg is not null, do aggregation */
     builder.SetInsertPoint(agg_else);
 
     /* corresponding to leftarg = (DatumGetBINumeric)(leftdata[0]) */
-    llvm::Value* leftdata = builder.CreateAlignedLoad(dataaddr, 8, "cell_val");
+    llvm::Value* leftdata = builder.CreateLoad(int64Type, dataaddr, "cell_val");
     llvm::Value* leftarg = DatumGetBINumericCodeGen(&builder, leftdata);
 
     /* get BI numeric val from datum */
@@ -870,12 +882,12 @@ llvm::Function* vsnumeric_sum_codegen(Aggref* aggref)
     Vals2[0] = int64_0;
     Vals2[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(bictlval, Vals2);
-    builder.CreateAlignedStore(mcxt, tmpval, 8);
+    builder.CreateStore(mcxt, tmpval);
 
     /* ctl.store_pos = cell->m_val[idx].val */
     Vals2[1] = int32_0;
     llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals2);
-    builder.CreateAlignedStore(leftdata, store_pos_val, 8);
+    builder.CreateStore(leftdata, store_pos_val);
 
     /* get numFlags : NUMERIC_NB_FLAGBITS(arg) */
     Vals4[0] = int64_0;
@@ -883,11 +895,11 @@ llvm::Function* vsnumeric_sum_codegen(Aggref* aggref)
     Vals4[2] = int32_0;
     Vals4[3] = int32_0;
     tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
     llvm::Value* lnumFlags = builder.CreateAnd(tmpval, val_mask);
 
     tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-    tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+    tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
     llvm::Value* rnumFlags = builder.CreateAnd(tmpval, val_mask);
 
     /* check : NUMERIC_FLAG_IS_BI(numFlags) */
@@ -908,16 +920,16 @@ llvm::Function* vsnumeric_sum_codegen(Aggref* aggref)
         func_bi64addbi64 = bi64add64_codegen(true);
     }
     builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-    tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-    builder.CreateAlignedStore(tmpval, dataaddr, 8);
+    tmpval = builder.CreateLoad(int64Type, store_pos_val);
+    builder.CreateStore(tmpval, dataaddr);
     builder.CreateBr(agg_end);
 
     builder.SetInsertPoint(bi128_add_bi128);
     oparg1 = builder.CreateZExt(oparg1, int32Type);
     oparg2 = builder.CreateZExt(oparg2, int32Type);
     WrapBiAggAddMatrixCodeGen(&builder, oparg1, oparg2, leftarg, rightarg, bictlval);
-    tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-    builder.CreateAlignedStore(tmpval, dataaddr, 8);
+    tmpval = builder.CreateLoad(int64Type, store_pos_val);
+    builder.CreateStore(tmpval, dataaddr);
     builder.CreateBr(agg_end);
 
     /* call numeric add */
@@ -948,6 +960,8 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_TYPE(bictlType, "struct.bictl");
@@ -1039,7 +1053,7 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
 
     /* Now load the cell flag and check it*/
     aggidx = builder.CreateTrunc(aggidx, int32Type);
-    tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellflag");
+    tmpval = builder.CreateLoad(int8Type, cellflag, "cellflag");
 
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
@@ -1053,10 +1067,10 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         tmpval = builder.CreatePtrToInt(leftarg, int64Type);
         /* corresponding to addVariable(context, NumericGetDatum(leftarg)) */
         tmpval = WrapaddVariableCodeGen(&builder, mcontext, tmpval);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        builder.CreateStore(tmpval, cellval);
 
         /* count set to be one */
-        builder.CreateAlignedStore(int64_1, cellval2, 8);
+        builder.CreateStore(int64_1, cellval2);
     } else {
         /*
          * construct an array, with the first element be the count
@@ -1065,20 +1079,20 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         WrapDeconstructArrayCodeGen(&builder, pval, datumarr, ndatum);
 
         /* do cell->m_val[idx].val = tbl->CopyVarP(datumarray[1]) */
-        llvm::Value* tmpdarr = builder.CreateAlignedLoad(datumarr, 8, "datumarr");
+        llvm::Value* tmpdarr = builder.CreateLoad(int64PtrType, datumarr, "datumarr");
         tmpval = builder.CreateInBoundsGEP(tmpdarr, int64_1);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "datumarr1");
+        tmpval = builder.CreateLoad(int64Type, tmpval, "datumarr1");
         tmpval = WrapaddVariableCodeGen(&builder, mcontext, tmpval);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        builder.CreateStore(tmpval, cellval);
 
         /* do cell->m_val[idx + 1].val = tbl->CopyVarP(datumarray[0]) */
-        tmpval = builder.CreateAlignedLoad(tmpdarr, 8, "datumarr0");
+        tmpval = builder.CreateLoad(int64Type, tmpdarr, "datumarr0");
         tmpval = WrapaddVariableCodeGen(&builder, mcontext, tmpval);
-        builder.CreateAlignedStore(tmpval, cellval2, 8);
+        builder.CreateStore(tmpval, cellval2);
     }
 
-    builder.CreateAlignedStore(int8_0, cellflag, 1);
-    builder.CreateAlignedStore(int8_0, cellflag2, 1);
+    builder.CreateStore(int8_0, cellflag);
+    builder.CreateStore(int8_0, cellflag2);
     builder.CreateBr(agg_end);
 
     /* cell be not null, do aggregation */
@@ -1089,12 +1103,12 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
     Vals[0] = int64_0;
     Vals[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(bictlval, Vals);
-    builder.CreateAlignedStore(mcontext, tmpval, 8);
+    builder.CreateStore(mcontext, tmpval);
 
     aggidx = builder.CreateTrunc(aggidx, int32Type);
     if (aggref->aggstage == 0) {
         /* corresponding to leftarg = (Numeric)(cell->m_val[idx].val) */
-        real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+        real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
         leftarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
 
         /* get BI numeric val from datum */
@@ -1106,11 +1120,11 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
         lnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
         rnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         /* check : NUMERIC_FLAG_IS_BI(numFlags) */
@@ -1124,7 +1138,7 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         Vals[0] = int32_0;
         Vals[1] = int32_0;
         llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals);
-        builder.CreateAlignedStore(real_cellval, store_pos_val, 8);
+        builder.CreateStore(real_cellval, store_pos_val);
         /* check numeric is BI128 */
         oparg1 = builder.CreateICmpEQ(lnumFlags, val_binum128);
         oparg2 = builder.CreateICmpEQ(rnumFlags, val_binum128);
@@ -1137,16 +1151,16 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(eval_count);
 
         builder.SetInsertPoint(bi128_add_bi128);
         oparg1 = builder.CreateZExt(oparg1, int32Type);
         oparg2 = builder.CreateZExt(oparg2, int32Type);
         WrapBiAggAddMatrixCodeGen(&builder, oparg1, oparg2, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(eval_count);
 
         /* call numeric add */
@@ -1156,9 +1170,9 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
 
         builder.SetInsertPoint(eval_count);
         /* cell->m_val[idx+1].val++ */
-        tmpval = builder.CreateAlignedLoad(cellval2, 8, "count");
+        tmpval = builder.CreateLoad(int64Type, cellval2, "count");
         tmpval = builder.CreateAdd(tmpval, int64_1);
-        builder.CreateAlignedStore(tmpval, cellval2, 8);
+        builder.CreateStore(tmpval, cellval2);
         builder.CreateBr(agg_end);
     } else {
         /*
@@ -1169,13 +1183,13 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
 
         /* calculate sum : sum = sum + num */
         /* corresponding to leftarg = (Numeric)(cell->m_val[idx].val) */
-        real_cellval = builder.CreateAlignedLoad(cellval, 8, "cell_val");
+        real_cellval = builder.CreateLoad(int64Type, cellval, "cell_val");
         leftarg = builder.CreateIntToPtr(real_cellval, numericPtrType);
 
         /* corresponding to rightarg = DatumGetBINumeric(datumarray[1]) */
-        llvm::Value* tmpdarr = builder.CreateAlignedLoad(datumarr, 8, "datumarr");
+        llvm::Value* tmpdarr = builder.CreateLoad(int64PtrType, datumarr, "datumarr");
         tmpval = builder.CreateInBoundsGEP(tmpdarr, int64_1);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "datumarr1");
+        tmpval = builder.CreateLoad(int64Type, tmpval, "datumarr1");
         rightarg = DatumGetBINumericCodeGen(&builder, tmpval);
 
         /* get numFlags : NUMERIC_NB_FLAGBITS(arg) */
@@ -1184,11 +1198,11 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
         lnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
         rnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         /* check : NUMERIC_FLAG_IS_BI(numFlags) */
@@ -1202,7 +1216,7 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         Vals[0] = int32_0;
         Vals[1] = int32_0;
         llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals);
-        builder.CreateAlignedStore(real_cellval, store_pos_val, 8);
+        builder.CreateStore(real_cellval, store_pos_val);
         /* check numeric is BI128 */
         oparg1 = builder.CreateICmpEQ(lnumFlags, val_binum128);
         oparg2 = builder.CreateICmpEQ(rnumFlags, val_binum128);
@@ -1215,16 +1229,16 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(eval_count);
 
         builder.SetInsertPoint(bi128_add_bi128);
         oparg1 = builder.CreateZExt(oparg1, int32Type);
         oparg2 = builder.CreateZExt(oparg2, int32Type);
         WrapBiAggAddMatrixCodeGen(&builder, oparg1, oparg2, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, cellval);
         builder.CreateBr(eval_count);
 
         /* call numeric add */
@@ -1236,8 +1250,8 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         /* calculate count: count = oldcount + count
          * the count num can be stored by int64, call bi64add64 directly.
          */
-        llvm::Value* real_cellval2 = builder.CreateAlignedLoad(cellval2, 8, "cellval2");
-        builder.CreateAlignedStore(real_cellval2, store_pos_val, 8);
+        llvm::Value* real_cellval2 = builder.CreateLoad(int64Type, cellval2, "cellval2");
+        builder.CreateStore(real_cellval2, store_pos_val);
         func_bi64addbi64 = llvmCodeGen->module()->getFunction("Jitted_bi64add64");
         if (NULL == func_bi64addbi64) {
             func_bi64addbi64 = bi64add64_codegen(true);
@@ -1246,7 +1260,7 @@ llvm::Function* numeric_avg_codegen(Aggref* aggref)
         /* extract ctl.store_pos and datumarray[0] */
         llvm::Value* tmplarg = builder.CreateIntToPtr(real_cellval2, numericPtrType);
 
-        tmpval = builder.CreateAlignedLoad(tmpdarr, 8, "datumarr0");
+        tmpval = builder.CreateLoad(int64Type, tmpdarr, "datumarr0");
         llvm::Value* tmprarg = builder.CreateIntToPtr(tmpval, numericPtrType);
         builder.CreateCall(func_bi64addbi64, {tmplarg, tmprarg, bictlval});
         builder.CreateBr(agg_end);
@@ -1277,13 +1291,19 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
+    DEFINE_CG_TYPE(int16Type, INT2OID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_TYPE(bictlType, "struct.bictl");
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(numericPtrType, "struct.NumericData");
     DEFINE_CG_PTRTYPE(sonicDatumArrayPtrType, "class.SonicDatumArray");
     DEFINE_CG_PTRTYPE(sonicEncodingDatumArrayPtrType, "class.SonicEncodingDatumArray");
+    DEFINE_CG_PTRTYPE(memCxtPtrType, "struct.MemoryContextData");
+    DEFINE_CG_PTRTYPE(atomPtrType, "struct.atom");
+    DEFINE_CG_PTRPTRTYPE(atomPtrPtrType, "struct.atom");
 
     DEFINE_CGVAR_INT8(int8_0, 0);
     DEFINE_CGVAR_INT8(int8_1, 1);
@@ -1348,19 +1368,19 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
     /* get data->m_cxt */
     Vals3[2] = int32_pos_sdarray_cxt;
     llvm::Value* mcxt = builder.CreateInBoundsGEP(sdata, Vals3);
-    mcxt = builder.CreateAlignedLoad(mcxt, 8, "context");
+    mcxt = builder.CreateLoad(memCxtPtrType, mcxt, "context");
 
     /* get sonic data according to sonic datum array and locidx */
     /* calculate arrIdx and atomIdx */
     Vals3[2] = int32_pos_sdarray_nbit;
     llvm::Value* nbit = builder.CreateInBoundsGEP(sdata, Vals3);
-    nbit = builder.CreateAlignedLoad(nbit, 4, "arridx");
+    nbit = builder.CreateLoad(int32Type, nbit, "arridx");
     llvm::Value* arrIdx = builder.CreateLShr(loc, nbit);
     arrIdx = builder.CreateSExt(arrIdx, int64Type);
 
     Vals3[2] = int32_pos_sdarray_atomsize;
     llvm::Value* atomsize = builder.CreateInBoundsGEP(sdata, Vals3);
-    atomsize = builder.CreateAlignedLoad(atomsize, 4, "atomsize");
+    atomsize = builder.CreateLoad(int32Type, atomsize, "atomsize");
     atomsize = builder.CreateSub(atomsize, int32_1);
     llvm::Value* atomIdx = builder.CreateAnd(atomsize, loc);
     atomIdx = builder.CreateSExt(atomIdx, int64Type);
@@ -1368,45 +1388,45 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
     /* sdata->m_arr[arrIdx] */
     Vals3[2] = int32_pos_sdarray_arr;
     llvm::Value* atom = builder.CreateInBoundsGEP(sdata, Vals3);
-    atom = builder.CreateAlignedLoad(atom, 8, "atomptr");
+    atom = builder.CreateLoad(atomPtrPtrType, atom, "atomptr");
     atom = builder.CreateInBoundsGEP(atom, arrIdx);
-    atom = builder.CreateAlignedLoad(atom, 8, "atom");
+    atom = builder.CreateLoad(atomPtrType, atom, "atom");
 
     /* get address of sdata->m_arr[arrIdx]->data[atomIdx] */
     Vals2[1] = int32_pos_atom_data;
     llvm::Value* data = builder.CreateInBoundsGEP(atom, Vals2);
-    data = builder.CreateAlignedLoad(data, 8, "data");
+    data = builder.CreateLoad(int8PtrType, data, "data");
     data = builder.CreateBitCast(data, int64PtrType);
     llvm::Value* dataptr = builder.CreateInBoundsGEP(data, atomIdx);
 
     /* get scount->m_arr[arrIdx] */
     Vals2[1] = int32_pos_sdarray_arr;
     llvm::Value* cntatom = builder.CreateInBoundsGEP(scount, Vals2);
-    cntatom = builder.CreateAlignedLoad(cntatom, 8, "cntatomptr");
+    cntatom = builder.CreateLoad(atomPtrPtrType, cntatom, "cntatomptr");
     cntatom = builder.CreateInBoundsGEP(cntatom, arrIdx);
-    cntatom = builder.CreateAlignedLoad(cntatom, 8, "cntatom");
+    cntatom = builder.CreateLoad(atomPtrType, cntatom, "cntatom");
 
     /* get address of scount->m_arr[arrIdx]->data[atomIdx] */
     Vals2[1] = int32_pos_atom_data;
     llvm::Value* cntdata = builder.CreateInBoundsGEP(cntatom, Vals2);
-    cntdata = builder.CreateAlignedLoad(cntdata, 8, "cntdata");
+    cntdata = builder.CreateLoad(int8PtrType, cntdata, "cntdata");
     cntdata = builder.CreateBitCast(cntdata, int64PtrType);
     llvm::Value* cntptr = builder.CreateInBoundsGEP(cntdata, atomIdx);
 
     /* get sdata->m_arr[arrIdx]->nullFlag[atomIdx] */
     Vals2[1] = int32_pos_atom_nullflag;
     llvm::Value* dataflag = builder.CreateInBoundsGEP(atom, Vals2);
-    dataflag = builder.CreateAlignedLoad(dataflag, 8, "dataflagptr");
+    dataflag = builder.CreateLoad(int8PtrType, dataflag, "dataflagptr");
     dataflag = builder.CreateInBoundsGEP(dataflag, atomIdx);
 
     /* get scount>m_arr[arrIdx]->nullFlag[atomIdx] */
     Vals2[1] = int32_pos_atom_nullflag;
     llvm::Value* cntflag = builder.CreateInBoundsGEP(cntatom, Vals2);
-    cntflag = builder.CreateAlignedLoad(cntflag, 8, "cntflagptr");
+    cntflag = builder.CreateLoad(int8PtrType, cntflag, "cntflagptr");
     cntflag = builder.CreateInBoundsGEP(cntflag, atomIdx);
 
     /* Now load the data flag and check it*/
-    tmpval = builder.CreateAlignedLoad(dataflag, 1, "cntflag");
+    tmpval = builder.CreateLoad(int8Type, dataflag, "cntflag");
 
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_0);
@@ -1420,10 +1440,10 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         tmpval = builder.CreatePtrToInt(leftarg, int64Type);
         /* corresponding to addVariable(context, NumericGetDatum(leftarg)) */
         tmpval = WrapaddVariableCodeGen(&builder, mcxt, tmpval);
-        builder.CreateAlignedStore(tmpval, dataptr, 8);
+        builder.CreateStore(tmpval, dataptr);
 
         /* count set to be one */
-        builder.CreateAlignedStore(int64_1, cntptr, 8);
+        builder.CreateStore(int64_1, cntptr);
     } else {
         /*
          * construct an array, with the first element be the count
@@ -1432,14 +1452,14 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         WrapDeconstructArrayCodeGen(&builder, pval, datumarr, ndatum);
 
         /* do data->setValue(datumarray[1], false, arridx, atomIdx) */
-        llvm::Value* tmpdarr = builder.CreateAlignedLoad(datumarr, 8, "datumarr");
+        llvm::Value* tmpdarr = builder.CreateLoad(int64PtrType, datumarr, "datumarr");
         tmpval = builder.CreateInBoundsGEP(tmpdarr, int64_1);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "datumarr1");
+        tmpval = builder.CreateLoad(int64Type, tmpval, "datumarr1");
         tmpval = WrapaddVariableCodeGen(&builder, mcxt, tmpval);
-        builder.CreateAlignedStore(tmpval, dataptr, 8);
+        builder.CreateStore(tmpval, dataptr);
 
         /* do cell->m_val[idx + 1].val = tbl->CopyVarP(datumarray[0]) */
-        tmpval = builder.CreateAlignedLoad(tmpdarr, 8, "datumarr0");
+        tmpval = builder.CreateLoad(int64Type, tmpdarr, "datumarr0");
         tmpval = builder.CreateIntToPtr(tmpval, numericPtrType);
         Vals4[0] = int64_0;
         Vals4[1] = int32_1;
@@ -1447,12 +1467,12 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         Vals4[3] = int32_1;
         tmpval = builder.CreateInBoundsGEP(tmpval, Vals4);
         tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "lval");
-        builder.CreateAlignedStore(tmpval, cntptr, 8);
+        tmpval = builder.CreateLoad(int64Type, tmpval, "lval");
+        builder.CreateStore(tmpval, cntptr);
     }
 
-    builder.CreateAlignedStore(int8_0, dataflag, 1);
-    builder.CreateAlignedStore(int8_0, cntflag, 1);
+    builder.CreateStore(int8_0, dataflag);
+    builder.CreateStore(int8_0, cntflag);
     builder.CreateBr(agg_end);
 
     /* sonic data is not null, do aggregation */
@@ -1463,11 +1483,11 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
     Vals2[0] = int64_0;
     Vals2[1] = int32_1;
     tmpval = builder.CreateInBoundsGEP(bictlval, Vals2);
-    builder.CreateAlignedStore(mcxt, tmpval, 8);
+    builder.CreateStore(mcxt, tmpval);
 
     if (aggref->aggstage == 0) {
         /* corresponding to leftarg = (Numeric)(cell->m_val[idx].val) */
-        realdata = builder.CreateAlignedLoad(dataptr, 8, "sonic_data");
+        realdata = builder.CreateLoad(int64Type, dataptr, "sonic_data");
         leftarg = builder.CreateIntToPtr(realdata, numericPtrType);
 
         /* get BI numeric val from datum */
@@ -1479,11 +1499,11 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
         lnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
         rnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         /* check : NUMERIC_FLAG_IS_BI(numFlags) */
@@ -1497,7 +1517,7 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         Vals2[0] = int32_0;
         Vals2[1] = int32_0;
         llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals2);
-        builder.CreateAlignedStore(realdata, store_pos_val, 8);
+        builder.CreateStore(realdata, store_pos_val);
         /* check numeric is BI128 */
         oparg1 = builder.CreateICmpEQ(lnumFlags, val_binum128);
         oparg2 = builder.CreateICmpEQ(rnumFlags, val_binum128);
@@ -1510,16 +1530,16 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, dataptr, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, dataptr);
         builder.CreateBr(eval_count);
 
         builder.SetInsertPoint(bi128_add_bi128);
         oparg1 = builder.CreateZExt(oparg1, int32Type);
         oparg2 = builder.CreateZExt(oparg2, int32Type);
         WrapBiAggAddMatrixCodeGen(&builder, oparg1, oparg2, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, dataptr, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, dataptr);
         builder.CreateBr(eval_count);
 
         /* call numeric add */
@@ -1529,9 +1549,9 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
 
         builder.SetInsertPoint(eval_count);
         /* cell->m_val[idx+1].val++ */
-        tmpval = builder.CreateAlignedLoad(cntptr, 8, "count");
+        tmpval = builder.CreateLoad(int64Type, cntptr, "count");
         tmpval = builder.CreateAdd(tmpval, int64_1);
-        builder.CreateAlignedStore(tmpval, cntptr, 8);
+        builder.CreateStore(tmpval, cntptr);
         builder.CreateBr(agg_end);
     } else {
         /*
@@ -1542,13 +1562,13 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
 
         /* calculate sum : sum = sum + num */
         /* corresponding to leftarg = (Numeric)(leftdata[0]) */
-        realdata = builder.CreateAlignedLoad(dataptr, 8, "cell_val");
+        realdata = builder.CreateLoad(int64Type, dataptr, "cell_val");
         leftarg = builder.CreateIntToPtr(realdata, numericPtrType);
 
         /* corresponding to rightarg = DatumGetBINumeric(datumarray[1]) */
-        llvm::Value* tmpdarr = builder.CreateAlignedLoad(datumarr, 8, "datumarr");
+        llvm::Value* tmpdarr = builder.CreateLoad(int64PtrType, datumarr, "datumarr");
         tmpval = builder.CreateInBoundsGEP(tmpdarr, int64_1);
-        tmpval = builder.CreateAlignedLoad(tmpval, 8, "datumarr1");
+        tmpval = builder.CreateLoad(int64Type, tmpval, "datumarr1");
         rightarg = DatumGetBINumericCodeGen(&builder, tmpval);
 
         /* get numFlags : NUMERIC_NB_FLAGBITS(arg) */
@@ -1557,11 +1577,11 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         Vals4[2] = int32_0;
         Vals4[3] = int32_0;
         tmpval = builder.CreateInBoundsGEP(leftarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "lheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "lheader");
         lnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         tmpval = builder.CreateInBoundsGEP(rightarg, Vals4);
-        tmpval = builder.CreateAlignedLoad(tmpval, 2, "rheader");
+        tmpval = builder.CreateLoad(int16Type, tmpval, "rheader");
         rnumFlags = builder.CreateAnd(tmpval, val_mask);
 
         /* check : NUMERIC_FLAG_IS_BI(numFlags) */
@@ -1575,7 +1595,7 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         Vals2[0] = int32_0;
         Vals2[1] = int32_0;
         llvm::Value* store_pos_val = builder.CreateInBoundsGEP(bictlval, Vals2);
-        builder.CreateAlignedStore(realdata, store_pos_val, 8);
+        builder.CreateStore(realdata, store_pos_val);
         /* check numeric is BI128 */
         oparg1 = builder.CreateICmpEQ(lnumFlags, val_binum128);
         oparg2 = builder.CreateICmpEQ(rnumFlags, val_binum128);
@@ -1588,16 +1608,16 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
             func_bi64addbi64 = bi64add64_codegen(true);
         }
         builder.CreateCall(func_bi64addbi64, {leftarg, rightarg, bictlval});
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, dataptr, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, dataptr);
         builder.CreateBr(eval_count);
 
         builder.SetInsertPoint(bi128_add_bi128);
         oparg1 = builder.CreateZExt(oparg1, int32Type);
         oparg2 = builder.CreateZExt(oparg2, int32Type);
         WrapBiAggAddMatrixCodeGen(&builder, oparg1, oparg2, leftarg, rightarg, bictlval);
-        tmpval = builder.CreateAlignedLoad(store_pos_val, 8);
-        builder.CreateAlignedStore(tmpval, dataptr, 8);
+        tmpval = builder.CreateLoad(int64Type, store_pos_val);
+        builder.CreateStore(tmpval, dataptr);
         builder.CreateBr(eval_count);
 
         /* call numeric add */
@@ -1609,9 +1629,9 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         /* calculate count: count = oldcount + count, the count num can be stored by int64:
          * *countdata = *countdata + NUMERIC_64VALUE((Numeric)datumarray[0])
          */
-        llvm::Value* cntdata = builder.CreateAlignedLoad(cntptr, 8, "cntdata");
+        llvm::Value* cntdata = builder.CreateLoad(int64Type, cntptr, "cntdata");
 
-        tmpval = builder.CreateAlignedLoad(tmpdarr, 8, "datumarr0");
+        tmpval = builder.CreateLoad(int64Type, tmpdarr, "datumarr0");
         tmpval = builder.CreateIntToPtr(tmpval, numericPtrType);
         Vals4[0] = int64_0;
         Vals4[1] = int32_1;
@@ -1619,9 +1639,9 @@ llvm::Function* vsnumeric_avg_codegen(Aggref* aggref)
         Vals4[3] = int32_1;
         tmpval = builder.CreateInBoundsGEP(tmpval, Vals4);
         tmpval = builder.CreateBitCast(tmpval, int64PtrType);
-        llvm::Value* tmplarg = builder.CreateAlignedLoad(tmpval, 8, "tmp_rarg");
+        llvm::Value* tmplarg = builder.CreateLoad(int64Type, tmpval, "tmp_rarg");
         cntdata = builder.CreateAdd(cntdata, tmplarg);
-        builder.CreateAlignedStore(cntdata, cntptr, 8);
+        builder.CreateStore(cntdata, cntptr);
         builder.CreateBr(agg_end);
     }
 
@@ -1646,6 +1666,7 @@ llvm::Function* vec_count_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
     DEFINE_CG_PTRTYPE(hashCellPtrType, "struct.hashCell");
 
@@ -1699,7 +1720,7 @@ llvm::Function* vec_count_codegen(Aggref* aggref)
     Vals4[3] = int32_1;
     cellflag = builder.CreateInBoundsGEP(cell, Vals4);
 
-    tmpval = builder.CreateAlignedLoad(cellflag, 1, "cellflag");
+    tmpval = builder.CreateLoad(int8Type, cellflag, "cellflag");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_1);
     builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -1707,23 +1728,23 @@ llvm::Function* vec_count_codegen(Aggref* aggref)
     /* cell flag is null */
     builder.SetInsertPoint(agg_else);
     if (aggref->aggstage == 0) {
-        builder.CreateAlignedStore(int64_1, cellval, 8);
+        builder.CreateStore(int64_1, cellval);
     } else {
-        builder.CreateAlignedStore(pval, cellval, 8);
+        builder.CreateStore(pval, cellval);
     }
-    builder.CreateAlignedStore(int8_0, cellflag, 1);
+    builder.CreateStore(int8_0, cellflag);
     builder.CreateBr(agg_end);
 
     /* cell flag is not null */
     builder.SetInsertPoint(agg_then);
     if (aggref->aggstage == 0) {
-        tmpval = builder.CreateAlignedLoad(cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, cellval);
         tmpval = builder.CreateAdd(tmpval, int64_1);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        builder.CreateStore(tmpval, cellval);
     } else {
-        tmpval = builder.CreateAlignedLoad(cellval, 8);
+        tmpval = builder.CreateLoad(int64Type, cellval);
         tmpval = builder.CreateAdd(tmpval, pval);
-        builder.CreateAlignedStore(tmpval, cellval, 8);
+        builder.CreateStore(tmpval, cellval);
     }
     builder.CreateBr(agg_end);
 
@@ -1751,10 +1772,14 @@ llvm::Function* vsonic_count_codegen(Aggref* aggref)
 
     /* Define the datatype and variables that needed */
     DEFINE_CG_VOIDTYPE(voidType);
+    DEFINE_CG_TYPE(int8Type, CHAROID);
     DEFINE_CG_TYPE(int32Type, INT4OID);
     DEFINE_CG_TYPE(int64Type, INT8OID);
+    DEFINE_CG_PTRTYPE(int8PtrType, CHAROID);
     DEFINE_CG_PTRTYPE(int64PtrType, INT8OID);
     DEFINE_CG_PTRTYPE(sonicDatumArrayPtrType, "class.SonicDatumArray");
+    DEFINE_CG_PTRTYPE(atomPtrType, "struct.atom");
+    DEFINE_CG_PTRPTRTYPE(atomPtrPtrType, "struct.atom");
 
     DEFINE_CGVAR_INT8(int8_0, 0);
     DEFINE_CGVAR_INT8(int8_1, 1);
@@ -1801,13 +1826,13 @@ llvm::Function* vsonic_count_codegen(Aggref* aggref)
     /* get the nth flag of sonicdata : first calculate arrIdx and atomIdx */
     Vals2[1] = int32_pos_sdarray_nbit;
     llvm::Value* nbit = builder.CreateInBoundsGEP(sdata, Vals2);
-    nbit = builder.CreateAlignedLoad(nbit, 4, "arridx");
+    nbit = builder.CreateLoad(int32Type, nbit, "arridx");
     llvm::Value* arrIdx = builder.CreateLShr(locidx, nbit);
     arrIdx = builder.CreateSExt(arrIdx, int64Type);
 
     Vals2[1] = int32_pos_sdarray_atomsize;
     llvm::Value* atomsize = builder.CreateInBoundsGEP(sdata, Vals2);
-    atomsize = builder.CreateAlignedLoad(atomsize, 4, "atomsize");
+    atomsize = builder.CreateLoad(int32Type, atomsize, "atomsize");
     atomsize = builder.CreateSub(atomsize, int32_1);
     llvm::Value* atomIdx = builder.CreateAnd(atomsize, locidx);
     atomIdx = builder.CreateSExt(atomIdx, int64Type);
@@ -1815,25 +1840,25 @@ llvm::Function* vsonic_count_codegen(Aggref* aggref)
     /* sdata->m_arr[arrIdx] */
     Vals2[1] = int32_pos_sdarray_arr;
     llvm::Value* atom = builder.CreateInBoundsGEP(sdata, Vals2);
-    atom = builder.CreateAlignedLoad(atom, 8, "atomptr");
+    atom = builder.CreateLoad(atomPtrPtrType, atom, "atomptr");
     atom = builder.CreateInBoundsGEP(atom, arrIdx);
-    atom = builder.CreateAlignedLoad(atom, 8, "atom");
+    atom = builder.CreateLoad(atomPtrType, atom, "atom");
 
     /* get address of sdata->m_arr[arrIdx]->data[atomIdx] */
     Vals2[1] = int32_pos_atom_data;
     llvm::Value* data = builder.CreateInBoundsGEP(atom, Vals2);
-    data = builder.CreateAlignedLoad(data, 8, "data");
+    data = builder.CreateLoad(int8PtrType, data, "data");
     data = builder.CreateBitCast(data, int64PtrType);
     llvm::Value* dataaddr = builder.CreateInBoundsGEP(data, atomIdx);
 
     /* sdata->m_arr[arrIdx]->nullFlag[atomIdx] */
     Vals2[1] = int32_pos_atom_nullflag;
     llvm::Value* nullflag = builder.CreateInBoundsGEP(atom, Vals2);
-    nullflag = builder.CreateAlignedLoad(nullflag, 8, "nullflagptr");
+    nullflag = builder.CreateLoad(int8PtrType, nullflag, "nullflagptr");
     nullflag = builder.CreateInBoundsGEP(nullflag, atomIdx);
 
     /* check if flag is NULL */
-    tmpval = builder.CreateAlignedLoad(nullflag, 1, "nullflag");
+    tmpval = builder.CreateLoad(int8Type, nullflag, "nullflag");
     tmpval = builder.CreateAnd(tmpval, int8_1);
     tmpval = builder.CreateICmpEQ(tmpval, int8_1);
     builder.CreateCondBr(tmpval, agg_else, agg_then);
@@ -1841,23 +1866,23 @@ llvm::Function* vsonic_count_codegen(Aggref* aggref)
     /* sonic data flag is null */
     builder.SetInsertPoint(agg_else);
     if (aggref->aggstage == 0) {
-        builder.CreateAlignedStore(int64_1, dataaddr, 8);
+        builder.CreateStore(int64_1, dataaddr);
     } else {
-        builder.CreateAlignedStore(pval, dataaddr, 8);
+        builder.CreateStore(pval, dataaddr);
     }
-    builder.CreateAlignedStore(int8_0, nullflag, 1);
+    builder.CreateStore(int8_0, nullflag);
     builder.CreateBr(agg_end);
 
     /* sonic data flag is not null */
     builder.SetInsertPoint(agg_then);
     if (aggref->aggstage == 0) {
-        tmpval = builder.CreateAlignedLoad(dataaddr, 8, "dataval");
+        tmpval = builder.CreateLoad(int64Type, dataaddr, "dataval");
         tmpval = builder.CreateAdd(tmpval, int64_1);
-        builder.CreateAlignedStore(tmpval, dataaddr, 8);
+        builder.CreateStore(tmpval, dataaddr);
     } else {
-        tmpval = builder.CreateAlignedLoad(dataaddr, 8, "dataval");
+        tmpval = builder.CreateLoad(int64Type, dataaddr, "dataval");
         tmpval = builder.CreateAdd(tmpval, pval);
-        builder.CreateAlignedStore(tmpval, dataaddr, 8);
+        builder.CreateStore(tmpval, dataaddr);
     }
     builder.CreateBr(agg_end);
 
@@ -1887,6 +1912,7 @@ llvm::Value* DatumGetBINumericCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::
 
     jitted_datbinum = llvmCodeGen->module()->getFunction("Jitted_datbinum");
     if (NULL == jitted_datbinum) {
+        DEFINE_CG_TYPE(int8Type, CHAROID);
         DEFINE_CG_TYPE(int64Type, INT8OID);
         DEFINE_CG_PTRTYPE(numericPtrType, "struct.NumericData");
         DEFINE_CG_PTRTYPE(varattrib_1bPtrType, "struct.varattrib_1b");
@@ -1916,7 +1942,7 @@ llvm::Value* DatumGetBINumericCodeGen(GsCodeGen::LlvmBuilder* ptrbuilder, llvm::
         /* convert to varatt_1b type */
         tmpval = builder.CreateIntToPtr(arg, varattrib_1bPtrType);
         tmpval = builder.CreateInBoundsGEP(tmpval, Vals);
-        tmpval = builder.CreateAlignedLoad(tmpval, 1);
+        tmpval = builder.CreateLoad(int8Type, tmpval);
         tmpval = builder.CreateAnd(tmpval, val_mask);
 
         /* check VARATT_IS_SHORT(num) is true or not */

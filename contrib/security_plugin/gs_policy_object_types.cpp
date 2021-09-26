@@ -710,3 +710,86 @@ int gs_policy_base_cmp(const void *key1, const void *key2)
     if (r->m_type < l->m_type) return 1;
     return strcasecmp(l->m_label_name.c_str(), r->m_label_name.c_str());
 }
+
+/* get function param types */
+bool get_function_parameters(HeapTuple tuple, func_types* types, int* default_params)
+{
+    if (types == NULL) {
+        return false;
+    }
+    Form_pg_proc func_rel = (Form_pg_proc) GETSTRUCT(tuple);
+    if (default_params != NULL) {
+        *default_params = func_rel->pronargdefaults;
+    }
+    bool isNull = false;
+    Datum pro_all_arg_types = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_proallargtypes, &isNull);
+    Oid* pro_arg_types = NULL;
+    if (!isNull) {
+        ArrayType  *arr = DatumGetArrayTypeP(pro_all_arg_types);
+        Assert(ARR_DIMS(arr)[0] >= func_rel->pronargs);
+        pro_arg_types = (Oid*)ARR_DATA_PTR(arr);
+    } else {
+        pro_arg_types = func_rel->proargtypes.values;
+    }
+    Oid type;
+    for (int i = 0; i < func_rel->pronargs; ++i) {
+        type = pro_arg_types[i];
+        types->push_back(type);
+    }
+    return !types->empty();
+}
+
+bool verify_proc_params(const func_params* func_params, const func_types* proc_types)
+{
+    if (!func_params || func_params->empty())
+        return true;
+    if (!proc_types || proc_types->empty()) {
+        return false;
+    }
+    /* it is used to represent function's parameters in pg_proc */
+    func_types::const_iterator it = proc_types->begin();
+
+    ++it;
+    /* fit is useed to represent user's input parameters when create masking policy */
+    func_params::const_iterator fit = func_params->begin(), feit = func_params->end();
+    int datatype_length = 2; /* data type length */
+    for (; fit != feit; ++fit, ++it) {
+        if (it == proc_types->end()) {
+            return false;
+        }
+        switch (*it) {
+            case BPCHAROID:
+            case VARCHAROID:
+            case NVARCHAR2OID:
+            case TEXTOID:
+            {
+                if (strncasecmp(fit->c_str(), "s:", datatype_length) != 0) {
+                    return false;
+                }
+            }
+            break;
+            case INT8OID:
+            case INT4OID:
+            case INT2OID:
+            case INT1OID:
+            {
+                if (strncasecmp(fit->c_str(), "i:", datatype_length) != 0) {
+                    return false;
+                }
+            }
+            break;
+            case FLOAT4OID:
+            case FLOAT8OID:
+            case NUMERICOID:
+            {
+                if (strncasecmp(fit->c_str(), "f:", datatype_length) != 0) {
+                    return false;
+                }
+            }
+            break;
+            default:
+                return false;
+        }
+    }
+    return true;
+}

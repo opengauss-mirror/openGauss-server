@@ -475,7 +475,7 @@ void SetLatch(volatile Latch* latch)
      * in a 32 bit integer, and so should be atomic. In the worst case, we
      * might end up signaling the wrong process. Even then, you're very
      * unlucky if a process with that bogus pid exists and belongs to
-     * Postgres; and PG database processes should handle excess SIGUSR1
+     * openGauss; and PG database processes should handle excess SIGUSR1
      * interrupts without a problem anyhow.
      *
      * Another sort of race condition that's possible here is for a new

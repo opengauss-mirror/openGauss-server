@@ -65,3 +65,26 @@ begin
     return left(MD5(random()::text), length(col));
 end;
 $$ LANGUAGE plpgsql;
+
+create or replace function pg_catalog.regexpmasking(col text, reg text, replace_text text, pos INTEGER default 0, reg_len INTEGER default -1) RETURNS text AS $$
+declare
+	size INTEGER := length(col);
+	endpos INTEGER;
+	startpos INTEGER;
+	lstr text;
+	rstr text;
+	ltarget text;
+begin
+	startpos := pos;
+	IF pos < 0 THEN startpos := 0; END IF;
+	IF pos >= size THEN startpos := size; END IF;
+	endpos := reg_len + startpos - 1;
+	IF reg_len < 0 THEN endpos := size - 1; END IF;
+	IF reg_len + startpos >= size THEN endpos := size - 1; END IF;
+	lstr := left(col, startpos);
+	rstr := right(col, size - endpos - 1);
+	ltarget := substring(col, startpos+1, endpos - startpos + 1);
+    ltarget := pg_catalog.REGEXP_REPLACE(ltarget, reg, replace_text, 'g');
+    return lstr || ltarget || rstr;
+end;
+$$ LANGUAGE plpgsql;

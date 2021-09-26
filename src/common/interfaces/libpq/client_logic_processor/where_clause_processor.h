@@ -37,11 +37,11 @@ typedef struct PGClientLogicParams PGClientLogicParams;
 struct ExprParts;
 class ExprPartsList;
 class ICachedColumn;
-
+class CStringsMap;
 class WhereClauseProcessor {
 public:
     static bool process(const ICachedColumns *cached_columns, const ExprPartsList *expr_parts_list,
-        StatementData *statement_data);
+        StatementData *statement_data, const CStringsMap* target_list = NULL);
 };
 
 #endif

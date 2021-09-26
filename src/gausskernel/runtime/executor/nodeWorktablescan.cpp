@@ -16,9 +16,9 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodeRecursiveunion.h"
-#include "executor/nodeWorktablescan.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeRecursiveunion.h"
+#include "executor/node/nodeWorktablescan.h"
 
 static TupleTableSlot* WorkTableScanNext(WorkTableScanState* node);
 

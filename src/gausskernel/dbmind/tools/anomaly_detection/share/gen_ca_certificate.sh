@@ -16,9 +16,6 @@
 # gen_ca_certificate.sh
 #    generate certificate
 #
-# IDENTIFICATION
-#    src/gausskernel/dbmind/tools/A-Detection/shell/gen_ca_certificate.sh
-#
 #-------------------------------------------------------------------------
 source ./initialize_certificate.sh
 
@@ -26,7 +23,7 @@ ca_crt="ca.crt"
 ca_key="ca.key"
 ca_password=""
 
-read -s -p "please input the password of ca: " ca_password
+read -s -p "please input the CA password: " ca_password
 
 cat > ca.conf <<-EOF
 [req]

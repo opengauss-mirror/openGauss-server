@@ -71,6 +71,7 @@ CATALOG(gs_asp,9534) BKI_WITHOUT_OIDS BKI_ROWTYPE_OID(3465) BKI_SCHEMA_MACRO
     text lockmode;
     int8 block_sessionid;
     text wait_status;
+    text global_sessionid;
 #endif
 } FormData_gs_asp;
 
@@ -88,7 +89,7 @@ typedef FormData_gs_asp* Form_gs_asp;
  *		compiler constants for gs_asp
  *-------------------------------------------------------------------------
  */
-#define Natts_gs_asp                      26
+#define Natts_gs_asp                      27
 #define Anum_gs_asp_sample_id             1
 #define Anum_gs_asp_sample_time           2
 #define Anum_gs_asp_need_flush_sample     3
@@ -115,6 +116,7 @@ typedef FormData_gs_asp* Form_gs_asp;
 #define Anum_gs_asp_lockmode              24
 #define Anum_gs_asp_block_sessionid       25
 #define Anum_gs_asp_wait_status           26
+#define Anum_gs_asp_global_sessionid      27
 
 #endif /* GS_ASP */
 

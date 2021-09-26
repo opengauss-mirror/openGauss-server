@@ -58,6 +58,17 @@
 typedef enum { PGC_INTERNAL, PGC_POSTMASTER, PGC_SIGHUP, PGC_BACKEND, PGC_SUSET, PGC_USERSET } GucContext;
 
 /*
+ * The following type represents the application environment of the
+ * parameter.
+ * 
+ * NODE_ALL: general parameters, suitable for centralized and distributed
+ * scenarios.
+ * NODE_SINGLENODE: centralized parameters, suitable for centralized scenarios.
+ * NODE_DISTRIBUTE: distributed parameters, suitable for distributed scenarios.
+ */
+typedef enum { NODE_ALL, NODE_SINGLENODE, NODE_DISTRIBUTE } GucNodeType;
+
+/*
  * The following type records the source of the current setting.  A
  * new setting can only take effect if the previous setting had the
  * same or lower level.  (E.g, changing the config file doesn't
@@ -257,9 +268,9 @@ extern void GetConfigOptionByNum(int varnum, const char** values, bool* noshow);
 extern int GetNumConfigOptions(void);
 
 extern void SetPGVariable(const char* name, List* args, bool is_local);
-extern void GetPGVariable(const char* name, const char* likename, DestReceiver* dest);
+extern void GetPGVariable(const char* name, DestReceiver* dest);
 extern TupleDesc GetPGVariableResultDesc(const char* name);
-
+extern int get_fixed_bgwriter_thread_num();
 #ifdef PGXC
 extern char* RewriteBeginQuery(char* query_string, const char* name, List* args);
 #endif
@@ -357,7 +368,12 @@ typedef enum {
     PARAM_PATH_GEN = 4, /* Parametrized Path Generation */
     RAND_COST_OPT = 8,  /* Optimizing sc_random_page_cost */
     PARAM_PATH_OPT = 16, /* Parametrized Path Optimization. */
-    PAGE_EST_OPT = 32   /* More accurate (rowstored) index pages estimation */
+    PAGE_EST_OPT = 32,   /* More accurate (rowstored) index pages estimation */
+    NO_UNIQUE_INDEX_FIRST = 64, /* use unique index first rule in path generation */
+    JOIN_SEL_WITH_CAST_FUNC = 128, /* support cast function while calculating join selectivity */
+    CANONICAL_PATHKEY = 256, /* Use canonicalize pathkeys directly */
+    INDEX_COST_WITH_LEAF_PAGES_ONLY = 512, /* compute index cost with consideration of leaf-pages-only */
+    PARTITION_OPFUSION = 1024 /* Enable partition opfusion */
 } sql_beta_param;
 
 #define ENABLE_PRED_PUSH(root) \
@@ -434,5 +450,19 @@ extern void set_qunit_case_number_hook(int newval, void* extra);
 
 extern GucContext get_guc_context();
 extern void InitializeNumLwLockPartitions(void);
+
+extern bool check_double_parameter(double* newval, void** extra, GucSource source);
+extern bool CheckReplChannel(const char* ChannelInfo);
+extern bool logging_module_check(char** newval, void** extra, GucSource source);
+extern void logging_module_guc_assign(const char* newval, void* extra);
+extern bool check_directory(char** newval, void** extra, GucSource source);
+extern bool transparent_encrypt_kms_url_region_check(char** newval, void** extra, GucSource source);
+extern bool check_canonical_path(char** newval, void** extra, GucSource source);
+
+#ifdef ENABLE_MULTIPLE_NODES
+extern const char* show_nodegroup_mode(void);
+#endif
+
+extern THR_LOCAL GucContext currentGucContext;
 
 #endif /* GUC_H */

@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <poll.h>
+#include <sys/epoll.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include "libcomm_message.h"

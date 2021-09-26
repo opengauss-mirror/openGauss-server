@@ -38,7 +38,7 @@
  * Portions Copyright (c) 2010-2012, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
- *	  src/gausskernel/storage/replication/syncrep.cpp
+ *      src/gausskernel/storage/replication/syncrep.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -61,6 +61,7 @@
 #include "utils/builtins.h"
 #include "utils/ps_status.h"
 #include "utils/distribute_test.h"
+#include "replication/dcf_replication.h"
 #include "common/config/cm_config.h"
 
 /*
@@ -90,8 +91,13 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
                                           XLogRecPtr* replayPtr, List* sync_standbys, uint8 nth);
 
 
+static void SyncPaxosQueueInsert(void);
+static void SyncPaxosCancelWait(void);
+static int SyncPaxosWakeQueue(void);
+
 #ifdef USE_ASSERT_CHECKING
 static bool SyncRepQueueIsOrderedByLSN(int mode);
+static bool SyncPaxosQueueIsOrderedByLSN(void);
 #endif
 
 static List *SyncRepGetSyncStandbysPriority(bool *am_sync, List** catchup_standbys = NULL);
@@ -146,7 +152,7 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
  * the state to SYNC_REP_WAIT_COMPLETE once replication is confirmed.
  * This backend then resets its state to SYNC_REP_NOT_WAITING.
  */
-void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
+void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
     char *new_status = NULL;
     const char *old_status = NULL;
@@ -157,8 +163,8 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
      * sync replication standby names defined. Note that those standbys don't
      * need to be connected.
      */
-    if (!u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() || !SyncStandbysDefined() ||
-        (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
+    if (!u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() ||
+        !SyncStandbysDefined() || (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE))
         return;
 
     Assert(SHMQueueIsDetached(&(t_thrd.proc->syncRepLinks)));
@@ -278,7 +284,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
          * altogether is not helpful, so we just terminate the wait with a
          * suitable warning.
          */
-        if (t_thrd.int_cxt.QueryCancelPending) {
+        if (enableHandleCancel && t_thrd.int_cxt.QueryCancelPending) {
             /* reset query cancel signal after vacuum. */
             if (!t_thrd.vacuum_cxt.in_vacuum) {
                 t_thrd.int_cxt.QueryCancelPending = false;
@@ -623,14 +629,10 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
      * or there are not enough synchronous standbys.
      * but in a particular scenario, when most_available_sync is true, primary only wait the alive sync standbys
      * if list_length(sync_standbys) doesn't satisfy t_thrd.syncrep_cxt.SyncRepConfig->num_sync.
-     * 
-     * All synchronous standbys are allowed to disconnect from the host
-     * only when the maximum available mode is on
      */
     if ((!(*am_sync) && check_am_sync) || t_thrd.syncrep_cxt.SyncRepConfig == NULL ||
         (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync &&
-            list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync) ||
-        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && list_length(sync_standbys) == 0)) {
+        list_length(sync_standbys) < t_thrd.syncrep_cxt.SyncRepConfig->num_sync)) {
         list_free(sync_standbys);
         return false;
     }
@@ -1375,6 +1377,312 @@ void SyncRepCheckSyncStandbyAlive(void)
     }
 }
 
+/*
+ * Wait for paxos, if requested by user.
+ *
+ * Initially backends start in state SYNC_REP_NOT_WAITING and then
+ * change that state to SYNC_REP_WAITING before adding ourselves
+ * to the wait queue. During SyncRepWakeQueue() ConsensusLogCallback changes
+ * the state to SYNC_REP_WAIT_COMPLETE once paxos is consensus.
+ * This backend then resets its state to SYNC_REP_NOT_WAITING.
+ * 
+ * Returns true if it is really awaken by paxos callback, or false if it
+ * is terminated by proc die or demotion.
+ */
+bool SyncPaxosWaitForLSN(XLogRecPtr PaxosConsensusLSN)
+{
+    bool syncSuccessed = true;
+    char* new_status = NULL;
+    const char* old_status = NULL;
+
+    Assert(SHMQueueIsDetached(&(t_thrd.proc->syncPaxosLinks)));
+    Assert(t_thrd.walsender_cxt.WalSndCtl != NULL);
+
+    LWLockAcquire(SyncPaxosLock, LW_EXCLUSIVE);
+    Assert(t_thrd.proc->syncPaxosState == SYNC_REP_NOT_WAITING);
+
+    if (XLByteLE(PaxosConsensusLSN, t_thrd.walsender_cxt.WalSndCtl->paxosLsn)) {
+        LWLockRelease(SyncPaxosLock);
+        return true;
+    }
+
+    /*
+     * Set our waitPaxosLSN so ConsensusLogCb will know when to wake us, and add
+     * ourselves to the queue.
+     */
+    t_thrd.proc->waitPaxosLSN = PaxosConsensusLSN;
+    t_thrd.proc->syncPaxosState = SYNC_REP_WAITING;
+    SyncPaxosQueueInsert();
+    Assert(SyncPaxosQueueIsOrderedByLSN());
+    LWLockRelease(SyncPaxosLock);
+
+    /* Alter ps display to show waiting for sync rep. */
+    if (u_sess->attr.attr_common.update_process_title) {
+        int len;
+        errno_t ret = EOK;
+        int rc = 0;
+#define NEW_STATUS_LEN 33
+        old_status = get_ps_display(&len);
+        new_status = (char *) palloc(len + NEW_STATUS_LEN);
+        ret = memcpy_s(new_status, len + NEW_STATUS_LEN, old_status, len);
+        securec_check(ret, "\0", "\0");
+
+        rc = snprintf_s(new_status + len, NEW_STATUS_LEN, NEW_STATUS_LEN - 1, " waiting for %X/%X",
+                        (uint32)(PaxosConsensusLSN >> 32), (uint32)PaxosConsensusLSN);
+        securec_check_ss(rc, "", "");
+
+        set_ps_display(new_status, false);
+        new_status[len] = '\0'; /* truncate off " waiting ..." */
+    }
+
+    WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_WALSYNC);
+
+    /*
+     * Wait for specified LSN to be confirmed.
+     *
+     * Each proc has its own wait latch, so we perform a normal latch
+     * check/wait loop here.
+     */
+    for (;;) {
+        /* Must reset the latch before testing state. */
+        ResetLatch(&t_thrd.proc->procLatch);
+
+        if (t_thrd.proc->syncPaxosState == SYNC_REP_WAIT_COMPLETE) 
+            break;
+
+        /*
+         * If a wait for synchronous replication is pending, we can neither
+         * acknowledge the commit nor raise ERROR or FATAL.  The latter would
+         * lead the client to believe that the transaction aborted, which
+         * is not true: it's already committed locally. The former is no good
+         * either: the client has requested synchronous replication, and is
+         * entitled to assume that an acknowledged commit is also replicated,
+         * which might not be true. So in this case we issue a WARNING (which
+         * some clients may be able to interpret) and shut off further output.
+         * We do NOT reset ProcDiePending, so that the process will die after
+         * the commit is cleaned up.
+         */
+        if (t_thrd.int_cxt.ProcDiePending || t_thrd.proc_cxt.proc_exit_inprogress) {
+            ereport(WARNING,
+                    (errcode(ERRCODE_ADMIN_SHUTDOWN),
+                     errmsg("canceling the wait for paxos consensus and terminating connection due to administrator command"),
+                     errdetail("The transaction will not be committed locally, because it is not consensus by paxos yet.")));
+            t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+            SyncPaxosCancelWait();
+            syncSuccessed = false;
+            break;
+        }
+
+        /*
+         * It's unclear what to do if a query cancel interrupt arrives.  We
+         * can't actually abort at this point, but ignoring the interrupt
+         * altogether is not helpful, so we just terminate the wait with a
+         * suitable warning.
+         */
+        if (t_thrd.int_cxt.QueryCancelPending) {
+            /* reset query cancel signal after vacuum. */
+            if (!t_thrd.vacuum_cxt.in_vacuum) {
+                t_thrd.int_cxt.QueryCancelPending = false;
+            }
+            ereport(WARNING,
+                    (errmsg("canceling wait for paxos consensus due to user request"),
+                     errdetail("The transaction will not be committed locally, because it is not consensus by paxos yet.")));
+            SyncPaxosCancelWait();
+            syncSuccessed = false;
+            break;
+        }
+
+        /*
+         * If the postmaster dies, we'll probably never get an
+         * acknowledgement, because all the wal sender processes will exit. So
+         * just bail out.
+         */
+        if (!PostmasterIsAlive()) {
+            t_thrd.int_cxt.ProcDiePending = true;
+            t_thrd.postgres_cxt.whereToSendOutput = DestNone;
+            SyncPaxosCancelWait();
+            syncSuccessed = false;
+            break;
+        }
+
+        /*
+         * For case that query cancel pending or proc die pending signal not reached, if current
+         * session is set closed, we'll stop wait
+         */
+        if (u_sess->status == KNL_SESS_CLOSE) {
+            ereport(WARNING,
+                    (errmsg("canceling wait for paxos consensus due to session close."),
+                     errdetail("The transaction has already committed locally, but might not have been consensus by paxos yet.")));
+            SyncPaxosCancelWait();
+            syncSuccessed = false;
+            break;
+        }
+
+        /*
+         * Wait on latch.  Any condition that should wake us up will set the
+         * latch, so no need for timeout.
+         */
+        WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, 3000L);
+    }
+
+    pgstat_report_waitstatus(oldStatus);
+
+    /*
+     * ConsensusLogCb has checked our LSN and has removed us from queue. Clean up
+     * state and leave.  It's OK to reset these shared memory fields without
+     * holding SyncPaxosLock, because any walsenders will ignore us anyway when
+     * we're not on the queue.
+     */
+    pg_read_barrier();
+    Assert(SHMQueueIsDetached(&(t_thrd.proc->syncPaxosLinks)));
+    t_thrd.proc->syncPaxosState = SYNC_REP_NOT_WAITING;
+    t_thrd.proc->waitPaxosLSN = 0;
+
+    if (new_status != NULL) {
+        /* Reset ps display */
+        set_ps_display(new_status, false);
+        pfree(new_status);
+        new_status = NULL;
+    }
+    return syncSuccessed;
+}
+
+/*
+ * Acquire SyncPaxosLock and cancel any wait currently in progress.
+ */
+static void SyncPaxosCancelWait(void)
+{
+    LWLockAcquire(SyncPaxosLock, LW_EXCLUSIVE);
+    if (!SHMQueueIsDetached(&(t_thrd.proc->syncPaxosLinks)))
+        SHMQueueDelete(&(t_thrd.proc->syncPaxosLinks));
+    t_thrd.proc->syncPaxosState = SYNC_REP_NOT_WAITING;
+    LWLockRelease(SyncPaxosLock);
+}
+
+/*
+ * Insert t_thrd.proc into the specified SyncPaxosQueue, maintaining sorted invariant.
+ *
+ * Usually we will go at tail of queue, though it's possible that we arrive
+ * here out of order, so start at tail and work back to insertion point.
+ */
+static void SyncPaxosQueueInsert(void)
+{
+    PGPROC* proc = NULL;
+
+    proc = (PGPROC* ) SHMQueuePrev(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                   &(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                   offsetof(PGPROC, syncPaxosLinks));
+
+    while (proc != NULL) {
+        /*
+         * Stop at the queue element that we should after to ensure the queue
+         * is ordered by LSN.
+         */
+        if (XLByteLE(proc->waitPaxosLSN, t_thrd.proc->waitPaxosLSN))
+            break;
+
+        proc = (PGPROC *) SHMQueuePrev(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                       &(proc->syncPaxosLinks),
+                                       offsetof(PGPROC, syncPaxosLinks));
+    }
+
+    if (proc != NULL)
+        SHMQueueInsertAfter(&(proc->syncPaxosLinks), &(t_thrd.proc->syncPaxosLinks));
+    else
+        SHMQueueInsertAfter(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue), &(t_thrd.proc->syncPaxosLinks));
+}
+
+/*
+ * Update the LSNs on paxos queue based upon our latest state.
+ * 
+ * NOTE: we pass paxosConsensus lsn here, in order not to get xlogctl->info_lck.
+ */
+void SyncPaxosReleaseWaiters(XLogRecPtr PaxosConsensusLSN)
+{
+    volatile WalSndCtlData *walsndctl = t_thrd.walsender_cxt.WalSndCtl;
+    int numProc = 0;
+
+    LWLockAcquire(SyncPaxosLock, LW_EXCLUSIVE);
+
+    /*
+     * Set the lsn first so that when we wake backends they will release up to
+     * this location.
+     */
+    if (XLByteLE(walsndctl->paxosLsn, PaxosConsensusLSN)) {
+        walsndctl->paxosLsn = PaxosConsensusLSN;
+        numProc = SyncPaxosWakeQueue();
+    }
+
+    LWLockRelease(SyncPaxosLock);
+
+    ereport(DEBUG3, (errmsg("released %d procs up to paxos consensus %X/%X", 
+            numProc, (uint32) (PaxosConsensusLSN >> 32), (uint32) PaxosConsensusLSN)));
+}
+
+/*
+ * Walk the specified queue from head.    Set the state of any backends that
+ * need to be woken, remove them from the queue, and then wake them.
+ *
+ * Must hold SyncPaxosLock.
+ */
+static int SyncPaxosWakeQueue(void)
+{
+    volatile WalSndCtlData *walsndctl = t_thrd.walsender_cxt.WalSndCtl;
+    PGPROC *proc = NULL;
+    PGPROC *thisproc = NULL;
+    int numprocs = 0;
+
+    Assert(SyncPaxosQueueIsOrderedByLSN());
+
+    proc = (PGPROC *) SHMQueueNext(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                   &(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                   offsetof(PGPROC, syncPaxosLinks));
+
+    while (proc != NULL) {
+        /*
+         * Assume the queue is ordered by LSN
+         */
+        if (XLByteLT(walsndctl->paxosLsn, proc->waitPaxosLSN))
+            return numprocs;
+
+        /*
+         * Move to next proc, so we can delete thisproc from the queue.
+         * thisproc is valid, proc may be NULL after this.
+         */
+        thisproc = proc;
+        proc = (PGPROC *) SHMQueueNext(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                       &(proc->syncPaxosLinks),
+                                       offsetof(PGPROC, syncPaxosLinks));
+
+        /*
+         * Remove thisproc from queue.
+         */
+        SHMQueueDelete(&(thisproc->syncPaxosLinks));
+
+        /*
+         * SyncRepWaitForLSN() reads syncRepState without holding the lock, so
+         * make sure that it sees the queue link being removed before the
+         * syncRepState change.
+         */
+        pg_write_barrier();
+
+        /*
+         * Set state to complete; see SyncRepWaitForLSN() for discussion of
+         * the various states.
+         */
+        thisproc->syncPaxosState = SYNC_REP_WAIT_COMPLETE;
+
+        /*
+         * Wake only when we have set state and removed from queue.
+         */
+        SetLatch(&(thisproc->procLatch));
+
+        numprocs++;
+    }
+
+    return numprocs;
+}
+
 #ifdef USE_ASSERT_CHECKING
 static bool SyncRepQueueIsOrderedByLSN(int mode)
 {
@@ -1400,6 +1708,34 @@ static bool SyncRepQueueIsOrderedByLSN(int mode)
 
         proc = (PGPROC *)SHMQueueNext(&(t_thrd.walsender_cxt.WalSndCtl->SyncRepQueue[mode]), &(proc->syncRepLinks),
                                       offsetof(PGPROC, syncRepLinks));
+    }
+
+    return true;
+}
+#endif
+
+#ifdef USE_ASSERT_CHECKING
+static bool SyncPaxosQueueIsOrderedByLSN(void)
+{
+    PGPROC *proc = NULL;
+    XLogRecPtr lastPaxosLSN = 0;
+
+    proc = (PGPROC *) SHMQueueNext(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                   &(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                   offsetof(PGPROC, syncPaxosLinks));
+
+    while (proc != NULL) {
+        /*
+         * Check the queue is ordered by LSN
+         */
+        if (XLByteLT(proc->waitPaxosLSN, lastPaxosLSN))
+            return false;
+
+        lastPaxosLSN = proc->waitPaxosLSN;
+
+        proc = (PGPROC *) SHMQueueNext(&(t_thrd.walsender_cxt.WalSndCtl->SyncPaxosQueue),
+                                       &(proc->syncPaxosLinks),
+                                       offsetof(PGPROC, syncPaxosLinks));
     }
 
     return true;

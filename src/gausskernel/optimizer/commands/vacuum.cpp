@@ -39,14 +39,16 @@
 #include "catalog/gs_matview.h"
 #include "catalog/pg_database.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_object.h"
 #include "catalog/pgxc_class.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
 #include "commands/cluster.h"
+#include "commands/dbcommands.h"
 #include "commands/matview.h"
 #include "commands/tablespace.h"
 #include "commands/vacuum.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "miscadmin.h"
 #include "optimizer/cost.h"
 #include "pgstat.h"
@@ -55,6 +57,7 @@
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
+#include "storage/tcap.h"
 #include "utils/acl.h"
 #include "utils/extended_statistics.h"
 #include "utils/fmgroids.h"
@@ -66,9 +69,11 @@
 #include "access/heapam.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/commands_gstrace.h"
+
 #ifdef ENABLE_MOT
 #include "foreign/fdwapi.h"
 #endif
+#include "access/ustore/knl_uheap.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/utils/constant_def.h"
 #endif
@@ -107,6 +112,7 @@ const char* sql_templates[] = {
 typedef struct {
     Bitmapset* invisMap; /* cache invisible tuple's partOid in global partition index */
     Bitmapset* visMap;   /* cache visible tuple's partOid in global partition index */
+    oidvector* bucketList;
 } VacStates;
 
 extern void exec_query_for_merge(const char* query_string);
@@ -124,6 +130,8 @@ static THR_LOCAL int elevel = -1;
 static void vac_truncate_clog(TransactionId frozenXID);
 static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast);
 static void GPIVacuumMainPartition(
+    Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy);
+static void CBIVacuumMainPartition(
     Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy);
 
 #define TryOpenCStoreInternalRelation(r, lmode, r1, r2)                   \
@@ -527,6 +535,10 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
         vacObj->flags = vacstmt->flags;
         oid_list = lappend(oid_list, vacObj);
 
+        if (!IsAutoVacuumWorkerProcess()) {
+            TrForbidAccessRbObject(RelationRelationId, relid);
+        }
+
         if (t_thrd.vacuum_cxt.vac_context) {
             (void)MemoryContextSwitchTo(oldcontext);
         }
@@ -574,6 +586,9 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("relation with OID %u has one or more incremental materialized view associated, and cannot be FULL vacuumed",
                                    relationid)));
+        }
+        if (!IsAutoVacuumWorkerProcess()) {
+            TrForbidAccessRbObject(RelationRelationId, relationid, vacstmt->relation->relname);
         }
 
         /* 1.a partition */
@@ -764,6 +779,11 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
 
         while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
             Form_pg_class classForm = (Form_pg_class) GETSTRUCT(tuple);
+
+            /* Skip object in recycle bin. */
+            if (TrIsRefRbObjectEx(RelationRelationId, HeapTupleGetOid(tuple), NameStr(classForm->relname))) {
+                continue;
+            }
 
             if (classForm->relkind != RELKIND_RELATION && classForm->relkind != RELKIND_MATVIEW)
                 continue;
@@ -991,6 +1011,10 @@ double vac_estimate_reltuples(
     double unscanned_pages;
     double total_tuples;
 
+    if (RelationIsBucket(relation)) {
+        return 0;
+    }
+
     /* If we did scan the whole table, just use the count as-is */
     if (scanned_pages >= total_pages)
         return scanned_tuples;
@@ -1021,6 +1045,20 @@ double vac_estimate_reltuples(
     unscanned_pages = (double)total_pages - (double)scanned_pages;
     total_tuples = old_density * unscanned_pages + scanned_tuples;
     return floor(total_tuples + 0.5);
+}
+
+static void debug_print_rows_and_pages(Relation relation, Form_pg_class pgcform)
+{
+    if (!module_logging_is_on(MOD_AUTOVAC)) {
+        return;
+    }
+    ereport(DEBUG2, (errmodule(MOD_AUTOVAC),
+                    (errmsg("Update relstats for relation %s: "
+                            "old totalrows = %lf, relpages = %lf; "
+                            "new totalrows = %lf, relpages = %lf.",
+                            NameStr(relation->rd_rel->relname),
+                            relation->rd_rel->reltuples, relation->rd_rel->relpages,
+                            pgcform->reltuples, pgcform->relpages))));
 }
 
 /*
@@ -1106,6 +1144,7 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
                 dirty = true;
             }
         }
+        debug_print_rows_and_pages(relation, pgcform);
 #ifdef PGXC
     }
 #endif
@@ -1221,6 +1260,11 @@ void vac_update_datfrozenxid(void)
     TransactionId datfrozenxid;
     TransactionId relfrozenxid;
     Datum xid64datum;
+
+    /* Don't update datfrozenxid when cluser is resizing */
+    if (ClusterResizingInProgress()) {
+        return;
+    }
     /*
      * Initialize the "min" calculation with GetOldestXmin, which is a
      * reasonable approximation to the minimum relfrozenxid for not-yet-
@@ -1378,6 +1422,9 @@ void vac_update_datfrozenxid(void)
         datfrozenxid = DatumGetTransactionId(xid64datum);
     }
 
+    /* Consider frozenxid of objects in recyclebin. */
+    TrAdjustFrozenXid64(u_sess->proc_cxt.MyDatabaseId, &newFrozenXid);
+
     if ((TransactionIdPrecedes(datfrozenxid, newFrozenXid))
 #ifdef PGXC
         || !IsPostmasterEnvironment)
@@ -1532,6 +1579,17 @@ static inline void proc_snapshot_and_transaction()
     gstrace_exit(GS_TRC_ID_vacuum_rel);
     return;
 }
+
+static inline void
+TableRelationVacuum(Relation rel, VacuumStmt *vacstmt, BufferAccessStrategy vacStrategy)
+{
+    if (RelationIsUstoreFormat(rel)) {
+        LazyVacuumUHeapRel(rel, vacstmt, vacStrategy);
+    } else {
+        lazy_vacuum_rel(rel, vacstmt, vacStrategy);
+    }
+}
+
 /*
  *	vacuum_rel() -- vacuum one heap relation
  *
@@ -1578,6 +1636,8 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
 
     /* vacuum must hold RowExclusiveLock on db for a new transaction */
     LockSharedObject(DatabaseRelationId, u_sess->proc_cxt.MyDatabaseId, 0, RowExclusiveLock);
+    /* check database valid */
+    get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId, true);
 
     if (!(vacstmt->options & VACOPT_FULL)) {
         /*
@@ -1937,6 +1997,18 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         return false;
     }
 
+    /* 
+     * We don't do vaccum on temp table create by pg_redis,
+     * It will be deleted after redistribution.
+     */
+    Oid redis_ns = get_namespace_oid("data_redis", true);
+    if (OidIsValid(redis_ns) && onerel->rd_rel->relnamespace == redis_ns) {
+        ereport(LOG, (errmsg("skip vacuum for temp table : %s create by pg_redis", onerel->rd_rel->relname.data)));
+        CloseAllRelationsBeforeReturnFalse();
+        proc_snapshot_and_transaction();
+        return false;
+    }
+
     // If the internal relation of CStore relation open failed, we should return false
     //
     if ((RelationGetCUDescRelId(onerel) != InvalidOid && (cudescrel == NULL)) ||
@@ -2215,6 +2287,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
                 vacstmt->freeze_table_age,
                 &vacstmt->memUsage,
                 vacstmt->relation != NULL);
+            /* Record changecsn when VACUUM FULL occur */
+            Relation rel = RelationIdGetRelation(relid);
+            UpdatePgObjectChangecsn(relid, rel->rd_rel->relkind);
+            RelationClose(rel);
         }
     } else if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_SUB_PARTITION)) {
         releaseDummyRelation(&onerel);
@@ -2250,6 +2326,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
 
         pgstat_report_waitstatus_relname(STATE_VACUUM_FULL, get_nsp_relname(relid));
         GpiVacuumFullMainPartiton(relid);
+        CBIVacuumFullMainPartiton(relid);
         pgstat_report_vacuum(relid, InvalidOid, false, 0);
     } else if (!(vacstmt->options & VACOPT_FULL)) {
         /* clean hdfs empty directories of value partition just on main CN */
@@ -2260,9 +2337,10 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         } else if (vacuumMainPartition((uint32)(vacstmt->flags))) {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             GPIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
+            CBIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
         } else {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
-            lazy_vacuum_rel(onerel, vacstmt, vac_strategy);
+            TableRelationVacuum(onerel, vacstmt, vac_strategy);
         }
     }
     (void)pgstat_report_waitstatus(oldStatus);
@@ -3713,7 +3791,7 @@ void updateTotalRows(Oid relid, double num_tuples)
 }
 
 // call back func to check current partOid is invisible or visible
-static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid)
+static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid, int2 bktId)
 {
     VacStates* pvacStates = (VacStates*)state;
     Assert(pvacStates != NULL);
@@ -3723,6 +3801,12 @@ static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid)
             (errmsg("global index tuple's oid invalid. partOid = %u", partOid)));
         return false;
     }
+    
+    /* check bucket id of crossbucket index tuple */
+    if (pvacStates->bucketList != NULL && lookupHBucketid(pvacStates->bucketList, 0, bktId) == -1) {
+        return true;
+    }
+    
     // check partition oid of global partition index tuple
     if (bms_is_member(partOid, pvacStates->invisMap)) {
         return true;
@@ -3742,7 +3826,8 @@ static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid)
 }
 
 // clean invisible tuples for global partition index
-static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult** stats, Bitmapset** cleanedParts)
+static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult **stats, Bitmapset **cleanedParts,
+    Bitmapset *invisibleParts)
 {
     IndexVacuumInfo ivinfo;
     PGRUsage ru0;
@@ -3758,9 +3843,12 @@ static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult** stat
     ivinfo.strategy = vac_strategy;
 
     VacStates* pvacStates = (VacStates*)palloc0(sizeof(VacStates));
-    pvacStates->invisMap = NULL;
+    pvacStates->invisMap = invisibleParts;
     pvacStates->visMap = NULL;
-
+    pvacStates->bucketList = NULL;
+    if (RELATION_OWN_BUCKET(indrel) && RelationIsCrossBucketIndex(indrel)) {
+        pvacStates->bucketList = searchHashBucketByOid(indrel->rd_bucketoid);
+    }
     /* Do bulk deletion */
     *stats = index_bulk_delete(&ivinfo, *stats, GPIIsInvisibleTuple, (void*)pvacStates);
     Bitmapset* pIntersect = bms_intersect(pvacStates->invisMap, pvacStates->visMap);
@@ -3769,7 +3857,6 @@ static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult** stat
 
     *cleanedParts = bms_add_members(*cleanedParts, pvacStates->invisMap);
 
-    bms_free(pvacStates->invisMap);
     bms_free(pvacStates->visMap);
     pfree_ext(pvacStates);
     ereport(elevel,
@@ -3847,9 +3934,13 @@ static void GPIVacuumMainPartition(
     IndexBulkDeleteResult** indstats = (IndexBulkDeleteResult**)palloc0(nindexes * sizeof(IndexBulkDeleteResult*));
     Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
     for (int i = 0; i < nindexes; i++) {
-        GPICleanInvisibleIndex(iRel[i], &indstats[i], &cleanedParts);
+        GPICleanInvisibleIndex(iRel[i], &indstats[i], &cleanedParts, invisibleParts);
+        if (IndexEnableWaitCleanCbi(iRel[i])) {
+            cbi_set_enable_clean(iRel[i]);
+        }
         vac_update_relstats(
             iRel[i], classRel, indstats[i]->num_pages, indstats[i]->num_index_tuples, 0, false, InvalidTransactionId);
+        pfree_ext(indstats[i]);
         index_close(iRel[i], lockmode);
     }
     heap_close(classRel, RowExclusiveLock);
@@ -3870,6 +3961,57 @@ static void GPIVacuumMainPartition(
     bms_free(cleanedParts);
     bms_free(invisibleParts);
     pfree_ext(indstats);
+    pfree_ext(iRel);
+}
+
+void CBIOpenLocalCrossbucketIndex(Relation onerel, LOCKMODE lockmode, int* nindexes, Relation** iRel)
+{
+    List* indOidList = NIL;
+    ListCell* indCell = NULL;
+    int indNums;
+    Assert(lockmode != NoLock);
+    Assert(onerel != NULL);
+    indOidList = RelationGetLocalCbiList(onerel);
+    indNums = list_length(indOidList);
+    if (indNums > 0) {
+        *iRel = (Relation*)palloc((long)(indNums) * sizeof(Relation));
+    } else {
+        *iRel = NULL;
+    }
+    int i = 0;
+    foreach (indCell, indOidList) {
+        Oid indOid = lfirst_oid(indCell);
+        Relation indrel = index_open(indOid, lockmode);
+        if (IndexIsReady(indrel->rd_index) && IndexIsUsable(indrel->rd_index)) {
+            (*iRel)[i] = indrel;
+            i++;
+        } else {
+            index_close(indrel, lockmode);
+        }
+    }
+    *nindexes = i;
+    list_free(indOidList);
+}
+
+static void CBIVacuumMainPartition(
+    Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy)
+{
+    Relation* iRel = NULL;
+    int nindexes;
+    if (vacstmt->options & VACOPT_VERBOSE) {
+        elevel = VERBOSEMESSAGE;
+    } else {
+        elevel = DEBUG2;
+    }
+    vac_strategy = bstrategy;
+    CBIOpenLocalCrossbucketIndex(onerel, lockmode, &nindexes, &iRel);
+    for (int i = 0; i < nindexes; i++) {
+        if (IndexEnableWaitCleanCbi(iRel[i])) {
+            cbi_set_enable_clean(iRel[i]);
+        }
+        index_close(iRel[i], lockmode);
+    }
+
     pfree_ext(iRel);
 }
 

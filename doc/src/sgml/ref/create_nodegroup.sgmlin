@@ -22,10 +22,12 @@ PostgreSQL documentation
  <refsynopsisdiv>
 <synopsis>
 CREATE NODE GROUP <replaceable class="parameter">groupname</replaceable>
-WITH ( <replaceable class="parameter">nodename</replaceable> [, ... ] )
+[WITH ( <replaceable class="parameter">nodename</replaceable> [, ... ] )]
+[bucketcnt bucket_cnt]
 [ BUCKETS [ ( bucketnumber [, ... ] ) ] ] 
 [ VCGROUP ] 
-[ DISTRIBUTE FROM src_nodegroup_name ];
+[ DISTRIBUTE FROM src_nodegroup_name ]
+[groupparent parent_group_name];
 
 </synopsis>
  </refsynopsisdiv>

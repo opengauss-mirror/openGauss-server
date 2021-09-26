@@ -26,7 +26,7 @@
 #ifndef CSTORE_H
 #define CSTORE_H
 
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "vecexecutor/vectorbatch.h"
 
 /* 0~FirstCUID is reserved for page id of delta table

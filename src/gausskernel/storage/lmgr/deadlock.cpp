@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * deadlock.cpp
- *	  POSTGRES deadlock detection code
+ *	  openGauss deadlock detection code
  *
  * See src/backend/storage/lmgr/README for a description of the deadlock
  * detection and resolution algorithms.
@@ -36,6 +36,7 @@
 typedef struct EDGE {
     PGPROC *waiter;  /* the waiting process */
     PGPROC *blocker; /* the process it is waiting for */
+    LOCK   *lock;    /* the lock it is waiting for */
     int pred;        /* workspace for TopoSort */
     int link;        /* workspace for TopoSort */
 } EDGE;
@@ -65,6 +66,8 @@ static bool DeadLockCheckRecurse(PGPROC *proc);
 static int TestConfiguration(PGPROC *startProc);
 static bool FindLockCycle(PGPROC *checkProc, EDGE *softEdges, int *nSoftEdges);
 static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, int *nSoftEdges);
+static bool FindLockCycleRecurseMember(PGPROC *checkProc, PGPROC *checkProcLeader,
+    int depth, EDGE *softEdges, int *nSoftEdges);
 static bool ExpandConstraints(EDGE *constraints, int nConstraints);
 static bool TopoSort(LOCK *lock, EDGE *constraints, int nConstraints, PGPROC **ordering);
 
@@ -455,23 +458,21 @@ static bool FindLockCycle(PGPROC *checkProc, EDGE *softEdges, /* output argument
 static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, /* output argument */
                                  int *nSoftEdges)                               /* output argument */
 {
-    PGPROC *proc = NULL;
-    PGXACT *pgxact = NULL;
-    LOCK *lock = NULL;
-    PROCLOCK *proclock = NULL;
-    SHM_QUEUE *procLocks = NULL;
-    LockMethod lockMethodTable;
-    PROC_QUEUE *waitQueue = NULL;
-    int queue_size;
-    int conflictMask;
-    int i;
-    int numLockModes, lm;
+    int         i;
+    dlist_iter  iter;
 
     /* defence of deadlock checker: the depth of stack */
     check_stack_depth();
 
     /* defence of deadlock checker: running too long */
     CheckDeadLockRunningTooLong(depth);
+
+    /*
+     * If this process is a lock group member, check the leader instead. (Note
+     * that we might be the leader, in which case this is a no-op.)
+     */
+    if (checkProc->lockGroupLeader != NULL)
+        checkProc = checkProc->lockGroupLeader;
 
     /*
      * Have we already seen this proc?
@@ -504,13 +505,51 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
     t_thrd.storage_cxt.visitedProcs[t_thrd.storage_cxt.nVisitedProcs++] = checkProc;
 
     /*
-     * If the proc is not waiting, we have no outgoing waits-for edges.
+     * If the process is waiting, there is an outgoing waits-for edge to each
+     * process that blocks it.
      */
-    if (checkProc->links.next == NULL)
-        return false;
-    lock = checkProc->waitLock;
-    if (lock == NULL)
-        return false;
+    if (checkProc->links.next != NULL && checkProc->waitLock != NULL &&
+        FindLockCycleRecurseMember(checkProc, checkProc, depth, softEdges, nSoftEdges))
+        return true;
+
+    /*
+     * If the process is not waiting, there could still be outgoing waits-for
+     * edges if it is part of a lock group, because other members of the lock
+     * group might be waiting even though this process is not.  (Given lock
+     * groups {A1, A2} and {B1, B2}, if A1 waits for B1 and B2 waits for A2,
+     * that is a deadlock even neither of B1 and A2 are waiting for anything.)
+     */
+    dlist_foreach(iter, &checkProc->lockGroupMembers) {
+        PGPROC *memberProc;
+
+        memberProc = dlist_container(PGPROC, lockGroupLink, iter.cur);
+        if (memberProc->links.next != NULL && memberProc->waitLock != NULL && memberProc != checkProc &&
+            FindLockCycleRecurseMember(memberProc, checkProc, depth, softEdges, nSoftEdges))
+            return true;
+    }
+
+    return false;
+}
+
+static bool FindLockCycleRecurseMember(PGPROC *checkProc,
+                           PGPROC *checkProcLeader,
+                           int depth,
+                           EDGE *softEdges, /* output argument */
+                           int *nSoftEdges) /* output argument */
+{
+    PGPROC     *proc;
+    LOCK       *lock = checkProc->waitLock;
+    PGXACT     *pgxact;
+    PROCLOCK   *proclock;
+    SHM_QUEUE  *procLocks;
+    LockMethod  lockMethodTable;
+    PROC_QUEUE *waitQueue;
+    int         queue_size;
+    int         conflictMask;
+    int         i;
+    int         numLockModes,
+                lm;
+
     lockMethodTable = GetLocksMethodTable(lock);
     numLockModes = lockMethodTable->numLockModes;
     conflictMask = lockMethodTable->conflictTab[checkProc->waitLockMode];
@@ -524,11 +563,14 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
     proclock = (PROCLOCK *)SHMQueueNext(procLocks, procLocks, offsetof(PROCLOCK, lockLink));
 
     while (proclock != NULL) {
+        PGPROC  *leader;
+
         proc = proclock->tag.myProc;
         pgxact = &g_instance.proc_base_all_xacts[proc->pgprocno];
+        leader = (proc->lockGroupLeader == NULL) ? proc : proc->lockGroupLeader;
 
         /* A proc never blocks itself */
-        if (proc != checkProc) {
+        if (leader != checkProcLeader) {
             for (lm = 1; lm <= numLockModes; lm++) {
                 if ((proclock->holdMask & LOCKBIT_ON((unsigned int)lm)) && (conflictMask & LOCKBIT_ON(lm))) {
                     /* This proc hard-blocks checkProc */
@@ -637,10 +679,13 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
         queue_size = t_thrd.storage_cxt.waitOrders[i].nProcs;
 
         for (i = 0; i < queue_size; i++) {
+            PGPROC     *leader;
             proc = procs[i];
 
+            leader = (proc->lockGroupLeader == NULL) ? proc : proc->lockGroupLeader;
+
             /* Done when we reach the target proc */
-            if (proc == checkProc)
+            if (leader == checkProc)
                 break;
 
             /* Is there a conflict with this guy's request? */
@@ -658,27 +703,55 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
                      * Add this edge to the list of soft edges in the cycle
                      */
                     Assert(*nSoftEdges < g_instance.shmem_cxt.MaxBackends);
-                    softEdges[*nSoftEdges].waiter = checkProc;
-                    softEdges[*nSoftEdges].blocker = proc;
+                    softEdges[*nSoftEdges].waiter = checkProcLeader;
+                    softEdges[*nSoftEdges].blocker = leader;
+                    softEdges[*nSoftEdges].lock = lock;
                     (*nSoftEdges)++;
                     return true;
                 }
             }
         }
     } else {
+        PGPROC     *lastGroupMember = NULL;
         /* Use the true lock wait queue order */
         waitQueue = &(lock->waitProcs);
+        /*
+         * Find the last member of the lock group that is present in the wait
+         * queue.  Anything after this is not a soft lock conflict. If group
+         * locking is not in use, then we know immediately which process we're
+         * looking for, but otherwise we've got to search the wait queue to
+         * find the last process actually present.
+         */
+        if (checkProc->lockGroupLeader == NULL) {
+            lastGroupMember = checkProc;
+        } else {
+            proc = (PGPROC *) waitQueue->links.next;
+            queue_size = waitQueue->size;
+            while (queue_size-- > 0) {
+                if (proc->lockGroupLeader == checkProcLeader)
+                    lastGroupMember = proc;
+                proc = (PGPROC *) proc->links.next;
+            }
+            Assert(lastGroupMember != NULL);
+        }
+
+        /*
+         * OK, now rescan (or scan) the queue to identify the soft conflicts.
+         */
         queue_size = waitQueue->size;
-
-        proc = (PGPROC *)waitQueue->links.next;
-
+        proc = (PGPROC *) waitQueue->links.next;
         while (queue_size-- > 0) {
+            PGPROC     *leader;
+
+            leader = (proc->lockGroupLeader == NULL) ? proc : proc->lockGroupLeader;
+
             /* Done when we reach the target proc */
-            if (proc == checkProc)
+            if (proc == checkProcLeader)
                 break;
 
             /* Is there a conflict with this guy's request? */
-            if (((1U << (unsigned int)proc->waitLockMode) & conflictMask) != 0) {
+            if (((1U << (unsigned int)proc->waitLockMode) & conflictMask) != 0 &&
+                leader != checkProcLeader) {
                 /* This proc soft-blocks checkProc */
                 if (FindLockCycleRecurse(proc, depth + 1, softEdges, nSoftEdges)) {
                     /* fill deadlockDetails[] */
@@ -692,8 +765,9 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
                      * Add this edge to the list of soft edges in the cycle
                      */
                     Assert(*nSoftEdges < g_instance.shmem_cxt.MaxBackends);
-                    softEdges[*nSoftEdges].waiter = checkProc;
-                    softEdges[*nSoftEdges].blocker = proc;
+                    softEdges[*nSoftEdges].waiter = checkProcLeader;
+                    softEdges[*nSoftEdges].blocker = leader;
+                    softEdges[*nSoftEdges].lock = lock;
                     (*nSoftEdges)++;
                     return true;
                 }
@@ -708,6 +782,7 @@ static bool FindLockCycleRecurse(PGPROC *checkProc, int depth, EDGE *softEdges, 
      */
     return false;
 }
+
 
 /*
  * ExpandConstraints -- expand a list of constraints into a set of
@@ -733,8 +808,7 @@ static bool ExpandConstraints(EDGE *constraints, int nConstraints)
      * for inconsistency first.
      */
     for (i = nConstraints; --i >= 0;) {
-        PGPROC *proc = constraints[i].waiter;
-        LOCK *lock = proc->waitLock;
+        LOCK   *lock = constraints[i].lock;
 
         /* Did we already make a list for this lock? */
         for (j = t_thrd.storage_cxt.nWaitOrders; --j >= 0;) {
@@ -762,6 +836,75 @@ static bool ExpandConstraints(EDGE *constraints, int nConstraints)
         }
         t_thrd.storage_cxt.nWaitOrders++;
     }
+    return true;
+}
+
+/* --------------------
+ * Now scan the topoProcs array backwards.  At each step, output the
+ * last proc that has no remaining before-constraints, and decrease
+ * the beforeConstraints count of each of the procs it was constrained
+ * against.
+ * i = index of ordering[] entry we want to output this time
+ * j = search index for topoProcs[]
+ * k = temp for scanning constraint list for proc j
+ * last = last non-null index in topoProcs (avoid redundant searches)
+ * --------------------
+ */
+static bool TopoSortScan(EDGE *constraints, PGPROC **ordering, int queue_size)
+{
+    int i, j, k, last;
+    PGPROC *proc = NULL;
+
+    last = queue_size - 1;
+    for (i = queue_size - 1; i >= 0;) {
+        int c;
+        int nmatches = 0;
+
+        /* Find next candidate to output */
+        while (t_thrd.storage_cxt.topoProcs[last] == NULL) {
+            last--;
+        }
+        for (j = last; j >= 0; j--) {
+            if (t_thrd.storage_cxt.topoProcs[j] != NULL && t_thrd.storage_cxt.beforeConstraints[j] == 0) {
+                break;
+            }
+        }
+
+        /* If no available candidate, topological sort fails */
+        if (j < 0) {
+            return false;
+        }
+        /*
+         * Output everything in the lock group.  There's no point in
+         * outputting an ordering where members of the same lock group are not
+         * consecutive on the wait queue: if some other waiter is between two
+         * requests that belong to the same group, then either it conflicts
+         * with both of them and is certainly not a solution; or it conflicts
+         * with at most one of them and is thus isomorphic to an ordering
+         * where the group members are consecutive.
+         */
+        proc = t_thrd.storage_cxt.topoProcs[j];
+        if (proc->lockGroupLeader != NULL) {
+            proc = proc->lockGroupLeader;
+        }
+        Assert(proc != NULL);
+        for (c = 0; c <= last; ++c) {
+            if (t_thrd.storage_cxt.topoProcs[c] == proc || (t_thrd.storage_cxt.topoProcs[c] != NULL &&
+                t_thrd.storage_cxt.topoProcs[c]->lockGroupLeader == proc)) {
+                ordering[i - nmatches] = t_thrd.storage_cxt.topoProcs[c];
+                t_thrd.storage_cxt.topoProcs[c] = NULL;
+                ++nmatches;
+            }
+        }
+        Assert(nmatches > 0);
+        i -= nmatches;
+
+        /* Update beforeConstraints counts of its predecessors */
+        for (k = t_thrd.storage_cxt.afterConstraints[j]; k > 0; k = constraints[k - 1].link) {
+            t_thrd.storage_cxt.beforeConstraints[constraints[k - 1].pred]--;
+        }
+    }
+    /* Done */
     return true;
 }
 
@@ -795,7 +938,7 @@ static bool TopoSort(LOCK *lock, EDGE *constraints, int nConstraints, PGPROC **o
     PROC_QUEUE *waitQueue = &(lock->waitProcs);
     int queue_size = waitQueue->size;
     PGPROC *proc = NULL;
-    int i, j, k, last;
+    int i, j, k, jj, kk;
 
     /* First, fill topoProcs[] array with the procs in their current order */
     proc = (PGPROC *)waitQueue->links.next;
@@ -819,69 +962,76 @@ static bool TopoSort(LOCK *lock, EDGE *constraints, int nConstraints, PGPROC **o
     ret = memset_s(t_thrd.storage_cxt.afterConstraints, queue_size * sizeof(int), 0, queue_size * sizeof(int));
     securec_check(ret, "\0", "\0");
     for (i = 0; i < nConstraints; i++) {
+        /*
+         * Find a representative process that is on the lock queue and part of
+         * the waiting lock group.  This may or may not be the leader, which
+         * may or may not be waiting at all.  If there are any other processes
+         * in the same lock group on the queue, set their number of
+         * beforeConstraints to -1 to indicate that they should be emitted
+         * with their groupmates rather than considered separately.
+         *
+         * In this loop and the similar one just below, it's critical that we
+         * consistently select the same representative member of any one lock
+         * group, so that all the constraints are associated with the same
+         * proc, and the -1's are only associated with not-representative
+         * members.  We select the last one in the topoProcs array.
+         */
         proc = constraints[i].waiter;
-        /* Ignore constraint if not for this lock */
-        if (proc->waitLock != lock) {
+        Assert(proc != NULL);
+        jj = -1;
+        for (j = queue_size; --j >= 0;) {
+            PGPROC *waiter = t_thrd.storage_cxt.topoProcs[j];
+
+            if (waiter == proc || waiter->lockGroupLeader == proc) {
+                Assert(waiter->waitLock == lock);
+                if (jj == -1) {
+                    jj = j;
+                } else {
+                    Assert(t_thrd.storage_cxt.beforeConstraints[j] <= 0);
+                    t_thrd.storage_cxt.beforeConstraints[j] = -1;
+                }
+            }
+        }
+
+        /* If no matching waiter, constraint is not relevant to this lock. */
+        if (jj < 0) {
             continue;
         }
-        /* Find the waiter proc in the array */
-        for (j = queue_size; --j >= 0;) {
-            if (t_thrd.storage_cxt.topoProcs[j] == proc) {
-                break;
-            }
-        }
-        Assert(j >= 0); /* should have found a match */
-        /* Find the blocker proc in the array */
+        /*
+         * Similarly, find a representative process that is on the lock queue
+         * and waiting for the blocking lock group.  Again, this could be the
+         * leader but does not need to be.
+         */
         proc = constraints[i].blocker;
+        Assert(proc != NULL);
+        kk = -1;
         for (k = queue_size; --k >= 0;) {
-            if (t_thrd.storage_cxt.topoProcs[k] == proc) {
-                break;
+            PGPROC     *blocker = t_thrd.storage_cxt.topoProcs[k];
+
+            if (blocker == proc || blocker->lockGroupLeader == proc) {
+                Assert(blocker->waitLock == lock);
+                if (kk == -1) {
+                    kk = k;
+                } else {
+                    Assert(t_thrd.storage_cxt.beforeConstraints[k] <= 0);
+                    t_thrd.storage_cxt.beforeConstraints[k] = -1;
+                }
             }
         }
-        Assert(k >= 0);                            /* should have found a match */
-        t_thrd.storage_cxt.beforeConstraints[j]++; /* waiter must come before */
+
+        /* If no matching blocker, constraint is not relevant to this lock. */
+        if (kk < 0) {
+            continue;
+        }
+        Assert(t_thrd.storage_cxt.beforeConstraints[jj] >= 0);
+        t_thrd.storage_cxt.beforeConstraints[jj]++;    /* waiter must come before */
         /* add this constraint to list of after-constraints for blocker */
-        constraints[i].pred = j;
-        constraints[i].link = t_thrd.storage_cxt.afterConstraints[k];
-        t_thrd.storage_cxt.afterConstraints[k] = i + 1;
-    }
-    /* --------------------
-     * Now scan the topoProcs array backwards.	At each step, output the
-     * last proc that has no remaining before-constraints, and decrease
-     * the beforeConstraints count of each of the procs it was constrained
-     * against.
-     * i = index of ordering[] entry we want to output this time
-     * j = search index for topoProcs[]
-     * k = temp for scanning constraint list for proc j
-     * last = last non-null index in topoProcs (avoid redundant searches)
-     * --------------------
-     */
-    last = queue_size - 1;
-    for (i = queue_size; --i >= 0;) {
-        /* Find next candidate to output */
-        while (t_thrd.storage_cxt.topoProcs[last] == NULL) {
-            last--;
-        }
-        for (j = last; j >= 0; j--) {
-            if (t_thrd.storage_cxt.topoProcs[j] != NULL && t_thrd.storage_cxt.beforeConstraints[j] == 0) {
-                break;
-            }
-        }
-        /* If no available candidate, topological sort fails */
-        if (j < 0) {
-            return false;
-        }
-        /* Output candidate, and mark it done by zeroing topoProcs[] entry */
-        ordering[i] = t_thrd.storage_cxt.topoProcs[j];
-        t_thrd.storage_cxt.topoProcs[j] = NULL;
-        /* Update beforeConstraints counts of its predecessors */
-        for (k = t_thrd.storage_cxt.afterConstraints[j]; k > 0; k = constraints[k - 1].link) {
-            t_thrd.storage_cxt.beforeConstraints[constraints[k - 1].pred]--;
-        }
+        constraints[i].pred = jj;
+        constraints[i].link = t_thrd.storage_cxt.afterConstraints[kk];
+        t_thrd.storage_cxt.afterConstraints[kk] = i + 1;
     }
 
-    /* Done */
-    return true;
+    return TopoSortScan(constraints, ordering, queue_size);
 }
 
 #ifdef DEBUG_DEADLOCK

@@ -14,7 +14,7 @@
  * ---------------------------------------------------------------------------------------
  * 
  * percentile.h
- *     Definitions for the PostgreSQL statistics collector daemon.
+ *     Definitions for the openGauss statistics collector daemon.
  *
  *	Copyright (c) 2001-2012, PostgreSQL Global Development Group
  *

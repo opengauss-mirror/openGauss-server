@@ -30,6 +30,7 @@
 
 #include "access/reloptions.h"
 #include "access/gtm.h"
+#include "access/sysattr.h"
 #include "catalog/dependency.h"
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_encrypted_columns.h"
@@ -74,11 +75,11 @@
 #include "optimizer/nodegroups.h"
 #include "pgxc/execRemote.h"
 #include "pgxc/redistrib.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #endif
 #include "parser/parser.h"
 #include "rewrite/rewriteManip.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/node/nodeModifyTable.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/extended_statistics.h"
@@ -92,7 +93,7 @@
 #include "utils/numeric_gs.h"
 #include "mb/pg_wchar.h"
 #include "gaussdb_version.h"
-
+#include "gs_ledger/ledger_utils.h"
 #include "client_logic/client_logic.h"
 #include "client_logic/client_logic_enums.h"
 #include "storage/checksum_impl.h"
@@ -122,7 +123,7 @@ typedef struct {
 static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column, bool preCheck);
 static void transformTableConstraint(CreateStmtContext* cxt, Constraint* constraint);
 static void transformTableLikeClause(
-    CreateStmtContext* cxt, TableLikeClause* table_like_clause, bool preCheck, bool isFirstNode = false);
+    CreateStmtContext* cxt, TableLikeClause* table_like_clause, bool preCheck, bool isFirstNode, bool is_row_table, TransformTableType transformType);
 /* decide if serial column should be copied under analyze */
 static bool IsCreatingSeqforAnalyzeTempTable(CreateStmtContext* cxt);
 static void transformTableLikePartitionProperty(Relation relation, HeapTuple partitionTableTuple, List** partKeyColumns,
@@ -149,7 +150,7 @@ static void CheckListRangeDistribClause(CreateStmtContext *cxt, CreateStmt *stmt
 static void transformIndexConstraints(CreateStmtContext* cxt);
 static void checkConditionForTransformIndex(
     Constraint* constraint, CreateStmtContext* cxt, Oid index_oid, Relation index_rel);
-static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtContext* cxt);
+static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtContext* cxt, bool mustGlobal = false);
 static void transformFKConstraints(CreateStmtContext* cxt, bool skipValidation, bool isAddConstraint);
 static void transformConstraintAttrs(CreateStmtContext* cxt, List* constraintList);
 static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column);
@@ -184,9 +185,9 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
     int maxNum, bool isinterval, bool needCheck, bool isPartition);
 static List* DividePartitionStartEndInterval(ParseState* pstate, Form_pg_attribute attr, char* partName,
     Const* startVal, Const* endVal, Const* everyVal, Node* everyExpr, int* numPart, int maxNum, bool isPartition);
-static void TryReuseFilenode(Relation rel, CreateStmtContext *ctx, bool clonepart);
 extern Node* makeAConst(Value* v, int location);
 static bool IsElementExisted(List* indexElements, IndexElem* ielem);
+static char* CreatestmtGetOrientation(CreateStmt *stmt);
 #define REDIS_SCHEMA "data_redis"
 /*
  * transformCreateStmt -
@@ -202,27 +203,28 @@ static bool IsElementExisted(List* indexElements, IndexElem* ielem);
  * then expand those into multiple IndexStmt blocks.
  *	  - thomas 1997-12-02
  */
-List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List* uuids, bool preCheck, bool isFirstNode)
+List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List* uuids, bool preCheck,
+Oid *namespaceid, bool isFirstNode)
 {
     ParseState* pstate = NULL;
     CreateStmtContext cxt;
     List* result = NIL;
     List* save_alist = NIL;
     ListCell* elements = NULL;
-    Oid namespaceid;
     Oid existing_relid;
-
+    bool is_ledger_nsp = false;
+    bool is_row_table = is_ledger_rowstore(stmt->options);
     /*
      * We must not scribble on the passed-in CreateStmt, so copy it.  (This is
      * overkill, but easy.)
      */
     stmt = (CreateStmt*)copyObject(stmt);
-    
+
     if (uuids != NIL) {
         list_free_deep(stmt->uuids);
         stmt->uuids = (List*)copyObject(uuids);
     }
-    
+
     if (stmt->relation->relpersistence == RELPERSISTENCE_TEMP && stmt->relation->schemaname)
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("temporary tables cannot specify a schema name")));
@@ -233,7 +235,20 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
      * preexisting relation in that namespace with the same name, and updates
      * stmt->relation->relpersistence if the select namespace is temporary.
      */
-    namespaceid = RangeVarGetAndCheckCreationNamespace(stmt->relation, NoLock, &existing_relid);
+    *namespaceid = RangeVarGetAndCheckCreationNamespace(stmt->relation, NoLock, &existing_relid);
+
+    /*
+     * Check whether relation is in ledger schema. If it is, we add hash column.
+     */
+    HeapTuple tp = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(*namespaceid));
+    if (HeapTupleIsValid(tp)) {
+        bool is_null = true;
+        Datum datum = SysCacheGetAttr(NAMESPACEOID, tp, Anum_pg_namespace_nspblockchain, &is_null);
+        if (!is_null) {
+            is_ledger_nsp = DatumGetBool(datum);
+        }
+        ReleaseSysCache(tp);
+    }
 
     /*
      * If the relation already exists and the user specified "IF NOT EXISTS",
@@ -241,7 +256,7 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
      */
     if (stmt->if_not_exists && OidIsValid(existing_relid)) {
         bool exists_ok = true;
-        /* 
+        /*
          * Emit the right error or warning message for a "CREATE" command issued on a exist relation.
          * remote node : should have relation if recieve "IF NOT EXISTS" stmt.
          */
@@ -311,8 +326,20 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
      * are earlier in the search path.	But a local temp table is effectively
      * specified to be in pg_temp, so no need for anything extra in that case.
      */
-    if (stmt->relation->schemaname == NULL && stmt->relation->relpersistence != RELPERSISTENCE_TEMP)
-        stmt->relation->schemaname = get_namespace_name(namespaceid);
+    if (stmt->relation->schemaname == NULL && stmt->relation->relpersistence != RELPERSISTENCE_TEMP) {
+        /* If create schema already set, use the latest one */
+        if (t_thrd.proc->workingVersionNum >= 92408 && u_sess->catalog_cxt.setCurCreateSchema) {
+            stmt->relation->schemaname = pstrdup(u_sess->catalog_cxt.curCreateSchema);
+        } else {
+            stmt->relation->schemaname = get_namespace_name(*namespaceid);
+        }
+        if (t_thrd.proc->workingVersionNum >= 92408 && IS_MAIN_COORDINATOR &&
+            !u_sess->catalog_cxt.setCurCreateSchema) {
+            u_sess->catalog_cxt.setCurCreateSchema = true;
+            u_sess->catalog_cxt.curCreateSchema =
+                MemoryContextStrdup(u_sess->top_transaction_mem_cxt,stmt->relation->schemaname);
+        }
+    }
 
     /* Set up pstate and CreateStmtContext */
     pstate = make_parsestate(NULL);
@@ -348,9 +375,6 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
     cxt.node = (Node*)stmt;
     cxt.internalData = stmt->internalData;
     cxt.isResizing = false;
-    cxt.bucketOid = InvalidOid;
-    cxt.relnodelist = NULL;
-    cxt.toastnodelist = NULL;
     cxt.ofType = (stmt->ofTypename != NULL);
 
     /* We have gen uuids, so use it */
@@ -380,11 +404,19 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
      */
     foreach (elements, stmt->tableElts) {
         TableLikeClause* tbl_like_clause = NULL;
+        TransformTableType transformType = TRANSFORM_INVALID;
         Node* element = (Node*)lfirst(elements);
         cxt.uuids = stmt->uuids;
 
         switch (nodeTag(element)) {
             case T_ColumnDef:
+                if (is_ledger_nsp && strcmp(((ColumnDef*)element)->colname, "hash") == 0 &&
+                    !IsA(stmt, CreateForeignTableStmt) && stmt->relation->relpersistence == RELPERSISTENCE_PERMANENT &&
+                    is_row_table) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("\"hash\" column is reserved for system in ledger schema.")));
+                }
                 transformColumnDefinition(&cxt, (ColumnDef*)element, !isFirstNode && preCheck);
                 break;
 
@@ -422,7 +454,15 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
                     }
                 }
 #endif
-                transformTableLikeClause(&cxt, (TableLikeClause*)element, !isFirstNode && preCheck, isFirstNode);
+                if (!(tbl_like_clause->options & CREATE_TABLE_LIKE_RELOPTIONS)) {
+                    //transformType is only use in hashbucket data transfer
+                    if (is_ledger_hashbucketstore(stmt->options)) {
+                        transformType = TRANSFORM_TO_HASHBUCKET;
+                    } else {
+                        transformType = TRANSFORM_TO_NONHASHBUCKET;
+                    }
+                }
+                transformTableLikeClause(&cxt, (TableLikeClause*)element, !isFirstNode && preCheck, isFirstNode, is_row_table, transformType);
                 if (stmt->relation->relpersistence != RELPERSISTENCE_TEMP &&
                     tbl_like_clause->relation->relpersistence == RELPERSISTENCE_TEMP)
                     ereport(ERROR,
@@ -436,6 +476,30 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
                         errmsg("unrecognized node type: %d", (int)nodeTag(element))));
                 break;
         }
+    }
+
+    /*
+     * add hash column for table in ledger scheam;
+     */
+    if (is_ledger_nsp && !IsA(stmt, CreateForeignTableStmt) &&
+        stmt->relation->relpersistence == RELPERSISTENCE_PERMANENT && is_ledger_rowstore(stmt->options)) {
+        ColumnDef* col = makeNode(ColumnDef);
+        col->colname = pstrdup("hash");
+        col->typname = SystemTypeName("hash16");
+        col->kvtype = 0;
+        col->inhcount = 0;
+        col->is_local = true;
+        col->is_not_null = false;
+        col->is_from_type = false;
+        col->storage = 0;
+        col->cmprs_mode = ATT_CMPR_UNDEFINED;
+        col->raw_default = NULL;
+        col->cooked_default = NULL;
+        col->collClause = NULL;
+        col->collOid = InvalidOid;
+        col->constraints = NIL;
+        col->fdwoptions = NIL;
+        transformColumnDefinition(&cxt, col, !isFirstNode && preCheck);
     }
 
     // cxt.csc_partTableState is the partitionState generated
@@ -482,7 +546,7 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
         pos = GetPartitionkeyPos(stmt->partTableState->partitionKey, cxt.columns);
 
         /* get descriptor */
-        desc = BuildDescForRelation(cxt.columns, (Node*)makeString(ORIENTATION_ROW));
+        desc = BuildDescForRelation(cxt.columns);
 
         /* entry of transform */
         stmt->partTableState->partitionList = transformRangePartStartEndStmt(
@@ -576,12 +640,9 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
     stmt->tableElts = cxt.columns;
     stmt->constraints = cxt.ckconstraints;
     stmt->clusterKeys = cxt.clusterConstraints;
-    stmt->oldBucket = cxt.bucketOid;
-    stmt->oldNode  = cxt.relnodelist;
-    stmt->oldToastNode = cxt.toastnodelist;
-    if (stmt->internalData == NULL)
+    if (stmt->internalData == NULL) {
         stmt->internalData = cxt.internalData;
-
+    }
     result = lappend(cxt.blist, stmt);
     result = list_concat(result, cxt.alist);
     result = list_concat(result, save_alist);
@@ -800,7 +861,7 @@ static void transformColumnDefinition(CreateStmtContext* cxt, ColumnDef* column,
             is_serial = true;
             column->typname->names = NIL;
             column->typname->typeOid = INT8OID;
-        } else if (strcmp(typname, "byteawithoutordercol") == 0 || 
+        } else if (strcmp(typname, "byteawithoutordercol") == 0 ||
             strcmp(typname, "byteawithoutorderwithequalcol") == 0 ||
             strcmp(typname, "_byteawithoutordercol") == 0 ||
             strcmp(typname, "_byteawithoutorderwithequalcol") == 0) {
@@ -1108,7 +1169,7 @@ static void checkTableLikeSequence(Node* cooked_default)
                 errmsg("CREATE TABLE LIKE with column sequence "
                        "in different NodeGroup is not supported."),
                 errdetail("Recommend to LIKE table with sequence in installation NodeGroup.")));
-    }      
+    }
     pfree_ext(seq_name);
 }
 
@@ -1157,7 +1218,7 @@ static void transformTableLikeFromSerialData(CreateStmtContext* cxt, TableLikeCl
  * <srctable>.
  */
 static void transformTableLikeClause(
-    CreateStmtContext* cxt, TableLikeClause* table_like_clause, bool preCheck, bool isFirstNode)
+    CreateStmtContext* cxt, TableLikeClause* table_like_clause, bool preCheck, bool isFirstNode, bool is_row_table, TransformTableType transformType)
 {
     AttrNumber parent_attno;
     Relation relation;
@@ -1270,7 +1331,7 @@ static void transformTableLikeClause(
      * Views are not created on Datanodes, so this will result in an error
      * In order to fix this problem, it will be necessary to
      * transform the query string of CREATE TABLE into something not using
-     * the view definition. Now Postgres-XC only uses the raw string...
+     * the view definition. Now openGauss only uses the raw string...
      * There is some work done with event triggers in 9.3, so it might
      * be possible to use that code to generate the SQL query to be sent to
      * remote nodes. When this is done, this error will be removed.
@@ -1278,7 +1339,7 @@ static void transformTableLikeClause(
     if (relation->rd_rel->relkind == RELKIND_VIEW || relation->rd_rel->relkind == RELKIND_CONTQUERY)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Postgres-XC does not support VIEW in LIKE clauses"),
+                errmsg("openGauss does not support VIEW in LIKE clauses"),
                 errdetail("The feature is not currently supported")));
 #endif
 
@@ -1326,6 +1387,7 @@ static void transformTableLikeClause(
     /*
      * Insert the copied attributes into the cxt for the new table definition.
      */
+    bool hideTag = false;
     for (parent_attno = 1; parent_attno <= tupleDesc->natts; parent_attno++) {
         Form_pg_attribute attribute = tupleDesc->attrs[parent_attno - 1];
         char* attributeName = NameStr(attribute->attname);
@@ -1336,6 +1398,13 @@ static void transformTableLikeClause(
          */
         if (attribute->attisdropped && (!u_sess->attr.attr_sql.enable_cluster_resize || RelationIsTsStore(relation)))
             continue;
+        /*
+         * Ignore hide tag(tsdb)
+         */
+        if (attribute->attkvtype == ATT_KV_HIDE && table_like_clause->options != CREATE_TABLE_LIKE_ALL) {
+            hideTag = true;
+            continue;
+        }
 
         if (u_sess->attr.attr_sql.enable_cluster_resize && attribute->attisdropped) {
             def = makeNode(ColumnDef);
@@ -1354,14 +1423,14 @@ static void transformTableLikeClause(
             def->colname = pstrdup(attributeName);
             if (attribute->atttypid == BYTEAWITHOUTORDERCOLOID || attribute->atttypid == BYTEAWITHOUTORDERWITHEQUALCOLOID) {
                 /* this is client logic column. need to rewrite */
-                    HeapTuple   col_tup = SearchSysCache2(CERELIDCOUMNNAME, 
+                    HeapTuple   col_tup = SearchSysCache2(CERELIDCOUMNNAME,
                         ObjectIdGetDatum(RelationGetRelid(relation)), PointerGetDatum (def->colname));
-                    
+
                     if (!col_tup) {
                         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_CL_COLUMN),
                             errmsg("could not find encrypted column for %s", def->colname)));
                     } else {
-                        
+
                         Form_gs_encrypted_columns columns_rel_data = (Form_gs_encrypted_columns)GETSTRUCT(col_tup);
                         const Oid ColSettingOid  = columns_rel_data->column_key_id;
                         HeapTuple col_setting_tup  = SearchSysCache1(COLUMNSETTINGOID, ObjectIdGetDatum(ColSettingOid));
@@ -1399,7 +1468,7 @@ static void transformTableLikeClause(
              * When analyzing a column-oriented table with default_statistics_target < 0, we will create a row-oriented
              * temp table. In this case, ignore the compression flag.
              */
-            if (u_sess->analyze_cxt.is_under_analyze) {
+            if (u_sess->analyze_cxt.is_under_analyze || (IsConnFromCoord() && is_row_table)) {
                 if (def->cmprs_mode != ATT_CMPR_UNDEFINED) {
                     def->cmprs_mode = ATT_CMPR_NOCOMPRESS;
                 }
@@ -1681,7 +1750,6 @@ static void transformTableLikeClause(
     if ((table_like_clause->options & CREATE_TABLE_LIKE_INDEXES) && relation->rd_rel->relhasindex) {
         List* parent_indexes = NIL;
         ListCell* l = NULL;
-
         parent_indexes = RelationGetIndexList(relation);
 
         foreach (l, parent_indexes) {
@@ -1692,7 +1760,7 @@ static void transformTableLikeClause(
             parent_index = index_open(parent_index_oid, AccessShareLock);
 
             /* Build CREATE INDEX statement to recreate the parent_index */
-            index_stmt = generateClonedIndexStmt(cxt, parent_index, attmap, tupleDesc->natts, relation);
+            index_stmt = generateClonedIndexStmt(cxt, parent_index, attmap, tupleDesc->natts, relation, transformType);
 
             /* Copy comment on index, if requested */
             if (table_like_clause->options & CREATE_TABLE_LIKE_COMMENTS) {
@@ -1746,8 +1814,8 @@ static void transformTableLikeClause(
      * Likewise, copy distribution if requested
      */
     if (table_like_clause->options & CREATE_TABLE_LIKE_DISTRIBUTION) {
-        cxt->distributeby = (IS_PGXC_COORDINATOR) ? 
-                            getTableDistribution(relation->rd_id) : 
+        cxt->distributeby = (IS_PGXC_COORDINATOR) ?
+                            getTableDistribution(relation->rd_id) :
                             getTableHBucketDistribution(relation);
     }
 #endif
@@ -1776,17 +1844,7 @@ static void transformTableLikeClause(
     }
 
     if (u_sess->attr.attr_sql.enable_cluster_resize) {
-         cxt->isResizing = RelationInClusterResizing(relation);
-
-         if (RELATION_OWN_BUCKET(relation) && RelationInClusterResizing(relation)) {
-             char new_tablename[NAMEDATALEN];
-             RelationGetNewTableName(relation, (char*)new_tablename);
-             if(strcmp(cxt->relation->schemaname, REDIS_SCHEMA) == 0 
-                && strcmp(cxt->relation->relname, new_tablename) == 0 ){
-                cxt->bucketOid = relation->rd_bucketoid;
-                TryReuseFilenode(relation, cxt, table_like_clause->options & CREATE_TABLE_LIKE_PARTITION);
-             }
-         }
+        cxt->isResizing = RelationInClusterResizing(relation);
     }
 
     /*
@@ -2123,12 +2181,60 @@ char* getTmptableIndexName(const char* srcSchema, const char* srcIndex)
     return idxname;
 }
 
+static bool* getPartIndexUsableStat(Relation indexRelation)
+{
+    Oid relation_oid = IndexGetRelation(indexRelation->rd_id, false);
+    Relation rel = relation_open(relation_oid, NoLock);
+    List* relation_oid_list = relationGetPartitionOidList(rel);
+    List* partitions = indexGetPartitionList(indexRelation, ExclusiveLock);
+    bool *usable = (bool *)palloc0(sizeof(bool) * list_length(partitions));
+    ListCell* cell = NULL;
+    int i = 0;
+
+    foreach (cell, relation_oid_list) {
+        Oid relid = lfirst_oid(cell);
+        ListCell* parCell = NULL;
+        bool found = false;
+        foreach (parCell, partitions) {
+            Partition indexPartition = (Partition)lfirst(parCell);
+            if (relid == indexPartition->pd_part->indextblid) {
+                usable[i++] = indexPartition->pd_part->indisusable;
+                found = true;
+                break;
+            }
+        }
+        Assert(found);
+    }
+    releasePartitionList(indexRelation, &partitions, ExclusiveLock);
+    list_free_ext(relation_oid_list);
+    list_free_ext(partitions);
+    relation_close(rel, NoLock);
+    return usable;
+}
+
+void GenerateClonedIndexHbucketTransfer(Relation rel, IndexStmt* index, TransformTableType transformType, bool constainsExp)
+{
+    if (PointerIsValid(rel) && RelationInClusterResizing(rel) && RELATION_HAS_BUCKET(rel) &&
+        transformType == TRANSFORM_TO_NONHASHBUCKET) {
+        if (index->options != NULL && is_contain_crossbucket(index->options)) {
+            index->options = list_delete_name(index->options, "crossbucket");
+        }
+    }
+
+    if (PointerIsValid(rel) && RelationInClusterResizing(rel) && !RELATION_HAS_BUCKET(rel) &&
+        transformType == TRANSFORM_TO_HASHBUCKET) {
+        if (constainsExp || index->whereClause) {
+            index->options = lappend(index->options, makeDefElem("crossbucket", (Node*)makeString("off")));
+        }
+    }
+
+}
 /*
  * Generate an IndexStmt node using information from an already existing index
  * "source_idx".  Attribute numbers should be adjusted according to attmap.
  */
 IndexStmt* generateClonedIndexStmt(
-    CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel)
+    CreateStmtContext* cxt, Relation source_idx, const AttrNumber* attmap, int attmap_length, Relation rel, TransformTableType transformType)
 {
     Oid source_relid = RelationGetRelid(source_idx);
     Form_pg_attribute* attrs = RelationGetDescr(source_idx)->attrs;
@@ -2147,7 +2253,6 @@ IndexStmt* generateClonedIndexStmt(
     Oid keycoltype;
     Datum datum;
     bool isnull = false;
-    bool isResize = false;
     int indnkeyatts;
 
     /*
@@ -2210,8 +2315,10 @@ IndexStmt* generateClonedIndexStmt(
         char *srcSchema = get_namespace_name(source_idx->rd_rel->relnamespace);
         char *srcIndex = NameStr(source_idx->rd_rel->relname);
         index->idxname = getTmptableIndexName(srcSchema, srcIndex);
-        isResize = true;
         pfree_ext(srcSchema);
+        if (index->isPartitioned) {
+            index->partIndexUsable = getPartIndexUsableStat(source_idx);
+        }
     } else {
         index->idxname = NULL;
     }
@@ -2374,26 +2481,22 @@ IndexStmt* generateClonedIndexStmt(
         index->indexParams = lappend(index->indexParams, iparam);
     }
 
-    if (u_sess->attr.attr_sql.enable_cluster_resize && 
-            isResize && RELATION_OWN_BUCKET(rel)) {
-        if (!index->isPartitioned) {
-            TryReuseIndex(source_idx->rd_id, index);
-        } else {
-            tryReusePartedIndex(source_idx->rd_id, index, rel);
-        }
-    }
-
     /* Handle included columns separately */
-    if (indnkeyatts != idxrec->indnatts) {
-        /* Only global-partition-index would satisfy this condition in the current code */
-        index->isGlobal = true;
-        index->isPartitioned = true;
+    for (int i = indnkeyatts; i < idxrec->indnatts; i++) {
+        AttrNumber attnum = idxrec->indkey.values[i];
+        if (attnum == TableOidAttributeNumber) {
+            /* global-partition-index */
+            index->isGlobal = true;
+            index->isPartitioned = true;
+            break;
+        }
     }
 
     /* Copy reloptions if any */
     datum = SysCacheGetAttr(RELOID, ht_idxrel, Anum_pg_class_reloptions, &isnull);
-    if (!isnull)
+    if (!isnull) {
         index->options = untransformRelOptions(datum);
+    }
 
     /* If it's a partial index, decompile and append the predicate */
     datum = SysCacheGetAttr(INDEXRELID, ht_idx, Anum_pg_index_indpred, &isnull);
@@ -2419,7 +2522,7 @@ IndexStmt* generateClonedIndexStmt(
 
         index->whereClause = pred_tree;
     }
-
+    GenerateClonedIndexHbucketTransfer(rel, index, transformType, indexprs != NULL);
     /* Clean up */
     ReleaseSysCache(ht_idxrel);
 
@@ -2515,6 +2618,7 @@ static void transformIndexConstraints(CreateStmtContext* cxt)
      */
     foreach (lc, cxt->ixconstraints) {
         Constraint* constraint = (Constraint*)lfirst(lc);
+        bool mustGlobal = false;
 
         AssertEreport(IsA(constraint, Constraint), MOD_OPT, "");
         AssertEreport(constraint->contype == CONSTR_PRIMARY || constraint->contype == CONSTR_UNIQUE ||
@@ -2560,16 +2664,14 @@ static void transformIndexConstraints(CreateStmtContext* cxt)
                     }
 
                     if (!found) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("Invalid PRIMARY KEY/UNIQUE constraint for partitioned table"),
-                                errdetail("Columns of PRIMARY KEY/UNIQUE constraint Must contain PARTITION KEY")));
+                        mustGlobal = true;
+                        break;
                     }
                 }
             }
         }
 
-        index = transformIndexConstraint(constraint, cxt);
+        index = transformIndexConstraint(constraint, cxt, mustGlobal);
 
         indexlist = lappend(indexlist, index);
     }
@@ -2623,12 +2725,15 @@ static void transformIndexConstraints(CreateStmtContext* cxt)
 
         foreach (k, cxt->alist) {
             IndexStmt* priorindex = (IndexStmt*)lfirst(k);
+            bool accessMethodEqual = index->accessMethod == priorindex->accessMethod ||
+                (index->accessMethod != NULL && priorindex->accessMethod != NULL &&
+                 strcmp(index->accessMethod, priorindex->accessMethod) == 0);
 
             if (equal(index->indexParams, priorindex->indexParams) &&
                 equal(index->indexIncludingParams, priorindex->indexIncludingParams) &&
                 equal(index->whereClause, priorindex->whereClause) &&
                 equal(index->excludeOpNames, priorindex->excludeOpNames) &&
-                strcmp(index->accessMethod, priorindex->accessMethod) == 0 &&
+                accessMethodEqual &&
                 index->deferrable == priorindex->deferrable && index->initdeferred == priorindex->initdeferred) {
                 priorindex->unique = priorindex->unique || index->unique;
 
@@ -2725,7 +2830,7 @@ static void checkConditionForTransformIndex(
      * pg_upgrade in particular).
      */
     if (index_rel->rd_rel->relam != get_am_oid(DEFAULT_INDEX_TYPE, false) &&
-        index_rel->rd_rel->relam != get_am_oid(CSTORE_BTREE_INDEX_TYPE, false))
+        index_rel->rd_rel->relam != get_am_oid(DEFAULT_USTORE_INDEX_TYPE, false))
         ereport(ERROR,
             (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                 errmsg("index \"%s\" is not a btree", index_name),
@@ -2737,7 +2842,7 @@ static void checkConditionForTransformIndex(
  *		Transform one UNIQUE, PRIMARY KEY, or EXCLUDE constraint for
  *		transformIndexConstraints.
  */
-static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtContext* cxt)
+static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtContext* cxt, bool mustGlobal)
 {
     IndexStmt* index = NULL;
     ListCell* lc = NULL;
@@ -2777,7 +2882,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         index->idxname = NULL; /* DefineIndex will choose name */
 
     index->relation = cxt->relation;
-    index->accessMethod = const_cast<char*>(constraint->access_method ? constraint->access_method : DEFAULT_INDEX_TYPE);
+    index->accessMethod = constraint->access_method;
     index->options = constraint->options;
     index->tableSpace = constraint->indexspace;
     index->whereClause = constraint->where_clause;
@@ -2789,6 +2894,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
     index->oldNode = InvalidOid;
     index->oldPSortOid = InvalidOid;
     index->concurrent = false;
+    index->isGlobal = mustGlobal;
 
     /*
      * @hdfs
@@ -2802,6 +2908,7 @@ static IndexStmt* transformIndexConstraint(Constraint* constraint, CreateStmtCon
         index->isPartitioned = false;
     } else {
         index->isPartitioned = cxt->ispartitioned;
+
     }
 
     index->inforConstraint = constraint->inforConstraint;
@@ -3272,6 +3379,7 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
     ParseState* pstate = NULL;
     RangeTblEntry* rte = NULL;
     ListCell* l = NULL;
+    int crossbucketopt = -1; /* -1 means the SQL statement doesn't contain crossbucket option */
 
     /*
      * We must not scribble on the passed-in IndexStmt, so copy it.  (This is
@@ -3298,33 +3406,67 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
 #endif
 
     /* default partition index is set to Global index */
-    if (RELATION_IS_PARTITIONED(rel) && !stmt->isPartitioned) {
-        stmt->isPartitioned = true;
+    if (RELATION_IS_PARTITIONED(rel) && !stmt->isPartitioned && DEFAULT_CREATE_GLOBAL_INDEX) {
         stmt->isGlobal = true;
+    }
+
+    /* set to crossbucket flag as necessary */
+    if (RELATION_HAS_BUCKET(rel) && !stmt->crossbucket) {
+        stmt->crossbucket = get_crossbucket_option(&stmt->options, stmt->isGlobal, stmt->accessMethod, &crossbucketopt);
     }
 
     bool isColStore = RelationIsColStore(rel);
     if (stmt->accessMethod == NULL) {
         if (!isColStore) {
             /* row store using btree index by default */
-            stmt->accessMethod = DEFAULT_INDEX_TYPE;
+            if (!RelationIsUstoreFormat(rel)) {
+                stmt->accessMethod = DEFAULT_INDEX_TYPE;
+            } else {
+                stmt->accessMethod = DEFAULT_USTORE_INDEX_TYPE;
+            }
         } else {
             if (stmt->isGlobal) {
-                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
-                        errmsg("Global partition index does not support column store.")));
+                if (stmt->isconstraint) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                errmsg("Invalid PRIMARY KEY/UNIQUE constraint for column partitioned table"),
+                                errdetail("Columns of PRIMARY KEY/UNIQUE constraint Must contain PARTITION KEY")));
+                }
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Global partition index does not support column store.")));
             }
-            /* column store using psort index by default */
-            stmt->accessMethod = DEFAULT_CSTORE_INDEX_TYPE;
+            if (crossbucketopt > 0) {
+                ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cross-bucket index does not support column store")));
+            }
+            if (stmt->isconstraint && (stmt->unique || stmt->primary)) {
+                /* cstore unique and primary key only support cbtree */
+                stmt->accessMethod = CSTORE_BTREE_INDEX_TYPE;
+            } else {
+                /* column store using psort index by default */
+                stmt->accessMethod = DEFAULT_CSTORE_INDEX_TYPE;
+            }
         }
-    } else if (stmt->isGlobal) { 
+    } else if (stmt->isGlobal) {
         /* Global partition index only support btree index */
-        if (pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE) != 0) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+        if (pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE) != 0 &&
+            pg_strcasecmp(stmt->accessMethod, DEFAULT_USTORE_INDEX_TYPE) != 0) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Global partition index only support btree.")));
         }
         if (isColStore) {
-            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), 
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Global partition index does not support column store.")));
+        }
+    } else if (crossbucketopt > 0) {
+        if (pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE) != 0) {
+            /* report error when presenting crossbucket option with non-btree access method */
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cross-bucket index only supports btree")));
+        }
+        if (isColStore) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("cross-bucket index does not support column store")));
         }
     } else {
         bool isDfsStore = RelationIsDfsStore(rel);
@@ -3351,11 +3493,12 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Unsupport cgin index in this version")));
         }
 
+        /* row store only support btree/ubtree/gin/gist/hash index */
         if (!isColStore && (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_GIN_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_GIST_INDEX_TYPE)) &&
+            (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_USTORE_INDEX_TYPE)) &&
             (0 != pg_strcasecmp(stmt->accessMethod, DEFAULT_HASH_INDEX_TYPE))) {
-            /* row store only support btree/gin/gist/hash index */
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("access method \"%s\" does not support row store", stmt->accessMethod)));
@@ -3667,11 +3810,11 @@ void transformRuleStmt(RuleStmt* stmt, const char* queryString, List** actions, 
                 case CMD_UTILITY:
                     if (has_old)
                         ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), 
+                            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                             errmsg("ON SELECT or UTILITY rule cannot use OLD")));
                     if (has_new)
                         ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION), 
+                            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                             errmsg("ON SELECT or UTILITY rule cannot use NEW")));
                     break;
                 case CMD_UPDATE:
@@ -3802,8 +3945,8 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
          */
         if (isSecurityMode && !have_useft_privilege()) {
             ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    errmsg("permission denied to alter foreign table in security mode")));
+                    (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                        errmsg("permission denied to alter foreign table in security mode")));
         }
     }
 
@@ -3841,9 +3984,6 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
 #endif
     cxt.node = (Node*)stmt;
     cxt.isResizing = false;
-    cxt.bucketOid = InvalidOid;
-    cxt.relnodelist = NULL;
-    cxt.toastnodelist = NULL;
     cxt.ofType = false;
 
     if (RelationIsForeignTable(rel) || RelationIsStream(rel)) {
@@ -3898,9 +4038,9 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                     }
                 } else
                     ereport(ERROR,
-                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                            errmodule(MOD_OPT),
-                            errmsg("unrecognized node type: %d", (int)nodeTag(cmd->def))));
+                            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                errmodule(MOD_OPT),
+                                errmsg("unrecognized node type: %d", (int)nodeTag(cmd->def))));
                 break;
 
             case AT_ProcessedConstraint:
@@ -3918,7 +4058,7 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                 addDefState = (AddPartitionState*)cmd->def;
                 if (!PointerIsValid(addDefState)) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("missing definition of adding partition")));
+                            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE), errmsg("missing definition of adding partition")));
                 }
                 /* A_Const -->Const */
                 foreach (cell, addDefState->partitionList) {
@@ -3982,7 +4122,7 @@ List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char* query
                     ereport(ERROR,
                         (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("can not split LIST/HASH partition table")));
                 }
-
+                
                 /* transform the boundary of range partition: from A_Const into Const */
                 splitDefState = (SplitPartitionState*)cmd->def;
                 if (!PointerIsValid(splitDefState->split_point)) {
@@ -4183,22 +4323,22 @@ static void transformConstraintAttrs(CreateStmtContext* cxt, List* constraintLis
                 lastprimarycon->deferrable = false;
                 if (saw_initially && lastprimarycon->initdeferred)
                     ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("constraint declared INITIALLY DEFERRED must be DEFERRABLE"),
-                            parser_errposition(cxt->pstate, con->location)));
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("constraint declared INITIALLY DEFERRED must be DEFERRABLE"),
+                                parser_errposition(cxt->pstate, con->location)));
                 break;
 
             case CONSTR_ATTR_DEFERRED:
                 if (!SUPPORTS_ATTRS(lastprimarycon))
                     ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("misplaced INITIALLY DEFERRED clause"),
-                            parser_errposition(cxt->pstate, con->location)));
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("misplaced INITIALLY DEFERRED clause"),
+                                parser_errposition(cxt->pstate, con->location)));
                 if (saw_initially)
                     ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"),
-                            parser_errposition(cxt->pstate, con->location)));
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"),
+                                parser_errposition(cxt->pstate, con->location)));
                 saw_initially = true;
                 lastprimarycon->initdeferred = true;
 
@@ -4209,22 +4349,22 @@ static void transformConstraintAttrs(CreateStmtContext* cxt, List* constraintLis
                     lastprimarycon->deferrable = true;
                 else if (!lastprimarycon->deferrable)
                     ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("constraint declared INITIALLY DEFERRED must be DEFERRABLE"),
-                            parser_errposition(cxt->pstate, con->location)));
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("constraint declared INITIALLY DEFERRED must be DEFERRABLE"),
+                                parser_errposition(cxt->pstate, con->location)));
                 break;
 
             case CONSTR_ATTR_IMMEDIATE:
                 if (!SUPPORTS_ATTRS(lastprimarycon))
                     ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("misplaced INITIALLY IMMEDIATE clause"),
-                            parser_errposition(cxt->pstate, con->location)));
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("misplaced INITIALLY IMMEDIATE clause"),
+                                parser_errposition(cxt->pstate, con->location)));
                 if (saw_initially)
                     ereport(ERROR,
-                        (errcode(ERRCODE_SYNTAX_ERROR),
-                            errmsg("multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"),
-                            parser_errposition(cxt->pstate, con->location)));
+                            (errcode(ERRCODE_SYNTAX_ERROR),
+                                errmsg("multiple INITIALLY IMMEDIATE/DEFERRED clauses not allowed"),
+                                parser_errposition(cxt->pstate, con->location)));
                 saw_initially = true;
                 lastprimarycon->initdeferred = false;
                 break;
@@ -4258,9 +4398,9 @@ static void transformColumnType(CreateStmtContext* cxt, ColumnDef* column)
         /* Complain if COLLATE is applied to an uncollatable type */
         if (!OidIsValid(typtup->typcollation))
             ereport(ERROR,
-                (errcode(ERRCODE_DATATYPE_MISMATCH),
-                    errmsg("collations are not supported by type %s", format_type_be(HeapTupleGetOid(ctype))),
-                    parser_errposition(cxt->pstate, column->collClause->location)));
+                    (errcode(ERRCODE_DATATYPE_MISMATCH),
+                        errmsg("collations are not supported by type %s", format_type_be(HeapTupleGetOid(ctype))),
+                        parser_errposition(cxt->pstate, column->collClause->location)));
     }
 
     ReleaseSysCache(ctype);
@@ -4419,20 +4559,20 @@ void checkPartitionSynax(CreateStmt* stmt)
                  */
                 if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE || rel->rd_rel->relkind == RELKIND_STREAM) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                            errmsg("inherited relation \"%s\" is a foreign table", inh->relname),
-                            errdetail("can not inherit from a foreign table")));
+                            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                errmsg("inherited relation \"%s\" is a foreign table", inh->relname),
+                                errdetail("can not inherit from a foreign table")));
                 } else if (rel->rd_rel->relkind != RELKIND_RELATION) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                            errmsg("inherited relation \"%s\" is not a table", inh->relname)));
+                            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                                errmsg("inherited relation \"%s\" is not a table", inh->relname)));
                 }
                 if (RELATION_IS_PARTITIONED(rel)) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                            errmodule(MOD_OPT),
-                            errmsg("inherited relation \"%s\" is a partitioned table", inh->relname),
-                            errdetail("can not inherit from partitioned table")));
+                            (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                                errmodule(MOD_OPT),
+                                errmsg("inherited relation \"%s\" is a partitioned table", inh->relname),
+                                errdetail("can not inherit from partitioned table")));
                 }
                 heap_close(rel, NoLock);
             }
@@ -4450,9 +4590,9 @@ void checkPartitionSynax(CreateStmt* stmt)
         /* do partition-key null check as part of sytax check */
         if (list_length(stmt->partTableState->partitionKey) == 0) {
             ereport(ERROR,
-                (errmodule(MOD_OPT),
-                    errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("Value-based partition table should have one column at least")));
+                    (errmodule(MOD_OPT),
+                        errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("Value-based partition table should have one column at least")));
         }
 
         /*
@@ -4461,9 +4601,9 @@ void checkPartitionSynax(CreateStmt* stmt)
          */
         if (stmt->partTableState->intervalPartDef || stmt->partTableState->partitionList) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_OPERATION),
-                    errmsg("Value-Based partition table creation encounters unexpected data in unnecessary fields"),
-                    errdetail("save context and get assistance from DB Dev team")));
+                    (errcode(ERRCODE_INVALID_OPERATION),
+                        errmsg("Value-Based partition table creation encounters unexpected data in unnecessary fields"),
+                        errdetail("save context and get assistance from DB Dev team")));
         }
     }
 
@@ -4481,8 +4621,8 @@ void checkPartitionSynax(CreateStmt* stmt)
     /* unsupport typed table */
     if (stmt->relation->relpersistence != RELPERSISTENCE_PERMANENT) {
         ereport(ERROR,
-            (errcode(ERRCODE_SYNTAX_ERROR),
-                errmsg("unsupported feature with temporary/unlogged table for partitioned table")));
+                (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("unsupported feature with temporary/unlogged table for partitioned table")));
     }
 
     /* unsupport oids option */
@@ -4498,17 +4638,17 @@ void checkPartitionSynax(CreateStmt* stmt)
     /* check partition key number for none value-partition table */
     if (!value_partition && stmt->partTableState->partitionKey->length > MAX_PARTITIONKEY_NUM) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("too many partition keys for partitioned table"),
-                errhint("Partittion key columns can not be more than %d", MAX_PARTITIONKEY_NUM)));
+                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                    errmsg("too many partition keys for partitioned table"),
+                    errhint("Partittion key columns can not be more than %d", MAX_PARTITIONKEY_NUM)));
     }
 
     /* check range partition number for none value-partition table */
     if (!value_partition && stmt->partTableState->partitionList->length > MAX_PARTITION_NUM) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg("too many partitions for partitioned table"),
-                errhint("Number of partitions can not be more than %d", MAX_PARTITION_NUM)));
+                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                    errmsg("too many partitions for partitioned table"),
+                    errhint("Number of partitions can not be more than %d", MAX_PARTITION_NUM)));
     }
 
     /* check interval synax */
@@ -4520,15 +4660,15 @@ void checkPartitionSynax(CreateStmt* stmt)
 #else
         if (1 < stmt->partTableState->partitionKey->length) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg("Range partitioned table with INTERVAL clause has more than one column"),
-                    errhint("Only support one partition key for interval partition")));
+                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                        errmsg("Range partitioned table with INTERVAL clause has more than one column"),
+                        errhint("Only support one partition key for interval partition")));
         }
         if (!IsA(stmt->partTableState->intervalPartDef->partInterval, A_Const) ||
             ((A_Const*)stmt->partTableState->intervalPartDef->partInterval)->val.type != T_String) {
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
-                    errmsg("invalid input syntax for type interval")));
+                    (errcode(ERRCODE_INVALID_DATETIME_FORMAT),
+                        errmsg("invalid input syntax for type interval")));
         }
         int32 typmod = -1;
         Interval* interval = NULL;
@@ -4679,7 +4819,7 @@ static void CheckSliceValue(CreateStmtContext *cxt, CreateStmt *stmt)
                 def->boundary = transformRangePartitionValueInternal(cxt->pstate, def->boundary, true, true, false);
                 break;
             }
-            
+
             case T_RangePartitionStartEndDefState: {
                 RangePartitionStartEndDefState *def = (RangePartitionStartEndDefState *)slice;
                 def->startValue = transformRangePartitionValueInternal(cxt->pstate, def->startValue, true, true, false);
@@ -4709,7 +4849,7 @@ static void CheckSliceValue(CreateStmtContext *cxt, CreateStmt *stmt)
     }
 }
 
-static void TransformListDistributionValue(ParseState* pstate, Node** listDistDef, bool needCheck) 
+static void TransformListDistributionValue(ParseState* pstate, Node** listDistDef, bool needCheck)
 {
     *listDistDef = (Node *)transformRangePartitionValueInternal(
         pstate, (List *)*listDistDef, needCheck, true, false);
@@ -4718,6 +4858,10 @@ static void TransformListDistributionValue(ParseState* pstate, Node** listDistDe
 
 static List* GetDistributionkeyPos(List* partitionkeys, List* schema)
 {
+    if (schema == NULL) {
+        return NULL;
+    }
+
     ListCell* cell = NULL;
     ListCell* schemaCell = NULL;
     ColumnDef* schemaDef = NULL;
@@ -4742,8 +4886,8 @@ static List* GetDistributionkeyPos(List* partitionkeys, List* schema)
                 if (isExist[columnCount]) {
                     pfree_ext(isExist);
                     ereport(ERROR,
-                        (errcode(ERRCODE_DUPLICATE_COLUMN),
-                         errmsg("Include identical distribution column: \"%s\"", distributionkeyName)));
+                            (errcode(ERRCODE_DUPLICATE_COLUMN),
+                                errmsg("Include identical distribution column: \"%s\"", distributionkeyName)));
                 }
 
                 isExist[columnCount] = true;
@@ -4756,8 +4900,8 @@ static List* GetDistributionkeyPos(List* partitionkeys, List* schema)
         if (columnCount >= len) {
             pfree_ext(isExist);
             ereport(ERROR,
-                (errcode(ERRCODE_UNDEFINED_COLUMN),
-                    errmsg("Invalid distribution column specified")));
+                    (errcode(ERRCODE_UNDEFINED_COLUMN),
+                        errmsg("Invalid distribution column specified")));
         }
 
         pos = lappend_int(pos, columnCount);
@@ -4769,6 +4913,19 @@ static List* GetDistributionkeyPos(List* partitionkeys, List* schema)
     return pos;
 }
 
+/* get storage type from CreateStmt.optitions, which is generated by WITH clause */
+static char* CreatestmtGetOrientation(CreateStmt *stmt)
+{
+    ListCell *lc = NULL;
+    foreach (lc, stmt->options) {
+        DefElem* def = (DefElem*)lfirst(lc);
+        if (pg_strcasecmp(def->defname, "orientation") == 0) {
+            return defGetString(def);
+        }
+    }
+    /* default orientation by row store */
+    return ORIENTATION_ROW;
+}
 
 static void ConvertSliceStartEnd2LessThan(CreateStmtContext *cxt, CreateStmt *stmt)
 {
@@ -4778,7 +4935,14 @@ static void ConvertSliceStartEnd2LessThan(CreateStmtContext *cxt, CreateStmt *st
     TupleDesc desc;
 
     pos = GetDistributionkeyPos(distBy->colname, cxt->columns);
-    desc = BuildDescForRelation(cxt->columns, (Node  *)makeString(ORIENTATION_ROW));
+    char *storeChar = CreatestmtGetOrientation(stmt);
+    if ((pg_strcasecmp(storeChar, ORIENTATION_ROW) != 0) && (pg_strcasecmp(storeChar, ORIENTATION_COLUMN) != 0)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Un-supported feature"),
+                    errdetail("Orientation type %s is not supported for range distributed table.", storeChar)));
+    }
+    desc = BuildDescForRelation(cxt->columns, (Node *)makeString(storeChar));
 
     distState->sliceList = transformRangePartStartEndStmt(
         cxt->pstate, distState->sliceList, pos, desc->attrs, 0, NULL, NULL, true, false);
@@ -4801,8 +4965,8 @@ static void CheckListSliceName(List* sliceList)
             curName = ((ListSliceDefState *)lfirst(next))->name;
             if (strcmp(refName, curName) == 0) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_DUPLICATE_OBJECT),
-                         errmsg("duplicate slice name: \"%s\"", refName)));
+                        (errcode(ERRCODE_DUPLICATE_OBJECT),
+                            errmsg("duplicate slice name: \"%s\"", refName)));
             }
         }
     }
@@ -4862,9 +5026,9 @@ static void checkClusterConstraints(CreateStmtContext* cxt)
                 char* key2 = strVal(lfirst(lc2));
                 if (0 == strcasecmp(key1, key2)) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_DUPLICATE_COLUMN),
-                            errmsg("column \"%s\" appears twice in partial cluster key constraint", key1),
-                            parser_errposition(cxt->pstate, constraint->location)));
+                            (errcode(ERRCODE_DUPLICATE_COLUMN),
+                                errmsg("column \"%s\" appears twice in partial cluster key constraint", key1),
+                                parser_errposition(cxt->pstate, constraint->location)));
                 }
             }
         }
@@ -4891,8 +5055,8 @@ static void checkReserveColumn(CreateStmtContext* cxt)
 
         if (CHCHK_PSORT_RESERVE_COLUMN(col->colname)) {
             ereport(ERROR,
-                (errcode(ERRCODE_DUPLICATE_COLUMN),
-                    errmsg("column name \"%s\" conflicts with a system column name", col->colname)));
+                    (errcode(ERRCODE_DUPLICATE_COLUMN),
+                        errmsg("column name \"%s\" conflicts with a system column name", col->colname)));
         }
     }
 }
@@ -4901,7 +5065,7 @@ static void checkPsortIndexCompatible(IndexStmt* stmt)
 {
     if (stmt->whereClause) {
         ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("access method \"psort\" does not support WHERE clause")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("access method \"psort\" does not support WHERE clause")));
     }
 
     /* psort index can not support index expressions */
@@ -4911,8 +5075,8 @@ static void checkPsortIndexCompatible(IndexStmt* stmt)
 
         if (ielem->expr) {
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("access method \"psort\" does not support index expressions")));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("access method \"psort\" does not support index expressions")));
         }
     }
 }
@@ -4921,7 +5085,7 @@ static void checkCBtreeIndexCompatible(IndexStmt* stmt)
 {
     if (stmt->whereClause) {
         ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("access method \"cbtree\" does not support WHERE clause")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("access method \"cbtree\" does not support WHERE clause")));
     }
 
     /* psort index can not support index expressions */
@@ -4931,8 +5095,8 @@ static void checkCBtreeIndexCompatible(IndexStmt* stmt)
 
         if (ielem->expr) {
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("access method \"cbtree\" does not support index expressions")));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("access method \"cbtree\" does not support index expressions")));
         }
     }
 }
@@ -4943,7 +5107,7 @@ static void checkCGinBtreeIndexCompatible(IndexStmt* stmt)
 
     if (stmt->whereClause) {
         ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("access method \"cgin\" does not support WHERE clause")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("access method \"cgin\" does not support WHERE clause")));
     }
 
     /* cgin index can not support null text search parser */
@@ -4962,8 +5126,8 @@ static void checkCGinBtreeIndexCompatible(IndexStmt* stmt)
                     Const* constarg = (Const*)firstarg;
                     if (constarg->constisnull)
                         ereport(ERROR,
-                            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("access method \"cgin\" does not support null text search parser")));
+                                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                                    errmsg("access method \"cgin\" does not support null text search parser")));
                 }
             }
         }
@@ -4983,10 +5147,10 @@ List* transformListPartitionValue(ParseState* pstate, List* boundary, bool needC
         result = transformIntoConst(pstate, elem);
         if (PointerIsValid(result) && needCheck && ((Const*)result)->constisnull && !((Const*)result)->ismaxvalue) {
             ereport(ERROR,
-                (errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("Partition key value can not be null"),
-                    errdetail("partition bound element must be one of: string, datetime or interval literal, number, "
-                              "or MAXVALUE, and not null")));
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("Partition key value can not be null"),
+                        errdetail("partition bound element must be one of: string, datetime or interval literal, number, "
+                                  "or MAXVALUE, and not null")));
         }
         newValueList = lappend(newValueList, result);
     }
@@ -5034,7 +5198,7 @@ void transformRangePartitionValue(ParseState* pstate, Node* rangePartDef, bool n
     }
 }
 
-List* transformRangePartitionValueInternal(ParseState* pstate, List* boundary, bool needCheck, bool needFree, 
+List* transformRangePartitionValueInternal(ParseState* pstate, List* boundary, bool needCheck, bool needFree,
     bool isPartition)
 {
     List* newMaxValueList = NIL;
@@ -5084,7 +5248,7 @@ Node* transformIntoConst(ParseState* pstate, Node* maxElem, bool isPartition)
         case T_Const:
             result = maxElem;
             break;
-        /* MaxValue for Date must be a function expression(to_date) */
+            /* MaxValue for Date must be a function expression(to_date) */
         case T_FuncExpr: {
             funcexpr = (FuncExpr*)maxElem;
             result = (Node*)evaluate_expr(
@@ -5096,16 +5260,16 @@ Node* transformIntoConst(ParseState* pstate, Node* maxElem, bool isPartition)
              */
             if (T_Const != nodeTag((Node*)result)) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("%s key value must be const or const-evaluable expression",
-                            (isPartition ? "partition" : "distribution"))));
+                        (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("%s key value must be const or const-evaluable expression",
+                                   (isPartition ? "partition" : "distribution"))));
             }
         } break;
         default: {
             ereport(ERROR,
-                (errcode(ERRCODE_SYNTAX_ERROR),
-                    errmsg("%s key value must be const or const-evaluable expression",
-                        (isPartition ? "partition" : "distribution"))));
+                    (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("%s key value must be const or const-evaluable expression",
+                               (isPartition ? "partition" : "distribution"))));
         } break;
     }
     return result;
@@ -5118,7 +5282,7 @@ Node* transformIntoConst(ParseState* pstate, Node* maxElem, bool isPartition)
  * Notes		:
  */
 Oid generateClonedIndex(Relation source_idx, Relation source_relation, char* tempIndexName, Oid targetTblspcOid,
-    bool skip_build, bool partitionedIndex)
+                        bool skip_build, bool partitionedIndex)
 {
     CreateStmtContext cxt;
     IndexStmt* index_stmt = NULL;
@@ -5146,7 +5310,7 @@ Oid generateClonedIndex(Relation source_idx, Relation source_relation, char* tem
         attmap[i] = i + 1;
 
     /* generate an index statement */
-    index_stmt = generateClonedIndexStmt(&cxt, source_idx, attmap, attmap_length, NULL);
+    index_stmt = generateClonedIndexStmt(&cxt, source_idx, attmap, attmap_length, NULL, TRANSFORM_INVALID);
 
     if (tempIndexName != NULL)
         index_stmt->idxname = tempIndexName;
@@ -5172,12 +5336,12 @@ Oid generateClonedIndex(Relation source_idx, Relation source_relation, char* tem
     /* ... and do it */
     WaitState oldStatus = pgstat_report_waitstatus(STATE_CREATE_INDEX);
     ret = DefineIndex(RelationGetRelid(source_relation),
-        index_stmt,
-        InvalidOid, /* no predefined OID */
-        false,      /* is_alter_table */
-        true,       /* check_rights */
-        skip_build, /* skip_build */
-        false);     /* quiet */
+                      index_stmt,
+                      InvalidOid, /* no predefined OID */
+                      false,      /* is_alter_table */
+                      true,       /* check_rights */
+                      skip_build, /* skip_build */
+                      false);     /* quiet */
     (void)pgstat_report_waitstatus(oldStatus);
 
     /* clean up */
@@ -5233,8 +5397,8 @@ void checkInformationalConstraint(Node* node, bool isForeignTbl)
     if (!isForeignTbl) {
         if (constr->inforConstraint && constr->inforConstraint->nonforced) {
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("It is not allowed to support \"NOT ENFORCED\" informational constraint.")));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("It is not allowed to support \"NOT ENFORCED\" informational constraint.")));
         }
         return;
     }
@@ -5245,19 +5409,19 @@ void checkInformationalConstraint(Node* node, bool isForeignTbl)
         /* HDFS foreign table only support not enforced informational primary key and unique Constraint. */
         if (constr->inforConstraint == NULL || !constr->inforConstraint->nonforced) {
             ereport(ERROR,
-                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("The foreign table only support \"NOT ENFORCED\" informational constraint.")));
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("The foreign table only support \"NOT ENFORCED\" informational constraint.")));
         }
     } else {
         ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Only the primary key, unique, not null and null be supported.")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Only the primary key, unique, not null and null be supported.")));
     }
 
     if (constr->keys != NIL && list_length(constr->keys) != 1) {
         ereport(ERROR,
-            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("Multi-column combined informational constraint is forbidden.")));
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("Multi-column combined informational constraint is forbidden.")));
     }
 }
 
@@ -5354,9 +5518,9 @@ void get_range_partition_name_prefix(char* namePrefix, char* srcName, bool print
         namePrefix[k] = '\0';
         if (printNotice)
             ereport(NOTICE,
-                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg("%s name's prefix \"%s\" will be truncated to \"%s\"",
-                        (isPartition ? "Partition" : "Slice"), srcName, namePrefix)));
+                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                        errmsg("%s name's prefix \"%s\" will be truncated to \"%s\"",
+                               (isPartition ? "Partition" : "Slice"), srcName, namePrefix)));
     }
 }
 
@@ -5377,9 +5541,9 @@ static void get_rel_partition_info(Relation partTableRel, List** pos, Const** up
 
     if (!RELATION_IS_PARTITIONED(partTableRel)) {
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("CAN NOT get detail info from a NON-PARTITIONED relation.")));
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                    errmsg("CAN NOT get detail info from a NON-PARTITIONED relation.")));
     }
 
     if (pos == NULL && upBound == NULL)
@@ -5422,9 +5586,9 @@ static void get_src_partition_bound(Relation partTableRel, Oid srcPartOid, Const
 
     if (!RELATION_IS_PARTITIONED(partTableRel)) {
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("CAN NOT get detail info from a NON-PARTITIONED relation.")));
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                    errmsg("CAN NOT get detail info from a NON-PARTITIONED relation.")));
     }
 
     if (lowBound == NULL && upBound == NULL)
@@ -5432,9 +5596,9 @@ static void get_src_partition_bound(Relation partTableRel, Oid srcPartOid, Const
 
     if (srcPartOid == InvalidOid)
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("CAN NOT get detail info from a partitioned relation WITHOUT specified partition.")));
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                    errmsg("CAN NOT get detail info from a partitioned relation WITHOUT specified partition.")));
 
     Assert(partTableRel->partMap->type == PART_TYPE_RANGE || partTableRel->partMap->type == PART_TYPE_INTERVAL);
     partMap = (RangePartitionMap*)partTableRel->partMap;
@@ -5466,23 +5630,23 @@ static Oid get_split_partition_oid(Relation partTableRel, SplitPartitionState* s
 
     if (!RELATION_IS_PARTITIONED(partTableRel)) {
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                errmsg("CAN NOT get partition oid from a NON-PARTITIONED relation.")));
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                    errmsg("CAN NOT get partition oid from a NON-PARTITIONED relation.")));
     }
 
     partMap = (RangePartitionMap*)partTableRel->partMap;
 
     if (PointerIsValid(splitState->src_partition_name)) {
         srcPartOid = partitionNameGetPartitionOid(RelationGetRelid(partTableRel),
-            splitState->src_partition_name,
-            PART_OBJ_TYPE_TABLE_PARTITION,
-            AccessExclusiveLock,
-            true,
-            false,
-            NULL,
-            NULL,
-            NoLock);
+                                                  splitState->src_partition_name,
+                                                  PART_OBJ_TYPE_TABLE_PARTITION,
+                                                  AccessExclusiveLock,
+                                                  true,
+                                                  false,
+                                                  NULL,
+                                                  NULL,
+                                                  NoLock);
     } else {
         Assert(PointerIsValid(splitState->partition_for_values));
         splitState->partition_for_values = transformConstIntoTargetType(
@@ -5513,15 +5677,15 @@ static Oid get_split_partition_oid(Relation partTableRel, SplitPartitionState* s
  *    precheck start/end value of a range partition defstate
  */
 static void precheck_start_end_defstate(List* pos, Form_pg_attribute* attrs,
-    RangePartitionStartEndDefState* defState, bool isPartition)
+                                        RangePartitionStartEndDefState* defState, bool isPartition)
 {
     ListCell* cell = NULL;
 
     if (pos == NULL || attrs == NULL || defState == NULL)
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("unexpected parameter for precheck start/end defstate.")));
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("unexpected parameter for precheck start/end defstate.")));
 
     Assert(pos->length == 1); /* already been checked in caller */
     foreach (cell, pos) {
@@ -5590,9 +5754,9 @@ static Datum get_partition_arg_value(Node* node, bool* isnull)
     c = (Const*)evaluate_expr((Expr*)node, exprType(node), exprTypmod(node), exprCollation(node));
     if (!IsA(c, Const))
         ereport(ERROR,
-            (errmodule(MOD_OPT),
-                errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("partition parameter is not constant.")));
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                    errmsg("partition parameter is not constant.")));
 
     *isnull = c->constisnull;
     return c->constvalue;
@@ -5636,9 +5800,9 @@ static Datum evaluate_opexpr(
     oprcode = get_opcode(opexpr->opno);
     if (oprcode == InvalidOid) /* should not fail */
         ereport(ERROR,
-            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                errmodule(MOD_OPT),
-                errmsg("cache lookup failed for operator %u", opexpr->opno)));
+                (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                    errmodule(MOD_OPT),
+                    errmsg("cache lookup failed for operator %u", opexpr->opno)));
 
     opexpr->opfuncid = oprcode;
 
@@ -5661,12 +5825,12 @@ static Datum evaluate_opexpr(
 
                 typ = typeidType(opexpr->opresulttype);
                 c = makeConst(opexpr->opresulttype,
-                    ((Form_pg_type)GETSTRUCT(typ))->typtypmod,
-                    ((Form_pg_type)GETSTRUCT(typ))->typcollation,
-                    typeLen(typ),
-                    res,
-                    false,
-                    typeByVal(typ));
+                              ((Form_pg_type)GETSTRUCT(typ))->typtypmod,
+                              ((Form_pg_type)GETSTRUCT(typ))->typcollation,
+                              typeLen(typ),
+                              res,
+                              false,
+                              typeByVal(typ));
                 ReleaseSysCache(typ);
 
                 typ = typeidType(*restypid);
@@ -5675,13 +5839,13 @@ static Datum evaluate_opexpr(
 
                 /* coerce from oprresulttype to resttypid */
                 e = (Expr*)coerce_type(NULL,
-                    (Node*)c,
-                    opexpr->opresulttype,
-                    *restypid,
-                    typmod,
-                    COERCION_ASSIGNMENT,
-                    COERCE_IMPLICIT_CAST,
-                    -1);
+                                       (Node*)c,
+                                       opexpr->opresulttype,
+                                       *restypid,
+                                       typmod,
+                                       COERCION_ASSIGNMENT,
+                                       COERCE_IMPLICIT_CAST,
+                                       -1);
 
                 res = get_partition_arg_value((Node*)e, &isnull);
             }
@@ -5780,8 +5944,8 @@ static Oid choose_coerce_type(Oid leftid, Oid rightid)
  * RETURN: end points of all sub-intervals
  */
 static List* divide_start_end_every_internal(ParseState* pstate, char* partName, Form_pg_attribute attr,
-    Const* startVal, Const* endVal, Node* everyExpr, int* numPart,
-    int maxNum, bool isinterval, bool needCheck, bool isPartition)
+                                             Const* startVal, Const* endVal, Node* everyExpr, int* numPart,
+                                             int maxNum, bool isinterval, bool needCheck, bool isPartition)
 {
     List* result = NIL;
     List* opr_pl = NIL;
@@ -5880,8 +6044,8 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
                 if (!DatumGetBool(res))
                     ereport(ERROR,
                         (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                            errmsg((isPartition ? 
-                                "ambiguous partition rule is raised by EVERY parameter in partition \"%s\"." : 
+                            errmsg((isPartition ?
+                                "ambiguous partition rule is raised by EVERY parameter in partition \"%s\"." :
                                 "ambiguous distribution rule is raised by EVERY parameter in slice \"%s\"."),
                                 partName)));
             }
@@ -5939,7 +6103,7 @@ static List* divide_start_end_every_internal(ParseState* pstate, char* partName,
     return result;
 }
 
-template <bool isTimestampz> void CheckTIMESTAMPISFinite(Const* startVal, Const* endVal, char* partName) 
+template <bool isTimestampz> void CheckTIMESTAMPISFinite(Const* startVal, Const* endVal, char* partName)
 {
     if (isTimestampz) {
         TimestampTz t1 = DatumGetTimestampTz(startVal->constvalue);
@@ -6152,7 +6316,7 @@ static List* DividePartitionStartEndInterval(ParseState* pstate, Form_pg_attribu
  * RETURN: a new partition list (wrote by "less/than" syntax).
  */
 List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, List* pos, Form_pg_attribute* attrs,
-    int32 existPartNum, Const* lowBound, Const* upBound, bool needFree, bool isPartition)
+                                     int32 existPartNum, Const* lowBound, Const* upBound, bool needFree, bool isPartition)
 {
     ListCell* cell = NULL;
     int i, j;
@@ -6189,11 +6353,11 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
     /* only one partition key is allowed */
     if (pos->length != 1) {
         ereport(ERROR,
-            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                errmsg((isPartition ? "partitioned table has too many partition keys." : 
-                    "distributed table has too many distribution keys.")),
-                errhint((isPartition ? "start/end syntax requires a partitioned table with only one partition key." : 
-                    "start/end syntax requires a distributed table with only one distribution key."))));
+                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                    errmsg((isPartition ? "partitioned table has too many partition keys." :
+                            "distributed table has too many distribution keys.")),
+                    errhint((isPartition ? "start/end syntax requires a partitioned table with only one partition key." :
+                             "start/end syntax requires a distributed table with only one distribution key."))));
     }
 
     /*
@@ -6212,10 +6376,10 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
             (defState->endValue && defState->endValue->length != 1) ||
             (defState->everyValue && defState->everyValue->length != 1))
             ereport(ERROR,
-                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                    errmsg((isPartition ? "too many partition keys for partition \"%s\"." : 
-                        "too many distribution keys for slice \"%s\"."), defState->partitionName),
-                            errhint(isPartition ? "only one partition key is allowed in start/end clause." : 
+                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                        errmsg((isPartition ? "too many partition keys for partition \"%s\"." :
+                                "too many distribution keys for slice \"%s\"."), defState->partitionName),
+                        errhint(isPartition ? "only one partition key is allowed in start/end clause." :
                                 "only one distribution key is allowed in start/end clause.")));
     }
 
@@ -6246,11 +6410,11 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
 
             default:
                 ereport(ERROR,
-                    (errcode(ERRCODE_DATATYPE_MISMATCH),
-                        errmsg("datatype of column \"%s\" is unsupported for %s key in start/end clause.",
-                            NameStr(attrs[i]->attname), (isPartition ? "partition" : "distribution")),
-                        errhint("Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date "
-                                "and timestamp [with time zone].")));
+                        (errcode(ERRCODE_DATATYPE_MISMATCH),
+                            errmsg("datatype of column \"%s\" is unsupported for %s key in start/end clause.",
+                                   NameStr(attrs[i]->attname), (isPartition ? "partition" : "distribution")),
+                            errhint("Valid datatypes are: smallint, int, bigint, float4/real, float8/double, numeric, date "
+                                    "and timestamp [with time zone].")));
                 break;
         }
     }
@@ -6258,8 +6422,8 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
     /* check exist partition number */
     if (existPartNum >= MAX_PARTITION_NUM)
         ereport(ERROR,
-            (errcode(ERRCODE_DATATYPE_MISMATCH),
-                errmsg("can not add more %ss as %s number is already at its maximum.", partTypeName, partTypeName)));
+                (errcode(ERRCODE_DATATYPE_MISMATCH),
+                    errmsg("can not add more %ss as %s number is already at its maximum.", partTypeName, partTypeName)));
 
     /*
      * Start transform (including check)
@@ -6293,38 +6457,38 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
             /* check value */
             if (startVal->ismaxvalue || endVal->ismaxvalue || everyVal->ismaxvalue)
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                        errmsg("%s \"%s\" is invalid.", partTypeName, defState->partitionName),
-                        errhint("MAXVALUE can not appear in a (START, END, EVERY) clause.")));
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("%s \"%s\" is invalid.", partTypeName, defState->partitionName),
+                            errhint("MAXVALUE can not appear in a (START, END, EVERY) clause.")));
             if (partitonKeyCompare(&startVal, &endVal, 1) >= 0)
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                        errmsg(
-                            "start value must be less than end value for %s \"%s\".",
-                            partTypeName, defState->partitionName)));
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg(
+                                "start value must be less than end value for %s \"%s\".",
+                                partTypeName, defState->partitionName)));
 
             if (lastVal != NULL) {
                 if (lastVal->ismaxvalue)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("%s \"%s\" is not allowed behind MAXVALUE.",
-                                partTypeName, defState->partitionName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("%s \"%s\" is not allowed behind MAXVALUE.",
+                                       partTypeName, defState->partitionName)));
 
                 kc = partitonKeyCompare(&lastVal, &startVal, 1);
                 if (kc > 0)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("start value of %s \"%s\" is too low.",
-                                partTypeName, defState->partitionName),
-                            errhint("%s gap or overlapping is not allowed.",
-                                partTypeName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("start value of %s \"%s\" is too low.",
+                                       partTypeName, defState->partitionName),
+                                errhint("%s gap or overlapping is not allowed.",
+                                        partTypeName)));
                 if (kc < 0)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("start value of %s \"%s\" is too high.",
-                                partTypeName, defState->partitionName),
-                            errhint("%s gap or overlapping is not allowed.",
-                                partTypeName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("start value of %s \"%s\" is too high.",
+                                       partTypeName, defState->partitionName),
+                                errhint("%s gap or overlapping is not allowed.",
+                                        partTypeName)));
             }
 
             /* build necessary MINVALUE, check lowBound,  append for last single START, etc. */
@@ -6351,10 +6515,10 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
                         if (NULL != lowBound && NULL != upBound) {
                             if (partitonKeyCompare(&lowBound, &startVal, 1) != 0)
                                 ereport(ERROR,
-                                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                                        errmsg(
-                                            "start value of %s \"%s\" NOT EQUAL up-boundary of last %s.",
-                                            partTypeName, defState->partitionName, partTypeName)));
+                                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                            errmsg(
+                                                "start value of %s \"%s\" NOT EQUAL up-boundary of last %s.",
+                                                partTypeName, defState->partitionName, partTypeName)));
                         }
                     }
                 }
@@ -6365,15 +6529,15 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
             Assert(totalPart < MAX_PARTITION_NUM);
             Assert(everyExpr);
             resList = DividePartitionStartEndInterval(pstate,
-                attr,
-                defState->partitionName,
-                startVal,
-                endVal,
-                everyVal,
-                everyExpr,
-                &numPart,
-                MAX_PARTITION_NUM - totalPart,
-                isPartition);
+                                                      attr,
+                                                      defState->partitionName,
+                                                      startVal,
+                                                      endVal,
+                                                      everyVal,
+                                                      everyExpr,
+                                                      &numPart,
+                                                      MAX_PARTITION_NUM - totalPart,
+                                                      isPartition);
             Assert(resList && numPart == resList->length);
 
             j = 1;
@@ -6407,35 +6571,35 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
             /* check value */
             if (startVal->ismaxvalue)
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                        errmsg("start value can not be MAXVALUE for %s \"%s\".", 
-                            partTypeName, defState->partitionName)));
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("start value can not be MAXVALUE for %s \"%s\".",
+                                   partTypeName, defState->partitionName)));
 
             if (partitonKeyCompare(&startVal, &endVal, 1) >= 0)
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                        errmsg(
-                            "start value must be less than end value for %s \"%s\".", 
-                            partTypeName, defState->partitionName)));
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg(
+                                "start value must be less than end value for %s \"%s\".",
+                                partTypeName, defState->partitionName)));
 
             if (lastVal != NULL) {
                 if (lastVal->ismaxvalue)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("%s \"%s\" is not allowed behind MAXVALUE.", 
-                                partTypeName, defState->partitionName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("%s \"%s\" is not allowed behind MAXVALUE.",
+                                       partTypeName, defState->partitionName)));
 
                 kc = partitonKeyCompare(&lastVal, &startVal, 1);
                 if (kc > 0)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("start value of %s \"%s\" is too low.", partTypeName, defState->partitionName),
-                            errhint("%s gap or overlapping is not allowed.", partTypeName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("start value of %s \"%s\" is too low.", partTypeName, defState->partitionName),
+                                errhint("%s gap or overlapping is not allowed.", partTypeName)));
                 if (kc < 0)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("start value of %s \"%s\" is too high.", partTypeName, defState->partitionName),
-                            errhint("%s gap or overlapping is not allowed.", partTypeName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("start value of %s \"%s\" is too high.", partTypeName, defState->partitionName),
+                                errhint("%s gap or overlapping is not allowed.", partTypeName)));
             }
 
             /* build less than defstate */
@@ -6482,9 +6646,9 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
                     if (NULL != lowBound && NULL != upBound) {
                         if (partitonKeyCompare(&lowBound, &startVal, 1) != 0)
                             ereport(ERROR,
-                                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                                    errmsg("start value of %s \"%s\" NOT EQUAL up-boundary of last %s.",
-                                        partTypeName, defState->partitionName, partTypeName)));
+                                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                        errmsg("start value of %s \"%s\" NOT EQUAL up-boundary of last %s.",
+                                               partTypeName, defState->partitionName, partTypeName)));
                     }
 
                     /* add endVal as a pnt */
@@ -6510,28 +6674,28 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
             /* check value */
             if (startVal->ismaxvalue)
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                        errmsg("start value can not be MAXVALUE for %s \"%s\".", 
-                            partTypeName, defState->partitionName)));
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("start value can not be MAXVALUE for %s \"%s\".",
+                                   partTypeName, defState->partitionName)));
 
             if (lastVal != NULL) {
                 if (lastVal->ismaxvalue)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("%s \"%s\" is not allowed behind MAXVALUE.", 
-                                partTypeName, defState->partitionName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("%s \"%s\" is not allowed behind MAXVALUE.",
+                                       partTypeName, defState->partitionName)));
 
                 kc = partitonKeyCompare(&lastVal, &startVal, 1);
                 if (kc > 0)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("start value of %s \"%s\" is too low.", partTypeName, defState->partitionName),
-                            errhint("%s gap or overlapping is not allowed.", partTypeName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("start value of %s \"%s\" is too low.", partTypeName, defState->partitionName),
+                                errhint("%s gap or overlapping is not allowed.", partTypeName)));
                 if (kc < 0)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("start value of %s \"%s\" is too high.", partTypeName, defState->partitionName),
-                            errhint("%s gap or overlapping is not allowed.", partTypeName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("start value of %s \"%s\" is too high.", partTypeName, defState->partitionName),
+                                errhint("%s gap or overlapping is not allowed.", partTypeName)));
             }
 
             /* build less than defstate */
@@ -6561,10 +6725,10 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
                         if (NULL != lowBound && NULL != upBound) {
                             if (partitonKeyCompare(&lowBound, &startVal, 1) != 0)
                                 ereport(ERROR,
-                                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                                        errmsg(
-                                            "start value of %s \"%s\" NOT EQUAL up-boundary of last %s.",
-                                            partTypeName, defState->partitionName, partTypeName)));
+                                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                            errmsg(
+                                                "start value of %s \"%s\" NOT EQUAL up-boundary of last %s.",
+                                                partTypeName, defState->partitionName, partTypeName)));
                         }
                     }
                 }
@@ -6581,15 +6745,15 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
             if (lastVal != NULL) {
                 if (lastVal->ismaxvalue)
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("%s \"%s\" is not allowed behind MAXVALUE.", 
-                                partTypeName, defState->partitionName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("%s \"%s\" is not allowed behind MAXVALUE.",
+                                       partTypeName, defState->partitionName)));
 
                 if (partitonKeyCompare(&lastVal, &endVal, 1) >= 0) {
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("end value of %s \"%s\" is too low.", partTypeName, defState->partitionName),
-                            errhint("%s gap or overlapping is not allowed.", partTypeName)));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("end value of %s \"%s\" is too low.", partTypeName, defState->partitionName),
+                                errhint("%s gap or overlapping is not allowed.", partTypeName)));
                 }
             }
 
@@ -6598,18 +6762,18 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
                 if (lastState != NULL) {
                     /* last def is a single START, invalid definition */
                     ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                            errmsg("%s \"%s\" is an invalid definition clause.", partTypeName, defState->partitionName),
-                            errhint("Do not use a single END after a single START.")));
+                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                errmsg("%s \"%s\" is an invalid definition clause.", partTypeName, defState->partitionName),
+                                errhint("Do not use a single END after a single START.")));
                 } else {
                     /* this is the first def state END, check lowBound if any */
                     /* case for ADD_PARTITION, SPLIT_PARTITION */
                     if (lowBound && partitonKeyCompare(&lowBound, &endVal, 1) >= 0)
                         ereport(ERROR,
-                            (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                                errmsg(
-                                    "end value of %s \"%s\" MUST be greater than up-boundary of last %s.",
-                                    partTypeName, defState->partitionName, partTypeName)));
+                                (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                                    errmsg(
+                                        "end value of %s \"%s\" MUST be greater than up-boundary of last %s.",
+                                        partTypeName, defState->partitionName, partTypeName)));
                 }
             }
             pnt = (Const*)copyObject(endVal);
@@ -6619,7 +6783,7 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
             totalPart++;
 
             if (lastVal != NULL) {
-                pfree_ext(lastVal); 
+                pfree_ext(lastVal);
             }
             lastVal = endVal;
             startVal = NULL;
@@ -6634,12 +6798,12 @@ List* transformRangePartStartEndStmt(ParseState* pstate, List* partitionList, Li
                 break;
             } else {
                 ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
-                        errmsg("too many %ss after split %s \"%s\".",
-                            partTypeName, defState->partitionName, partTypeName),
-                        errhint("number of %ss can not be more than %d, MINVALUE will be auto-included if not "
-                                "assigned.",
-                            partTypeName, MAX_PARTITION_NUM)));
+                        (errcode(ERRCODE_INVALID_TABLE_DEFINITION),
+                            errmsg("too many %ss after split %s \"%s\".",
+                                   partTypeName, partTypeName, defState->partitionName),
+                            errhint("number of %ss can not be more than %d, MINVALUE will be auto-included if not "
+                                    "assigned.",
+                                    partTypeName, MAX_PARTITION_NUM)));
             }
         }
 
@@ -6797,50 +6961,10 @@ bool is_multi_nodegroup_createtbllike(PGXCSubCluster* subcluster, Oid oid)
 }
 #endif
 
-static void
-TryReuseFilenode(Relation rel, CreateStmtContext *ctx, bool clonepart)
-{
-    Form_pg_partition partForm = NULL;
-    HeapTuple partTuple = NULL;
-    List *partitionList = NULL;
-    ListCell *cell= NULL;
-    Relation toastRel;      
-
-    if (!RelationIsPartitioned(rel)) {
-        ctx->relnodelist = lappend_oid(ctx->relnodelist, rel->rd_rel->relfilenode);
-        if (OidIsValid(rel->rd_rel->reltoastrelid)) {
-            toastRel = heap_open(rel->rd_rel->reltoastrelid, NoLock);
-            ctx->toastnodelist = lappend_oid(ctx->toastnodelist, rel->rd_rel->reltoastrelid);
-            ctx->toastnodelist = lappend_oid(ctx->toastnodelist, toastRel->rd_rel->reltoastidxid);
-            heap_close(toastRel, NoLock);
-        }
-    } else if (clonepart) {
-        partitionList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, ObjectIdGetDatum(rel->rd_id));
-        foreach (cell, partitionList) {
-            partTuple = (HeapTuple)lfirst(cell);            
-            partForm = (Form_pg_partition) GETSTRUCT(partTuple);
-            ctx->relnodelist = lappend_oid(ctx->relnodelist, HeapTupleGetOid(partTuple));
-
-            if (OidIsValid(partForm->reltoastrelid)) {
-                toastRel = heap_open(partForm->reltoastrelid, NoLock);
-                ctx->toastnodelist = lappend_oid(ctx->toastnodelist, partForm->reltoastrelid);
-                ctx->toastnodelist = lappend_oid(ctx->toastnodelist, toastRel->rd_rel->reltoastidxid);
-                heap_close(toastRel, NoLock);
-            }
-        }
-        freePartList(partitionList);
-    } else {
-        ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-            errmsg("Not specify \"INCLUDING PARTITION\" for partitioned-table relation:\"%s\"",
-            RelationGetRelationName(rel))));
-    }
-}
-
 static bool IsCreatingSeqforAnalyzeTempTable(CreateStmtContext* cxt)
 {
     if (cxt->relation->relpersistence != RELPERSISTENCE_TEMP) {
-            return false;
+        return false;
     }
     bool isUnderAnalyze = false;
     if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
@@ -6851,7 +6975,7 @@ static bool IsCreatingSeqforAnalyzeTempTable(CreateStmtContext* cxt)
          * to determine the analyze state of dn.
          */
         isUnderAnalyze = (strncmp(cxt->relation->relname, ANALYZE_TEMP_TABLE_PREFIX,
-                                 strlen(ANALYZE_TEMP_TABLE_PREFIX)) == 0);
+                                  strlen(ANALYZE_TEMP_TABLE_PREFIX)) == 0);
     }
     return isUnderAnalyze;
 }

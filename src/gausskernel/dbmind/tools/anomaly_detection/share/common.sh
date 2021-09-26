@@ -16,9 +16,6 @@
 # common.sh
 #    common info of A-Detection
 #
-# IDENTIFICATION
-#    src/gausskernel/dbmind/tools/A-Detection/shell/common.sh
-#
 #-------------------------------------------------------------------------
 
 CURRENT_DIR=$(cd ../$(dirname $0); pwd)

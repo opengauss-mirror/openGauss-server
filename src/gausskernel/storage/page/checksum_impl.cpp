@@ -61,7 +61,7 @@ uint32 pg_checksum_block(char* data, uint32 size)
 }
 
 /*
- * Compute the checksum for a Postgres page.  The page must be aligned on a
+ * Compute the checksum for a openGauss page.  The page must be aligned on a
  * 4-byte boundary.
  *
  * The checksum includes the block number (to detect the case where a page is
@@ -73,9 +73,6 @@ uint16 pg_checksum_page(char* page, BlockNumber blkno)
     PageHeader phdr = (PageHeader)page;
     uint16 save_checksum;
     uint32 checksum;
-
-    /* We only calculate the checksum for properly-initialized pages */
-    Assert(!PageIsNew(page));
 
     /*
      * Save pd_checksum and temporarily set it to zero, so that the checksum

@@ -1669,35 +1669,21 @@ uint32 CU::GetMagic() const
 }
 
 /*
- * CU data encrypt.
+ * CU data encrypt. Will support in the future.
  * Since CU have no buffer and write disk directly,so no concurrent thread issue.
  */
 void CU::CUDataEncrypt(char* buf)
 {
-    size_t plainLength = 0;
-    size_t cipherLength = 0;
-    if (isEncryptedCluster()) {
-        plainLength = m_cuSizeExcludePadding - GetCUHeaderSize() - m_bpNullCompressedSize;
-        if (plainLength > 0) {
-            encryptBlockOrCUData(buf, plainLength, buf, &cipherLength);
-            m_infoMode |= CU_ENCRYPT;
-        }
-    }
+    return;
 }
 
 /*
- * CU data decrypt.
+ * CU data decrypt. Will support in the future.
  * Since CU have no buffer and write disk directly,so no concurrent thread issue.
  */
 void CU::CUDataDecrypt(char* buf)
 {
-    if ((m_infoMode & CU_ENCRYPT) != 0) {
-        size_t cipherLength = 0;
-        size_t plainLength = 0;
-        cipherLength = m_cuSizeExcludePadding - GetCUHeaderSize() - m_bpNullCompressedSize;
-        decryptBlockOrCUData(buf, cipherLength, buf, &plainLength);
-        m_infoMode &= ~CU_ENCRYPT;
-    }
+    return;
 }
 
 /* 
@@ -1773,3 +1759,9 @@ void CU::check_cu_consistence(const CUDesc* cudesc) const
         }
 }
 
+int CU::GetCurScanPos(int rowCursorInCU)
+{
+    Assert(rowCursorInCU >= 0);
+    Assert(this->m_offset[rowCursorInCU] >= 0);
+    return this->m_offset[rowCursorInCU];
+}

@@ -51,7 +51,7 @@
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
 #include "storage/shmem.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "storage/spin.h"
 #include "storage/standby.h"
 #include "utils/guc.h"
@@ -102,6 +102,10 @@ static void candidate_buf_push(int buf_id, int thread_id);
 static int64 get_thread_candidate_nums(int thread_id);
 static uint32 get_candidate_buf(bool *contain_hashbucket);
 static uint32 get_buf_form_dirty_queue(bool *contain_hashbucket);
+static void drop_rel_all_forks_buffers();
+
+#define SEGMENT_BGWRITER_ID  (g_instance.bgwriter_cxt.bgwriter_num - 1)
+#define IS_SEGMENT_BGWRITER(thread_id) (thread_id == SEGMENT_BGWRITER_ID)
 
 static void setup_bgwriter_signalhook(void)
 {
@@ -132,6 +136,12 @@ static void setup_bgwriter_signalhook(void)
 
 static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContext bgwriter_cxt)
 {
+    /*
+     * Close all open files after any error.  This is helpful on Windows,
+     * where holding deleted files open causes various strange errors.
+     * It's not clear we need it elsewhere, but shouldn't hurt.
+     */
+
     /* Since not using PG_TRY, must reset error stack by hand */
     t_thrd.log_cxt.error_context_stack = NULL;
 
@@ -182,13 +192,6 @@ static void bgwriter_handle_exceptions(WritebackContext wb_context, MemoryContex
      * fast as we can.
      */
     pg_usleep(1000000L);
-
-    /*
-     * Close all open files after any error.  This is helpful on Windows,
-     * where holding deleted files open causes various strange errors.
-     * It's not clear we need it elsewhere, but shouldn't hurt.
-     */
-    smgrcloseall();
     return;
 }
 
@@ -221,8 +224,8 @@ void BackgroundWriterMain(void)
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Background Writer", MEMORY_CONTEXT_STORAGE);
-
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Background Writer",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
     /*
      * Create a memory context that we will do all our work in.  We do this so
      * that we can reset the context during error recovery and thereby avoid
@@ -526,7 +529,8 @@ Datum bgwriter_view_get_last_flush_num()
 
 Datum bgwriter_view_get_candidate_nums()
 {
-    int candidate_num = get_curr_candidate_nums();
+    int candidate_num = get_curr_candidate_nums(true) +
+                        get_curr_candidate_nums(false);
     return Int32GetDatum(candidate_num);
 }
 
@@ -586,7 +590,10 @@ uint32 incre_ckpt_bgwriter_flush_dirty_page(WritebackContext wb_context, int thr
                 if (g_instance.bgwriter_cxt.candidate_free_map[buf_id] == false) {
                     buf_state = LockBufHdr(buf_desc);
                     if (g_instance.bgwriter_cxt.candidate_free_map[buf_id] == false) {
+                        bool emptyUsageCount = (!u_sess->attr.attr_storage.enable_candidate_buf_usage_count ||
+                            BUF_STATE_GET_USAGECOUNT(buf_state) == 0);
                         if (BUF_STATE_GET_REFCOUNT(buf_state) == 0 &&
+                            emptyUsageCount &&
                             !(buf_state & BM_DIRTY)) {
                             candidate_buf_push(buf_id, thread_id);
                             candidates++;
@@ -605,12 +612,12 @@ uint32 incre_ckpt_bgwriter_flush_dirty_page(WritebackContext wb_context, int thr
 }
 
 void incre_ckpt_bgwriter_flush_page_batch(WritebackContext wb_context, uint32 need_flush_num,
-    bool contain_hashbucket)
+    bool is_new_relfilenode)
 {
     int thread_id = t_thrd.bgwriter_cxt.thread_id;
     BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
     CkptSortItem *dirty_buf_list = bgwriter->dirty_buf_list;
-    int dw_batch_page_max = GET_DW_DIRTY_PAGE_MAX(contain_hashbucket);
+    int dw_batch_page_max = GET_DW_DIRTY_PAGE_MAX(is_new_relfilenode);
     int runs = (need_flush_num + dw_batch_page_max - 1) / dw_batch_page_max;
     int num_actual_flush = 0;
 
@@ -624,7 +631,7 @@ void incre_ckpt_bgwriter_flush_page_batch(WritebackContext wb_context, uint32 ne
         int batch_num = (i == runs - 1) ? (need_flush_num - offset) : dw_batch_page_max;
         uint32 flush_num;
 
-        bgwriter->thrd_dw_cxt.contain_hashbucket = contain_hashbucket;
+        bgwriter->thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
         bgwriter->thrd_dw_cxt.dw_page_idx = -1;
         dw_perform_batch_flush(batch_num, dirty_buf_list + offset, &bgwriter->thrd_dw_cxt);
         flush_num = incre_ckpt_bgwriter_flush_dirty_page(wb_context, thread_id, dirty_buf_list, offset, batch_num);
@@ -640,7 +647,7 @@ void candidate_buf_init(void)
 {
     bool found_candidate_buf = false;
     bool found_candidate_fm = false;
-    int buffer_num = g_instance.attr.attr_storage.NBuffers;
+    int buffer_num = TOTAL_BUFFER_NUM;
 
     /* 
      * Each thread manages a part of the buffer. Several slots are reserved to 
@@ -654,17 +661,21 @@ void candidate_buf_init(void)
     if (found_candidate_buf || found_candidate_fm) {
         Assert(found_candidate_buf && found_candidate_fm);
     } else {
-        MemsetHugeMem((char *)g_instance.bgwriter_cxt.candidate_buffers, buffer_num * sizeof(Buffer), -1);
-        MemsetHugeMem((char *)g_instance.bgwriter_cxt.candidate_free_map, buffer_num * sizeof(bool));
-
+        /* The memory of the memset sometimes exceeds 2 GB. so, memset_s cannot be used. */
+        MemSet((char*)g_instance.bgwriter_cxt.candidate_buffers, -1, buffer_num * sizeof(Buffer));
+        MemSet((char*)g_instance.bgwriter_cxt.candidate_free_map, 0, buffer_num * sizeof(bool));
         if (g_instance.bgwriter_cxt.bgwriter_procs != NULL) {
             int thread_num = g_instance.bgwriter_cxt.bgwriter_num;
-            int avg_num = g_instance.attr.attr_storage.NBuffers / thread_num;
+            int total_num = SharedBufferNumber;
+            int avg_num = total_num / (thread_num - 1);
             for (int i = 0; i < thread_num; i++) {
                 int start = avg_num * i;
                 int end = start + avg_num;
-                if (i == thread_num - 1) {
-                    end += g_instance.attr.attr_storage.NBuffers % thread_num;
+                if (i == thread_num - 2) {
+                    end += total_num % (thread_num - 1);
+                } else if (i ==  thread_num - 1) {
+                    start = SharedBufferNumber;
+                    end = start + SEGMENT_BUFFER_NUM;
                 }
                 g_instance.bgwriter_cxt.bgwriter_procs[i].buf_id_start = start;
                 g_instance.bgwriter_cxt.bgwriter_procs[i].cand_list_size = end - start;
@@ -681,33 +692,36 @@ const int MAX_BGWRITER_FLUSH_NUM = 1000 * DW_DIRTY_PAGE_MAX_FOR_NOHBK;
 void incre_ckpt_bgwriter_cxt_init()
 {
     MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
-    int thread_num = g_instance.attr.attr_storage.bgwriter_thread_num;
+    int thread_num = get_fixed_bgwriter_thread_num();
 
-    thread_num = thread_num > 0 ? thread_num : 1;
     g_instance.bgwriter_cxt.bgwriter_num = thread_num;
     g_instance.bgwriter_cxt.bgwriter_procs = (BgWriterProc *)palloc0(sizeof(BgWriterProc) * thread_num);
 
     uint32 dirty_list_size = MAX_BGWRITER_FLUSH_NUM / thread_num;
-    int avg_num = g_instance.attr.attr_storage.NBuffers / thread_num;
+    int total_num = SharedBufferNumber;
+    int avg_num = total_num / (thread_num - 1);
     for (int i = 0; i < thread_num; i++) {
         int start = avg_num * i;
         int end = start + avg_num;
-        if (i == thread_num - 1) {
-            end += g_instance.attr.attr_storage.NBuffers % thread_num;
+        if (i == thread_num - 2) {
+            end += total_num % (thread_num - 1);
+        } else if (i ==  thread_num - 1) {
+            start = SharedBufferNumber;
+            end = start + SEGMENT_BUFFER_NUM;
         }
         g_instance.bgwriter_cxt.bgwriter_procs[i].buf_id_start = start;
         g_instance.bgwriter_cxt.bgwriter_procs[i].cand_list_size = end - start;
         g_instance.bgwriter_cxt.bgwriter_procs[i].cand_buf_list = &g_instance.bgwriter_cxt.candidate_buffers[start];
-
         /* bgwriter thread dw cxt init */
         char *unaligned_buf = (char*)palloc0((DW_BUF_MAX_FOR_NOHBK + 1) * BLCKSZ);
         g_instance.bgwriter_cxt.bgwriter_procs[i].thrd_dw_cxt.dw_buf = (char*)TYPEALIGN(BLCKSZ, unaligned_buf);
         g_instance.bgwriter_cxt.bgwriter_procs[i].thrd_dw_cxt.dw_page_idx = -1;
-        g_instance.bgwriter_cxt.bgwriter_procs[i].thrd_dw_cxt.contain_hashbucket = false;
+        g_instance.bgwriter_cxt.bgwriter_procs[i].thrd_dw_cxt.is_new_relfilenode = false;
         g_instance.bgwriter_cxt.bgwriter_procs[i].dirty_list_size = dirty_list_size;
         g_instance.bgwriter_cxt.bgwriter_procs[i].dirty_buf_list =
             (CkptSortItem *)palloc0(dirty_list_size * sizeof(CkptSortItem));
     }
+
     (void)MemoryContextSwitchTo(oldcontext);
 }
 
@@ -730,11 +744,13 @@ static int64 get_bgwriter_sleep_time()
     uint64 now;
     int64 time_diff;
     int thread_id = t_thrd.bgwriter_cxt.thread_id;
+    bool segment_bgwriter = IS_SEGMENT_BGWRITER(thread_id);
 
     /* If primary instance do full checkpoint and not the first bgwriter thread, can scan the dirty
      * page queue, help the pagewriter thread finish the dirty page flush.
      */
-    if (FULL_CKPT && !RecoveryInProgress() && thread_id > 0) {
+    if (FULL_CKPT && !RecoveryInProgress() &&
+        (thread_id > 0 && !segment_bgwriter)) {
         return 0;
     }
 
@@ -759,6 +775,8 @@ void incre_ckpt_background_writer_main(void)
     WritebackContext wb_context;
     int thread_id = t_thrd.bgwriter_cxt.thread_id;
     BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
+    bool segment_bgwriter = IS_SEGMENT_BGWRITER(thread_id);
+    uint32 targetNum = segment_bgwriter ? SEGMENT_BUFFER_NUM : NORMAL_SHARED_BUFFER_NUM;
     uint64 now;
 
     t_thrd.role = BGWRITER;
@@ -773,7 +791,8 @@ void incre_ckpt_background_writer_main(void)
     /*
      * Create a resource owner to keep track of our resources (currently only buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name, MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name,
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -819,7 +838,7 @@ void incre_ckpt_background_writer_main(void)
 	/* Loop forever */
     for (;;) {
         int rc;
-        bool contain_hashbucket = false;
+        bool is_new_relfilenode = false;
         uint32 need_flush_num = 0;
         int64 sleep_time = 0;
 
@@ -865,7 +884,7 @@ void incre_ckpt_background_writer_main(void)
         now = get_time_ms();
         t_thrd.bgwriter_cxt.next_flush_time = now + u_sess->attr.attr_storage.BgWriterDelay;
 
-        if (get_curr_candidate_nums() == (uint32)g_instance.attr.attr_storage.NBuffers) {
+        if (get_curr_candidate_nums(segment_bgwriter) == targetNum) {
             continue;
         }
         /*
@@ -875,17 +894,18 @@ void incre_ckpt_background_writer_main(void)
          * Standby redo the checkpoint xlog, which is similar to full checkpoint, so the
          * bgwirter thread only scan the buffer pool to maintain the candidate buffer list.
          */
-        if (FULL_CKPT && !RecoveryInProgress() && thread_id > 0) {
-            need_flush_num = get_buf_form_dirty_queue(&contain_hashbucket);
+        if (FULL_CKPT && !RecoveryInProgress() &&
+            (thread_id > 0 && !segment_bgwriter)) {
+            need_flush_num = get_buf_form_dirty_queue(&is_new_relfilenode);
         } else {
-            need_flush_num = get_candidate_buf(&contain_hashbucket);
+            need_flush_num = get_candidate_buf(&is_new_relfilenode);
         }
 
         if (need_flush_num == 0) {
             continue;
         }
 
-        incre_ckpt_bgwriter_flush_page_batch(wb_context, need_flush_num, contain_hashbucket);
+        incre_ckpt_bgwriter_flush_page_batch(wb_context, need_flush_num, is_new_relfilenode);
     }
 }
 
@@ -922,9 +942,9 @@ int get_bgwriter_thread_id(void)
 const float GAP_PERCENT = 0.15;
 static uint32 get_bgwriter_flush_num()
 {
-    int buffer_num = g_instance.attr.attr_storage.NBuffers;
     double percent_target = u_sess->attr.attr_storage.candidate_buf_percent_target;
     int thread_id = t_thrd.bgwriter_cxt.thread_id;
+    bool segment_bgwriter = IS_SEGMENT_BGWRITER(thread_id);
     uint32 dirty_list_size = g_instance.bgwriter_cxt.bgwriter_procs[thread_id].dirty_list_size;
     uint32 cur_candidate_num;
     uint32 total_target;
@@ -932,10 +952,14 @@ static uint32 get_bgwriter_flush_num()
     uint32 flush_num = 0;
     uint32 min_io = DW_DIRTY_PAGE_MAX_FOR_NOHBK;
     uint32 max_io = calculate_thread_max_flush_num(false);
-
+    int buffer_num = segment_bgwriter ? SEGMENT_BUFFER_NUM : NORMAL_SHARED_BUFFER_NUM;
+    int normal_buffer = NORMAL_SHARED_BUFFER_NUM / (g_instance.bgwriter_cxt.bgwriter_num - 1);
+    int thread_num = (SEGMENT_BUFFER_NUM >= normal_buffer) ?
+        g_instance.bgwriter_cxt.bgwriter_num :
+        g_instance.bgwriter_cxt.bgwriter_num - 1;
     total_target = buffer_num * percent_target;
     high_water_mark = buffer_num * (percent_target + GAP_PERCENT);
-    cur_candidate_num = get_curr_candidate_nums();
+    cur_candidate_num = get_curr_candidate_nums(segment_bgwriter);
 
     /* If the slots are sufficient, the standby DN does not need to flush too many pages. */
     if (RecoveryInProgress() && cur_candidate_num >= total_target / 2) {
@@ -943,7 +967,11 @@ static uint32 get_bgwriter_flush_num()
     }
 
     /* max_io need greater than one batch flush num, and need less than the dirty list size */
-    max_io = MAX(max_io / g_instance.bgwriter_cxt.bgwriter_num, DW_DIRTY_PAGE_MAX_FOR_NOHBK);
+    max_io = max_io / thread_num;
+    if (segment_bgwriter && SEGMENT_BUFFER_NUM < normal_buffer) {
+        max_io = ((double)SEGMENT_BUFFER_NUM / normal_buffer) * max_io;
+    }
+    max_io = MAX(max_io, DW_DIRTY_PAGE_MAX_FOR_NOHBK);
     max_io = MIN(max_io, dirty_list_size);
 
     if (cur_candidate_num >= high_water_mark) {
@@ -978,22 +1006,61 @@ static uint32 get_candidate_buf(bool *contain_hashbucket)
     CkptSortItem* item = NULL;
     uint32 max_flush_num = get_bgwriter_flush_num();
     int thread_id = t_thrd.bgwriter_cxt.thread_id;
+    bool segment_bgwriter = IS_SEGMENT_BGWRITER(thread_id);
     BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
     CkptSortItem *dirty_buf_list = bgwriter->dirty_buf_list;
     int batch_scan_num = MIN(bgwriter->cand_list_size, MAX_SCAN_BATCH_NUM);
     int start = MAX(bgwriter->buf_id_start, bgwriter->next_scan_loc);
     int end = bgwriter->buf_id_start + bgwriter->cand_list_size;
+    bool check_not_need_flush = false;
 
     end = MIN(start + batch_scan_num, end);
 
     for (int buf_id = start; buf_id < end; buf_id++) {
-        if (FULL_CKPT && !RecoveryInProgress() && thread_id > 0) {
+        bool need_scan_dirty_queue = FULL_CKPT && !RecoveryInProgress() && thread_id > 0 && !segment_bgwriter;
+        if (need_scan_dirty_queue) {
             break;
         }
 
         buf_desc = GetBufferDescriptor(buf_id);
         local_buf_state = pg_atomic_read_u32(&buf_desc->state);
 
+        ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
+        Block tmpBlock = BufHdrGetBlock(buf_desc);
+        bool check_lsn_not_match = (local_buf_state & BM_TAG_VALID) && !(local_buf_state & BM_DIRTY) &&
+            XLByteLT(buf_desc->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress() && !segment_bgwriter;
+
+        if (check_lsn_not_match) {
+            PinBuffer(buf_desc, NULL);
+            LockBuffer(BufferDescriptorGetBuffer(buf_desc), LW_SHARED);
+            pg_memory_barrier();
+            local_buf_state = pg_atomic_read_u32(&buf_desc->state);
+            check_lsn_not_match = (local_buf_state & BM_TAG_VALID) && !(local_buf_state & BM_DIRTY) &&
+            XLByteLT(buf_desc->lsn_on_disk, PageGetLSN(tmpBlock)) && RecoveryInProgress();
+            if (check_lsn_not_match) {
+                MarkBufferDirty(BufferDescriptorGetBuffer(buf_desc));
+                LWLockRelease(buf_desc->content_lock);
+                UnpinBuffer(buf_desc, true);
+                const uint32 shiftSize = 32;
+                ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
+                    errmsg("check lsn is not matched on disk:%X/%X on page %X/%X, relnode info:%u/%u/%u %u %u stat:%u",
+                            (uint32)(buf_desc->lsn_on_disk >> shiftSize), (uint32)(buf_desc->lsn_on_disk),
+                            (uint32)(PageGetLSN(tmpBlock) >> shiftSize), (uint32)(PageGetLSN(tmpBlock)),
+                            buf_desc->tag.rnode.spcNode, buf_desc->tag.rnode.dbNode, buf_desc->tag.rnode.relNode,
+                            buf_desc->tag.blockNum, buf_desc->tag.forkNum, local_buf_state)));
+
+                if (need_flush_num < bgwriter->dirty_list_size) {
+                    local_buf_state = LockBufHdr(buf_desc);
+                    goto PUSH_DIRTY;
+                } else {
+                    continue;
+                }
+            } else {
+                LWLockRelease(buf_desc->content_lock);
+                UnpinBuffer(buf_desc, true);
+            }
+        }
+        
         /* Dirty read, pinned buffer, skip */
         if (BUF_STATE_GET_REFCOUNT(local_buf_state) > 0) {
             continue;
@@ -1002,6 +1069,13 @@ static uint32 get_candidate_buf(bool *contain_hashbucket)
         local_buf_state = LockBufHdr(buf_desc);
         if (BUF_STATE_GET_REFCOUNT(local_buf_state) > 0) {
             goto UNLOCK;
+        }
+
+        if (u_sess->attr.attr_storage.enable_candidate_buf_usage_count) {
+            if (BUF_STATE_GET_USAGECOUNT(local_buf_state) != 0) {
+                local_buf_state -= BUF_USAGECOUNT_ONE;
+                goto UNLOCK;
+            }
         }
 
         /* Not dirty, put directly into flushed candidates */
@@ -1014,11 +1088,12 @@ static uint32 get_candidate_buf(bool *contain_hashbucket)
             goto UNLOCK;
         }
 
-        if ((!RecoveryInProgress() && XLogNeedsFlush(BufferGetLSN(buf_desc))) ||
-            need_flush_num >= max_flush_num) {
+        check_not_need_flush = (need_flush_num >= max_flush_num || (!RecoveryInProgress()
+            && XLogNeedsFlush(BufferGetLSN(buf_desc))));
+        if (check_not_need_flush) {
             goto UNLOCK;
         }
-
+PUSH_DIRTY:
         if (!(local_buf_state & BM_CHECKPOINT_NEEDED)) {
             local_buf_state |= BM_CHECKPOINT_NEEDED;
             item = &dirty_buf_list[need_flush_num++];
@@ -1028,7 +1103,7 @@ static uint32 get_candidate_buf(bool *contain_hashbucket)
             item->bucketNode = buf_desc->tag.rnode.bucketNode;
             item->forkNum = buf_desc->tag.forkNum;
             item->blockNum = buf_desc->tag.blockNum;
-            if (buf_desc->tag.rnode.bucketNode != InvalidBktId) {
+            if (IsSegmentFileNode(buf_desc->tag.rnode)) {
                 *contain_hashbucket = true;
             }
         }
@@ -1044,10 +1119,12 @@ UNLOCK:
 
     ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
         errmsg("get_candidate_buf %u buf, total candidate num is %u, thread num is %ld, sent %u to flush",
-            candidates, get_curr_candidate_nums(), get_thread_candidate_nums(thread_id), need_flush_num)));
+            candidates, get_curr_candidate_nums(segment_bgwriter),
+            get_thread_candidate_nums(thread_id), need_flush_num)));
     return need_flush_num;
 }
 
+const int MAX_SCAN_NUM = 131072;  /* 1GB buffers */
 static uint32 get_buf_form_dirty_queue(bool *contain_hashbucket)
 {
     uint32 need_flush_num = 0;
@@ -1059,8 +1136,9 @@ static uint32 get_buf_form_dirty_queue(bool *contain_hashbucket)
     CkptSortItem *dirty_buf_list = bgwriter->dirty_buf_list;
     XLogRecPtr redo = g_instance.ckpt_cxt_ctl->full_ckpt_redo_ptr;
     uint64 dirty_queue_head = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
+    uint64 scan_end = MIN(MAX_SCAN_NUM, get_dirty_page_num());
 
-    for (int i = 0; ;i++) {
+    for (uint64 i = 0;i < scan_end; i++) {
         Buffer buffer;
         uint64 temp_loc = (dirty_queue_head + i) % g_instance.ckpt_cxt_ctl->dirty_page_queue_size;
         volatile DirtyPageQueueSlot* slot = &g_instance.ckpt_cxt_ctl->dirty_page_queue[temp_loc];
@@ -1092,7 +1170,7 @@ static uint32 get_buf_form_dirty_queue(bool *contain_hashbucket)
             item->bucketNode = buf_desc->tag.rnode.bucketNode;
             item->forkNum = buf_desc->tag.forkNum;
             item->blockNum = buf_desc->tag.blockNum;
-            if (buf_desc->tag.rnode.bucketNode != InvalidBktId) {
+            if (IsSegmentFileNode(buf_desc->tag.rnode)) {
                 *contain_hashbucket = true;
             }
         }
@@ -1176,9 +1254,18 @@ static int64 get_thread_candidate_nums(int thread_id)
 /**
  * @Description: Return a rough estimate of the current number of buffers in the candidate list.
  */
-uint32 get_curr_candidate_nums(void)
+uint32 get_curr_candidate_nums(bool segment)
 {
     uint32 currCandidates = 0;
+
+    if (segment) {
+        BgWriterProc *curr_writer = &g_instance.bgwriter_cxt.bgwriter_procs[SEGMENT_BGWRITER_ID];
+        if (curr_writer->proc != NULL) {
+            currCandidates = get_thread_candidate_nums(SEGMENT_BGWRITER_ID);
+        }
+        return currCandidates;
+    }
+
     for (int i = 0; i < g_instance.bgwriter_cxt.bgwriter_num; i++) {
         BgWriterProc *curr_writer = &g_instance.bgwriter_cxt.bgwriter_procs[i];
         if (curr_writer->proc != NULL) {
@@ -1198,3 +1285,168 @@ void ckpt_shutdown_bgwriter()
         pg_usleep(MILLISECOND_TO_MICROSECOND);
     }
 }
+
+
+const uint THREAD_SLEEP_TIME = 10 * 60 * 1000;
+void invalid_buffer_bgwriter_main()
+{
+    sigjmp_buf	localSigjmpBuf;
+    MemoryContext bgwriter_context;
+    char name[MAX_THREAD_NAME_LEN] = {0};
+    WritebackContext wb_context;
+    t_thrd.role = SPBGWRITER;
+
+    setup_bgwriter_signalhook();
+    ereport(LOG, (errmsg("invalidate buffer bgwriter started")));
+
+    errno_t err_rc = snprintf_s(name, MAX_THREAD_NAME_LEN, MAX_THREAD_NAME_LEN - 1, "%s", "spbgwriter");
+    securec_check_ss(err_rc, "", "");
+
+    /* Create a resource owner to keep track of our resources (currently only buffer pins). */
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name,
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+
+    /*
+     * Create a memory context that we will do all our work in.  We do this so
+     * that we can reset the context during error recovery and thereby avoid
+     * possible memory leaks.  Formerly this code just ran in
+     * t_thrd.top_mem_cxt, but resetting that would be a really bad idea.
+     */
+    bgwriter_context = AllocSetContextCreate(t_thrd.top_mem_cxt, name, ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
+    MemoryContextSwitchTo(bgwriter_context);
+
+    WritebackContextInit(&wb_context, &u_sess->attr.attr_storage.bgwriter_flush_after);
+
+    if (sigsetjmp(localSigjmpBuf, 1) != 0) {
+        ereport(WARNING, (errmsg("invalidate buffer bgwriter exception occured.")));
+        bgwriter_handle_exceptions(wb_context, bgwriter_context);
+    }
+
+    /* We can now handle ereport(ERROR) */
+    t_thrd.log_cxt.PG_exception_stack = &localSigjmpBuf;
+
+    /* Unblock signals (they were blocked when the postmaster forked us) */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+
+    /* Use the recovery target timeline ID during recovery */
+    if (RecoveryInProgress()) {
+        t_thrd.xlog_cxt.ThisTimeLineID = GetRecoveryTargetTLI();
+    }
+
+    pgstat_report_appname("InvalidBufferBgWriter");
+    pgstat_report_activity(STATE_IDLE, NULL);
+    g_instance.bgwriter_cxt.invalid_buf_proc_latch = &t_thrd.proc->procLatch;
+	/* Loop forever */
+    for (;;) {
+        int rc;
+
+        if (t_thrd.bgwriter_cxt.got_SIGHUP) {
+            t_thrd.bgwriter_cxt.got_SIGHUP = false;
+            ProcessConfigFile(PGC_SIGHUP);
+        }
+
+        if (t_thrd.bgwriter_cxt.shutdown_requested) {
+            ereport(LOG, (errmsg("invalidate buffer bgwriter thread shut down")));
+            u_sess->attr.attr_common.ExitOnAnyError = true;
+            proc_exit(0);
+        }
+
+        rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, THREAD_SLEEP_TIME);
+        if (rc & WL_POSTMASTER_DEATH) {
+            gs_thread_exit(1);
+        }
+
+        /* Clear any already-pending wakeups */
+        ResetLatch(&t_thrd.proc->procLatch);
+        drop_rel_all_forks_buffers();
+    }
+}
+
+const int HASH_TABLE_ELEMENT_MIN_NUM = 512;
+HTAB *relfilenode_hashtbl_create(const char *name, bool use_heap_mem)
+{
+    HASHCTL hashCtrl;
+    HTAB *hashtbl = NULL;
+    errno_t rc;
+
+    rc = memset_s(&hashCtrl, sizeof(hashCtrl), 0, sizeof(hashCtrl));
+    securec_check(rc, "", "");
+    hashCtrl.hcxt = (MemoryContext)CurrentMemoryContext;
+    hashCtrl.hash = tag_hash;
+    hashCtrl.keysize = sizeof(RelFileNode);
+    /* keep entrysize >= keysize, stupid limits */
+    hashCtrl.entrysize = sizeof(DelFileTag);
+
+    if (use_heap_mem) {
+        hashtbl = HeapMemInitHash(name, HASH_TABLE_ELEMENT_MIN_NUM,
+            Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles),  &hashCtrl,
+            (HASH_FUNCTION | HASH_ELEM));
+        if (hashtbl == NULL) {
+            ereport(FATAL, (errmsg("could not initialize unlinik relation hash table")));
+        }
+    } else {
+        hashtbl = hash_create(name, HASH_TABLE_ELEMENT_MIN_NUM, &hashCtrl, (HASH_CONTEXT | HASH_FUNCTION | HASH_ELEM));
+    }
+    return hashtbl;
+}
+
+static void drop_rel_all_forks_buffers()
+{
+    HASH_SEQ_STATUS status;
+    DelFileTag *entry = NULL;
+    DelFileTag *temp_entry = NULL;
+    bool found = false;
+    uint rel_num = 0;
+    HTAB *unlink_rel_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    HTAB *rel_bak = relfilenode_hashtbl_create("unlink_rel_bak", false);
+
+    /* Obtains the entry in hashtable. */
+    LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
+    hash_seq_init(&status, unlink_rel_hashtbl);
+    while ((temp_entry = (DelFileTag *)hash_seq_search(&status)) != NULL) {
+        entry = (DelFileTag*)hash_search(rel_bak, (void *)&temp_entry->rnode, HASH_ENTER, &found);
+        if (!found) {
+            entry->rnode = temp_entry->rnode;
+            entry->maxSegNo = temp_entry->maxSegNo;
+            rel_num++;
+        }
+    }
+    LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+    
+    if (rel_num > 0) {
+        DropRelFileNodeAllBuffersUsingHash(rel_bak);
+
+        hash_seq_init(&status, rel_bak);
+        while ((temp_entry = (DelFileTag *)hash_seq_search(&status)) != NULL) {
+            if (temp_entry->maxSegNo == -1) {
+                ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
+                    errmsg("the max segno is -1, skip forget this rel %u/%u/%u, bucketNode is %d",
+                        temp_entry->rnode.spcNode, temp_entry->rnode.dbNode, temp_entry->rnode.relNode,
+                        temp_entry->rnode.bucketNode)));
+                continue;
+            }
+            for (int32 i = 0; i < temp_entry->maxSegNo; i++) {
+                for (int fork_num = 0; fork_num <= (int)MAX_FORKNUM; fork_num++) {
+                    md_register_forget_request(temp_entry->rnode, fork_num, i);
+                }
+            }
+            LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_EXCLUSIVE);
+            if (hash_search(unlink_rel_hashtbl, (void *)&temp_entry->rnode, HASH_REMOVE, NULL) == NULL) {
+                LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+                hash_destroy(rel_bak);
+                ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("unlink rel hash table corrupted")));
+            } else {
+                ereport(DEBUG1, (errmodule(MOD_INCRE_BG),
+                    errmsg("invalidate buffer has been finished for rel %u/%u/%u, bucketNode is %d",
+                        temp_entry->rnode.spcNode, temp_entry->rnode.dbNode, temp_entry->rnode.relNode,
+                        temp_entry->rnode.bucketNode)));
+            }
+            LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+        }
+    }
+
+    hash_destroy(rel_bak);
+}
+

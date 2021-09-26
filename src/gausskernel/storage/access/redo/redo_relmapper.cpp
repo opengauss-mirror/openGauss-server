@@ -37,7 +37,7 @@
 #include "catalog/pg_tablespace.h"
 #include "catalog/storage.h"
 #include "miscadmin.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/lock/lwlock.h"
 #include "utils/inval.h"
 #include "utils/relmapper.h"
@@ -52,13 +52,15 @@ XLogRecParseState *relmap_xlog_parse_to_block(XLogReaderState *record, uint32 *b
 {
     ForkNumber forknum = MAIN_FORKNUM;
     BlockNumber lowblknum = InvalidBlockNumber;
+    RelFileNodeForkNum filenode;
     XLogRecParseState *recordstatehead = NULL;
 
     *blocknum = 0;
     (*blocknum)++;
     XLogParseBufferAllocListFunc(record, &recordstatehead, NULL);
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_RELMAP_TYPE, forknum, lowblknum, NULL, recordstatehead);
+    filenode = RelFileNodeForkNumFill(NULL, InvalidBackendId, forknum, lowblknum);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_RELMAP_TYPE, filenode, recordstatehead);
 
     char *maindata = XLogRecGetData(record);
     Size maindatalen = XLogRecGetDataLen(record);

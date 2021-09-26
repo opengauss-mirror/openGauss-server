@@ -40,7 +40,18 @@ static inline char* GetDataDir()
             ereport(ERROR, (errmsg("Get GAUSSHOME failed, please check.")));
             return NULL;
         }
-        return dataDir;
+        char realDir[PATH_MAX + 1] = {'\0'};
+        if (realpath(dataDir, realDir) == NULL) {
+            ereport(ERROR,
+                (errmodule(MOD_EXECUTOR), errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
+                errmsg("Failed to obtain environment value $GAUSSHOME!"),
+                errdetail("N/A"),
+                errcause("Incorrect environment value."),
+                erraction("Please refer to backend log for more details.")));
+        }
+        dataDir = NULL;
+        check_backend_env(realDir);
+        return pstrdup(realDir);
     }
 }
 
@@ -62,7 +73,7 @@ Datum pg_control_system(PG_FUNCTION_ARGS)
     tupdesc = CreateTemplateTupleDesc(CONTROL_SYSTEM_ATTRNUM, false);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "pg_control_version", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "catalog_version_no", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "system_identifier", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "system_identifier", XIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "pg_control_last_modified", TIMESTAMPTZOID, -1, 0);
     tupdesc = BlessTupleDesc(tupdesc);
 

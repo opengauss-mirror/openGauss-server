@@ -71,6 +71,29 @@ typedef enum {
     GPC_INVALID,
 } GPCSourceSharedStatus;
 
+typedef enum {
+    SHARED_PLANCACHE = 0,
+    UPSERT_UPDATE_QUERY,
+#ifdef ENABLE_MOT
+    PBE_OPT_AND_MOT_ENGINE,
+#endif
+    PARAM_EXPR,
+    ONE_SHOT_PLAN,
+    NO_BOUND_PARAM,
+    TRANSACTION_STAT,
+    CALLER_FORCE_GPLAN,
+    CALLER_FORCE_CPLAN,
+    CSTORE_TABLE,
+    CHOOSE_BY_HINT,
+    PBE_OPTIMIZATION,
+    SETTING_FORCE_GPLAN,
+    SETTING_FORCE_CPLAN,
+    TRY_CPLAN,
+    COST_PREFER_GPLAN,
+    DEFAULT_CHOOSE,
+    MAX_PLANCHOOSEREASON
+} PlanChooseReason;
+
 class GPCPlanStatus
 {
 public:
@@ -353,10 +376,12 @@ typedef struct CachedPlan {
     bool is_saved;            /* is CachedPlan in a long-lived context? */
     bool is_valid;            /* is the stmt_list currently valid? */
     bool is_oneshot;          /* is it a "oneshot" plan? */
+
 #ifdef ENABLE_MOT
     StorageEngineType storageEngineType;    /* which storage engine is used*/
     JitExec::JitContext* mot_jit_context;   /* MOT JIT context required for executing LLVM jitted code */
 #endif
+
     bool dependsOnRole;       /* is plan specific to that role? */
     Oid planRoleId;           /* Role ID the plan was created for */
     TransactionId saved_xmin; /* if valid, replan when TransactionXmin

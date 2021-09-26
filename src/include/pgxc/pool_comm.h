@@ -61,10 +61,12 @@ typedef struct PGXCNodePoolSlot {
 
 typedef struct {
     int* fds;
+    int fdsCnt;
     gsocket* gsock;
     PoolConnInfo* connInfos;
     NODE_CONNECTION** pgConn;
     int pgConnCnt;
+    int waitCreateCount;
 } PoolConnDef;
 
 /* All pools for specified database */
@@ -113,6 +115,8 @@ typedef struct PoolAgent {
     int coord_connecting_cnt;             /* current connection cn count */
     PGXCNodePoolSlot** dn_connections;    /* one for each Datanode */
     PGXCNodePoolSlot** coord_connections; /* one for each Coordinator */
+    PoolConnDef* coor_conndef_for_validate;  /* record connections while in connecting process for cn */
+    PoolConnDef* dn_conndef_for_validate;  /* record connections while in connecting process for dn */
     char* session_params;
     char* local_params;
     char* temp_namespace;                 /* @Temp table. temp namespace name of session related to this agent. */

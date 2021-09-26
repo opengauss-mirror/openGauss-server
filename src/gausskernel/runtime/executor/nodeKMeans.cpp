@@ -24,7 +24,7 @@ IDENTIFICATION
 
 #include <random>
 
-#include "executor/nodeKMeans.h"
+#include "executor/node/nodeKMeans.h"
 #include "funcapi.h"
 #include "utils/array.h"
 

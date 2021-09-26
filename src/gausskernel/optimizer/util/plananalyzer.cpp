@@ -17,7 +17,7 @@
 #include "knl/knl_variable.h"
 
 #include "commands/prepare.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "parser/parse_relation.h"
 #ifdef PGXC
 #include "optimizer/planmain.h"

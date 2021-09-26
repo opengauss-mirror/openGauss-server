@@ -18,7 +18,7 @@
 #include "storage/buf/block.h"
 
 /*
- * Compute the checksum for a Postgres page.  The page must be aligned on a
+ * Compute the checksum for a openGauss page.  The page must be aligned on a
  * 4-byte boundary.
  */
 extern uint16 pg_checksum_page(char* page, BlockNumber blkno);

@@ -38,7 +38,7 @@
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
-#include "executor/nodeWindowAgg.h"
+#include "executor/node/nodeWindowAgg.h"
 #include "miscadmin.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
@@ -776,7 +776,8 @@ static void update_frameheadpos(WindowObject winobj, TupleTableSlot* slot)
     if (winstate->framehead_valid)
         return; /* already known for current row */
 
-    if (frame_options & FRAMEOPTION_START_UNBOUNDED_PRECEDING) {
+    bool isFrameHead = frame_options & FRAMEOPTION_START_UNBOUNDED_PRECEDING;
+    if (isFrameHead) {
         /* In UNBOUNDED PRECEDING mode, frame head is always row 0 */
         winstate->frameheadpos = 0;
         winstate->framehead_valid = true;

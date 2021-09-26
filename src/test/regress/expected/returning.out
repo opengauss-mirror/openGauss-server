@@ -3,7 +3,6 @@
 --
 -- Simple cases
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 CREATE TEMP TABLE foo (f1 int, f2 text, f3 int default 42);
 INSERT INTO foo (f1,f2,f3)
   VALUES (1, 'test', DEFAULT), (2, 'More', 11), (3, upper('more'), 7+9)

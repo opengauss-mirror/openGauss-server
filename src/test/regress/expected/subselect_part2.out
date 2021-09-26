@@ -1,4 +1,3 @@
-SET enforce_two_phase_commit TO off;
 --
 -- Test that an IN implemented using a UniquePath does unique-ification
 -- with the right semantics, as per bug #4113.  (Unfortunately we have

@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------------------
  * 
  * elog.h
- *        POSTGRES error reporting/logging definitions.
+ *        openGauss error reporting/logging definitions.
  *
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -18,6 +18,10 @@
 #include "c.h"
 #include "pgtime.h"
 #include <time.h>
+#include "cm/be_module.h"
+#include "cm/cm_errcodes.h"
+#include "securec.h"
+#include <initializer_list>
 
 #ifdef HAVE_SYSLOG
 #ifndef MONITOR_SYSLOG_LIMIT
@@ -61,11 +65,18 @@ extern THR_LOCAL const char* thread_name;
  * express means you want to free the space alloced
  * by yourself. e.g. express could be "free(str1);free(str2)"
  */
+
+#define PGSIXBIT(ch) (((ch) - '0') & 0x3F)
+#define PGUNSIXBIT(val) (((val)&0x3F) + '0')
+
+#define MAKE_SQLSTATE(ch1, ch2, ch3, ch4, ch5) \
+    (PGSIXBIT(ch1) + (PGSIXBIT(ch2) << 6) + (PGSIXBIT(ch3) << 12) + (PGSIXBIT(ch4) << 18) + (PGSIXBIT(ch5) << 24))
+
 #define check_errno(errno, express, file, line)                                                               \
     {                                                                                                         \
         if (EOK != errno) {                                                                                   \
             express;                                                                                          \
-            write_runlog(ERROR, "%s : %d failed on calling security function, err:%u.\n", file, line, errno); \
+            write_runlog(ERROR, "%s : %d failed on calling security function, err:%d.\n", file, line, errno); \
             exit(1);                                                                                          \
         }                                                                                                     \
     }
@@ -108,13 +119,32 @@ extern THR_LOCAL const char* thread_name;
 #define CM_AUTH_TRUST (1)
 #define CM_AUTH_GSS (2)
 
+#define EREPORT_BUF_LEN 1024
+#define MAX_EREPORT_BUF_LEN 2048
+
 extern void write_runlog(int elevel, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+extern char *errmsg(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+extern char* errdetail(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+extern char* errcause(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+extern char* erraction(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+extern char* errcode(int sql_state);
+extern char* errmodule(ModuleId id);
+extern int add_message_string(char* errmsg_tmp, char* errdetail_tmp, char* errmodule_tmp,
+    char* errcode_tmp, char* errcause_tmp, char* erraction_tmp, const char* fmt);
+template<typename... T>
+extern void write_runlog2(int elevel, T... args);
 
 FILE* logfile_open(const char* filename, const char* mode);
 void write_runlog(int elevel, const char* fmt, ...);
 void add_log_prefix(char* str);
 
 void write_log_file(const char* buffer, int count);
+
+char* errmsg(const char* fmt, ...);
+char* errdetail(const char* fmt, ...);
+char* errcode(int sql_state);
+char* errmodule(ModuleId id);
+
 
 #define curLogFileMark ("-current.log")
 
@@ -130,7 +160,9 @@ char* trim(char* src);
 int is_comment_line(const char* str);
 int is_digit_string(char* str);
 int SetFdCloseExecFlag(FILE* fp);
-
+int add_message_string(char* errmsg_tmp, char* errdetail_tmp, char* errmodule_tmp, char* errcode_tmp, const char* fmt);
+void write_runlog3(int elevel, const char* errmodule_tmp, const char* errcode_tmp, const char* fmt, ...)
+    __attribute__((format(printf, 4, 5)));
 /*
  * @Description:  get value of paramater from configuration file
  *
@@ -153,5 +185,68 @@ extern const char* prefix_name;
 /* inplace upgrade stuffs */
 extern volatile uint32 undocumentedVersion;
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
+
+template<typename... T>
+void write_runlog2(int elevel, T... args)
+{
+    char errmsg_tmp[EREPORT_BUF_LEN] = {0};
+    char errdetail_tmp[EREPORT_BUF_LEN] = {0};
+    char errmodule_tmp[EREPORT_BUF_LEN] = {0};
+    char errcode_tmp[EREPORT_BUF_LEN] = {0};
+    char errcause_tmp[EREPORT_BUF_LEN] = {0};
+    char erraction_tmp[EREPORT_BUF_LEN] = {0};
+    char errbuf[MAX_EREPORT_BUF_LEN] = {0};
+    int rcs;
+    for (auto x : {args...}) {
+        rcs = add_message_string(errmsg_tmp, errdetail_tmp, errmodule_tmp,
+            errcode_tmp, errcause_tmp, erraction_tmp, x);
+    }
+
+    if (errmsg_tmp[0]) {
+        if (errbuf[0]) {
+            rcs = memcpy_s(errbuf + strlen(errbuf), MAX_EREPORT_BUF_LEN - strlen(errbuf),
+                           errmsg_tmp, strlen(errmsg_tmp));
+            securec_check_errno(rcs, (void)rcs);
+        } else {
+            rcs = snprintf_s(errbuf, sizeof(errbuf), sizeof(errbuf) - 1, errmsg_tmp);
+            securec_check_intval(rcs, );
+        }
+    }
+
+    if (errdetail_tmp[0]) {
+        if (errbuf[0]) {
+            rcs = memcpy_s(errbuf + strlen(errbuf), MAX_EREPORT_BUF_LEN - strlen(errbuf),
+                           errdetail_tmp, strlen(errdetail_tmp));
+            securec_check_errno(rcs, (void)rcs);
+        } else {
+            rcs = snprintf_s(errbuf, sizeof(errbuf), sizeof(errbuf) - 1, errdetail_tmp);
+            securec_check_intval(rcs, );
+        }
+    }
+
+    if (errcause_tmp[0]) {
+        if (errbuf[0]) {
+            rcs = memcpy_s(errbuf + strlen(errbuf), MAX_EREPORT_BUF_LEN - strlen(errbuf),
+                           errcause_tmp, strlen(errcause_tmp));
+            securec_check_errno(rcs, (void)rcs);
+        } else {
+            rcs = snprintf_s(errbuf, sizeof(errbuf), sizeof(errbuf) - 1, errcause_tmp);
+            securec_check_intval(rcs, );
+        }
+    }
+    if (erraction_tmp[0]) {
+        if (errbuf[0]) {
+            rcs = memcpy_s(errbuf + strlen(errbuf), MAX_EREPORT_BUF_LEN - strlen(errbuf),
+                           erraction_tmp, strlen(erraction_tmp));
+            securec_check_errno(rcs, (void)rcs);
+        } else {
+            rcs = snprintf_s(errbuf, sizeof(errbuf), sizeof(errbuf) - 1, erraction_tmp);
+            securec_check_intval(rcs, );
+        }
+    }
+    if (errbuf[0]) {
+        write_runlog3(elevel, errmodule_tmp, errcode_tmp, "%s\n", errbuf);
+    }
+}
 
 #endif /* GTM_ELOG_H */

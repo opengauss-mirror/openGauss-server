@@ -23,7 +23,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
+#include "executor/exec/execdebug.h"
 #include "vecexecutor/vecpartiterator.h"
 #include "executor/tuptable.h"
 #include "utils/memutils.h"
@@ -54,7 +54,40 @@ VecPartIteratorState* ExecInitVecPartIterator(VecPartIterator* node, EState* est
     return state;
 }
 
-static void init_vecscan_partition(VecPartIteratorState* node)
+static int GetVecscanPartitionNum(const PartIteratorState* node)
+{
+    VecPartIterator* pi_node = (VecPartIterator*)node->ps.plan;
+    PlanState* noden = (PlanState*)node->ps.lefttree;
+    int partitionScan;
+    switch (nodeTag(noden)) {
+        case T_CStoreScanState:
+            partitionScan = ((CStoreScanState*)noden)->part_id;
+            break;
+#ifdef ENABLE_MULTIPLE_NODES
+        case T_TsStoreScanState:
+            partitionScan = ((TsStoreScanState*)noden)->part_id;
+            break;
+#endif
+        case T_DfsIndexScanState:
+            partitionScan = ((DfsIndexScanState*)noden)->part_id;
+            break;
+        case T_CStoreIndexScanState:
+            partitionScan = ((CStoreIndexScanState*)noden)->part_id;
+            break;
+        case T_CStoreIndexCtidScanState:
+            partitionScan = ((CStoreIndexCtidScanState*)noden)->part_id;
+            break;
+        case T_CStoreIndexHeapScanState:
+            partitionScan = ((CStoreIndexHeapScanState*)noden)->part_id;
+            break;
+        default:
+            partitionScan = pi_node->itrs;
+            break;
+    }
+    return partitionScan;
+}
+
+static void InitVecscanPartition(VecPartIteratorState* node, int partitionScan)
 {
     int paramno = 0;
     unsigned int itr_idx = 0;
@@ -67,7 +100,7 @@ static void init_vecscan_partition(VecPartIteratorState* node)
     node->currentItr++;
     itr_idx = node->currentItr;
     if (BackwardScanDirection == pi_node->direction)
-        itr_idx = pi_node->itrs - itr_idx - 1;
+        itr_idx = partitionScan - itr_idx - 1;
 
     paramno = pi_node->param->paramno;
     param = &(node->ps.state->es_param_exec_vals[paramno]);
@@ -82,33 +115,17 @@ static void init_vecscan_partition(VecPartIteratorState* node)
 VectorBatch* ExecVecPartIterator(VecPartIteratorState* node)
 {
     VectorBatch* result = NULL;
-    VecPartIterator* pi_node = (VecPartIterator*)node->ps.plan;
     EState* state = node->ps.lefttree->state;
     bool orig_early_free = state->es_skip_early_free;
 
-    PlanState* noden = (PlanState*)node->ps.lefttree;
-    int partitionScan;
-    switch (nodeTag(noden)) {
-        case T_CStoreScanState:
-            partitionScan = ((CStoreScanState*)noden)->part_id;
-            break;
-#ifdef ENABLE_MULTIPLE_NODES
-        case T_TsStoreScanState:
-            partitionScan = ((TsStoreScanState*)noden)->part_id;
-            break;
-#endif
-        default:
-            partitionScan = pi_node->itrs;
-            break;
-    }
-
+    int partitionScan = GetVecscanPartitionNum(node);
     if (partitionScan == 0) {
         return NULL;
     }
 
     /* init first scanned partition */
     if (-1 == node->currentItr)
-        init_vecscan_partition(node);
+        InitVecscanPartition(node, partitionScan);
 
     /* For partition wise join, can not early free left tree's caching memory */
     state->es_skip_early_free = true;
@@ -123,7 +140,7 @@ VectorBatch* ExecVecPartIterator(VecPartIteratorState* node)
         if (node->currentItr >= partitionScan - 1)
             return NULL;
 
-        init_vecscan_partition(node);
+        InitVecscanPartition(node, partitionScan);
 
         /* For partition wise join, can not early free left tree's caching memory */
         orig_early_free = state->es_skip_early_free;
@@ -150,13 +167,12 @@ void ExecReScanVecPartIterator(VecPartIteratorState* node)
     VecPartIterator* pi_node = NULL;
     int paramno = -1;
     ParamExecData* param = NULL;
-    VecPartIterator* piterator = NULL;
-
-    piterator = (VecPartIterator*)node->ps.plan;
 
     /* do nothing if there is no partition to scan */
-    if (0 == piterator->itrs)
+    int partitionScan = GetVecscanPartitionNum(node);
+    if (partitionScan == 0) {
         return;
+    }
 
     node->currentItr = -1;
 

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pgxc_plan_remote.h
- *		Postgres-XC specific planner interfaces and structures for remote query.
+ *		openGauss specific planner interfaces and structures for remote query.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.

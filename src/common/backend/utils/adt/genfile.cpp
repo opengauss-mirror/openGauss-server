@@ -26,7 +26,7 @@
 #include "miscadmin.h"
 #include "postmaster/alarmchecker.h"
 #include "postmaster/syslogger.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/checksum.h"
 #include "replication/basebackup.h"
 #include "utils/builtins.h"
@@ -101,6 +101,7 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
     const int MAX_RETRY_LIMIT = 60;
     int retryCnt = 0;
     errno_t rc = 0;
+    UndoFileType undoFileType = UNDO_INVALID;
 
     if (bytes_to_read < 0) {
         if (seek_offset < 0)
@@ -130,7 +131,7 @@ bytea* read_binary_file(const char* filename, int64 seek_offset, int64 bytes_to_
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not open file \"%s\" for reading: %m", filename)));
     }
 
-    isNeedCheck = is_row_data_file(filename, &segNo);
+    isNeedCheck = is_row_data_file(filename, &segNo, &undoFileType);
     ereport(DEBUG1, (errmsg("read_binary_file, filename is %s, isNeedCheck is %d", filename, isNeedCheck)));
 
     buf = (bytea*)palloc((Size)bytes_to_read + VARHDRSZ);
@@ -152,6 +153,8 @@ recheck:
         BlockNumber blkno = 0;
         uint16 checksum = 0;
         PageHeader phdr = NULL;
+        uint32 segSize;
+        GET_SEG_SIZE(undoFileType, segSize);
 
         if (seek_offset < 0) {
             struct stat fst;
@@ -178,9 +181,9 @@ recheck:
         }
 
         for (check_loc = 0; check_loc < nbytes; check_loc += BLCKSZ) {
-            blkno = offset / BLCKSZ + check_loc / BLCKSZ + (segNo * ((BlockNumber)RELSEG_SIZE));
+            blkno = offset / BLCKSZ + check_loc / BLCKSZ + (segNo * segSize);
             phdr = PageHeader((char*)VARDATA(buf) + check_loc);
-            if (PageIsNew(phdr)) {
+            if (!CheckPageZeroCases(phdr)) {
                 continue;
             }
             checksum = pg_checksum_page((char*)VARDATA(buf) + check_loc, blkno);

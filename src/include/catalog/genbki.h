@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * genbki.h
- *	  Required include file for all POSTGRES catalog header files
+ *	  Required include file for all openGauss catalog header files
  *
  * genbki.h defines CATALOG(), DATA(), BKI_BOOTSTRAP and related macros
  * so that the catalog header files can be read by the C compiler.

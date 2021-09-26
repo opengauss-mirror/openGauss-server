@@ -21,5 +21,5 @@ extern void AlterLanguageOwner(const char* name, Oid newOwnerId);
 extern void AlterLanguageOwner_oid(Oid oid, Oid newOwnerId);
 extern bool PLTemplateExists(const char* languageName);
 extern Oid get_language_oid(const char* langname, bool missing_ok);
-
+extern char* get_language_name(Oid languageOid);
 #endif /* PROCLANG_H */

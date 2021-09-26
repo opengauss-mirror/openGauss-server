@@ -32,6 +32,7 @@ typedef struct pg_conn PGconn;
 class CStringsMap;
 typedef struct StatementData StatementData;
 typedef struct PGClientLogicParams PGClientLogicParams;
+class ExprPartsList;
 /* *
  * @class Processor
  *
@@ -39,14 +40,15 @@ typedef struct PGClientLogicParams PGClientLogicParams;
  */
 class Processor {
 public:
-    static bool run_pre_query(StatementData *statement_data);
+    static bool run_pre_query(StatementData *statement_data, bool is_inner_query = false, bool *failed_to_parse = NULL);
     static bool run_pre_exec(StatementData *statement_data);
     /* *
      * 	CREATE commands require running functions later to update local cache
      */
     static bool run_post_query(PGconn *conn);
     static bool accept_pending_statements(PGconn *conn, bool isSuccess = true);
-    static bool deal_order_by_statement(const SelectStmt * const select_stmt, ICachedColumns *select_cached_columns);
+    static bool deal_order_by_statement(const SelectStmt * const select_stmt, ICachedColumns *select_cached_columns,
+    		StatementData *statement_data);
     static bool run_pre_statement(const Node * const stmt, StatementData *statement_data);
     static const int MAX_KEY_ADD_LEN = 1024;
 
@@ -94,7 +96,8 @@ private:
         StatementData *statement_data);
     static bool run_pre_copy_statement(const CopyStmt * const stmt, StatementData *statement_data);
     static bool run_pre_alter_table_statement(const AlterTableStmt * const stmt, StatementData *statement_data);
-    static bool alter_add_constraint(const AlterTableCmd *cmd, ICachedColumns *cached_columns);
+    static bool alter_add_constraint(const AlterTableCmd *cmd, 
+        ICachedColumns *cached_columns, StatementData *statement_data);
     static bool run_pre_column_setting_statement(PGconn *conn, const char *stmt_name,
         CreateClientLogicColumn *client_logic_column, const char *query, PGClientLogicParams &params);
     static bool run_pre_cached_global_setting(PGconn *conn, const char *stmt_name,
@@ -107,9 +110,8 @@ private:
     static bool run_pre_create_rlspolicy_stmt(const CreateRlsPolicyStmt *stmt, StatementData *statement_data);
     static bool run_pre_alter_rlspolicy_stmt(const AlterRlsPolicyStmt *stmt, StatementData *statement_data);
     static bool run_pre_rlspolicy_using(const Node *stmt, StatementData *statement_data);
-    static bool run_pre_create_function_stmt(const CreateFunctionStmt *stmt);
     static const bool remove_droppend_schemas(PGconn *conn, const bool is_success);
-    static const bool remove_droppend_global_settings(PGconn *conn, const bool is_success);
+    static void remove_dropped_global_settings(PGconn *conn, const bool is_success);
     static void remove_dropped_column_settings(PGconn *conn, const bool is_success);
     static bool is_set_operation_allowed(const SelectStmt * const select_stmt, const ICachedColumns *cached_columns,
         const SetOperation &parent_select_operation, const bool &select_cached_columns, StatementData *statement_data);
@@ -130,6 +132,9 @@ private:
         ICachedColumns *cached_columns);
     static bool join_with_same_key(List *usingClause, ICachedColumns *cached_larg, ICachedColumns *cached_rarg,
         StatementData *statement_data);
+    /* from RangeVar */
+    static bool run_pre_range_statement(const RangeVar * const range_var, StatementData *statement_data,
+    ICachedColumns *cached_columns, const ICachedColumns* cached_columns_parents);
     /*
      * with cte1(), cte2()
      */
@@ -141,11 +146,16 @@ private:
      * insert/delete/update returning list [target list]
      */
     static bool run_pre_returning_list_statement(const List *returning_list, ICachedColumns *cached_columns_from,
-        ICachedColumns *cachedColumns);
+        ICachedColumns *cachedColumns, StatementData *statement_data);
     static bool run_pre_merge_stmt(const MergeStmt *stmt, StatementData *statement_data);
 
-    static bool get_column_names_from_target_list(const List *target_list, CStringsMap *col_alias_map);
+    static bool get_column_names_from_target_list(const List *target_list, CStringsMap *col_alias_map,
+        StatementData *statement_data);
     static bool process_clause_value(StatementData *statement_data);
+    static bool run_pre_select_target_list(List *targetList, StatementData *statementData,
+        ExprPartsList *funcExprPartsList);
+    static bool process_res_target(ResTarget *resTarget, StatementData *statementData,
+        ExprPartsList *funcExprPartsList);
 };
 
 #endif

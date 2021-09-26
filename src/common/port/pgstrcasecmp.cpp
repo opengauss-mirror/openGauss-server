@@ -33,7 +33,7 @@
  */
 int pg_str_case_cmp_work(const char* s1, const char* s2, size_t n, bool useN)
 {
-    while (!useN || (useN && n-- > 0)) {
+    while (!useN || n-- > 0) {
         unsigned char ch1 = (unsigned char)*s1++;
         unsigned char ch2 = (unsigned char)*s2++;
 

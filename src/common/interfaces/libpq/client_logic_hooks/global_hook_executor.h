@@ -65,12 +65,12 @@ public:
      */
     virtual bool pre_create(const StringArgs &args, const GlobalHookExecutor **existing_global_hook_executors,
         size_t existing_global_hook_executors_size);
+    virtual bool post_create(const StringArgs& args);
+    virtual bool deprocess_column_setting(const unsigned char *processed_data, size_t processed_data_size, 
+    const char *key_store, const char *key_path, const char *key_algo, unsigned char **data, size_t *data_size);
 
     virtual bool set_deletion_expected();
 
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-    virtual bool get_key_path_by_cmk_name(char *key_path_buf, size_t buf_len);
-#endif
     /*
      * BUILT-IN FUNCTIONS
      */

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * freespace.cpp
- *	  POSTGRES free space map for quickly finding free space in relations
+ *	  openGauss free space map for quickly finding free space in relations
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -32,7 +32,7 @@
 #include "storage/freespace.h"
 #include "storage/fsm_internals.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "commands/tablespace.h"
 #include "utils/aiomem.h"
 #include "gstrace/gstrace_infra.h"
@@ -55,11 +55,12 @@ static uint8 fsm_space_needed_to_cat(Size needed);
 static Size fsm_space_cat_to_avail(uint8 cat);
 
 /* workhorse functions for various operations */
-static int fsm_set_and_search(Relation rel, const FSMAddress& addr, uint16 slot, uint8 newValue, uint8 minValue);
+static int fsm_set_and_search(Relation rel, const FSMAddress &addr, uint16 slot, uint8 newValue, uint8 minValue,
+    bool search = true);
 static BlockNumber fsm_search(Relation rel, uint8 min_cat);
 static uint8 fsm_vacuum_page(Relation rel, const FSMAddress& addr, bool* eof);
 static BlockNumber fsm_get_lastblckno(Relation rel, const FSMAddress& addr);
-static void fsm_update_recursive(Relation rel, const FSMAddress& addr, uint8 new_cat);
+static void fsm_update_recursive(Relation rel, const FSMAddress& addr, uint8 new_cat, bool search = true);
 
 /* ******* Public API ******* */
 /*
@@ -139,7 +140,7 @@ void RecordPageWithFreeSpace(Relation rel, BlockNumber heapBlk, Size spaceAvail)
  * it not worth updating the upper levels of the tree every time data for
  * a single page changes, but for a bulk-extend it's worth it.
  */
-void UpdateFreeSpaceMap(Relation rel, BlockNumber startBlkNum, BlockNumber endBlkNum, Size freespace)
+void UpdateFreeSpaceMap(Relation rel, BlockNumber startBlkNum, BlockNumber endBlkNum, Size freespace, bool search)
 {
     int new_cat = fsm_space_avail_to_cat(freespace);
     FSMAddress addr;
@@ -155,7 +156,7 @@ void UpdateFreeSpaceMap(Relation rel, BlockNumber startBlkNum, BlockNumber endBl
          * root.
          */
         addr = fsm_get_location(blockNum, &slot);
-        fsm_update_recursive(rel, addr, (uint8)new_cat);
+        fsm_update_recursive(rel, addr, (uint8)new_cat, search);
 
         /*
          * Get the last block number on this FSM page.  If that's greater
@@ -175,6 +176,15 @@ void UpdateFreeSpaceMap(Relation rel, BlockNumber startBlkNum, BlockNumber endBl
  */
 void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber heapBlk, Size spaceAvail)
 {
+    /*
+     * FSM can not be read by physical location in recovery. It is possible to write on wrong places
+     * if the FSM fork is dropped and then allocated when replaying old xlog.
+     * Since FSM does not have to be totally accurate anyway, just skip it.
+     */
+    if (IsSegmentFileNode(rnode)) {
+        return;
+    }
+
     int new_cat = fsm_space_avail_to_cat(spaceAvail);
     FSMAddress addr;
     uint16 slot;
@@ -187,7 +197,8 @@ void XLogRecordPageWithFreeSpace(const RelFileNode& rnode, BlockNumber heapBlk, 
     blkno = fsm_logical_to_physical(addr);
 
     /* If the page doesn't exist already, extend */
-    buf = XLogReadBufferExtended(rnode, FSM_FORKNUM, blkno, RBM_ZERO_ON_ERROR);
+    buf = XLogReadBufferExtended(rnode, FSM_FORKNUM, blkno, RBM_ZERO_ON_ERROR, NULL);
+
     LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
     page = BufferGetPage(buf);
@@ -303,9 +314,9 @@ void FreeSpaceMapTruncateRel(Relation rel, BlockNumber nblocks)
          * during recovery.
          */
         MarkBufferDirty(buf);
-        if (!t_thrd.xlog_cxt.InRecovery && RelationNeedsWAL(rel) && XLogHintBitIsNeeded())
+        if (!t_thrd.xlog_cxt.InRecovery && RelationNeedsWAL(rel) && XLogHintBitIsNeeded()) {
             log_newpage_buffer(buf, false);
-
+        }
         END_CRIT_SECTION();
 
         UnlockReleaseBuffer(buf);
@@ -621,9 +632,18 @@ static void fsm_extend(Relation rel, BlockNumber fsm_nblocks)
     }
 
     while (fsm_nblocks_now < fsm_nblocks) {
-        PageSetChecksumInplace(pg, fsm_nblocks_now);
+        if (IsSegmentFileNode(rel->rd_node)) {
+            Buffer buf = ReadBufferExtended(rel, FSM_FORKNUM, P_NEW, RBM_NORMAL, NULL);
+#ifdef USE_ASSERT_CHECKING
+            BufferDesc *buf_desc = GetBufferDescriptor(buf - 1);
+            Assert(buf_desc->tag.blockNum == fsm_nblocks_now);
+#endif
+            ReleaseBuffer(buf);
+        } else {
+            PageSetChecksumInplace(pg, fsm_nblocks_now);
 
-        smgrextend(rel->rd_smgr, FSM_FORKNUM, fsm_nblocks_now, (char*)pg, false);
+            smgrextend(rel->rd_smgr, FSM_FORKNUM, fsm_nblocks_now, (char*)pg, false);
+        }
         fsm_nblocks_now++;
     }
 
@@ -650,7 +670,8 @@ static void fsm_extend(Relation rel, BlockNumber fsm_nblocks)
  * least minValue of free space. If one is found, its slot number is
  * returned, -1 otherwise.
  */
-static int fsm_set_and_search(Relation rel, const FSMAddress& addr, uint16 slot, uint8 newValue, uint8 minValue)
+static int fsm_set_and_search(Relation rel, const FSMAddress &addr, uint16 slot, uint8 newValue, uint8 minValue,
+    bool search)
 {
     Buffer buf;
     Page page;
@@ -665,7 +686,7 @@ static int fsm_set_and_search(Relation rel, const FSMAddress& addr, uint16 slot,
     if (fsm_set_avail(page, slot, newValue))
         MarkBufferDirtyHint(buf, false);
 
-    if (minValue != 0) {
+    if (minValue != 0 && search) {
         /* Search while we still hold the lock */
         newslot = fsm_search_avail(buf, minValue, addr.level == FSM_BOTTOM_LEVEL, true);
     }
@@ -843,7 +864,7 @@ static BlockNumber fsm_get_lastblckno(Relation rel, const FSMAddress& addr)
  * Recursively update the FSM tree from given address to
  * all the way up to root.
  */
-static void fsm_update_recursive(Relation rel, const FSMAddress& addr, uint8 new_cat)
+static void fsm_update_recursive(Relation rel, const FSMAddress& addr, uint8 new_cat, bool search)
 {
     uint16 parentslot;
     FSMAddress parent;
@@ -856,8 +877,8 @@ static void fsm_update_recursive(Relation rel, const FSMAddress& addr, uint8 new
      * update the information in that.
      */
     parent = fsm_get_parent(addr, &parentslot);
-    fsm_set_and_search(rel, parent, parentslot, new_cat, 0);
-    fsm_update_recursive(rel, parent, new_cat);
+    fsm_set_and_search(rel, parent, parentslot, new_cat, 0, search);
+    fsm_update_recursive(rel, parent, new_cat, search);
 }
 
 BlockNumber FreeSpaceMapCalTruncBlkNo(BlockNumber relBlkNo)

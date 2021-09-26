@@ -15,7 +15,7 @@ See the Mulan PSL v2 for more details.
 import os
 import subprocess
 
-from utils import unify_byte_unit
+from utils import convert_to_mb
 
 
 def cpu_usage():
@@ -77,5 +77,5 @@ def disk_space():
         if not sub_chan[0]:
             result = 0.0
         else:
-            result = unify_byte_unit(sub_chan[0].decode('utf-8'))
+            result = convert_to_mb(sub_chan[0].decode('utf-8'))
         return result

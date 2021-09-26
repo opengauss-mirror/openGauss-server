@@ -661,7 +661,7 @@ void get_man_path(const char* my_exec_path, char* ret_path)
  *	get_home_path
  *
  * On Unix, this actually returns the user's home directory.  On Windows
- * it returns the PostgreSQL-specific application data folder.
+ * it returns the openGauss-specific application data folder.
  */
 bool get_home_path(char* ret_path, size_t sz)
 {

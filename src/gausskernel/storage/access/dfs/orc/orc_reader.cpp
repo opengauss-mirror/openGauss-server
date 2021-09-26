@@ -1909,11 +1909,7 @@ void OrcColumnReaderImpl<fieldKind>::predicateFilter(uint64_t numValues, bool *i
                 if (!nullFilter(hasNull, notNull, isSelected, i)) {
                     int64_t tmpValue = data[i];
                     if (checkPredicateOnRow) {
-#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueIntForLlvm<Int64Wrapper, int64_t>(tmpValue, predicate);
-#else
-                        isSelected[i] = HdfsPredicateCheckValue<Int64Wrapper, int64_t>(tmpValue, predicate);
-#endif
                     }
 
                     if (checkBloomFilterOnRow && isSelected[i]) {
@@ -1934,12 +1930,8 @@ void OrcColumnReaderImpl<fieldKind>::predicateFilter(uint64_t numValues, bool *i
                 if (!nullFilter(hasNull, notNull, isSelected, i)) {
                     double tmpValue = data[i];
                     if (checkPredicateOnRow) {
-#ifdef ENABLE_LLVM_COMPILE
                         isSelected[i] = HdfsPredicateCheckValueDoubleForLlvm<Float8Wrapper, double>(tmpValue,
                                                                                                     predicate);
-#else
-                        isSelected[i] = HdfsPredicateCheckValue<Float8Wrapper, double>(tmpValue, predicate);
-#endif
                     }
 
                     if (checkBloomFilterOnRow && isSelected[i]) {

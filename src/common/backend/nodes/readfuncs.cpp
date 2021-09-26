@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * readfuncs.cpp
- *	  Reader functions for Postgres tree nodes.
+ *	  Reader functions for openGauss tree nodes.
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -38,6 +38,7 @@
 #include "nodes/plannodes.h"
 #include "optimizer/dataskew.h"
 #include "optimizer/planner.h"
+#include "nodes/parsenodes.h"
 #include "nodes/readfuncs.h"
 #include "parser/parse_func.h"
 #include "parser/parse_hint.h"
@@ -58,7 +59,7 @@
 #include "catalog/pg_enum.h"
 #include "access/transam.h"
 #endif
-#include "executor/nodeExtensible.h"
+#include "executor/node/nodeExtensible.h"
 #include "storage/lmgr.h"
 #include "optimizer/streamplan.h"
 #include "utils/rel.h"
@@ -1080,6 +1081,72 @@ static RewriteHint* _readRewriteHint(void)
     READ_DONE();
 }
 
+/*
+ * @Description: Read string to gather hint struct.
+ * @return: gather hint struct.
+ */
+static GatherHint* _readGatherHint(void)
+{
+    READ_LOCALS(GatherHint);
+    _readBaseHint(&(local_node->base));
+    READ_ENUM_FIELD(source, GatherSource);
+    READ_DONE();
+}
+
+/*
+ * @Description: Read string to no_gpc hint struct.
+ * @return: no_gpc hint struct.
+ */
+static NoGPCHint* _readNoGPCHint(void)
+{
+    READ_LOCALS_NO_FIELDS(NoGPCHint);
+
+    _readBaseHint(&(local_node->base));
+
+    READ_END();
+}
+
+/*
+ * @Description: Read string to no_expand hint struct.
+ * @return: no_expand hint struct.
+ */
+static NoExpandHint* _readNoExpandHint(void)
+{
+    READ_LOCALS_NO_FIELDS(NoExpandHint);
+
+    _readBaseHint(&(local_node->base));
+
+    READ_END();
+}
+
+/*
+ * @Description: Read string to set hint struct.
+ * @return: set hint struct.
+ */
+static SetHint* _readSetHint(void)
+{
+    READ_LOCALS(SetHint);
+
+    _readBaseHint(&(local_node->base));
+    READ_STRING_FIELD(name);
+    READ_STRING_FIELD(value);
+
+    READ_DONE();
+}
+
+/*
+ * @Description: Read string to rewrite plancache hint struct.
+ * @return: plancache hint struct.
+ */
+static PlanCacheHint* _readPlanCacheHint(void)
+{
+    READ_LOCALS(PlanCacheHint);
+
+    _readBaseHint(&(local_node->base));
+    READ_BOOL_FIELD(chooseCustomPlan);
+
+    READ_DONE();
+}
 
 /*
  * @Description: Read string to leading hint struct.
@@ -1259,12 +1326,23 @@ static HintState* _readHintState()
     READ_NODE_FIELD(block_name_hint);
     READ_NODE_FIELD(scan_hint);
     READ_NODE_FIELD(skew_hint);
-    IF_EXIST(predpush_hint)
-    {
+    IF_EXIST(predpush_hint) {
         READ_NODE_FIELD(predpush_hint);
     }
     READ_NODE_FIELD(rewrite_hint);
-
+    READ_NODE_FIELD(gather_hint);
+    IF_EXIST(no_expand_hint) {
+        READ_NODE_FIELD(no_expand_hint);
+    }
+    IF_EXIST(set_hint) {
+        READ_NODE_FIELD(set_hint);
+    }
+    IF_EXIST(cache_plan_hint) {
+        READ_NODE_FIELD(cache_plan_hint);
+    }
+    IF_EXIST(no_gpc_hint) {
+        READ_NODE_FIELD(no_gpc_hint);
+    }
     READ_DONE();
 }
 
@@ -1434,6 +1512,38 @@ static AlterTableStmt* _readAlterTableStmt(void)
     READ_DONE();
 }
 
+static PLDebug_variable* _readPLDebug_variable(void)
+{
+    READ_LOCALS(PLDebug_variable);
+    READ_STRING_FIELD(name);
+    READ_STRING_FIELD(var_type);
+    READ_STRING_FIELD(value);
+
+    READ_DONE();
+}
+
+static PLDebug_breakPoint* _readPLDebug_breakPoint(void)
+{
+    READ_LOCALS(PLDebug_breakPoint);
+    READ_INT_FIELD(bpIndex);
+    READ_OID_FIELD(funcoid);
+    READ_INT_FIELD(lineno);
+    READ_STRING_FIELD(query);
+
+    READ_DONE();
+}
+
+static PLDebug_frame* _readPLDebug_frame(void)
+{
+    READ_LOCALS(PLDebug_frame);
+    READ_INT_FIELD(frameno);
+    READ_STRING_FIELD(funcname);
+    READ_INT_FIELD(lineno);
+    READ_STRING_FIELD(query);
+
+    READ_DONE();
+}
+
 /*
  * _readSortGroupClause
  */
@@ -1587,6 +1697,10 @@ static RangeVar* _readRangeVar(void)
 
     IF_EXIST(buckets) {
         READ_NODE_FIELD(buckets);
+    }
+
+    IF_EXIST(withVerExpr) {
+        READ_BOOL_FIELD(withVerExpr);
     }
 
     READ_DONE();
@@ -1903,6 +2017,9 @@ static FuncExpr* _readFuncExpr(void)
 
     READ_OID_FIELD(funcid);
     READ_OID_FIELD(funcresulttype);
+    IF_EXIST(funcresulttype_orig) {
+        READ_INT_FIELD(funcresulttype_orig);
+    }
     READ_BOOL_FIELD(funcretset);
     READ_ENUM_FIELD(funcformat, CoercionForm);
     READ_OID_FIELD(funccollid);
@@ -2092,6 +2209,9 @@ static MergeStmt* _readMergeStmt(void)
     READ_NODE_FIELD(mergeWhenClauses);
     READ_BOOL_FIELD(is_insert_update);
     READ_NODE_FIELD(insert_stmt);
+    IF_EXIST(hintState) {
+        READ_NODE_FIELD(hintState);
+    };
 
     READ_DONE();
 }
@@ -2631,6 +2751,10 @@ static RangeTblEntry* _readRangeTblEntry(void)
                 READ_NODE_FIELD(tablesample);
             }
 
+            IF_EXIST(timecapsule) {
+                READ_NODE_FIELD(timecapsule);
+            }
+
             READ_OID_FIELD(partitionOid);
             READ_BOOL_FIELD(isContainPartition);
 
@@ -2761,6 +2885,9 @@ static RangeTblEntry* _readRangeTblEntry(void)
             /* Nothing to do */
             break;
 #endif /* PGXC */
+        case RTE_RESULT:
+            /* no extra fields */
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -2809,6 +2936,10 @@ static RangeTblEntry* _readRangeTblEntry(void)
         READ_BOOL_FIELD(isbucket);
     }
 
+    IF_EXIST(bucketmapsize) {
+        READ_INT_FIELD(bucketmapsize);
+    }
+
     IF_EXIST(buckets) {
         READ_NODE_FIELD(buckets);
     }
@@ -2821,8 +2952,11 @@ static RangeTblEntry* _readRangeTblEntry(void)
         READ_BOOL_FIELD(sublink_pull_up);
     }
 
-    IF_EXIST(extraUpdatedCols)
-    {
+    IF_EXIST(is_ustore) {
+        READ_BOOL_FIELD(is_ustore);
+    }
+
+    IF_EXIST(extraUpdatedCols) {
         READ_BITMAPSET_FIELD(extraUpdatedCols);
     }
 
@@ -3000,6 +3134,9 @@ static BitmapOr* _readBitmapOr(BitmapOr* local_node)
 
     _readPlan(&local_node->plan);
     READ_NODE_FIELD(bitmapplans);
+    IF_EXIST(is_ustore) {
+        READ_BOOL_FIELD(is_ustore);
+    }
 
     READ_DONE();
 }
@@ -3011,6 +3148,9 @@ static BitmapAnd* _readBitmapAnd(BitmapAnd* local_node)
 
     _readPlan(&local_node->plan);
     READ_NODE_FIELD(bitmapplans);
+    IF_EXIST(is_ustore) {
+        READ_BOOL_FIELD(is_ustore);
+    }
 
     READ_DONE();
 }
@@ -3247,6 +3387,9 @@ static BitmapIndexScan* _readBitmapIndexScan(BitmapIndexScan* local_node)
         }
     }
 #endif  // STREAMPLAN
+    IF_EXIST(is_ustore) {
+         READ_BOOL_FIELD(is_ustore);
+     }
     READ_DONE();
 }
 
@@ -3336,6 +3479,9 @@ static IndexScan* _readIndexScan(IndexScan* local_node)
     READ_NODE_FIELD(indexorderby);
     READ_NODE_FIELD(indexorderbyorig);
     READ_ENUM_FIELD(indexorderdir, ScanDirection);
+    IF_EXIST(is_ustore) {
+        READ_BOOL_FIELD(is_ustore);
+    }
     READ_DONE();
 }
 
@@ -3965,11 +4111,13 @@ static PlannedStmt* _readPlannedStmt(void)
     READ_INT_FIELD(assigned_query_mem[1]);
 
     READ_INT_FIELD(num_bucketmaps);
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-    const int size = BUCKETDATALEN;
+    int size;
     for (int j = 0; j < local_node->num_bucketmaps; j++) {
+        local_node->bucketCnt[j] = BUCKETDATALEN;
+        IF_EXIST(bucketCnt) {
+            READ_INT_FIELD(bucketCnt[j]);
+        }
+        size = local_node->bucketCnt[j];
         READ_UINT2_ARRAY_LEN(bucketMap[j]);
     }
 
@@ -4266,6 +4414,23 @@ static TableSampleClause* _readTableSampleClause(void)
     READ_DONE();
 }
 
+/*
+ * Description: Read TimeCapsuleClause string to TimeCapsuleClause struct.
+ *
+ * Parameters: void
+ *
+ * Return: TimeCapsuleClause*
+ */
+static TimeCapsuleClause* ReadTimeCapsuleClause(void)
+{
+    READ_LOCALS(TimeCapsuleClause);
+
+    READ_ENUM_FIELD(tvtype, TvVersionType);
+    READ_NODE_FIELD(tvver);
+
+    READ_DONE();
+}
+
 static DefElem* _readDefElem(DefElem* local_node)
 {
     READ_LOCALS_NULL(DefElem);
@@ -4275,6 +4440,15 @@ static DefElem* _readDefElem(DefElem* local_node)
     READ_STRING_FIELD(defname);
     READ_NODE_FIELD(arg);
     READ_ENUM_FIELD(defaction, DefElemAction);
+
+    IF_EXIST(begin_location) {
+        READ_INT_FIELD(begin_location);
+    }
+
+    IF_EXIST(end_location) {
+        READ_INT_FIELD(end_location);
+    }
+
     READ_DONE();
 }
 
@@ -4758,6 +4932,38 @@ static BloomFilterSet* _readBloomFilterSet(BloomFilterSet* local_node)
 }
 
 /**
+ * @Description: deserialize the PurgeStmt struct.
+ * @in str, deserialized string.
+ * @return PurgeStmt struct.
+ */
+static PurgeStmt* ReadPurgeStmt()
+{
+    READ_LOCALS(PurgeStmt);
+    READ_ENUM_FIELD(purtype, PurgeType);
+    READ_NODE_FIELD(purobj);
+
+    READ_DONE();
+}
+
+/**
+ * @Description: deserialize the TimeCapsuleStmt struct.
+ * @in str, deserialized string.
+ * @return TimeCapsuleStmt struct.
+ */
+static TimeCapsuleStmt* ReadTimeCapsuleStmt()
+{
+    READ_LOCALS(TimeCapsuleStmt);
+    READ_ENUM_FIELD(tcaptype, TimeCapsuleType);
+    READ_NODE_FIELD(relation);
+    READ_STRING_FIELD(new_relname);
+
+    READ_NODE_FIELD(tvver);
+    READ_ENUM_FIELD(tvtype, TvVersionType);
+
+    READ_DONE();
+}
+
+/**
  * @Description: deserialize the CommentStmt struct.
  * @in str, deserialized string.
  * @return CommentStmt struct.
@@ -4867,6 +5073,10 @@ static TypeName* _readTypeName()
     READ_INT_FIELD(typemod);
     READ_NODE_FIELD(arrayBounds);
     READ_LOCATION_FIELD(location);
+    IF_EXIST(end_location)
+    {
+        READ_LOCATION_FIELD(end_location);
+    }
 
     READ_TYPEINFO_FIELD(typeOid);
     READ_DONE();
@@ -5229,6 +5439,34 @@ static QualSkewInfo* _readQualSkewInfo()
     READ_DONE();
 }
 
+static TdigestData* _readTdigestData()
+{
+
+    READ_TEMP_LOCALS();
+    token = pg_strtok(&length);
+    token = pg_strtok(&length);
+    double compression = atof(token);
+    int compressNum = 6;
+    int compressAdd = 10;
+    TdigestData* local_node = makeNodeWithSize(TdigestData, sizeof(TdigestData) +
+        (((compressNum * (int)compression) + compressAdd) * sizeof(CentroidPoint)));
+    local_node->compression = compression;
+
+    READ_INT_FIELD(cap);
+    READ_INT_FIELD(merged_nodes);
+    READ_INT_FIELD(unmerged_nodes);
+    READ_FLOAT_FIELD(merged_count);
+    READ_FLOAT_FIELD(unmerged_count);
+    READ_FLOAT_FIELD(valuetoc);
+
+    for (int i = 0; i < (local_node->merged_nodes + local_node->unmerged_nodes); i++) {
+        READ_FLOAT_FIELD(nodes[i].mean);
+        token = pg_strtok(&length);
+        local_node->nodes[i].count = atol(token);
+    }
+    READ_DONE();
+}
+
 /*
  * parseNodeString
  *
@@ -5364,6 +5602,8 @@ Node* parseNodeString(void)
         return_value = _readRangeTblEntry();
     } else if (MATCH("TABLESAMPLECLAUSE", 17)) {
         return_value = _readTableSampleClause();
+    } else if (MATCH("TIMECAPSULECLAUSE", 17)) {
+        return_value = ReadTimeCapsuleClause();
     } else if (MATCH("NOTIFY", 6)) {
         return_value = _readNotifyStmt();
     } else if (MATCH("DECLARECURSOR", 13)) {
@@ -5592,6 +5832,10 @@ Node* parseNodeString(void)
         return_value = _readSkewValueInfo();
     } else if (MATCH("QUALSKEWINFO", 12)) {
         return_value = _readQualSkewInfo();
+    } else if (MATCH("PURGESTMT", 9)) {
+        return_value = ReadPurgeStmt();
+    } else if (MATCH("TIMECAPSULESTMT", 15)) {
+        return_value = ReadTimeCapsuleStmt();
     } else if (MATCH("COMMENTSTMT", 11)) {
         return_value = _readCommentStmt();
     } else if (MATCH("TABLELIKECTX", 12)) {
@@ -5644,12 +5888,30 @@ Node* parseNodeString(void)
         return_value = _readPredpushHint();
     } else if (MATCH("REWRITEHINT", 11)) {
         return_value = _readRewriteHint();
+    } else if (MATCH("GATHERHINT", 10)) {
+        return_value = _readGatherHint();
+    } else if (MATCH("NOEXPANDHINT", 12)) {
+        return_value = _readNoExpandHint();
+    } else if (MATCH("SETHINT", 7)) {
+        return_value = _readSetHint();
+    } else if (MATCH("PLANCACHEHINT", 13)) {
+        return_value = _readPlanCacheHint();
+    } else if (MATCH("NOGPCHINT", 9)) {
+        return_value = _readNoGPCHint();
     } else if (MATCH("ROWNUM", 6)) {
         return_value = _readRownum();
     } else if (MATCH("COPY", 4)) {
         return_value = _readCopyStmt();
     } else if (MATCH("ALTERTABLE", 10)) {
         return_value = _readAlterTableStmt();
+    } else if (MATCH("PLDEBUG_VARIABLE", 16)) {
+        return_value = _readPLDebug_variable(); 
+    } else if (MATCH("PLDEBUG_BREAKPOINT", 18)) {
+        return_value = _readPLDebug_breakPoint(); 
+    } else if (MATCH("PLDEBUG_FRAME", 13)) {
+        return_value = _readPLDebug_frame();
+    } else if (MATCH("TdigestData", 11)) {
+        return_value = _readTdigestData();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

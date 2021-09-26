@@ -59,11 +59,12 @@ bool EncryptionPreProcess::run_pre_column_encryption_key(PGconn *conn, CreateCli
                 char global_fqdn[NAMEDATALEN * NAME_CNT];
                 check_memset_s(memset_s(global_fqdn, NAMEDATALEN * NAME_CNT, 0, NAMEDATALEN * NAME_CNT));
                 size_t global_fqdn_size =
-                    CacheLoader::get_instance().get_object_fqdn(global_key_name, true, global_fqdn);
+                    conn->client_logic->m_cached_column_manager->get_object_fqdn(global_key_name, true, global_fqdn);
                 if (global_fqdn_size == 0) {
-                    conn->client_logic->cacheRefreshType = CacheRefreshType::ALL;
-                    ICachedColumnManager::get_instance().load_cache(conn);
-                    global_fqdn_size = CacheLoader::get_instance().get_object_fqdn(global_key_name, true, global_fqdn);
+                    conn->client_logic->cacheRefreshType = CacheRefreshType::CACHE_ALL;
+                    conn->client_logic->m_cached_column_manager->load_cache(conn);
+                    global_fqdn_size = conn->client_logic->m_cached_column_manager->get_object_fqdn(global_key_name,
+                        true, global_fqdn);
                     if (global_fqdn_size == 0) {
                         printfPQExpBuffer(&conn->errorMessage,
                             libpq_gettext("ERROR(CLIENT): failed to get client master key %s from cache\n"),

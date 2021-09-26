@@ -5,40 +5,42 @@
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
  * You may obtain a copy of Mulan PSL v2 at:
  *
- *          http://license.coscl.org.cn/MulanPSL2
+ * http://license.coscl.org.cn/MulanPSL2
  *
  * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * opfusion_util.h
- *     Operator Fusion's definition for bypass.
- * 
+ *        Declaration of utilities for bypass executor.
+ *
  * IDENTIFICATION
- *        src/include/opfusion/opfusion_util.h
+ * src/include/opfusion/opfusion_util.h
  *
  * ---------------------------------------------------------------------------------------
  */
 
 #ifndef SRC_INCLUDE_OPFUSION_OPFUSION_UTIL_H_
 #define SRC_INCLUDE_OPFUSION_OPFUSION_UTIL_H_
+
 #include "commands/prepare.h"
-#include "opfusion/opfusion_scan.h"
 #include "lib/stringinfo.h"
 #include "nodes/parsenodes.h"
+#include "opfusion/opfusion_scan.h"
 #include "pgxc/pgxcnode.h"
 #include "utils/plancache.h"
 #include "utils/syscache.h"
 
 const int FUSION_EXECUTE = 0;
 const int FUSION_DESCRIB = 1;
+typedef struct pnFusionObj {
+    char portalname[NAMEDATALEN];
+    OpFusion *opfusion;
+} pnFusionObj;
 
-extern int namestrcmp(Name name, const char* str);
-extern void report_qps_type(CmdType commandType);
-void InitOpfusionFunctionId();
-Node* JudgePlanIsPartIterator(Plan* plan);
+#define HASH_TBL_LEN 64
 
 enum FusionType {
     NONE_FUSION,
@@ -99,6 +101,7 @@ enum FusionType {
     NOBYPASS_JUST_VAR_FOR_AGGARGS,
 
     NOBYPASS_JUST_MERGE_UNSUPPORTED,
+
     NOBYPASS_JUST_VAR_ALLOWED_IN_SORT,
 
     NOBYPASS_ZERO_PARTITION,
@@ -108,6 +111,7 @@ enum FusionType {
     NOBYPASS_NO_UPDATE_PARTITIONKEY,
     NOBYPASS_NO_INCLUDING_PARTITIONKEY,
     NOBYPASS_PARTITION_BYPASS_NOT_OPEN,
+    NOBYPASS_VERSION_SCAN_PLAN,
     NOBYPASS_PARTITION_NOT_SUPPORT_IN_LIST_OR_HASH_PARTITION
 };
 
@@ -117,12 +121,11 @@ enum FusionDebug {
 };
 
 const int MAX_OP_FUNCTION_NUM = 2;
-
 typedef struct FuncExprInfo {
     AttrNumber resno;
     Oid funcid;
-    List* args;
-    char* resname;
+    List *args;
+    char *resname;
 } FuncExprInfo;
 
 const int OPFUSION_FUNCTION_ID_MAX_HASH_SIZE = 200;
@@ -241,4 +244,27 @@ const Oid function_id[] = {
     5533, /* convert int1 to bool */
     5534  /* convert bool to int1 */
 };
+
+extern int namestrcmp(Name name, const char *str);
+extern void report_qps_type(CmdType commandType);
+
+void InitOpfusionFunctionId();
+Node *JudgePlanIsPartIterator(Plan *plan);
+const char *getBypassReason(FusionType result);
+void BypassUnsupportedReason(FusionType result);
+FusionType getSelectFusionType(List *stmt_list, ParamListInfo params);
+FusionType getInsertFusionType(List *stmt_list, ParamListInfo params);
+FusionType getUpdateFusionType(List *stmt_list, ParamListInfo params);
+FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params);
+void tpslot_free_heaptuple(TupleTableSlot *reslot);
+void InitPartitionByScanFusion(Relation rel, Relation *fakRel, Partition *part, EState *estate, const ScanFusion *scan);
+Relation InitBucketRelation(int2 bucketid, Relation rel, Partition part);
+void ExecDoneStepInFusion(EState *estate);
+Oid GetRelOidForPartitionTable(Scan scan, const Relation rel, ParamListInfo params);
+Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition *partIndex, Relation *parentIndex,
+    Relation rel);
+void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition *partRel, Relation *rel);
+void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation *parentRel, Partition *part, Relation *index,
+    Relation *rel);
+
 #endif /* SRC_INCLUDE_OPFUSION_OPFUSION_UTIL_H_ */

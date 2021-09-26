@@ -20,6 +20,10 @@
 #ifdef USE_READLINE
 bool useReadline = false;
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 /*
  * Preserve newlines in saved queries by mapping '\n' to NL_IN_HISTORY
  *

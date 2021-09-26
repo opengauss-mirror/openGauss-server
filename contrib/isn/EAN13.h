@@ -1,6 +1,6 @@
 /*
  * EAN13.h
- *	  PostgreSQL type definitions for ISNs (ISBN, ISMN, ISSN, EAN13, UPC)
+ *	  openGauss type definitions for ISNs (ISBN, ISMN, ISSN, EAN13, UPC)
  *
  * Information recompiled by Kronuz on August 23, 2006
  * http://www.gs1.org/productssolutions/idkeys/support/prefix_list.html

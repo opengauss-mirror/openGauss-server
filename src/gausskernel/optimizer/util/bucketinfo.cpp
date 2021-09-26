@@ -33,7 +33,7 @@
 
  * @in RangeVar:  the user sql sematic input
  */
-bool hasValidBuckets(RangeVar* r)
+bool hasValidBuckets(RangeVar* r, int bucketmapsize)
 {
     if (!(r->isbucket))
         return false;
@@ -41,19 +41,16 @@ bool hasValidBuckets(RangeVar* r)
     /* check for valid range of bucket ids */
     ListCell* lc = NULL;
     Bitmapset* bms = NULL;
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
     foreach (lc, r->buckets) {
         uint2 v = (uint2)intVal(lfirst(lc));
-        if (v >= BUCKETDATALEN) {
+        if (v >= bucketmapsize) {
             ereport(ERROR,
                 (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                     errmsg("buckets id %d of table \"%s\" is outsize range [%d,%d]",
                         v,
                         r->relname,
                         0,
-                        BUCKETDATALEN - 1)));
+                        bucketmapsize - 1)));
         }
 
         /* save it for later duplicate detection */
@@ -120,10 +117,6 @@ List* RangeVarGetBucketList(RangeVar* rangeVar)
  */
 static StringInfo bucketInfoToDotString(BucketInfo* bucket_info)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     StringInfo str = makeStringInfo();
     int* dot = (int*)palloc0(sizeof(int) * BUCKETDATALEN);
     int* arr = (int*)palloc0(sizeof(int) * BUCKETDATALEN);
@@ -190,10 +183,6 @@ static StringInfo bucketInfoToDotString(BucketInfo* bucket_info)
  */
 static StringInfo bucketInfoToNotString(BucketInfo* bucket_info)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     StringInfo str = makeStringInfo();
     int* arr = (int*)palloc0(sizeof(int) * BUCKETDATALEN);
     int len = 0;

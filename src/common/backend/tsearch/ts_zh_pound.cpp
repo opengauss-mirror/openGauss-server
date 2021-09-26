@@ -19,7 +19,7 @@
  *    with pound parser) or indirectly(such as to_tsvector with text seach configuration
  *    defined with pound parser).
  *
- *    As a parser we have got to abide by PostgreSQL full-text search rules, and define 4
+ *    As a parser we have got to abide by openGauss full-text search rules, and define 4
  *    functions pound_start as start_function, pound_nexttoken as gettoken_function,
  *    pound_end as end_function, and pound_lextype. And, we use prsd_headline
  *    defined for default parser as pound'ss headline_function

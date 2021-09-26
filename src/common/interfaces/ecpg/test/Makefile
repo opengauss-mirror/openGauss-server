@@ -48,7 +48,7 @@ clean distclean maintainer-clean:
 all: pg_regress$(X)
 
 ifeq ($(enable_memory_check_core), yes)
-pg_regress$(X): pg_regress_ecpg.o $(top_builddir)/src/distribute/test/regress/pg_regress.o
+pg_regress$(X): pg_regress_ecpg.o $(top_builddir)/../distribute/test/regress/pg_regress.o
 	$(CC) $(CFLAGS) $(LDFLAGS) $(LDFLAGS_EX) $^ $(LIBS) -o $@
 else
 pg_regress$(X): pg_regress_ecpg.o $(top_builddir)/src/test/regress/pg_regress.o

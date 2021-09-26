@@ -53,7 +53,7 @@ class TableSpaceUsageManager {
 public:
     static int ShmemSize(void);
     static void Init(void);
-    static void IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSize);
+    static void IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSize, bool segment);
 
 private:
     static bool IsLimited(Oid tableSpaceOid, uint64* maxSize);
@@ -85,12 +85,17 @@ typedef struct TableSpaceOpts {
 } TableSpaceOpts;
 
 /* This definition is used when storage space is increasing, it includes two main functionalities:
- * 1. Check tablespace is exceed the specified size
+ * 1. Check tablespace is exceed the specified size. Skip segment-page storage because it does not
+ *    actually extend physical space.
  * 2. Increase the permanent space on users' record
  */
 #define STORAGE_SPACE_OPERATION(relation, requestSize)                                                         \
     {                                                                                                          \
-        TableSpaceUsageManager::IsExceedMaxsize(relation->rd_node.spcNode, requestSize);                       \
+        if (RelationIsSegmentTable(relation)) {                                                            \
+            TableSpaceUsageManager::IsExceedMaxsize(relation->rd_node.spcNode, 0, true);                       \
+        } else {                                                                                               \
+            TableSpaceUsageManager::IsExceedMaxsize(relation->rd_node.spcNode, requestSize, false);            \
+        }                                                                                                      \
         perm_space_increase(                                                                                   \
             relation->rd_rel->relowner, requestSize, RelationUsesSpaceType(relation->rd_rel->relpersistence)); \
     }
@@ -102,7 +107,7 @@ extern void AlterTableSpaceOwner(const char* name, Oid newOwnerId);
 extern void AlterTableSpaceOptions(AlterTableSpaceOptionsStmt* stmt);
 extern bool IsSpecifiedTblspc(Oid spcOid, const char* specifedTblspc);
 
-extern void TablespaceCreateDbspace(const RelFileNode rnode, bool isRedo);
+extern void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo);
 
 extern Oid GetDefaultTablespace(char relpersistence);
 extern DataSpaceType RelationUsesSpaceType(char relpersistence);

@@ -25,7 +25,7 @@
 #define PG_SHMEM_H
 
 typedef struct PGShmemHeader /* standard header for all Postgres shmem */ {
-    int32 magic; /* magic # to identify Postgres segments */
+    int32 magic; /* magic # to identify openGauss segments */
 #define PGShmemMagic 679834894
     ThreadId creatorPID; /* PID of creating process */
     Size totalsize;      /* total size of segment */

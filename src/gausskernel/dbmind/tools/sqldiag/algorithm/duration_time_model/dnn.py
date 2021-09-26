@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import pickle
 import stat
 from abc import ABC
@@ -131,6 +132,7 @@ class DnnModel(AbstractModel, ABC):
                 self.scaler = pickle.load(f)
         else:
             logging.error("{} not exist.".format(realpath))
+            sys.exit(1)
 
     def save(self, filepath):
         realpath = os.path.realpath(filepath)

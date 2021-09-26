@@ -1,6 +1,6 @@
 #
 # errcodes.txt
-#      PostgreSQL error codes
+#      openGauss error codes
 #
 # Copyright (c) 2003-2012, PostgreSQL Global Development Group
 #
@@ -66,9 +66,9 @@
 # error codes that could be present in future versions of the
 # standard (i.e. the subclass value begins with 5-9 or I-Z).
 #
-# The convention is that new error codes defined by PostgreSQL in a
+# The convention is that new error codes defined by openGauss in a
 # class defined by the standard have a subclass value that begins
-# with 'P'. In addition, error codes defined by PostgreSQL clients
+# with 'P'. In addition, error codes defined by openGauss clients
 # (such as ecpg) have a class value that begins with 'Y'.
 
 Section: Class 00 - Successful Completion
@@ -363,6 +363,7 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 34001    E    ERRCODE_UNDEFINED_CURSOR                                       undefined_cursor
 3D000    E    ERRCODE_UNDEFINED_DATABASE
 42883    E    ERRCODE_UNDEFINED_FUNCTION                                     undefined_function
+42884    E    ERRCODE_UNDEFINED_PACKAGE                                      undefined_package
 26010    E    ERRCODE_UNDEFINED_PSTATEMENT                                   undefined_pstatement
 3F001    E    ERRCODE_UNDEFINED_SCHEMA                                       undefined_schema
 42P01    E    ERRCODE_UNDEFINED_TABLE                                        undefined_table
@@ -372,6 +373,7 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42P03    E    ERRCODE_DUPLICATE_CURSOR                                       duplicate_cursor
 42P04    E    ERRCODE_DUPLICATE_DATABASE                                     duplicate_database
 42723    E    ERRCODE_DUPLICATE_FUNCTION                                     duplicate_function
+42724    E    ERRCODE_DUPLICATE_PACKAGE                                      duplicate_package
 42P05    E    ERRCODE_DUPLICATE_PSTATEMENT                                   duplicate_prepared_statement
 42P06    E    ERRCODE_DUPLICATE_SCHEMA                                       duplicate_schema
 42P07    E    ERRCODE_DUPLICATE_TABLE                                        duplicate_table
@@ -391,9 +393,11 @@ Section: Class 42 - Syntax Error or Access Rule Violation
 42P16    E    ERRCODE_INVALID_TABLE_DEFINITION                               invalid_table_definition
 42P17    E    ERRCODE_INVALID_OBJECT_DEFINITION                              invalid_object_definition
 42P18    E    ERRCODE_INVALID_TEMP_OBJECTS                                   invalid temp objects(table, namespace)
+42P65    E    ERRCODE_INVALID_PACKAGE_DEFINITION                             invalid_package_definition
 42705    E    ERRCODE_UNDEFINED_KEY                                          undefined_key
 42711    E    ERRCODE_DUPLICATE_KEY                                          duplicate_key
 42713    E    ERRCODE_UNDEFINED_CL_COLUMN                                    undefined_cl_column
+42716    E    ERRCODE_CL_FUNCTION_UPDATE                                     internal - cl function being updatd
 
 Section: Class 44 - WITH CHECK OPTION Violation
 
@@ -447,6 +451,12 @@ Section: Class 58 - System Error (errors external to PostgreSQL itself)
 58P03    E    ERRCODE_FILE_READ_FAILED                                       file_read_failed
 58P04    E    ERRCODE_FILE_WRITE_FAILED                                      file_write_failed
 2200Z    E    ERRCODE_INVALID_ENCRYPTED_COLUMN_DATA                          encryped_column_wrong_data
+
+Section: Class 59 - Recycle Object Operation Error
+
+# Note: for `skip locked` & `skip purged/restored` policy in DQL, PURGE, and RESTORE commands concurrent execution.
+59000    E    ERRCODE_RBIN_LOCK_NOT_AVAILABLE                                rbin_lock_not_available
+59001    E    ERRCODE_RBIN_UNDEFINED_OBJECT                                  rbin_undefined_object
 
 Section: Class F0 - Configuration File Error
 
@@ -583,6 +593,7 @@ D0011    E    ERRCODE_INVALID_OPERATION                                      inv
 D0012    E    ERRCODE_MAX_DEBUG_SESSIONS_REACHED                             maximum_number_of_debug_sessions_reached
 D0013    E    ERRCODE_MAX_BREAKPOINTS_REACHED                                maximum_number_of_breakpoints_reached
 D0014    E    ERRCODE_INITIALIZE_FAILED                                      initialization_failed
+D0015    E    ERRCODE_PLDEBUGGER_TIMEOUT                                     pldebugger_wait_timeout
 
 # Section: Class RB - RBTree Error 
 RB001    E    ERRCODE_RBTREE_INVALID_NODE_STATE                              rbtree_invalid_node_state
@@ -609,6 +620,11 @@ LL002    E    ERRCODE_RELFILENODEMAP                                         rel
 Section: Class TS - Timeseries Error
 TS000    E    ERRCODE_TS_COMMON_ERROR                                        timeseries_common_error
 TS001    E    ERRCODE_TS_KEYTYPE_MISMATCH                                    column_key_type_mismatch
+
+Section: Class SE - Security Error
+42714    E    ERRCODE_DUPLICATE_POLICY                                        duplicate_policy
+42715    E    ERRCODE_DUPLICATE_LABEL                                         duplicate_label
+SE001    E    ERRCODE_INVALID_AUDIT_LOG                                       invalid audit log
 
 Section: Class UE - Uncorrected Error & Warning
 UE000    E    ERRCODE_UE_COMMON_ERROR                                        uce_common_error

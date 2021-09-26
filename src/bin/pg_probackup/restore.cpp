@@ -1399,13 +1399,13 @@ create_recovery_conf(time_t backup_id,
 
 #if PG_VERSION_NUM >= 120000
     /*
-     * Create "recovery.signal" to mark this recovery as PITR for PostgreSQL.
+     * Create "recovery.signal" to mark this recovery as PITR for openGauss.
      * In older versions presense of recovery.conf alone was enough.
      * To keep behaviour consistent with older versions,
      * we are forced to create "recovery.signal"
      * even when only restore_command is provided.
      * Presense of "recovery.signal" by itself determine only
-     * one thing: do PostgreSQL must switch to a new timeline
+     * one thing: do openGauss must switch to a new timeline
      * after successfull recovery or not?
      */
     if (pitr_requested)

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * constraint.cpp
- *	  PostgreSQL CONSTRAINT support code.
+ *	  openGauss CONSTRAINT support code.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -16,12 +16,27 @@
 #include "knl/knl_variable.h"
 
 #include "catalog/index.h"
+#include "catalog/indexing.h"
+#include "catalog/pg_partition_fn.h"
 #include "commands/trigger.h"
 #include "executor/executor.h"
 #include "utils/builtins.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
+
+#define RELATION_GET_BUCKET_REL(fakeRel, bucketId) \
+    ((!RELATION_CREATE_BUCKET(fakeRel)) ? (fakeRel) : bucketGetRelation((fakeRel), NULL, (bucketId)))
+
+#define GET_EXECUTOR_STATE(indexInfo, estate, econtext, slot)                              \
+    do {                                                                                   \
+        if ((indexInfo)->ii_Expressions != NIL || (indexInfo)->ii_ExclusionOps != NULL) {  \
+            (estate) = CreateExecutorState();                                              \
+            (econtext) = GetPerTupleExprContext(estate);                                   \
+            (econtext)->ecxt_scantuple = (slot);                                           \
+        } else                                                                             \
+            (estate) = NULL;                                                               \
+    } while (0);
 
 /*
  * unique_key_recheck - trigger function to do a deferred uniqueness check.
@@ -50,7 +65,13 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
     Datum values[INDEX_MAX_KEYS];
     bool isnull[INDEX_MAX_KEYS];
     Relation fakeRel = NULL;
+    Relation fakeIdxRel = NULL;
+    Partition part = NULL;
+    Partition indexPart = NULL;
+    Relation partRel = NULL;
+    Relation idxPartRel = NULL;
     int2 bucketid;
+    Oid tableOid;
     /*
      * Make sure this is being called as an AFTER ROW trigger.	Note:
      * translatable error strings are shared with ri_triggers.c, so resist the
@@ -100,15 +121,28 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
      * removed.
      */
     tmptid   = new_row->t_self;
+    tableOid = new_row->t_tableOid;
     bucketid = new_row->t_bucketId;
 
-    fakeRel = (bucketid == InvalidBktId) ? trigdata->tg_relation : 
-                         bucketGetRelation(trigdata->tg_relation, NULL, bucketid);
+    fakeRel = trigdata->tg_relation;
+    if (RelationIsPartitioned(trigdata->tg_relation)) {
+        part = partitionOpen(trigdata->tg_relation, tableOid, AccessShareLock);
+        partRel = partitionGetRelation(trigdata->tg_relation, part);
+        fakeRel = partRel;
+    }
+    fakeRel = RELATION_GET_BUCKET_REL(fakeRel, bucketid);
 
     if (!heap_hot_search(&tmptid, fakeRel, SnapshotSelf, NULL)) {
         /*
          * All rows in the HOT chain are dead, so skip the check.
          */
+        if (bucketid != InvalidBktId) {
+            bucketCloseRelation(fakeRel);
+        }
+        if (part != NULL) {
+            releaseDummyRelation(&partRel);
+            partitionClose(trigdata->tg_relation, part, AccessShareLock);
+        }
         return PointerGetDatum(NULL);
     }
 
@@ -117,8 +151,16 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
      * to update it.  (This protects against possible changes of the index
      * schema, not against concurrent updates.)
      */
-    indexRel = index_open(trigdata->tg_trigger->tgconstrindid, RowExclusiveLock, bucketid);
-    indexInfo = BuildIndexInfo(indexRel);
+    indexRel = index_open(trigdata->tg_trigger->tgconstrindid, RowExclusiveLock);
+    fakeIdxRel = indexRel;
+    if (RelationIsPartitioned(indexRel)) {
+        Oid indexPartOid = getPartitionIndexOid(trigdata->tg_trigger->tgconstrindid, tableOid);
+        indexPart = partitionOpen(indexRel, indexPartOid, RowExclusiveLock);
+        idxPartRel = partitionGetRelation(indexRel, indexPart);
+        fakeIdxRel = idxPartRel;
+    }
+    fakeIdxRel = RELATION_GET_BUCKET_REL(fakeIdxRel, bucketid);
+    indexInfo = BuildIndexInfo(fakeIdxRel);
 
     /*
      * The heap tuple must be put into a slot for FormIndexDatum.
@@ -132,12 +174,7 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
      * EState to evaluate them.  We need it for exclusion constraints too,
      * even if they are just on simple columns.
      */
-    if (indexInfo->ii_Expressions != NIL || indexInfo->ii_ExclusionOps != NULL) {
-        estate = CreateExecutorState();
-        econtext = GetPerTupleExprContext(estate);
-        econtext->ecxt_scantuple = slot;
-    } else
-        estate = NULL;
+    GET_EXECUTOR_STATE(indexInfo, estate, econtext, slot);
 
     /*
      * Form the index values and isnull flags for the index entry that we need
@@ -161,7 +198,7 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
          * correct even if t_self is now dead, because that is the TID the
          * index will know about.
          */
-        index_insert(indexRel, values, isnull, &(new_row->t_self), fakeRel, UNIQUE_CHECK_EXISTING);
+        index_insert(fakeIdxRel, values, isnull, &(new_row->t_self), fakeRel, UNIQUE_CHECK_EXISTING);
     } else {
         /*
          * For exclusion constraints we just do the normal check, but now it's
@@ -170,7 +207,7 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
          * the child is a conflict.
          */
         (void)check_exclusion_constraint(
-            fakeRel, indexRel, indexInfo, &tmptid, values, isnull, estate, false, false);
+            fakeRel, fakeIdxRel, indexInfo, &tmptid, values, isnull, estate, false, false);
     }
 
     /*
@@ -179,14 +216,23 @@ Datum unique_key_recheck(PG_FUNCTION_ARGS)
      */
     if (estate != NULL)
         FreeExecutorState(estate);
-
     ExecDropSingleTupleTableSlot(slot);
 
+    if (RelationIsBucket(fakeIdxRel)) {
+        bucketCloseRelation(fakeIdxRel);
+    }
+    if (indexPart != NULL) {
+        releaseDummyRelation(&idxPartRel);
+        partitionClose(indexRel, indexPart, RowExclusiveLock);
+    }
     index_close(indexRel, RowExclusiveLock);
 
     if (bucketid != InvalidBktId) {
         bucketCloseRelation(fakeRel);
     }
-
+    if (part != NULL) {
+        releaseDummyRelation(&partRel);
+        partitionClose(trigdata->tg_relation, part, AccessShareLock);
+    }
     return PointerGetDatum(NULL);
 }

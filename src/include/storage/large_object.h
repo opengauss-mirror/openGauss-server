@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * large_object.h
- *	  Declarations for PostgreSQL large objects.  POSTGRES 4.2 supported
+ *	  Declarations for openGauss large objects.  POSTGRES 4.2 supported
  *	  zillions of large objects (internal, external, jaquith, inversion).
  *	  Now we only support inversion.
  *

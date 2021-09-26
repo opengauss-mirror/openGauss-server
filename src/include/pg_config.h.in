@@ -722,11 +722,18 @@
 /* Postgres-XC version as a number */
 #undef PGXC_VERSION_NUM
 
+/* openGauss version as a number */
+#undef OPENGAUSS_VERSION_NUM_STR
+
 /* A string containing the version number, platform, and C compiler */
 #undef PG_VERSION_STR
 
 /* A string containing the version number of Postgres-XC, platform, and C compiler */
 #undef PGXC_VERSION_STR
+
+/* LLVM Version */
+#undef LLVM_MAJOR_VERSION
+#undef LLVM_MINOR_VERSION
 
 /* Define to 1 to allow profiling output to be saved separately for each
    process. */

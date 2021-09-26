@@ -18,10 +18,9 @@
 #include "access/rmgr.h"
 #include "access/xlogdefs.h"
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/pg_crc.h"
 #include "port/pg_crc32c.h"
-
 /*
  * The high 4 bits in xl_info may be used freely by rmgr. The
  * XLR_SPECIAL_REL_UPDATE bit can be passed by XLogInsert caller. The rest
@@ -33,12 +32,23 @@
 /*
  * If a WAL record modifies any relation files, in ways not covered by the
  * usual block references, this flag is set. This is not used for anything
- * by PostgreSQL itself, but it allows external tools that read WAL and keep
+ * by openGauss itself, but it allows external tools that read WAL and keep
  * track of modified blocks to recognize such special record types.
  */
 #define XLR_SPECIAL_REL_UPDATE 0x01
-/* If xlog record contains bucket node id */
-#define XLR_REL_HAS_BUCKET     0x02
+#define XLR_BTREE_UPGRADE_FLAG 0x02
+
+#define XLR_IS_TOAST           0X08
+/* If xlog record is from toast page */
+
+/*
+ * Enforces consistency checks of replayed WAL at recovery. If enabled,
+ * each record will log a full-page write for each block modified by the
+ * record and will reuse it afterwards for consistency checks. The caller
+ * of XLogInsert can use this value if necessary, but if
+ * wal_consistency_checking is enabled for a rmgr this is set unconditionally.
+ */
+#define XLR_CHECK_CONSISTENCY   0x03
 
 /*
  * Header info for block data appended to an XLOG record.
@@ -66,8 +76,20 @@ typedef struct XLogRecordBlockHeader {
  * We use the highest bit of XLogRecordBlockHeader->id for hash bucket table.
  * The RelFileNode is for hash bucket tables, and RelFileNodeOld is for regular tables.
  */
-#define BKID_HAS_BUCKET (0x80)
-#define BKID_GET_BKID(id) (id & 0x7F)
+#define BKID_HAS_BUCKET_OR_SEGPAGE (0x80)
+/*
+ * The second digit from the left of the ID is used as the identifier of the TDE table.
+ * Considering that the value of XLR_MAX_BLOCK_ID lower than 32, the original function is not affected.
+ */
+#define BKID_HAS_TDE_PAGE (0x40)
+#define BKID_GET_BKID(id) (id & 0x3F)
+
+/* 
+ * In segment-page storage, RelFileNode and block number are logic for XLog. Thus, we need record
+ * physical location in xlog. This macro is used to check whether in such situation.
+ */
+#define XLOG_NEED_PHYSICAL_LOCATION(relfilenode) \
+    (IsSegmentFileNode(relfilenode) && !IsSegmentPhysicalRelNode(relfilenode))
 
 /*
  * Additional header information when a full-page image is included
@@ -92,7 +114,8 @@ typedef struct XLogRecordBlockImageHeader {
  * temporary buffer for constructing the header.
  */
 #define MaxSizeOfXLogRecordBlockHeader \
-    (SizeOfXLogRecordBlockHeader + SizeOfXLogRecordBlockImageHeader + sizeof(RelFileNode) + sizeof(BlockNumber))
+    (SizeOfXLogRecordBlockHeader + SizeOfXLogRecordBlockImageHeader + sizeof(RelFileNode) + sizeof(BlockNumber) \
+    + sizeof(BlockNumber) + sizeof(uint8))
 
 /*
  * XLogRecordDataHeaderShort/Long are used for the "main data" portion of

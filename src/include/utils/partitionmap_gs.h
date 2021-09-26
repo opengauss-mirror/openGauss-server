@@ -31,6 +31,7 @@
 #include "access/heapam.h"
 #include "knl/knl_variable.h"
 #include "access/htup.h"
+#include "access/ustore/knl_uheap.h"
 #include "catalog/pg_type.h"
 #include "nodes/primnodes.h"
 #include "storage/lock/lock.h"
@@ -144,32 +145,34 @@ typedef struct HashPartitionMap {
         }                                                                              \
     } while (0)
 
-#define partitionRoutingForTuple(rel, tuple, partIdentfier)                                                     \
-    do {                                                                                                        \
-        TupleDesc tuple_desc = NULL;                                                                            \
-        int2vector* partkey_column = NULL;                                                                      \
-        int partkey_column_n = 0;                                                                               \
-        static THR_LOCAL Const consts[PARTITION_PARTKEYMAXNUM];                                                 \
-        static THR_LOCAL Const* values[PARTITION_PARTKEYMAXNUM];                                                \
-        bool isnull = false;                                                                                    \
-        Datum column_raw;                                                                                       \
-        int i = 0;                                                                                              \
-        partkey_column = GetPartitionKey((rel)->partMap);                                                       \
-        partkey_column_n = partkey_column->dim1;                                                                \
-        tuple_desc = (rel)->rd_att;                                                                             \
-        for (i = 0; i < partkey_column_n; i++) {                                                                \
-            isnull = false;                                                                                     \
-            column_raw = fastgetattr((tuple), partkey_column->values[i], tuple_desc, &isnull);                  \
-            values[i] =                                                                                         \
-                transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]); \
-        }                                                                                                       \
-        if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {                                 \
-            ereport(ERROR,                                                                                      \
-                (errcode(ERRCODE_INTERNAL_ERROR),                                                               \
-                    errmsg("inserted partition key does not map to any partition"),                             \
-                    errdetail("inserted partition key cannot be NULL for interval-partitioned table")));        \
-        }                                                                                                       \
-        partitionRoutingForValue((rel), values, partkey_column_n, true, false, (partIdentfier));                \
+#define partitionRoutingForTuple(rel, tuple, partIdentfier)                                                       \
+    do {                                                                                                          \
+        TupleDesc tuple_desc = NULL;                                                                              \
+        int2vector *partkey_column = NULL;                                                                        \
+        int partkey_column_n = 0;                                                                                 \
+        static THR_LOCAL Const consts[PARTITION_PARTKEYMAXNUM];                                                   \
+        static THR_LOCAL Const *values[PARTITION_PARTKEYMAXNUM];                                                  \
+        bool isnull = false;                                                                                      \
+        bool is_ustore = RelationIsUstoreFormat(rel);                                                             \
+        Datum column_raw;                                                                                         \
+        int i = 0;                                                                                                \
+        partkey_column = GetPartitionKey((rel)->partMap);                                                         \
+        partkey_column_n = partkey_column->dim1;                                                                  \
+        tuple_desc = (rel)->rd_att;                                                                               \
+        for (i = 0; i < partkey_column_n; i++) {                                                                  \
+            isnull = false;                                                                                       \
+            column_raw = (is_ustore) ?                                                                            \
+                UHeapFastGetAttr((UHeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull) :           \
+                fastgetattr((HeapTuple)(tuple), partkey_column->values[i], tuple_desc, &isnull);                  \
+            values[i] =                                                                                           \
+                transformDatum2Const((rel)->rd_att, partkey_column->values[i], column_raw, isnull, &consts[i]);   \
+        }                                                                                                         \
+        if (PartitionMapIsInterval((rel)->partMap) && values[0]->constisnull) {                                   \
+            ereport(ERROR,                                                                                        \
+                (errcode(ERRCODE_INTERNAL_ERROR), errmsg("inserted partition key does not map to any partition"), \
+                errdetail("inserted partition key cannot be NULL for interval-partitioned table")));              \
+        }                                                                                                         \
+        partitionRoutingForValue((rel), values, partkey_column_n, true, false, (partIdentfier));                  \
     } while (0)
 
 #define partitionRoutingForValue(rel, keyValue, valueLen, topClosed, missIsOk, result)                                 \
@@ -452,5 +455,6 @@ int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Inte
 extern void get_typlenbyval(Oid typid, int16 *typlen, bool *typbyval);
 extern RangeElement* copyRangeElements(RangeElement* src, int elementNum, int partkeyNum);
 extern int rangeElementCmp(const void* a, const void* b);
+extern int HashElementCmp(const void* a, const void* b);
 extern void DestroyListElements(ListPartElement* src, int elementNum);
 #endif /* PARTITIONMAP_GS_H_ */

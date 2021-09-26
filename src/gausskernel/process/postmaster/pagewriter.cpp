@@ -32,7 +32,7 @@
 #include "storage/barrier.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "storage/pmsignal.h"
 #include "access/double_write.h"
 #include "access/xlog.h"
@@ -242,7 +242,7 @@ void incre_ckpt_pagewriter_cxt_init()
     char *unaligned_buf = (char*)palloc0((DW_BUF_MAX_FOR_NOHBK + 1) * BLCKSZ);
 	g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.dw_buf = (char*)TYPEALIGN(BLCKSZ, unaligned_buf);
 	g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.dw_page_idx = -1;
-	g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.contain_hashbucket = false;
+	g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.is_new_relfilenode = false;
 
     (void)MemoryContextSwitchTo(oldcontext);
 }
@@ -306,7 +306,6 @@ loop:
     return true;
 }
 
-
 bool push_pending_flush_queue(Buffer buffer)
 {
     uint64 new_tail_loc = 0;
@@ -358,7 +357,7 @@ uint64 get_dirty_page_queue_tail()
 #if defined(__x86_64__) || defined(__aarch64__)
     uint128_u compare;
     compare = atomic_compare_and_swap_u128((uint128_u*)&g_instance.ckpt_cxt_ctl->dirty_page_queue_reclsn);
-    /* return the dirty page queue tail */
+    // return the dirty page queue tail
     return compare.u64[1];
 #else
     uint64 tail;
@@ -419,6 +418,41 @@ static uint32 ckpt_get_expected_flush_num()
     return (uint32)Min(expected_flush_num, flush_num);
 }
 
+const uint BYTE_PER_KB = 1024;
+static bool need_retry_scan(uint32 flush_num, uint32 max_batch_num)
+{
+    XLogRecPtr  min_lsn = ckpt_get_min_rec_lsn();
+    XLogRecPtr  cur_lsn;
+    bool flush_slow = false;
+
+    if (XLogRecPtrIsInvalid(min_lsn)) {
+        return false;
+    }
+    /* primary get the xlog insert loc, standby get the replay loc */
+    if (RecoveryInProgress()) {
+        cur_lsn = GetXLogReplayRecPtr(NULL);
+    } else {
+        cur_lsn = GetXLogInsertRecPtr();
+    }
+    flush_slow = (cur_lsn - min_lsn) > ((uint64)u_sess->attr.attr_storage.max_redo_log_size * BYTE_PER_KB);
+
+    if (g_instance.ckpt_cxt_ctl->actual_dirty_page_num > flush_num &&
+        (flush_num < max_batch_num || flush_slow || FULL_CKPT)) {
+        /* The queue head page needs to be flushed as soon as possible. */
+        Buffer head_buf = get_dirty_page_queue_head_buffer();
+        if (BufferIsValid(head_buf) && g_instance.ckpt_cxt_ctl->CkptBufferIds[0].buf_id != head_buf - 1) {
+            /* clean the buffer state BM_CHECKPOINT_NEEDED */
+            for (uint32 i = 0; i < flush_num; i++) {
+                int buf_id  = g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id;
+                BufferDesc *buf_desc = GetBufferDescriptor(buf_id);
+                clean_buf_need_flush_flag(buf_desc);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * @Description: Select a batch of dirty pages from the dirty_page_queue and sort
  * @in           Dirty queue head from which to select the dirty pages
@@ -426,32 +460,34 @@ static uint32 ckpt_get_expected_flush_num()
  * @out          Offset to the new head
  * @return       Actual number of dirty pages need to flush
  */
-static uint32 ckpt_qsort_dirty_page_for_flush(bool *contain_hashbucket)
+const int MAX_SCAN_NUM = 131072;  /* 1GB buffers */
+static uint32 ckpt_qsort_dirty_page_for_flush(bool *is_new_relfilenode)
 {
     uint32 num_to_flush = 0;
     bool retry = false;
     errno_t rc;
     uint32 i;
+    uint32 scan_end = 0;
     int64 dirty_page_num;
     uint64 dirty_queue_head;
-    uint32 buffer_slot_num = MIN(DW_DIRTY_PAGE_MAX_FOR_NOHBK, g_instance.attr.attr_storage.NBuffers);
-
-    rc = memset_s(g_instance.ckpt_cxt_ctl->CkptBufferIds,
-        buffer_slot_num * sizeof(CkptSortItem),
-        0,
-        buffer_slot_num * sizeof(CkptSortItem));
-    securec_check(rc, "", "");
+    uint32 buffer_slot_num = MIN(DW_DIRTY_PAGE_MAX_FOR_NOHBK, TOTAL_BUFFER_NUM);
 
 try_get_buf:
+    rc = memset_s(g_instance.ckpt_cxt_ctl->CkptBufferIds, buffer_slot_num * sizeof(CkptSortItem),
+        0, buffer_slot_num * sizeof(CkptSortItem));
+    securec_check(rc, "", "");
+
     /*
      * Before selecting a batch of dirty pages to flush, move dirty page queue head to
      * skip slot of invalid buffer of queue head.
      */
+    ckpt_try_prune_dirty_page_queue();
     ckpt_try_skip_invalid_elem_in_queue_head();
     dirty_page_num = get_dirty_page_num();
     dirty_queue_head = pg_atomic_read_u64(&g_instance.ckpt_cxt_ctl->dirty_page_queue_head);
+    scan_end = MIN(MAX_SCAN_NUM, dirty_page_num);
 
-    for (i = 0; i < dirty_page_num; i++) {
+    for (i = 0; i < scan_end; i++) {
         uint32 buf_state;
         Buffer buffer;
         BufferDesc* buf_desc = NULL;
@@ -482,8 +518,8 @@ try_get_buf:
             item->bucketNode = buf_desc->tag.rnode.bucketNode;
             item->forkNum = buf_desc->tag.forkNum;
             item->blockNum = buf_desc->tag.blockNum;
-            if(buf_desc->tag.rnode.bucketNode != InvalidBktId) {
-                *contain_hashbucket = true;
+            if(IsSegmentFileNode(buf_desc->tag.rnode)) {
+                *is_new_relfilenode = true;
             }
         } else {
             if (!(buf_state & BM_DIRTY) && slot->buffer != 0) {
@@ -497,14 +533,15 @@ try_get_buf:
             }
         }
         UnlockBufHdr(buf_desc, buf_state);
-        if (num_to_flush >= buffer_slot_num || num_to_flush >= GET_DW_DIRTY_PAGE_MAX(*contain_hashbucket)) {
+        if (num_to_flush >= buffer_slot_num || num_to_flush >= GET_DW_DIRTY_PAGE_MAX(*is_new_relfilenode)) {
             break;
         }
     }
 
-    num_to_flush = MIN(num_to_flush, GET_DW_DIRTY_PAGE_MAX(*contain_hashbucket));
-    if (num_to_flush == 0 && g_instance.ckpt_cxt_ctl->actual_dirty_page_num > 0) {
+    num_to_flush = MIN(num_to_flush, GET_DW_DIRTY_PAGE_MAX(*is_new_relfilenode));
+    if (!retry && need_retry_scan(num_to_flush, GET_DW_DIRTY_PAGE_MAX(*is_new_relfilenode))) {
         retry = true;
+        num_to_flush = 0;
         goto try_get_buf;
     }
     qsort(g_instance.ckpt_cxt_ctl->CkptBufferIds, num_to_flush, sizeof(CkptSortItem), ckpt_buforder_comparator);
@@ -627,7 +664,7 @@ static void ckpt_pagewriter_main_thread_flush_dirty_page()
     uint32 requested_flush_num;
     int thread_id = t_thrd.pagewriter_cxt.pagewriter_id;
     int32 expected_flush_num;
-    bool contain_hashbucket = false;
+    bool is_new_relfilenode = false;
 
     WritebackContextInit(&wb_context, &t_thrd.pagewriter_cxt.page_writer_after);
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
@@ -640,14 +677,14 @@ static void ckpt_pagewriter_main_thread_flush_dirty_page()
     g_instance.ckpt_cxt_ctl->page_writer_last_flush = 0;
 
     while (expected_flush_num > 0) {
-        requested_flush_num = ckpt_qsort_dirty_page_for_flush(&contain_hashbucket);
+        requested_flush_num = ckpt_qsort_dirty_page_for_flush(&is_new_relfilenode);
 
         if (SECUREC_UNLIKELY(requested_flush_num == 0)) {
             break;
         }
         expected_flush_num -= requested_flush_num;
 
-        g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.contain_hashbucket = contain_hashbucket;
+        g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.is_new_relfilenode = is_new_relfilenode;
         g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt.dw_page_idx = -1;
 
         dw_perform_batch_flush(requested_flush_num, NULL, &g_instance.ckpt_cxt_ctl->page_writer_procs.thrd_dw_cxt);
@@ -665,7 +702,7 @@ static void ckpt_pagewriter_main_thread_flush_dirty_page()
          * If request flush num less than the batch max, break this loop,
          * It indicates that there are not many dirty pages.
          */
-        if (expected_flush_num < (int32)GET_DW_DIRTY_PAGE_MAX(contain_hashbucket) && !FULL_CKPT) {
+        if (expected_flush_num < (int32)GET_DW_DIRTY_PAGE_MAX(is_new_relfilenode) && !FULL_CKPT) {
             break;
         }
     }
@@ -796,6 +833,7 @@ uint32 calculate_thread_max_flush_num(bool is_pagewriter)
 
 const int AVG_CALCULATE_NUM = 30;
 const float HIGH_WATER = 0.75;
+const uint UPDATE_REC_XLOG_NUM = 4;
 static uint32 calculate_pagewriter_flush_num()
 {
     static XLogRecPtr prev_lsn = InvalidXLogRecPtr;
@@ -819,6 +857,13 @@ static uint32 calculate_pagewriter_flush_num()
     uint32 max_io = calculate_thread_max_flush_num(true);
     uint32 num_for_lsn_max;
     float dirty_percent;
+    double lsn_target_percent = 0;
+    uint32 lsn_scan_factor = 3;
+
+    min_lsn = ckpt_get_min_rec_lsn();
+    if (XLogRecPtrIsInvalid(min_lsn)) {
+        min_lsn = get_dirty_page_queue_rec_lsn();
+    }
 
     /* primary get the xlog insert loc, standby get the replay loc */
     if (RecoveryInProgress()) {
@@ -877,13 +922,29 @@ static uint32 calculate_pagewriter_flush_num()
         num_for_lsn_max = max_io * 2;
     }
 
-    min_lsn = ckpt_get_min_rec_lsn();
-    if (XLogRecPtrIsInvalid(min_lsn)) {
-        min_lsn = get_dirty_page_queue_rec_lsn();
+     lsn_target_percent = (double)(cur_lsn - min_lsn) /
+            ((double)u_sess->attr.attr_storage.max_redo_log_size * BYTE_PER_KB);
+    /*
+     * If the xlog generation speed is slower than dirty queue rec lsn update speed and not many dirty pages,
+     * no need to scan too many dirty page, because the dirty page rec lsn is same.
+     */
+    if (dirty_percent < HIGH_WATER && avg_lsn_rate < XLOG_SEG_SIZE * UPDATE_REC_XLOG_NUM &&
+        lsn_target_percent < HIGH_WATER) {
+        lsn_scan_factor = 1;
     }
 
-    target_lsn = min_lsn + avg_lsn_rate;
+    target_lsn = min_lsn + avg_lsn_rate * lsn_scan_factor;
     num_for_lsn = get_page_num_for_lsn(target_lsn, num_for_lsn_max);
+
+    if (lsn_target_percent < HIGH_WATER) {
+        num_for_lsn = MIN(num_for_lsn / lsn_scan_factor, max_io);
+    } else if (lsn_target_percent < 1) {
+        num_for_lsn = MIN(num_for_lsn / lsn_scan_factor, max_io) +
+            (float)(lsn_target_percent - HIGH_WATER) / (float)(1 - HIGH_WATER) * max_io;
+    } else {
+        num_for_lsn = max_io * 2;
+    }
+
     num_for_lsn = (num_for_lsn + prev_lsn_num) / 2;
     prev_lsn_num = num_for_lsn;
 
@@ -1016,6 +1077,11 @@ static void ckpt_pagewriter_sub_thread_loop()
 
 static void ckpt_pagewriter_handle_exception(MemoryContext pagewriter_context)
 {
+    /*
+     * Close all open files after any error.  This is helpful on Windows,
+     * where holding deleted files open causes various strange errors.
+     * It's not clear we need it elsewhere, but shouldn't hurt.
+     */    
     int id = t_thrd.pagewriter_cxt.pagewriter_id;
 
     /* Since not using PG_TRY, must reset error stack by hand */
@@ -1070,12 +1136,6 @@ static void ckpt_pagewriter_handle_exception(MemoryContext pagewriter_context)
      */
     pg_usleep(1000000L);
 
-    /*
-     * Close all open files after any error.  This is helpful on Windows,
-     * where holding deleted files open causes various strange errors.
-     * It's not clear we need it elsewhere, but shouldn't hurt.
-     */
-    smgrcloseall();
     return;
 }
 
@@ -1178,7 +1238,8 @@ void ckpt_pagewriter_main(void)
         name, MAX_THREAD_NAME_LEN, MAX_THREAD_NAME_LEN - 1, "%s%d", "PageWriter", t_thrd.pagewriter_cxt.pagewriter_id);
     securec_check_ss(err_rc, "", "");
 
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name, MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, name,
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -1197,6 +1258,7 @@ void ckpt_pagewriter_main(void)
      * See notes in postgres.c about the design of this coding.
      */
     if (sigsetjmp(localSigjmpBuf, 1) != 0) {
+        ereport(WARNING, (errmodule(MOD_INCRE_CKPT), errmsg("pagewriter exception occured.")));
         ckpt_pagewriter_handle_exception(pagewriter_context);
     }
 
@@ -1239,7 +1301,7 @@ void ckpt_pagewriter_main(void)
 }
 
 const float NEED_PRUNE_DIRTY_QUEUE_SLOT = 0.6;
-#define MAX_INVALID_BUF_SLOT (MIN(g_instance.shmem_cxt.MaxConnections, g_instance.attr.attr_storage.NBuffers))
+#define MAX_INVALID_BUF_SLOT (MIN(g_instance.shmem_cxt.MaxConnections, TOTAL_BUFFER_NUM))
 #define MAX_VALID_BUF_SLOT (MAX_INVALID_BUF_SLOT * 3)
 
 static void print_dirty_page_queue_info(bool after_prune)
@@ -1275,10 +1337,6 @@ static bool ckpt_found_valid_and_invalid_buffer_loc(
     volatile DirtyPageQueueSlot* slot = NULL;
 
     dirty_page_num = get_dirty_page_num();
-
-    if (dirty_page_num < g_instance.ckpt_cxt_ctl->dirty_page_queue_size * NEED_PRUNE_DIRTY_QUEUE_SLOT || FULL_CKPT) {
-        return false;
-    }
 
     if (u_sess->attr.attr_storage.log_pagewriter) {
         print_dirty_page_queue_info(false);
@@ -1320,7 +1378,13 @@ static void ckpt_try_prune_dirty_page_queue()
     uint32 valid_slot_num = 0;
     uint64 last_invalid_slot = 0;
     bool can_found = false;
-    uint64* valid_buffer_array = (uint64*)palloc0(MAX_VALID_BUF_SLOT * sizeof(uint64));
+    uint64* valid_buffer_array = NULL;
+
+    if (get_dirty_page_num() < g_instance.ckpt_cxt_ctl->dirty_page_queue_size * NEED_PRUNE_DIRTY_QUEUE_SLOT) {
+        return;
+    }
+
+    valid_buffer_array = (uint64*)palloc0(MAX_VALID_BUF_SLOT * sizeof(uint64));
 
     can_found = ckpt_found_valid_and_invalid_buffer_loc(
         valid_buffer_array, MAX_VALID_BUF_SLOT, &valid_slot_num, &last_invalid_slot);

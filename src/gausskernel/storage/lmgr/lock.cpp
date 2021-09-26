@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * lock.cpp
- *	  POSTGRES primary lock mechanism
+ *	  openGauss primary lock mechanism
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -32,6 +32,7 @@
 #include "access/transam.h"
 #include "access/twophase.h"
 #include "access/twophase_rmgr.h"
+#include "access/xact.h"
 #include "access/xlog.h"
 #include "catalog/namespace.h"
 #include "miscadmin.h"
@@ -45,13 +46,14 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/resowner.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "instruments/instr_event.h"
 #include "instruments/instr_statement.h"
 
 #define NLOCKENTS()                                           \
     mul_size(g_instance.attr.attr_storage.max_locks_per_xact, \
-             add_size(g_instance.shmem_cxt.MaxBackends, g_instance.attr.attr_storage.max_prepared_xacts))
+             add_size(g_instance.shmem_cxt.MaxBackends,       \
+             g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS))
 
 /*
  * Data structures defining the semantics of the standard lock methods.
@@ -338,7 +340,8 @@ void InitLocks(void)
      * Allocate hash table for LOCK structs.  This stores per-locked-object
      * information.
      */
-    MemSet(&info, 0, sizeof(info));
+    errno_t rc = memset_s(&info, sizeof(info), 0, sizeof(info));
+    securec_check(rc, "", "");
     info.keysize = sizeof(LOCKTAG);
     info.entrysize = sizeof(LOCK);
     info.hash = tag_hash;
@@ -392,6 +395,20 @@ void InitLocks(void)
     hash_flags = (HASH_ELEM | HASH_FUNCTION);
 
     t_thrd.storage_cxt.LockMethodLocalHash = hash_create("LOCALLOCK hash", 16, &info, hash_flags);
+}
+
+/*
+ * Given two lock modes, return whether they would conflict.
+ */
+    bool
+DoLockModesConflict(LOCKMODE mode1, LOCKMODE mode2)
+{
+    LockMethod      lockMethodTable = LockMethods[DEFAULT_LOCKMETHOD];
+
+    if (lockMethodTable->conflictTab[mode1] & LOCKBIT_ON(mode2))
+        return true;
+
+    return false;
 }
 
 /*
@@ -502,7 +519,8 @@ bool LockHasWaiters(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
     /*
      * Find the LOCALLOCK entry for this lock and lockmode
      */
-    MemSet(&localtag, 0, sizeof(localtag)); /* must clear padding */
+    errno_t rc = memset_s(&localtag, sizeof(localtag), 0, sizeof(localtag)); /* must clear padding */
+    securec_check(rc, "", "");
     localtag.lock = *locktag;
     localtag.mode = lockmode;
 
@@ -686,7 +704,8 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
     /*
      * Find or create a LOCALLOCK entry for this lock and lockmode
      */
-    MemSet(&localtag, 0, sizeof(localtag)); /* must clear padding */
+    errno_t rc = memset_s(&localtag, sizeof(localtag), 0, sizeof(localtag)); /* must clear padding */
+    securec_check(rc, "", "");
     localtag.lock = *locktag;
     localtag.mode = lockmode;
 
@@ -752,7 +771,7 @@ static LockAcquireResult LockAcquireExtendedXC(const LOCKTAG *locktag, LOCKMODE 
         /*
          * In a scenario like:
          *
-         *	1, postgres run vacuum full or autovacuum pg_class, insert AccessExclusiveLock xlog.
+         *	1, openGauss run vacuum full or autovacuum pg_class, insert AccessExclusiveLock xlog.
          *	2, datanode crash, vacuum full abort.
          *	3, datanode restart in pending mode, start recovery.
          *	4, startup thread acquire pg_class's AccessExclusiveLock.
@@ -1062,6 +1081,7 @@ static PROCLOCK *SetupLockInTable(LockMethod lockMethodTable, PGPROC *proc, cons
     PROCLOCKTAG proclocktag;
     uint32 proclock_hashcode;
     bool found = false;
+    errno_t rc = EOK;
 
     /*
      * Find or create a lock with this tag.
@@ -1081,8 +1101,10 @@ static PROCLOCK *SetupLockInTable(LockMethod lockMethodTable, PGPROC *proc, cons
         ProcQueueInit(&(lock->waitProcs));
         lock->nRequested = 0;
         lock->nGranted = 0;
-        MemSet(lock->requested, 0, sizeof(lock->requested));
-        MemSet(lock->granted, 0, sizeof(lock->granted));
+        rc = memset_s(lock->requested, sizeof(lock->requested), 0, sizeof(lock->requested));
+        securec_check(rc, "", "");
+        rc = memset_s(lock->granted, sizeof(lock->granted), 0, sizeof(lock->granted));
+        securec_check(rc, "", "");
         LOCK_PRINT("LockAcquire: new", lock, lockmode);
     } else {
         LOCK_PRINT("LockAcquire: found", lock, lockmode);
@@ -1126,6 +1148,18 @@ static PROCLOCK *SetupLockInTable(LockMethod lockMethodTable, PGPROC *proc, cons
      */
     if (!found) {
         uint32 partition = LockHashPartition(hashcode);
+
+        /*
+         * It might seem unsafe to access proclock->groupLeader without a
+         * lock, but it's not really.  Either we are initializing a proclock
+         * on our own behalf, in which case our group leader isn't changing
+         * because the group leader for a process can only ever be changed by
+         * the process itself; or else we are transferring a fast-path lock to
+         * the main lock table, in which case that process can't change it's
+         * lock group leader without first releasing all of its locks (and in
+         * particular the one we are currently transferring).
+         */
+        proclock->groupLeader = (proc->lockGroupLeader != NULL) ? proc->lockGroupLeader : proc;
 
         proclock->holdMask = 0;
         proclock->releaseMask = 0;
@@ -1224,11 +1258,18 @@ static void RemoveLocalLock(LOCALLOCK *locallock)
  * when query run as stream mode, the topConsumer and producer thread hold differnt
  * Procs, but we treat them as one transaction
  */
-bool IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
+bool inline IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
 {
     return u_sess->stream_cxt.global_obj == NULL ? false
             : u_sess->stream_cxt.global_obj->inNodeGroup(proc1->pid, proc2->pid);
 }
+
+bool inline IsInSameLockGroup(const PROCLOCK *proclock1, const PROCLOCK *proclock2)
+{
+    Assert(proclock1->groupLeader != t_thrd.proc || t_thrd.proc->lockGroupLeader != NULL);
+    return proclock1 != proclock2 && proclock1->groupLeader == proclock2->groupLeader;
+}
+
 
 /*
  * LockCheckConflicts -- test whether requested lock conflicts
@@ -1272,6 +1313,8 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
      */
     myLocks = proclock->holdMask;
     otherLocks = 0;
+
+    bool inLockGroup = (proclock->groupLeader != t_thrd.proc || t_thrd.proc->lockGroupLeader != NULL);
     for (i = 1; i <= numLockModes; i++) {
         int myHolding = (myLocks & LOCKBIT_ON((unsigned int)i)) ? 1 : 0;
 
@@ -1280,12 +1323,13 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
          * thread is in one transaction, but these threads use differnt procs.
          * We need treat these procs as one proc
          */
-        if (StreamTopConsumerAmI() || StreamThreadAmI()) {
+        if (StreamTopConsumerAmI() || StreamThreadAmI() || inLockGroup) {
             SHM_QUEUE *otherProcLocks = &(lock->procLocks);
             PROCLOCK *otherProcLock = (PROCLOCK *)SHMQueueNext(otherProcLocks, otherProcLocks,
                                                                offsetof(PROCLOCK, lockLink));
             while (otherProcLock != NULL) {
-                if (IsInSameTransaction(otherProcLock->tag.myProc, proc)) {
+                if ((!inLockGroup && IsInSameTransaction(otherProcLock->tag.myProc, proc))
+                    || (inLockGroup && IsInSameLockGroup(proclock, otherProcLock))) {
                     if (otherProcLock->holdMask & LOCKBIT_ON((unsigned int)i))
                         ++myHolding;
                 }
@@ -1306,7 +1350,8 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
             conflictLocks = (lockMethodTable->conflictTab[lockmode] & otherProcLock->holdMask);
 
             /* lock conflicts and not is a stream group */
-            if (conflictLocks && !IsInSameTransaction(otherProcLock->tag.myProc, proc)) {
+            if (conflictLocks && (inLockGroup || !IsInSameTransaction(otherProcLock->tag.myProc, proc)) && 
+                (!inLockGroup || !IsInSameLockGroup(proclock, otherProcLock))) {
                 int lock_idx = 1;
                 for (; lock_idx <= numLockModes; lock_idx++) {
                     if (conflictLocks & LOCKBIT_ON((unsigned int)lock_idx))
@@ -1620,9 +1665,10 @@ static void ReportWaitLockInfo(const LOCALLOCK *locallock)
     } else if (u_sess->attr.attr_common.enable_instr_track_wait &&
                old_wait_event_info != WAIT_EVENT_END &&
                wait_event_info == WAIT_EVENT_END) {
+        TimestampTz currentTime = GetCurrentTimestamp();
         int64 duration =
-            GetCurrentTimestamp() - beentry->waitInfo.event_info.start_time;
-        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, duration);
+            currentTime - beentry->waitInfo.event_info.start_time;
+        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, duration, currentTime);
         beentry->waitInfo.event_info.start_time = 0;
     }
 
@@ -1839,7 +1885,8 @@ bool LockRelease(const LOCKTAG *locktag, LOCKMODE lockmode, bool sessionLock)
     /*
      * Find the LOCALLOCK entry for this lock and lockmode
      */
-    MemSet(&localtag, 0, sizeof(localtag)); /* must clear padding */
+    errno_t rc = memset_s(&localtag, sizeof(localtag), 0, sizeof(localtag)); /* must clear padding */
+    securec_check(rc, "", "");
     localtag.lock = *locktag;
     localtag.mode = lockmode;
 
@@ -2985,6 +3032,10 @@ void PostPrepare_Locks(TransactionId xid)
     bool found = false;
     int partition;
 
+    /* Can't prepare a lock group follower. */
+    Assert(t_thrd.proc->lockGroupLeader == NULL ||
+           t_thrd.proc->lockGroupLeader == t_thrd.proc);
+
     /* This is a critical section: any error means big trouble */
     START_CRIT_SECTION();
 
@@ -3112,6 +3163,13 @@ void PostPrepare_Locks(TransactionId xid)
              */
             proclocktag.myLock = lock;
             proclocktag.myProc = newproc;
+
+            /*
+             * Update groupLeader pointer to point to the new proc.  (We'd
+             * better not be a member of somebody else's lock group!)
+             */
+            Assert(proclock->groupLeader == proclock->tag.myProc);
+            proclock->groupLeader = newproc;
 
             newproclock = (PROCLOCK *)hash_search(t_thrd.storage_cxt.LockMethodProcLockHash, (void *)&proclocktag,
                                                   HASH_ENTER_NULL, &found);
@@ -3248,6 +3306,7 @@ LockData *GetLockStatusData(void)
             instance->backend = proc->backendId;
             instance->lxid = proc->lxid;
             instance->pid = proc->pid;
+            instance->globalSessionId = proc->globalSessionId;
             instance->sessionid = proc->sessionid;
             instance->fastpath = true;
 
@@ -3274,6 +3333,7 @@ LockData *GetLockStatusData(void)
             instance->lxid = proc->lxid;
             instance->pid = proc->pid;
             instance->sessionid = proc->sessionid;
+            instance->globalSessionId = proc->globalSessionId;
             instance->fastpath = true;
 
             el++;
@@ -3325,6 +3385,7 @@ LockData *GetLockStatusData(void)
         instance->lxid = proc->lxid;
         instance->pid = proc->pid;
         instance->sessionid = proc->sessionid;
+        instance->globalSessionId = proc->globalSessionId;
         instance->fastpath = false;
 
         el++;
@@ -3568,6 +3629,7 @@ void lock_twophase_recover(TransactionId xid, uint16 info, void *recdata, uint32
     int partition;
     LWLock *partitionLock = NULL;
     LockMethod lockMethodTable;
+    errno_t rc = EOK;
 
     Assert(len == sizeof(TwoPhaseLockRecord));
     locktag = &rec->locktag;
@@ -3604,8 +3666,10 @@ void lock_twophase_recover(TransactionId xid, uint16 info, void *recdata, uint32
         ProcQueueInit(&(lock->waitProcs));
         lock->nRequested = 0;
         lock->nGranted = 0;
-        MemSet(lock->requested, 0, sizeof(lock->requested));
-        MemSet(lock->granted, 0, sizeof(lock->granted));
+        rc = memset_s(lock->requested, sizeof(lock->requested), 0, sizeof(lock->requested));
+        securec_check(rc, "", "");
+        rc = memset_s(lock->granted, sizeof(lock->granted), 0, sizeof(lock->granted));
+        securec_check(rc, "", "");
         LOCK_PRINT("lock_twophase_recover: new", lock, lockmode);
     } else {
         LOCK_PRINT("lock_twophase_recover: found", lock, lockmode);
@@ -3650,6 +3714,8 @@ void lock_twophase_recover(TransactionId xid, uint16 info, void *recdata, uint32
      * If new, initialize the new entry
      */
     if (!found) {
+        Assert(proc->lockGroupLeader == NULL);
+        proclock->groupLeader = proc;
         proclock->holdMask = 0;
         proclock->releaseMask = 0;
         /* Add proclock to appropriate lists */

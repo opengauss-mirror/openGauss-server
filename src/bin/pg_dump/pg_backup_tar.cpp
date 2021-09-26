@@ -266,6 +266,13 @@ static void _ArchiveEntry(ArchiveHandle* AH, TocEntry* te)
     te->formatData = (void*)ctx;
 }
 
+#ifdef ENABLE_UT
+void uttest_tar_ArchiveEntry(ArchiveHandle* AH, TocEntry* te)
+{
+    _ArchiveEntry(AH, te);
+}
+#endif
+
 static void _WriteExtraToc(ArchiveHandle* AH, TocEntry* te)
 {
     lclTocEntry* ctx = (lclTocEntry*)te->formatData;

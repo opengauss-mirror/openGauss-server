@@ -28,48 +28,54 @@
 #include "client_logic_processor/stmt_processor.h"
 #include "expr_parts_list.h"
 #include "libpq-int.h"
+#include "client_logic_expressions/column_ref_data.h"
 
-/*
-   get the column's full FQDN, as full as possible, depending on the amount of information in the ColumnRef
-   column FQDN: "database"."schema"."table"."column"
-   */
 
-ColumnRefData::ColumnRefData()
+bool exprProcessor::expand_function_name(const FuncCall* callref, func_name_data& func_name)
 {
-    m_catalog_name.data[0] = '\0';
-    m_schema_name.data[0] = '\0';
-    m_table_name.data[0] = '\0';
-    m_column_name.data[0] = '\0';
-    m_alias_fqdn[0] = '\0';
-}
+    size_t fields_len = list_length(callref->funcname);
+    Node* n_func_name = NULL;
+    Node* n_schema_name = NULL;
+    Node* n_catalog_name = NULL;
+    switch (fields_len) {
+        case 1: {
+            n_func_name = (Node*)linitial(callref->funcname);
+            Assert(IsA(n_func_name, String));
+            break;
+        }
+        case 2: {
+            n_schema_name = (Node*)linitial(callref->funcname);
+            Assert(IsA(n_schema_name, String));
+            n_func_name = (Node*)lsecond(callref->funcname);
+            Assert(IsA(n_func_name, String));
+            break;
+        }
+        case 3: {
+            n_catalog_name = (Node*)linitial(callref->funcname);
+            Assert(IsA(n_catalog_name, String));
+            n_schema_name = (Node*)lsecond(callref->funcname);
+            Assert(IsA(n_schema_name, String));
+            n_func_name = (Node*)lthird(callref->funcname);
+            Assert(IsA(n_func_name, String));
+            break;
+        }
+        default:
+            Assert(false);
+            return false;
+            break;
+    }
 
-ColumnRefData::~ColumnRefData() {}
-
-/*
- * judge Cachecolumn by columnrefdata should include colname, tablename, schemaname and ...
- */
-bool ColumnRefData::compare_with_cachecolumn(const ICachedColumn *cached_column) const
-{
-    if (cached_column) {
-        if (cached_column->get_col_name() == NULL || cached_column->get_table_name() == NULL ||
-            cached_column->get_schema_name() == NULL || cached_column->get_catalog_name() == NULL) {
-            return false;
-        }
-        if (m_column_name.data[0] != '\0' && pg_strcasecmp(cached_column->get_col_name(), m_column_name.data) != 0) {
-            return false;
-        }
-        if (m_table_name.data[0] != '\0' && pg_strcasecmp(cached_column->get_table_name(), m_table_name.data) != 0) {
-            return false;
-        }
-        if (m_schema_name.data[0] != '\0' && pg_strcasecmp(cached_column->get_schema_name(), m_schema_name.data) != 0) {
-            return false;
-        }
-        if (m_catalog_name.data[0] != '\0' &&
-            pg_strcasecmp(cached_column->get_catalog_name(), m_catalog_name.data) != 0) {
-            return false;
-        }
-    } else {
-        return false;
+    if (n_catalog_name) {
+        check_strncpy_s(strncpy_s(func_name.m_catalogName.data, sizeof(func_name.m_catalogName.data),
+            strVal(n_catalog_name), strlen(strVal(n_catalog_name))));
+    }
+    if (n_schema_name) {
+        check_strncpy_s(strncpy_s(func_name.m_schemaName.data, sizeof(func_name.m_schemaName.data),
+            strVal(n_schema_name), strlen(strVal(n_schema_name))));
+    }
+    if (n_func_name) {
+        check_strncpy_s(strncpy_s(func_name.m_functionName.data, sizeof(func_name.m_functionName.data),
+            strVal(n_func_name), strlen(strVal(n_func_name))));
     }
     return true;
 }
@@ -93,9 +99,11 @@ bool exprProcessor::expand_column_ref(const ColumnRef *cref, ColumnRefData &colu
             Assert(IsA(field1, String));
             check_strncpy_s(strncpy_s(column_ref_data.m_table_name.data, sizeof(column_ref_data.m_table_name.data),
                 strVal(field1), strlen(strVal(field1))));
-            Assert(IsA(field2, String));
-            check_strncpy_s(strncpy_s(column_ref_data.m_column_name.data, sizeof(column_ref_data.m_column_name.data),
-                strVal(field2), strlen(strVal(field2))));
+            Assert(IsA(field2, String) || IsA(field2, A_Star));
+            if (IsA(field2, String)) { 
+                check_strncpy_s(strncpy_s(column_ref_data.m_column_name.data, 
+                    sizeof(column_ref_data.m_column_name.data), strVal(field2), strlen(strVal(field2))));
+            }
             break;
         }
         case 3: {
@@ -241,6 +249,8 @@ bool exprProcessor::expand_expr(const Node * const expr, StatementData *statemen
                             a_const = (A_Const *)a_expr->lexpr;
                         } else if (IsA(a_expr->lexpr, ParamRef)) {
                             param_ref = (ParamRef *)a_expr->lexpr;
+                        } else if (IsA(a_expr->lexpr, FuncCall)) {
+                            handle_func_call((const FuncCall*)a_expr->lexpr, expr_parts_list, statement_data);
                         }
                     }
                     if (a_expr->rexpr) {
@@ -253,6 +263,8 @@ bool exprProcessor::expand_expr(const Node * const expr, StatementData *statemen
                             param_ref = (ParamRef *)a_expr->rexpr;
                         } else if (IsA(a_expr->rexpr, SubLink)) {
                             expand_sub_link(a_expr->rexpr, statement_data);
+                        } else if (IsA(a_expr->rexpr, FuncCall)) {
+                            handle_func_call((const FuncCall*)a_expr->rexpr, expr_parts_list, statement_data);
                         }
                     }
                     if (column_ref && a_const) {

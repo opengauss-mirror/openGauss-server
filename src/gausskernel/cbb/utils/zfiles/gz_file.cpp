@@ -20,7 +20,7 @@
  */
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "utils/palloc.h"
 #include "utils/zfiles.h"
 

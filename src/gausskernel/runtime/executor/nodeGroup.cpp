@@ -24,7 +24,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeGroup.h"
+#include "executor/node/nodeGroup.h"
 
 /*
  *	 ExecGroup -

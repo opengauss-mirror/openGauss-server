@@ -1,0 +1,16 @@
+<refentry id="SQL-ARCHIVE_SNAPSHOT">
+<refmeta>
+<refentrytitle>ARCHIVE SNAPSHOT</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>ARCHIVE SNAPSHOT</refname>
+<refpurpose>archive a snapshot</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+ARCHIVE SNAPSHOT <qualified_name> @ <version | ident | sconst>;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

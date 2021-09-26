@@ -362,8 +362,8 @@ static void DecryptOptions(List *options)
             continue;
         }
 
-        for (int i = 0; i < sensitiveArrayLength; i++) {
-            if (pg_strcasecmp(def->defname, sensitiveOptionsArray[i]) == 0) {
+        for (int i = 0; i < g_sensitiveArrayLength; i++) {
+            if (pg_strcasecmp(def->defname, g_sensitiveOptionsArray[i]) == 0) {
                 char plainText[EC_CIPHER_TEXT_LENGTH] = {0};
 
                 /*
@@ -748,7 +748,7 @@ Datum pg_options_to_table(PG_FUNCTION_ARGS)
 }
 
 /*
- * Describes the valid options for postgresql FDW, server, and user mapping.
+ * Describes the valid options for openGauss FDW, server, and user mapping.
  */
 struct ConnectionOption {
     const char* optname;

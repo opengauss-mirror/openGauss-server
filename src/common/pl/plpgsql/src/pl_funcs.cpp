@@ -13,7 +13,7 @@
  * -------------------------------------------------------------------------
  */
 
-#include "plpgsql.h"
+#include "utils/plpgsql.h"
 #include "optimizer/pgxcship.h"
 #include "utils/memutils.h"
 
@@ -37,6 +37,60 @@ void plpgsql_ns_push(const char* label)
         label = "";
     }
     plpgsql_ns_additem(PLPGSQL_NSTYPE_LABEL, 0, label);
+}
+
+void add_pkg_compile()
+{
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL)  {
+        plpgsql_add_pkg_ns(u_sess->plsql_cxt.plpgsql_curr_compile_package);
+    }
+}
+/*
+ * add package variable to namespace when compile a function whcih in package
+ * it will add all package variable,including private variable, so it can't use
+ * in other function's compile.
+ */
+void plpgsql_add_pkg_ns(PLpgSQL_package* pkg) 
+{
+    PLpgSQL_datum			*datum;
+    int                     varno;
+    int                     ndatums;
+
+    if (pkg->ndatums == 0) {
+        ndatums = pkg->public_ndatums;
+    } else {
+         ndatums = pkg->ndatums;
+    }
+
+    for (int i = 0;i < ndatums; i++) {
+        datum = pkg->datums[i];
+        if (datum == NULL) {
+            ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_NONEXISTANT_VARIABLE),
+                errmsg("unrecognized package variable")));
+        }
+        char* pkgname = pkg->pkg_signature;
+        char* objname = ((PLpgSQL_var*) datum)->refname;
+        if (datum != NULL) {
+            datum->ispkg = true;
+            varno = plpgsql_adddatum(datum);
+            switch (datum->dtype) {
+                case PLPGSQL_DTYPE_VAR:
+                    plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, varno, objname, pkgname);
+                    break;
+                case PLPGSQL_DTYPE_ROW:
+                    plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, objname, pkgname);
+                    break;
+                case PLPGSQL_DTYPE_RECORD:
+                    plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, objname, pkgname);
+                    break;
+                default:
+                    ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized ttype: %d, when build variable in PLSQL, this situation should not occur.",
+                            datum->dtype)));
+            }
+        }
+
+    }
 }
 
 /* ----------
@@ -65,9 +119,10 @@ PLpgSQL_nsitem* plpgsql_ns_top(void)
  * plpgsql_ns_additem		Add an item to the current namespace chain
  * ----------
  */
-void plpgsql_ns_additem(int itemtype, int itemno, const char* name)
+void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* pkgname)
 {
     PLpgSQL_nsitem* nse = NULL;
+    errno_t rc;
 
 
     AssertEreport(name != NULL, MOD_PLSQL, "name should not be null");
@@ -78,8 +133,17 @@ void plpgsql_ns_additem(int itemtype, int itemno, const char* name)
     nse->itemtype = itemtype;
     nse->itemno = itemno;
     nse->prev = u_sess->plsql_cxt.ns_top;
-    errno_t rc = strncpy_s(nse->name, strlen(name) + 1, name, strlen(name));
+    rc = strncpy_s(nse->name, strlen(name) + 1, name, strlen(name));
     securec_check_c(rc, "\0", "\0");
+
+    if (pkgname != NULL) {
+        nse->pkgname = (char*)palloc(sizeof(char) * (strlen(pkgname) + 1));
+        rc = strncpy_s(nse->pkgname, strlen(pkgname) + 1, pkgname, strlen(pkgname));
+        securec_check_c(rc, "\0", "\0");
+    } else {
+        nse->pkgname = NULL;
+    }
+
     u_sess->plsql_cxt.ns_top = nse;
 }
 
@@ -116,6 +180,18 @@ PLpgSQL_nsitem* plpgsql_ns_lookup(
                 if (name2 == NULL || nsitem->itemtype != PLPGSQL_NSTYPE_VAR) {
                     if (names_used != NULL) {
                         *names_used = 1;
+                    }
+                    return nsitem;
+                }
+            }
+
+            if (nsitem->pkgname != NULL && strcmp(nsitem->pkgname, name1) == 0) {
+                if (name2 == NULL) {
+                    continue;
+                } else if (strcmp(nsitem->name, name2) == 0 && (name3 == NULL ||
+                    nsitem->itemtype != PLPGSQL_NSTYPE_VAR)) {
+                    if (names_used != NULL) {
+                        *names_used = 2;
                     }
                     return nsitem;
                 }
@@ -293,7 +369,7 @@ static void free_getdiag(PLpgSQL_stmt_getdiag* stmt);
 static void free_open(PLpgSQL_stmt_open* stmt);
 static void free_fetch(PLpgSQL_stmt_fetch* stmt);
 static void free_close(PLpgSQL_stmt_close* stmt);
-static void free_null(PLpgSQL_stmt* stmt);
+static void free_null(PLpgSQL_stmt_null* stmt);
 static void free_perform(PLpgSQL_stmt_perform* stmt);
 static void free_commit(PLpgSQL_stmt_commit *stmt);
 static void free_rollback(PLpgSQL_stmt_rollback *stmt);
@@ -380,7 +456,7 @@ static void free_stmt(PLpgSQL_stmt* stmt)
             free_rollback((PLpgSQL_stmt_rollback *) stmt);
             break;
         case PLPGSQL_STMT_NULL:
-            free_null((PLpgSQL_stmt*)stmt);
+            free_null((PLpgSQL_stmt_null*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -511,7 +587,7 @@ static void free_fetch(PLpgSQL_stmt_fetch* stmt)
 static void free_close(PLpgSQL_stmt_close* stmt)
 {}
 
-static void free_null(PLpgSQL_stmt* stmt)
+static void free_null(PLpgSQL_stmt_null* stmt)
 {
     ereport(DEBUG1, (errmsg("There is nothing to do for free NULL statement")));
 }
@@ -612,15 +688,115 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
 
     /* Better not call this on an in-use function */
     AssertEreport(func->use_count == 0, MOD_PLSQL, "Better not call this on an in-use function");
+    /*
+     * function which in package not free memory alone 
+     */
+    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+        return;
+    }
 
     /* Release plans associated with variable declarations */
     for (i = 0; i < func->ndatums; i++) {
         PLpgSQL_datum* d = func->datums[i];
-
+        if (d != NULL) {
+            if (d->ispkg == true) {
+                continue;
+            }
+        } else {
+            continue;
+        }
         switch (d->dtype) {
             case PLPGSQL_DTYPE_VAR: {
                 PLpgSQL_var* var = (PLpgSQL_var*)d;
 
+                free_expr(var->default_val);
+                free_expr(var->cursor_explicit_expr);
+            } break;
+            case PLPGSQL_DTYPE_ROW:
+                break;
+            case PLPGSQL_DTYPE_REC:
+                break;
+            case PLPGSQL_DTYPE_RECORD:
+                break;
+            case PLPGSQL_DTYPE_RECFIELD:
+                break;
+            case PLPGSQL_DTYPE_ARRAYELEM:
+                free_expr(((PLpgSQL_arrayelem*)d)->subscript);
+                break;
+            case PLPGSQL_DTYPE_UNKNOWN:
+                break;
+            default:
+                ereport(ERROR,
+                    (errmodule(MOD_PLSQL),
+                        errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized data type: %d when free function memory.", d->dtype)));
+                break;
+        }
+    }
+    func->ndatums = 0;
+#ifndef ENABLE_MULTIPLE_NODES
+    /* clean up debug info if necessary */
+    if (func->debug) {
+        clean_up_debug_server(func->debug, false, true);
+        func->debug = NULL;
+    }
+#endif
+    /* Release plans in statement tree */
+    if (func->action != NULL) {
+        free_block(func->action);
+    }
+    func->action = NULL;
+
+    /* Release goto_labels */
+    if (func->goto_labels != NIL) {
+        if (func->goto_labels->length > 0) {
+            list_free_ext(func->goto_labels);
+            func->goto_labels = NIL;
+        }
+    }
+
+    // Release searchpath
+    if (func->fn_searchpath != NULL && !OidIsValid(func->pkg_oid)) {
+        if (func->fn_searchpath->schemas && func->fn_searchpath->schemas->length > 0) {
+            list_free_ext(func->fn_searchpath->schemas);
+        }
+        pfree_ext(func->fn_searchpath);
+    }
+
+    /*
+     * And finally, release all memory except the PLpgSQL_function struct
+     * itself (which has to be kept around because there may be multiple
+     * fn_extra pointers to it).
+     */
+    if (func->fn_cxt == u_sess->plsql_cxt.plpgsql_cxt)
+        u_sess->plsql_cxt.plpgsql_cxt = NULL;
+    if (!OidIsValid(func->pkg_oid)) {
+        if (func->fn_cxt) {
+            MemoryContextDelete(func->fn_cxt);
+        }
+        func->fn_cxt = NULL;
+    } else {
+        func->fn_cxt = NULL;
+    }
+}
+
+/*
+ * free package memory here.
+ */
+void plpgsql_free_package_memory(PLpgSQL_package* pkg)
+{
+    int i;
+    ListCell* l;
+    foreach(l, pkg->proc_compiled_list) {
+        PLpgSQL_function* func = (PLpgSQL_function*)lfirst(l);
+        plpgsql_free_function_memory(func);
+    }
+    /* Release plans associated with variable declarations */
+    for (i = 0; i < pkg->ndatums; i++) {
+        PLpgSQL_datum* d = pkg->datums[i];
+        switch (d->dtype) {
+            case PLPGSQL_DTYPE_VAR: {
+                PLpgSQL_var* var = (PLpgSQL_var*)d;
                 free_expr(var->default_val);
                 free_expr(var->cursor_explicit_expr);
             } break;
@@ -643,39 +819,25 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
                 break;
         }
     }
-    func->ndatums = 0;
-
-    /* Release plans in statement tree */
-    if (func->action != NULL) {
-        free_block(func->action);
-    }
-    func->action = NULL;
-
-    /* Release goto_labels */
-    if (func->goto_labels != NIL) {
-        list_free_ext(func->goto_labels);
-        func->goto_labels = NIL;
-    }
-
+    pkg->ndatums = 0;
     // Release searchpath
-    if (func->fn_searchpath != NULL) {
-        if (func->fn_searchpath->schemas && func->fn_searchpath->schemas->length > 0) {
-            list_free_ext(func->fn_searchpath->schemas);
+    if (pkg->pkg_searchpath != NULL) {
+        if (pkg->pkg_searchpath->schemas && pkg->pkg_searchpath->schemas->length > 0) {
+            list_free_ext(pkg->pkg_searchpath->schemas);
         }
-        pfree_ext(func->fn_searchpath);
+        pfree_ext(pkg->pkg_searchpath);
     }
-
     /*
      * And finally, release all memory except the PLpgSQL_function struct
      * itself (which has to be kept around because there may be multiple
      * fn_extra pointers to it).
      */
-    if (func->fn_cxt == u_sess->plsql_cxt.plpgsql_func_cxt)
-        u_sess->plsql_cxt.plpgsql_func_cxt = NULL;
-    if (func->fn_cxt) {
-        MemoryContextDelete(func->fn_cxt);
+    if (pkg->pkg_cxt == u_sess->plsql_cxt.plpgsql_cxt)
+        u_sess->plsql_cxt.plpgsql_cxt = NULL;
+    if (pkg->pkg_cxt) {
+        MemoryContextDelete(pkg->pkg_cxt);
     }
-    func->fn_cxt = NULL;
+    pkg->pkg_cxt = NULL;
 }
 
 /**********************************************************************
@@ -711,7 +873,7 @@ static void dump_close(PLpgSQL_stmt_close* stmt);
 static void dump_perform(PLpgSQL_stmt_perform* stmt);
 static void dump_commit(PLpgSQL_stmt_commit *stmt);
 static void dump_rollback(PLpgSQL_stmt_rollback *stmt);
-static void dump_null(PLpgSQL_stmt* stmt);
+static void dump_null(PLpgSQL_stmt_null* stmt);
 static void dump_expr(PLpgSQL_expr* expr);
 
 static void dump_ind(void)
@@ -806,7 +968,7 @@ static void dump_stmt(PLpgSQL_stmt* stmt)
             dump_rollback((PLpgSQL_stmt_rollback *) stmt);
             break;
         case PLPGSQL_STMT_NULL:
-            dump_null((PLpgSQL_stmt*)stmt);
+            dump_null((PLpgSQL_stmt_null*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -1175,7 +1337,7 @@ static void dump_rollback(PLpgSQL_stmt_rollback *stmt)
     printf("ROLLBACK\n");
 }
 
-static void dump_null(PLpgSQL_stmt* stmt)
+static void dump_null(PLpgSQL_stmt_null* stmt)
 {
     dump_ind();
     printf("NULL\n");

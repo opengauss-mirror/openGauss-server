@@ -15,14 +15,14 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "executor/executor.h"
-#include "executor/nodeStub.h"
+#include "executor/node/nodeStub.h"
 #include "vecexecutor/vecnodes.h"
-#include "executor/nodeSeqscan.h"
-#include "executor/nodeIndexscan.h"
-#include "executor/nodeIndexonlyscan.h"
-#include "executor/nodeBitmapIndexscan.h"
-#include "executor/nodeBitmapHeapscan.h"
-#include "executor/nodeTidscan.h"
+#include "executor/node/nodeSeqscan.h"
+#include "executor/node/nodeIndexscan.h"
+#include "executor/node/nodeIndexonlyscan.h"
+#include "executor/node/nodeBitmapIndexscan.h"
+#include "executor/node/nodeBitmapHeapscan.h"
+#include "executor/node/nodeTidscan.h"
 
 extern char* nodeTagToString(NodeTag type);
 

@@ -58,7 +58,7 @@ typedef struct LogCtrlData {
     uint64 pre_rate2;
     int64 prev_RPO;
     int64 current_RPO;
-    bool just_keep_alive;
+    TimestampTz prev_send_time;
 } LogCtrlData;
 
 /*
@@ -115,23 +115,11 @@ typedef struct WalSnd {
      */
     int sync_standby_priority;
     int index;
-    XLogRecPtr arch_task_lsn;
-    int archive_obs_subterm;
     LogCtrlData log_ctrl;
-    unsigned int archive_flag;
-    Latch* arch_latch;
-    bool is_start_archive;
-    unsigned int standby_archive_flag;
-    XLogRecPtr archive_target_lsn;
-    XLogRecPtr arch_task_last_lsn;
-    bool arch_finish_result;
 
-    /* 
-     * has_sent_arch_lsn indicates whether the walsnd has sent the archive location,
-     * and last_send_time is used to record the time when the archive location is sent last time.
-     */
-    bool has_sent_arch_lsn;
-    long last_send_lsn_time;
+    slock_t mutex_archive_task_list;
+    List* archive_task_list;
+    unsigned int archive_task_count;
 
     /* 
      * lastCalTime is last time calculating catchupRate, and lastCalWrite
@@ -160,6 +148,18 @@ typedef struct WalSndCtlData {
      * waitLSN that follows this value. Protected by SyncRepLock.
      */
     XLogRecPtr lsn[NUM_SYNC_REP_WAIT_MODE];
+
+    /*
+    * Paxos replication queue.
+    * Protected by SyncRepLock.
+    */
+    SHM_QUEUE       SyncPaxosQueue;
+
+    /*
+    * Current location of the head of the queue. All waiters should have a
+    * waitLSN that follows this value. Protected by SyncPaxosLock.
+    */
+    XLogRecPtr      paxosLsn;
 
     /*
      * Are any sync standbys defined?  Waiting backends can't reload the

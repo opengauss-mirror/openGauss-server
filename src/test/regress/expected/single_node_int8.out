@@ -1,3 +1,4 @@
+set lc_monetary = 'C';
 --
 -- INT8
 -- Test int8 64-bit integers.

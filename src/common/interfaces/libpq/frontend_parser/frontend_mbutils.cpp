@@ -34,117 +34,10 @@ static THR_LOCAL pg_enc2name *g_database_encoding = &pg_enc2name_tbl[PG_SQL_ASCI
 
 static int cliplen(const char *str, int len, int limit);
 
-/* convert a multibyte string to a wchar */
-int pg_mb2wchar(const char *from, pg_wchar *to)
-{
-    return (*pg_wchar_table[g_database_encoding->encoding].mb2wchar_with_len)((const unsigned char *)from, to,
-        strlen(from));
-}
-
-/* convert a multibyte string to a wchar with a limited length */
-int pg_mb2wchar_with_len(const char *from, pg_wchar *to, int len)
-{
-    return (*pg_wchar_table[g_database_encoding->encoding].mb2wchar_with_len)((const unsigned char *)from, to, len);
-}
-
-/* same, with any encoding */
-int pg_encoding_mb2wchar_with_len(int encoding, const char *from, pg_wchar *to, int len)
-{
-    return (*pg_wchar_table[encoding].mb2wchar_with_len)((const unsigned char *)from, to, len);
-}
-
-/* convert a wchar string to a multibyte */
-int pg_wchar2mb(const pg_wchar *from, char *to)
-{
-    return (*pg_wchar_table[g_database_encoding->encoding].wchar2mb_with_len)(from, (unsigned char *)to,
-        pg_wchar_strlen(from));
-}
-
-/* convert a wchar string to a multibyte with a limited length */
-int pg_wchar2mb_with_len(const pg_wchar *from, char *to, int len)
-{
-    return (*pg_wchar_table[g_database_encoding->encoding].wchar2mb_with_len)(from, (unsigned char *)to, len);
-}
-
-/* same, with any encoding */
-int pg_encoding_wchar2mb_with_len(int encoding, const pg_wchar *from, char *to, int len)
-{
-    return (*pg_wchar_table[encoding].wchar2mb_with_len)(from, (unsigned char *)to, len);
-}
-
 /* returns the byte length of a multibyte character */
 int pg_mblen(const char *mbstr)
 {
     return ((*pg_wchar_table[g_database_encoding->encoding].mblen)((const unsigned char *)mbstr));
-}
-
-/* returns the display length of a multibyte character */
-int pg_dsplen(const char *mbstr)
-{
-    return ((*pg_wchar_table[g_database_encoding->encoding].dsplen)((const unsigned char *)mbstr));
-}
-
-/* returns the length (counted in wchars) of a multibyte string */
-int pg_mbstrlen(const char *mbstr)
-{
-    int len = 0;
-
-    /* optimization for single byte encoding */
-    if (pg_database_encoding_max_length() == 1) {
-        return strlen(mbstr);
-    }
-
-    while (*mbstr) {
-        mbstr += pg_mblen(mbstr);
-        len++;
-    }
-    return len;
-}
-
-/* 
- * returns the length (counted in wchars) of a multibyte string
- * (not necessarily NULL terminated)
- */
-int pg_mbstrlen_with_len(const char *mbstr, int limit)
-{
-    int len = 0;
-
-    /* optimization for single byte encoding */
-    if (pg_database_encoding_max_length() == 1) {
-        return limit;
-    }
-
-    while (limit > 0 && *mbstr) {
-        int l = pg_mblen(mbstr);
-
-        limit -= l;
-        mbstr += l;
-        len++;
-    }
-    return len;
-}
-
-/* 
- * returns the length (counted in wchars) of a multibyte string
- * with fixed encoding.
- */
-int pg_mbstrlen_with_len_eml(const char *mbstr, int limit, int eml)
-{
-    int len = 0;
-
-    /* optimization for single byte encoding */
-    if (eml == 1) {
-        return limit;
-    }
-
-    while (limit > 0 && *mbstr) {
-        int l = pg_mblen(mbstr);
-
-        limit -= l;
-        mbstr += l;
-        len++;
-    }
-    return len;
 }
 
 /*
@@ -256,81 +149,10 @@ static int cliplen(const char *str, int len, int limit)
     return l;
 }
 
-void SetDatabaseEncoding(int encoding)
-{
-    if (!PG_VALID_BE_ENCODING(encoding)) {
-        printf("invalid database encoding: %d\n", encoding);
-    }
-    g_database_encoding = &pg_enc2name_tbl[encoding];
-    Assert(g_database_encoding->encoding == encoding);
-}
-
-/*
- * Bind gettext to the codeset equivalent with the database encoding.
- */
-void pg_bind_textdomain_codeset(const char *domainname)
-{
-#if defined(ENABLE_NLS)
-    int encoding = GetDatabaseEncoding();
-    int i;
-
-    /*
-     * gettext() uses the codeset specified by LC_CTYPE by default, so if that
-     * matches the database encoding we don't need to do anything. In CREATE
-     * DATABASE, we enforce or trust that the locale's codeset matches
-     * database encoding, except for the C locale. In C locale, we bind
-     * gettext() explicitly to the right codeset.
-     *
-     * On Windows, though, gettext() tends to get confused so we always bind
-     * it.
-     */
-#ifndef WIN32
-    /* setlocale is thread-unsafe */
-    AutoMutexLock localeLock(&gLocaleMutex);
-    localeLock.lock();
-    const char *ctype = gs_setlocale_r(LC_CTYPE, NULL);
-
-    if (pg_strcasecmp(ctype, "C") != 0 && pg_strcasecmp(ctype, "POSIX") != 0) {
-        return;
-    }
-
-    localeLock.unLock();
-#endif
-
-    for (i = 0; pg_enc2gettext_tbl[i].name != NULL; i++) {
-        if (pg_enc2gettext_tbl[i].encoding == encoding) {
-            if (bind_textdomain_codeset(domainname, pg_enc2gettext_tbl[i].name) == NULL) {
-                ereport(LOG, (errmsg("bind_textdomain_codeset failed")));
-            }
-            break;
-        }
-    }
-#endif
-}
-
 int GetDatabaseEncoding(void)
 {
     Assert(g_database_encoding);
     return g_database_encoding->encoding;
-}
-
-const char *GetDatabaseEncodingName(void)
-{
-    Assert(g_database_encoding);
-    return g_database_encoding->name;
-}
-
-Datum getdatabaseencoding(PG_FUNCTION_ARGS)
-{
-    Assert(g_database_encoding);
-    return 0;
-}
-
-
-Datum pg_client_encoding(PG_FUNCTION_ARGS)
-{
-    Assert(g_client_encoding);
-    return 0;
 }
 
 /*
@@ -342,14 +164,6 @@ int pg_get_client_encoding(void)
     return g_client_encoding->encoding;
 }
 
-/*
- * returns the current client encoding name
- */
-const char *pg_get_client_encoding_name(void)
-{
-    Assert(g_client_encoding);
-    return g_client_encoding->name;
-}
 #ifdef WIN32
 
 /*

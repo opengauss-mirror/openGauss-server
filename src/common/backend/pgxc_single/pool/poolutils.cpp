@@ -221,7 +221,7 @@ static void SendSignalToProcess(const char *dbName, Oid dbOid, const char *userN
 /*
  * CleanConnection()
  *
- * Utility to clean up Postgres-XC Pooler connections.
+ * Utility to clean up openGauss Pooler connections.
  * This utility is launched to all the Coordinators of the cluster
  *
  * Use of CLEAN CONNECTION is limited to a super user.
@@ -562,7 +562,8 @@ void HandlePoolerReload(void)
     old_context = MemoryContextSwitchTo(THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
     /* Need to be able to look into catalogs */
-    CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForPoolerReload", MEMORY_CONTEXT_COMMUNICATION);
+    CurrentResourceOwner = ResourceOwnerCreate(NULL, "ForPoolerReload",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
 
     /* Reinitialize session, while old pooler connection is active */
     InitMultinodeExecutor(true);

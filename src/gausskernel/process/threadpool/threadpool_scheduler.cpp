@@ -158,6 +158,7 @@ void ThreadPoolScheduler::AdjustWorkerPool(int idx)
         m_freeTestCount[idx] = 0;
         EnlargeWorkerIfNecessage(idx);
     } else {
+        group->SetGroupHanged(false);
         m_hangTestCount[idx] = 0;
         m_freeTestCount[idx]++;
         ReduceWorkerIfNecessary(idx);
@@ -184,15 +185,16 @@ void ThreadPoolScheduler::AdjustStreamPool(int idx)
 void ThreadPoolScheduler::EnlargeWorkerIfNecessage(int groupIdx)
 {
     ThreadPoolGroup *group = m_groups[groupIdx];
-    if (m_hangTestCount[groupIdx] == ENLARGE_THREAD_TIME) {
+    if (m_hangTestCount[groupIdx] >= ENLARGE_THREAD_TIME && m_hangTestCount[groupIdx] < MAX_HANG_TIME) {
         if (group->EnlargeWorkers(THREAD_SCHEDULER_STEP)) {
             m_hangTestCount[groupIdx] = 0;
         }
     } else if (m_hangTestCount[groupIdx] == MAX_HANG_TIME) {
-        elog(LOG, "[SCHEDULER] Detect the system has hang %d seconds, "
+        elog(WARNING, "[SCHEDULER] Detect the system has hang %d seconds, "
             "and the thread num in pool exceed maximum, "
-            "so we need to cancel all current transactions.", MAX_HANG_TIME);
-        (void)SignalCancelAllBackEnd();
+            "so we need to close all new sessions.", MAX_HANG_TIME);
+        /* set flag for don't accept new session */
+        group->SetGroupHanged(true);
     }
 }
 

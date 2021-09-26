@@ -24,7 +24,8 @@
 #include <sys/stat.h>
 
 #include "storage/copydir.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
+#include "storage/smgr/segment.h"
 #include "miscadmin.h"
 #include "pgstat.h"
 

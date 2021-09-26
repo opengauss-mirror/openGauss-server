@@ -39,6 +39,7 @@
 #include <pwd.h>
 #endif
 
+#include "utils/palloc.h"
 #include "libpq/libpq-fe.h"
 #include "fe-auth.h"
 #include "libpq/md5.h"
@@ -944,13 +945,11 @@ static int pg_password_sendauth(PGconn* conn, const char* password, AuthRequest 
             } else {
                 pwd_to_send = password;
             }
-
             break;
-        }   
+        }
         case AUTH_REQ_SM3: {
-
             if (conn->password_stored_method == SM3_PASSWORD) {
-                if (!gs_sm3_encrypt(
+                if (!GsSm3Encrypt(
                         password, conn->salt, strlen(conn->salt), (char*)buf, client_key_buf, conn->iteration_count))
                     return STATUS_ERROR;
 

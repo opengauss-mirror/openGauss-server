@@ -39,6 +39,8 @@ typedef struct _SPI_connection {
     uint32 spi_hash_key;           /* corresponding oid */
     uint32 visit_id;               /* visit count */
     int plan_id;
+
+    TimestampTz stmtTimestamp;     /* the 'original' statemant time, recovered on stack pop */
 } _SPI_connection;
 
 /*
@@ -93,6 +95,7 @@ typedef struct _SPI_plan {
     void* parserSetupArg;
     uint32 id;                   /* SPIplan id in a function */
     uint32 spi_key;              /* key in SPICacheTable */
+    List* stmt_list; /* the query list for use in client logic feature */
 } _SPI_plan;
 
 #endif /* SPI_PRIV_H */

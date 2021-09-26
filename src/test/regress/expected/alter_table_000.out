@@ -37,6 +37,7 @@ column_clause
     | TO { GROUP groupname | NODE ( nodename [, ... ] ) }
     | ADD NODE ( nodename [, ... ] )
     | DELETE NODE ( nodename [, ... ] )
+    | UPDATE SLICE LIKE table_name
     | DISABLE TRIGGER [ trigger_name | ALL | USER ]
     | ENABLE TRIGGER [ trigger_name | ALL | USER ]
     | ENABLE REPLICA TRIGGER trigger_name
@@ -45,6 +46,7 @@ column_clause
     | DISABLE ROW LEVEL SECURITY
     | FORCE ROW LEVEL SECURITY
     | NO FORCE ROW LEVEL SECURITY
+    | ENCRYPTION KEY ROTATION
 where column_clause can be:
 ADD [ COLUMN ] column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
     | MODIFY column_name data_type

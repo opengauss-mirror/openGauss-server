@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * pgtime.h
- *	  PostgreSQL internal timezone library
+ *	  openGauss internal timezone library
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  *
@@ -44,7 +44,7 @@ typedef struct pg_tzenum pg_tzenum;
 #define TZ_STRLEN_MAX 255
 
 /* these functions are in localtime.c */
-
+extern struct pg_tm* pg_localtime_s(const pg_time_t* timep, struct pg_tm* tmp, const pg_tz* tz);
 extern struct pg_tm* pg_localtime(const pg_time_t* timep, const pg_tz* tz);
 extern struct pg_tm* pg_gmtime(const pg_time_t* timep);
 extern int pg_next_dst_boundary(const pg_time_t* timep, long int* before_gmtoff, int* before_isdst, pg_time_t* boundary,

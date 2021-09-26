@@ -5,6 +5,7 @@ set enable_seqscan=off;
 set opfusion_debug_mode = 'log';
 set log_min_messages=debug;
 set logging_module = 'on(OPFUSION)';
+set sql_beta_feature = 'index_cost_with_leaf_pages_only';
 --create table
 drop table if exists test_bypass_sql_partition;
 create table test_bypass_sql_partition(col1 int, col2 int, col3 text)

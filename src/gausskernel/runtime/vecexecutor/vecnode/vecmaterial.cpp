@@ -49,7 +49,8 @@ static VectorBatch* exec_vec_material_all(VecMaterialState* node) /* result tupl
     /*
      * If first time through, and we need a tuplestore, initialize it.
      */
-    if (batch_store_stat == NULL && node->eflags != 0) {
+    bool isInit = (batch_store_stat == NULL && node->eflags != 0);
+    if (isInit) {
         PlanState* outer_node = NULL;
         TupleDesc tup_desc;
         outer_node = outerPlanState(node);

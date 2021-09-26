@@ -1,6 +1,6 @@
 /* -----------------------------------------------------------------------
  * ascii.c
- *	 The PostgreSQL routine for string to ascii conversion.
+ *	 The openGauss routine for string to ascii conversion.
  *
  *	 Portions Copyright (c) 1999-2012, PostgreSQL Global Development Group
  *

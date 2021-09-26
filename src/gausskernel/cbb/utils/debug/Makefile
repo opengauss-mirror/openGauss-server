@@ -30,6 +30,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = distribute_test.o
+OBJS = distribute_test.o segment_test.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

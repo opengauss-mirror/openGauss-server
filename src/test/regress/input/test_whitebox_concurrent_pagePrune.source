@@ -1,0 +1,170 @@
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7a
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7a';
+
+-- case 7a: concurrent page prune and insert; second insert is delayed for 0.5 seconds
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values(60, 'fbc');
+insert into t1 values(70, 'gbc');
+update t1 set c2 = 'hello' where c1 > 60;
+select * from t1 order by c1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c2 = 'abcabcabc' where c1 > 60;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (80,'asdf'); select * from t1 order by c1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1 order by c1;
+
+-- case 7b: concurrent page prune and multi-insert; multi-insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7b
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7b';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values(60, 'fbc');
+insert into t1 values(70, 'gbc');
+update t1 set c2 = 'hello' where c1 > 60;
+select * from t1 order by c1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c2 = 'abcabcabc' where c1 > 60;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); \copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_pagePrune.data' delimiter '|'; select * from t1 order by c1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1 order by c1;
+
+-- case 7c: concurrent page prune and delete; delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7c
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7c';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values(60, 'fbc');
+insert into t1 values(70, 'gbc');
+update t1 set c2 = 'hello' where c1 > 60;
+select * from t1 order by c1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c2 = 'abcabcabc' where c1 > 60;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=70;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1 order by c1;
+
+-- case 7d: concurrent page prune and update; update is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7d
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7d
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7d';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values(60, 'fbc');
+insert into t1 values(70, 'gbc');
+update t1 set c2 = 'hello' where c1 > 60;
+select * from t1 order by c1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c2 = 'abcabcabc' where c1 > 60;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c1=60 where c1=70;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1 order by c1;
+
+
+-- case 7e: concurrent page prune and lock; lock is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7e
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7e
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7e';
+
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100, c4 varchar default 'hi') with(storage_type=ustore);
+insert into t1 values (15,10,100,'abc');
+insert into t1 values (default);
+insert into t1 values (2,20,400,'xyz');
+insert into t1 values (10,40,350,'fbc');
+update t1 set c4 = 'hello' where c1 > 60;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c4 = 'abcabcabc' where c2 < 30;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000; select * from t1 order by c1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1 order by c1,c2,c3,c4;
+
+-- case 7f: concurrent page prune and fetch; fetch is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7f
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7f';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values(60, 'fbc');
+insert into t1 values(70, 'gbc');
+update t1 set c2 = 'hello' where c1 > 60;
+select * from t1 order by c1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c2 = 'abcabcabc' where c1 > 60;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); select * from t1 order by c1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1 order by c1;
+
+-- case 7g: concurrent page prune and page prune; page prune is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7g
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7g
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7g';
+
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values(60, 'fbc');
+insert into t1 values(70, 'gbc');
+update t1 set c2 = 'hello' where c1 > 60;
+select * from t1 order by c1;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c2 = 'hellohello' where c1 > 60;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c2 = 'abcabcabc' where c1 >= 60;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select * from t1 order by c1;
+
+-- case 7h: concurrent page prune and toast delete; toast delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7h
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7h';
+
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000));
+insert into t1 values (1,2,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+update t1 set c4='xyzxyzxyz' where c2 >= 6;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c4 = 'abcdabcdabcd' where c2 >= 6;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+
+-- case 7i: concurrent page prune and toast insert; toast insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7i
+\! echo "ExecModifyTable_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_pagePrune_7i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_pagePrune_7i';
+
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100, c4 varchar default 'hi') with(storage_type=ustore);
+insert into t1 values (15,10,100,'abc');
+insert into t1 values (default);
+insert into t1 values (2,20,400,'xyz');
+insert into t1 values (10,40,350,'fbc');
+update t1 set c4 = repeat('e',10000) where c2 = 10;
+update t1 set c3 = 200 where c2 < 30;
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update t1 set c4 = 'abcabcabc' where c2 < 30;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c4=repeat('d',10000) where c2=10; select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+select c1, c2 from t1;
+
+
+-- drop all tables
+drop table t1;
+
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7a
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7b
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7c
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7d
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7e
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7f
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7g
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7h
+\! rm -f @abs_srcdir@/concurrent_uheap_pagePrune_7i

@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -63,6 +63,10 @@
 #include <time.h>
 #include "pgtime.h"
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 /* functions for use in this file */
 static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, PQExpBuffer query_buf);
 static bool do_edit(const char* filename_arg, PQExpBuffer query_buf, int lineno, bool* edited);
@@ -86,7 +90,6 @@ static void checkWin32Codepage(void);
 static void clear_sensitive_memory(char* strings, bool freeflag);
 
 extern void check_env_value(const char* input_env_value);
-static char* GetEnvStr(const char* env);
 
 /* ----------
  * HandleSlashCmds:
@@ -2077,6 +2080,41 @@ static bool do_edit(const char* filename_arg, PQExpBuffer query_buf, int lineno,
     return !error;
 }
 
+int ProcessFileInternal(char **fileName, bool useRelativePath, char *relPath, int relPathSize, FILE **fd)
+{
+    errno_t rc = EOK;
+    if (strcmp(*fileName, "-") != 0) {
+        canonicalize_path(*fileName);
+
+        /*
+         * If we were asked to resolve the pathname relative to the location
+         * of the currently executing script, and there is one, and this is a
+         * relative pathname, then prepend all but the last pathname component
+         * of the current script to this pathname.
+         */
+        if (useRelativePath && (pset.inputfile != NULL) &&
+            !is_absolute_path(*fileName) && !has_drive_prefix(*fileName)) {
+            rc = strcpy_s(relPath, relPathSize, pset.inputfile);
+            check_strcpy_s(rc);
+            get_parent_directory(relPath);
+            join_path_components(relPath, relPath, *fileName);
+            canonicalize_path(relPath);
+            *fileName = relPath;
+        }
+
+        *fd = fopen(*fileName, PG_BINARY_R);
+
+        if (*fd == NULL) {
+            psql_error("%s: %s\n", *fileName, strerror(errno));
+            return EXIT_FAILURE;
+        }
+    } else {
+        *fd = stdin;
+        *fileName = "<stdin>"; /* for future error messages */
+    }
+
+    return EXIT_SUCCESS;
+}
 /*
  * process_file
  *
@@ -2098,33 +2136,8 @@ int process_file(char* filename, bool single_txn, bool use_relative_path)
     if (NULL == filename)
         return EXIT_FAILURE;
 
-    if (strcmp(filename, "-") != 0) {
-        canonicalize_path(filename);
-
-        /*
-         * If we were asked to resolve the pathname relative to the location
-         * of the currently executing script, and there is one, and this is a
-         * relative pathname, then prepend all but the last pathname component
-         * of the current script to this pathname.
-         */
-        if (use_relative_path && NULL != pset.inputfile && !is_absolute_path(filename) && !has_drive_prefix(filename)) {
-            strlcpy(relpath, pset.inputfile, sizeof(relpath));
-            get_parent_directory(relpath);
-            join_path_components(relpath, relpath, filename);
-            canonicalize_path(relpath);
-
-            filename = relpath;
-        }
-
-        fd = fopen(filename, PG_BINARY_R);
-
-        if (NULL == fd) {
-            psql_error("%s: %s\n", filename, strerror(errno));
-            return EXIT_FAILURE;
-        }
-    } else {
-        fd = stdin;
-        filename = "<stdin>"; /* for future error messages */
+    if (ProcessFileInternal(&filename, use_relative_path, relpath, sizeof(relpath), &fd) == EXIT_FAILURE) {
+        return EXIT_FAILURE;
     }
 
     oldfilename = pset.inputfile;
@@ -2197,6 +2210,33 @@ static const char* _align2string(enum printFormat in)
     return "unknown";
 }
 
+static bool setToptFormat(const char* value, size_t vallen, printQueryOpt* popt, bool quiet)
+{
+    if (value == NULL)
+        ;
+    else if (pg_strncasecmp("unaligned", value, vallen) == 0)
+        popt->topt.format = PRINT_UNALIGNED;
+    else if (pg_strncasecmp("aligned", value, vallen) == 0)
+        popt->topt.format = PRINT_ALIGNED;
+    else if (pg_strncasecmp("wrapped", value, vallen) == 0)
+        popt->topt.format = PRINT_WRAPPED;
+    else if (pg_strncasecmp("html", value, vallen) == 0)
+        popt->topt.format = PRINT_HTML;
+    else if (pg_strncasecmp("latex", value, vallen) == 0)
+        popt->topt.format = PRINT_LATEX;
+    else if (pg_strncasecmp("troff-ms", value, vallen) == 0)
+        popt->topt.format = PRINT_TROFF_MS;
+    else {
+        psql_error("\\pset: allowed formats are unaligned, aligned, wrapped, html, latex, troff-ms\n");
+        return false;
+    }
+
+    if (!quiet)
+        printf(_("Output format is %s.\n"), _align2string(popt->topt.format));
+
+    return true;
+}
+
 bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool quiet)
 {
     size_t vallen = 0;
@@ -2208,27 +2248,9 @@ bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool qui
 
     /* set format */
     if (strcmp(param, "format") == 0) {
-        if (NULL == value)
-            ;
-        else if (pg_strncasecmp("unaligned", value, vallen) == 0)
-            popt->topt.format = PRINT_UNALIGNED;
-        else if (pg_strncasecmp("aligned", value, vallen) == 0)
-            popt->topt.format = PRINT_ALIGNED;
-        else if (pg_strncasecmp("wrapped", value, vallen) == 0)
-            popt->topt.format = PRINT_WRAPPED;
-        else if (pg_strncasecmp("html", value, vallen) == 0)
-            popt->topt.format = PRINT_HTML;
-        else if (pg_strncasecmp("latex", value, vallen) == 0)
-            popt->topt.format = PRINT_LATEX;
-        else if (pg_strncasecmp("troff-ms", value, vallen) == 0)
-            popt->topt.format = PRINT_TROFF_MS;
-        else {
-            psql_error("\\pset: allowed formats are unaligned, aligned, wrapped, html, latex, troff-ms\n");
+        if(!setToptFormat(value, vallen, popt, quiet)) {
             return false;
         }
-
-        if (!quiet)
-            printf(_("Output format is %s.\n"), _align2string(popt->topt.format));
     }
 
     /* set table line style */
@@ -2763,31 +2785,6 @@ extern void client_server_version_check(PGconn* conn)
 
     PQclear(res);
     return;
-}
-
-/*
- * GetEnvStr
- *
- * Note: malloc space for get the return of getenv() function, then return the malloc space.
- *         so, this space need be free.
- */
-static char* GetEnvStr(const char* env)
-{
-    char* tmpvar = NULL;
-    const char* temp = getenv(env);
-    errno_t rc = 0;
-    if (temp != NULL) {
-        size_t len = strlen(temp);
-        if (0 == len)
-            return NULL;
-        tmpvar = (char*)malloc(len + 1);
-        if (tmpvar != NULL) {
-            rc = strcpy_s(tmpvar, len + 1, temp);
-            securec_check_c(rc, "\0", "\0");
-            return tmpvar;
-        }
-    }
-    return NULL;
 }
 
 #ifdef ENABLE_UT

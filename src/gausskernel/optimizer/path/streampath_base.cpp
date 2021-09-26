@@ -243,7 +243,7 @@ void JoinPathGenBase::init()
      * in order to release resources when catch the exception.
      */
     m_resourceOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "join_path_gen",
-        MEMORY_CONTEXT_OPTIMIZER);
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
 
     m_dop = 0;
     m_multipleInner = 1.0;
@@ -1126,6 +1126,8 @@ Path* HashJoinPathGen::createHashJoinPath()
     pathnode->jpath.skewoptimize = m_streamInfoPair->skew_optimize;
     pathnode->path_hashclauses = m_hashClauses;
 
+    pathnode->jpath.path.exec_type = SetExectypeForJoinPath(m_innerStreamPath, m_outerStreamPath);
+
 #ifdef STREAMPLAN
     pathnode->jpath.path.locator_type =
         locator_type_join(m_innerStreamPath->locator_type, m_outerStreamPath->locator_type);
@@ -1372,6 +1374,8 @@ Path* NestLoopPathGen::createNestloopPath()
     pathnode->joinrestrictinfo = m_joinClauses;
     pathnode->skewoptimize = m_streamInfoPair->skew_optimize;
 
+    pathnode->path.exec_type = SetExectypeForJoinPath(m_innerStreamPath, m_outerStreamPath);
+
 #ifdef STREAMPLAN
     pathnode->path.locator_type = locator_type_join(m_outerStreamPath->locator_type, m_innerStreamPath->locator_type);
     ProcessRangeListJoinType(&pathnode->path, m_outerStreamPath, m_innerStreamPath);
@@ -1559,6 +1563,8 @@ Path* MergeJoinPathGen::createMergejoinPath()
     pathnode->outersortkeys = m_outerSortKeys;
     pathnode->innersortkeys = m_innerSortKeys;
     /* pathnode->materialize_inner will be set by final_cost_mergejoin */
+
+    pathnode->jpath.path.exec_type = SetExectypeForJoinPath(m_innerStreamPath, m_outerStreamPath);
 
 #ifdef STREAMPLAN
     pathnode->jpath.path.locator_type =

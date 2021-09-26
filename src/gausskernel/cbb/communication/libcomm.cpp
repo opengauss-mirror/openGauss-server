@@ -55,7 +55,7 @@
 
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
@@ -492,6 +492,12 @@ int gs_poll_create()
 
     if (t_thrd.comm_cxt.libcomm_semaphore != NULL) {
         return 0;
+    }
+
+    if (g_htab_tid_poll == NULL) {
+        errno = ECOMMTCPCVINIT;
+        LIBCOMM_ELOG(WARNING, "(libcomm tid lookup hash)\tg_htab_tid_poll is NULL.");
+        return -1;
     }
 
 #ifdef LIBCOMM_FAULT_INJECTION_ENABLE
@@ -1918,6 +1924,14 @@ int gs_push_local_buffer(int streamid, const char* message, int m_len, int cmail
         return -1;
     }
 
+    /*
+     * This process is invoked when a DN sends a message to itself.
+     * When the libcomm sends data to the local node, the data is directly inserted into the memory
+     * and needs to be proactively notified to the listener.
+     */
+    if (ENABLE_THREAD_POOL_DN_LOGICCONN) {
+        NotifyListener(cmailbox, false, __FUNCTION__);
+    }
     return m_len;
 }
 
@@ -2811,7 +2825,8 @@ void commPoolCleanerMain()
      * Create a resource owner to keep track of our resources (currently only
      * buffer pins).
      */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Pool cleaner", MEMORY_CONTEXT_COMMUNICATION);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Pool cleaner",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
     SetProcessingMode(NormalProcessing);
 
     /* To ensure the minimum pool concept, do not clean the idle connections of each CN at the same time.

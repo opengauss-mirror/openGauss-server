@@ -26,7 +26,7 @@
 #include "catalog/index.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "utils/aiomem.h"
 #include "utils/memutils.h"
 
@@ -124,7 +124,7 @@ Datum spgbuild(PG_FUNCTION_ARGS)
                                               ALLOCSET_DEFAULT_MINSIZE, ALLOCSET_DEFAULT_INITSIZE,
                                               ALLOCSET_DEFAULT_MAXSIZE);
 
-    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, spgistBuildCallback, (void*)&buildstate);
+    reltuples = tableam_index_build_scan(heap, index, indexInfo, true, spgistBuildCallback, (void*)&buildstate, NULL);
 
     MemoryContextDelete(buildstate.tmpCtx);
 

@@ -27,7 +27,7 @@
 
 #include "storage/buf/block.h"
 #include "storage/buf/buf.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 #include "utils/relcache.h"
 
 typedef uint32 BCMBitStatus;

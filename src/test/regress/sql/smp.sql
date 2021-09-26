@@ -52,6 +52,12 @@ select * from t1 where t1.a in (select t2.a from t2, t3 where t2.b = t3.c) order
 explain (costs off) with s1 as (select t1.a as a, t3.b as b from t1,t3 where t1.b=t3.c) select * from t2, s1 where t2.b=s1.a order by 1,2,3,4;
 with s1 as (select t1.a as a, t3.b as b from t1,t3 where t1.b=t3.c) select * from t2, s1 where t2.b=s1.a order by 1,2,3,4;
 
+explain (costs off) select * from t1 order by a limit 10;
+select * from t1 order by a limit 10;
+
+explain (costs off) select * from t1 order by a limit 10 offset 20;
+select * from t1 order by a limit 10 offset 20;
+
 --clean
 set search_path=public;
 drop schema test_smp cascade;

@@ -13,7 +13,7 @@
  *
  * -------------------------------------------------------------------------
  */
-#include "plpgsql.h"
+#include "utils/plpgsql.h"
 
 #include "catalog/pg_type.h"
 #include "mb/pg_wchar.h"
@@ -55,31 +55,58 @@
  * gram.y's unreserved_keyword production agrees with the second list.
  */
 
-static const ScanKeyword reserved_keywords[] = {PG_KEYWORD("all", K_ALL, RESERVED_KEYWORD) PG_KEYWORD(
-    "begin", K_BEGIN, RESERVED_KEYWORD) PG_KEYWORD("by", K_BY, RESERVED_KEYWORD) PG_KEYWORD("case", K_CASE,
-    RESERVED_KEYWORD) PG_KEYWORD("close", K_CLOSE, RESERVED_KEYWORD) PG_KEYWORD("collate", K_COLLATE,
-    RESERVED_KEYWORD) PG_KEYWORD("declare", K_DECLARE,
-    RESERVED_KEYWORD) PG_KEYWORD("default", K_DEFAULT, RESERVED_KEYWORD) PG_KEYWORD("delete", K_DELETE,
-    RESERVED_KEYWORD) PG_KEYWORD("diagnostics", K_DIAGNOSTICS, RESERVED_KEYWORD) PG_KEYWORD("else", K_ELSE,
-    RESERVED_KEYWORD) PG_KEYWORD("elseif", K_ELSIF, RESERVED_KEYWORD) PG_KEYWORD("elsif", K_ELSIF,
-    RESERVED_KEYWORD) PG_KEYWORD("end", K_END, RESERVED_KEYWORD) PG_KEYWORD("exception", K_EXCEPTION,
-    RESERVED_KEYWORD) PG_KEYWORD("execute", K_EXECUTE, RESERVED_KEYWORD) PG_KEYWORD("exit", K_EXIT,
-    RESERVED_KEYWORD) PG_KEYWORD("fetch", K_FETCH, RESERVED_KEYWORD) PG_KEYWORD("for", K_FOR,
-    RESERVED_KEYWORD) PG_KEYWORD("forall", K_FORALL, RESERVED_KEYWORD) PG_KEYWORD("foreach", K_FOREACH,
-    RESERVED_KEYWORD) PG_KEYWORD("from", K_FROM, RESERVED_KEYWORD) PG_KEYWORD("get", K_GET, RESERVED_KEYWORD)
-        PG_KEYWORD("goto", K_GOTO, RESERVED_KEYWORD) PG_KEYWORD("if", K_IF, RESERVED_KEYWORD) PG_KEYWORD("in", K_IN,
-            RESERVED_KEYWORD) PG_KEYWORD("insert", K_INSERT, RESERVED_KEYWORD) PG_KEYWORD("into", K_INTO,
-            RESERVED_KEYWORD) PG_KEYWORD("loop", K_LOOP, RESERVED_KEYWORD) PG_KEYWORD("move", K_MOVE, RESERVED_KEYWORD)
-            PG_KEYWORD("not", K_NOT, RESERVED_KEYWORD) PG_KEYWORD("null", K_NULL, RESERVED_KEYWORD)
-                PG_KEYWORD("of", K_OF, RESERVED_KEYWORD) PG_KEYWORD("open", K_OPEN, RESERVED_KEYWORD) PG_KEYWORD("or",
-                    K_OR, RESERVED_KEYWORD) PG_KEYWORD("out", K_OUT, RESERVED_KEYWORD) PG_KEYWORD("perform", K_PERFORM,
-                    RESERVED_KEYWORD) PG_KEYWORD("raise", K_RAISE, RESERVED_KEYWORD) PG_KEYWORD("ref", K_REF,
-                    RESERVED_KEYWORD) PG_KEYWORD("return", K_RETURN, RESERVED_KEYWORD) PG_KEYWORD("select", K_SELECT,
-                    RESERVED_KEYWORD) PG_KEYWORD("strict", K_STRICT, RESERVED_KEYWORD)
-                    PG_KEYWORD("then", K_THEN, RESERVED_KEYWORD) PG_KEYWORD("to", K_TO, RESERVED_KEYWORD)
-                        PG_KEYWORD("type", K_TYPE, RESERVED_KEYWORD) PG_KEYWORD("update", K_UPDATE, RESERVED_KEYWORD)
-                            PG_KEYWORD("using", K_USING, RESERVED_KEYWORD) PG_KEYWORD("when", K_WHEN, RESERVED_KEYWORD)
-                                PG_KEYWORD("while", K_WHILE, RESERVED_KEYWORD)};
+static const ScanKeyword reserved_keywords[] = {
+    PG_KEYWORD("all", K_ALL, RESERVED_KEYWORD) 
+    PG_KEYWORD("begin", K_BEGIN, RESERVED_KEYWORD) 
+    PG_KEYWORD("by", K_BY, RESERVED_KEYWORD) 
+    PG_KEYWORD("case", K_CASE, RESERVED_KEYWORD) 
+    PG_KEYWORD("close", K_CLOSE, RESERVED_KEYWORD) 
+    PG_KEYWORD("collate", K_COLLATE, RESERVED_KEYWORD) 
+    PG_KEYWORD("declare", K_DECLARE, RESERVED_KEYWORD) 
+    PG_KEYWORD("default", K_DEFAULT, RESERVED_KEYWORD) 
+    PG_KEYWORD("delete", K_DELETE, RESERVED_KEYWORD) 
+    PG_KEYWORD("diagnostics", K_DIAGNOSTICS, RESERVED_KEYWORD) 
+    PG_KEYWORD("else", K_ELSE, RESERVED_KEYWORD) 
+    PG_KEYWORD("elseif", K_ELSIF, RESERVED_KEYWORD) 
+    PG_KEYWORD("elsif", K_ELSIF, RESERVED_KEYWORD) 
+    PG_KEYWORD("end", K_END, RESERVED_KEYWORD) 
+    PG_KEYWORD("exception", K_EXCEPTION, RESERVED_KEYWORD) 
+    PG_KEYWORD("execute", K_EXECUTE, RESERVED_KEYWORD) 
+    PG_KEYWORD("exit", K_EXIT, RESERVED_KEYWORD) 
+    PG_KEYWORD("fetch", K_FETCH, RESERVED_KEYWORD) 
+    PG_KEYWORD("for", K_FOR, RESERVED_KEYWORD) 
+    PG_KEYWORD("forall", K_FORALL, RESERVED_KEYWORD) 
+    PG_KEYWORD("foreach", K_FOREACH, RESERVED_KEYWORD) 
+    PG_KEYWORD("from", K_FROM, RESERVED_KEYWORD) 
+    PG_KEYWORD("function", K_FUNCTION, RESERVED_KEYWORD)
+    PG_KEYWORD("get", K_GET, RESERVED_KEYWORD)
+    PG_KEYWORD("goto", K_GOTO, RESERVED_KEYWORD) 
+    PG_KEYWORD("if", K_IF, RESERVED_KEYWORD) 
+    PG_KEYWORD("in", K_IN, RESERVED_KEYWORD) 
+    PG_KEYWORD("insert", K_INSERT, RESERVED_KEYWORD) 
+    PG_KEYWORD("into", K_INTO, RESERVED_KEYWORD) 
+    PG_KEYWORD("loop", K_LOOP, RESERVED_KEYWORD) 
+    PG_KEYWORD("move", K_MOVE, RESERVED_KEYWORD)
+    PG_KEYWORD("not", K_NOT, RESERVED_KEYWORD) 
+    PG_KEYWORD("null", K_NULL, RESERVED_KEYWORD)
+    PG_KEYWORD("of", K_OF, RESERVED_KEYWORD) 
+    PG_KEYWORD("open", K_OPEN, RESERVED_KEYWORD) 
+    PG_KEYWORD("or", K_OR, RESERVED_KEYWORD) 
+    PG_KEYWORD("out", K_OUT, RESERVED_KEYWORD) 
+    PG_KEYWORD("procedure", K_PROCEDURE, RESERVED_KEYWORD)
+    PG_KEYWORD("raise", K_RAISE, RESERVED_KEYWORD) 
+    PG_KEYWORD("ref", K_REF, RESERVED_KEYWORD) 
+    PG_KEYWORD("return", K_RETURN, RESERVED_KEYWORD) 
+    PG_KEYWORD("select", K_SELECT, RESERVED_KEYWORD) 
+    PG_KEYWORD("strict", K_STRICT, RESERVED_KEYWORD)
+    PG_KEYWORD("then", K_THEN, RESERVED_KEYWORD) 
+    PG_KEYWORD("to", K_TO, RESERVED_KEYWORD)
+    PG_KEYWORD("type", K_TYPE, RESERVED_KEYWORD) 
+    PG_KEYWORD("update", K_UPDATE, RESERVED_KEYWORD)
+    PG_KEYWORD("using", K_USING, RESERVED_KEYWORD) 
+    PG_KEYWORD("when", K_WHEN, RESERVED_KEYWORD)
+    PG_KEYWORD("while", K_WHILE, RESERVED_KEYWORD) 
+};
 
 static const int num_reserved_keywords = lengthof(reserved_keywords);
 
@@ -88,6 +115,7 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("alias", K_ALIAS, UNRESERVED_KEYWORD) 
     PG_KEYWORD("alter", K_ALTER, UNRESERVED_KEYWORD) 
     PG_KEYWORD("array", K_ARRAY, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("as", K_AS, UNRESERVED_KEYWORD) 
     PG_KEYWORD("backward", K_BACKWARD, UNRESERVED_KEYWORD) 
     PG_KEYWORD("commit", K_COMMIT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("constant", K_CONSTANT, UNRESERVED_KEYWORD) 
@@ -101,9 +129,11 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("error", K_ERROR, UNRESERVED_KEYWORD) 
     PG_KEYWORD("first", K_FIRST, UNRESERVED_KEYWORD) 
     PG_KEYWORD("forward", K_FORWARD, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("function", K_FUNCTION, UNRESERVED_KEYWORD)
     PG_KEYWORD("hint", K_HINT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("immediate", K_IMMEDIATE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("info", K_INFO, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("instantiation", K_INSTANTIATION, UNRESERVED_KEYWORD)
     PG_KEYWORD("is", K_IS, UNRESERVED_KEYWORD) 
     PG_KEYWORD("last", K_LAST, UNRESERVED_KEYWORD)
     PG_KEYWORD("log", K_LOG, UNRESERVED_KEYWORD) 
@@ -114,13 +144,14 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("no", K_NO, UNRESERVED_KEYWORD) 
     PG_KEYWORD("notice", K_NOTICE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("option", K_OPTION, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("package", K_PACKAGE, UNRESERVED_KEYWORD)
+    PG_KEYWORD("perform", K_PERFORM, UNRESERVED_KEYWORD)
     PG_KEYWORD("pg_exception_context", K_PG_EXCEPTION_CONTEXT, UNRESERVED_KEYWORD)
     PG_KEYWORD("pg_exception_detail", K_PG_EXCEPTION_DETAIL, UNRESERVED_KEYWORD) 
     PG_KEYWORD("pg_exception_hint", K_PG_EXCEPTION_HINT, UNRESERVED_KEYWORD) 
-#ifndef ENABLE_MULTIPLE_NODES
-	PG_KEYWORD("pragma", K_PRAGMA, UNRESERVED_KEYWORD)
-#endif	
+    PG_KEYWORD("pragma", K_PRAGMA, UNRESERVED_KEYWORD)
     PG_KEYWORD("prior", K_PRIOR, UNRESERVED_KEYWORD)
+    PG_KEYWORD("procedure", K_PROCEDURE, UNRESERVED_KEYWORD)
     PG_KEYWORD("query", K_QUERY, UNRESERVED_KEYWORD) 
     PG_KEYWORD("record", K_RECORD, UNRESERVED_KEYWORD)
     PG_KEYWORD("relative", K_RELATIVE, UNRESERVED_KEYWORD) 
@@ -511,6 +542,24 @@ int plpgsql_location_to_lineno(int location)
     return u_sess->plsql_cxt.cur_line_num;
 }
 
+char* plpgsql_get_curline_query()
+{
+    int len = 0;
+    if (u_sess->plsql_cxt.cur_line_end == NULL) {
+        /* no '\n' in whole procedure source text */
+        len = strlen(u_sess->plsql_cxt.cur_line_start);
+    } else {
+        len = u_sess->plsql_cxt.cur_line_end - u_sess->plsql_cxt.cur_line_start;
+    }
+    char* curQuery = NULL;
+    if (len > 0) {
+        curQuery = (char*)palloc0(sizeof(char) * (len + 1));
+        int rc = memcpy_s(curQuery, len + 1, u_sess->plsql_cxt.cur_line_start, len);
+        securec_check(rc, "\0", "\0");
+    }
+    return curQuery;
+}
+
 /* initialize or reset the state for plpgsql_location_to_lineno */
 static void location_lineno_init(void)
 {
@@ -625,6 +674,9 @@ static int plpgsql_parse_cursor_attribute(int* loc)
     int token = -1;
     PLpgSQL_nsitem* ns = NULL;
 
+    if (u_sess->parser_cxt.in_package_function_compile) {
+        return token;
+    }
     /* coverity warning clear */
     tok1 = internal_yylex(&aux1);
     if (tok1 != IDENT && tok1 != PARAM) {
@@ -765,5 +817,6 @@ bool plpgsql_is_token_match(int token)
         plpgsql_push_back_token(tok);
         return true;
     }
+    plpgsql_push_back_token(tok);
     return false;
 }

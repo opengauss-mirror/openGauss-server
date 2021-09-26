@@ -64,6 +64,9 @@ INSERT INTO TEST_TINYINT VALUES (255,255);
 INSERT INTO TEST_TINYINT VALUES (-1,-1);
 ERROR:  tinyint out of range
 CONTEXT:  referenced column: id
+INSERT INTO TEST_TINYINT VALUES (1, -0.4);
+ERROR:  tinyint out of range
+CONTEXT:  referenced column: it
 INSERT INTO TEST_TINYINT VALUES (256,256);
 ERROR:  tinyint out of range
 CONTEXT:  referenced column: id
@@ -673,6 +676,85 @@ SELECT * FROM test_type order by 1;
               15.23448
                 1e+308
 (3 rows)
+
+DROP TABLE test_type;
+/* f.BINARY_FLOAT type */
+CREATE TABLE test_type(
+	my_float BINARY_FLOAT
+	);
+INSERT INTO test_type VALUES ('    0.0');
+INSERT INTO test_type VALUES ('1004.30   ');
+INSERT INTO test_type VALUES ('     -34.84    ');
+INSERT INTO test_type VALUES ('1.2345678901234e+20');
+INSERT INTO test_type VALUES ('1.2345678901234e-20');
+-- test for over and under flow
+INSERT INTO test_type VALUES ('10e70');
+ERROR:  value out of range: overflow
+LINE 1: INSERT INTO test_type VALUES ('10e70');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('-10e70');
+ERROR:  value out of range: overflow
+LINE 1: INSERT INTO test_type VALUES ('-10e70');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('10e-70');
+ERROR:  value out of range: underflow
+LINE 1: INSERT INTO test_type VALUES ('10e-70');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('-10e-70');
+ERROR:  value out of range: underflow
+LINE 1: INSERT INTO test_type VALUES ('-10e-70');
+                                      ^
+CONTEXT:  referenced column: my_float
+-- bad input
+INSERT INTO test_type VALUES ('');
+INSERT INTO test_type VALUES ('       ');
+ERROR:  invalid input syntax for type real: "       "
+LINE 1: INSERT INTO test_type VALUES ('       ');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('xyz');
+ERROR:  invalid input syntax for type real: "xyz"
+LINE 1: INSERT INTO test_type VALUES ('xyz');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('5.0.0');
+ERROR:  invalid input syntax for type real: "5.0.0"
+LINE 1: INSERT INTO test_type VALUES ('5.0.0');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('5 . 0');
+ERROR:  invalid input syntax for type real: "5 . 0"
+LINE 1: INSERT INTO test_type VALUES ('5 . 0');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('5.   0');
+ERROR:  invalid input syntax for type real: "5.   0"
+LINE 1: INSERT INTO test_type VALUES ('5.   0');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('     - 3.0');
+ERROR:  invalid input syntax for type real: "     - 3.0"
+LINE 1: INSERT INTO test_type VALUES ('     - 3.0');
+                                      ^
+CONTEXT:  referenced column: my_float
+INSERT INTO test_type VALUES ('123            5');
+ERROR:  invalid input syntax for type real: "123            5"
+LINE 1: INSERT INTO test_type VALUES ('123            5');
+                                      ^
+CONTEXT:  referenced column: my_float
+SELECT * FROM test_type order by 1;
+  my_float   
+-------------
+      -34.84
+           0
+ 1.23457e-20
+      1004.3
+ 1.23457e+20
+            
+(6 rows)
 
 DROP TABLE test_type;
 /* g.Type BINARY_INTEGER */

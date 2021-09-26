@@ -1203,26 +1203,19 @@ err:
 GS_UINT32 CRYPT_hmac(GS_UINT32 ulAlgType, const GS_UCHAR* pucKey, GS_UINT32 upucKeyLen, const GS_UCHAR* pucData,
     GS_UINT32 ulDataLen, GS_UCHAR* pucDigest, GS_UINT32* pulDigestLen)
 {
-    HMAC_CTX* ctx = NULL;
-    if ((ctx = HMAC_CTX_new()) == NULL)
-        return 1;
     const EVP_MD* evp_md = get_evp_md_by_id(ulAlgType);
     if (evp_md == NULL) {
-        HMAC_CTX_free(ctx);
         return 1;
     }
 #ifndef WIN32
     if (!HMAC(evp_md, pucKey, (int)upucKeyLen, pucData, ulDataLen, pucDigest, pulDigestLen)) {
-        HMAC_CTX_free(ctx);
         return 1;
     }
 #else
     if (!HMAC(evp_md, pucKey, (int)upucKeyLen, pucData, ulDataLen, pucDigest, (unsigned int*)pulDigestLen)) {
-        HMAC_CTX_free(ctx);
         return 1;
     }
 #endif
-    HMAC_CTX_free(ctx);
     return 0;
 }
 

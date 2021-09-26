@@ -23,7 +23,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/nodeFunctionscan.h"
+#include "executor/node/nodeFunctionscan.h"
 #include "funcapi.h"
 #include "nodes/nodeFuncs.h"
 
@@ -151,6 +151,17 @@ FunctionScanState* ExecInitFunctionScan(FunctionScan* node, EState* estate, int 
         Assert(tupdesc);
         /* Must copy it out of typcache for safety */
         tupdesc = CreateTupleDescCopy(tupdesc);
+        if (tupdesc->tdTableAmType != TAM_HEAP) {
+            /* For function scan, we need tupdesc type to be heap,
+             * and invalidate attcacheoff, since other storage type
+             * uses different offset values than heap.
+             */
+            int i;
+            for (i = 0; i < tupdesc->natts; i++) {
+                tupdesc->attrs[i]->attcacheoff = -1;
+            }
+            tupdesc->tdTableAmType = TAM_HEAP;
+        }
     } else if (functypclass == TYPEFUNC_SCALAR) {
         /* Base data type, i.e. scalar */
         char* attname = strVal(linitial(node->funccolnames));

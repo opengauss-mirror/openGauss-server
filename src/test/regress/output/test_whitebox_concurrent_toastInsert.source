@@ -1,0 +1,382 @@
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9a
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9a';
+-- case 9a: concurrent toast insert/update and insert; second insert is delayed for 0.5 seconds
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+create table t1 (c1 int, c2 int, c3 text) with (storage_type=ustore);
+insert into t1 values (1,2,'hi');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  2
+(1 row)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (1,5,'d'); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  2
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\] \(2 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  2
+  1 |  5
+ 10 | 20
+(3 rows)
+
+-- case 9b: concurrent toast insert/update and multi-insert; multi-insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9b
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9b';
+drop table if exists t1;
+create table t1 (c1 int, c2 int, c3 text) with (storage_type=ustore);
+insert into t1 values (1,2,'hi');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  2
+(1 row)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); \copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_toastInsert.data' delimiter '|'; select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  2
+--?.* \[terminal 2\]   1 |  2
+--?.* \[terminal 2\]   3 |  4
+--?.* \[terminal 2\]   2 |  3
+--?.* \[terminal 2\]   5 |  6
+--?.* \[terminal 2\]   8 |  8
+--?.* \[terminal 2\] \(6 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  2
+  1 |  2
+  3 |  4
+  2 |  3
+  5 |  6
+  8 |  8
+ 10 | 20
+(7 rows)
+
+-- case 9c: concurrent toast insert/update and delete; delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9c
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9c';
+drop table if exists t1;
+create table t1 (c1 int, c2 int, c3 text) with (storage_type=ustore);
+insert into t1 values (1,2,'hi');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  2
+(1 row)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c2=2;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] DELETE 1
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+ 10 | 20
+(1 row)
+
+-- case 9d: concurrent toast insert/update and update; update is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9d
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9d
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9d';
+drop table if exists t1;
+create table t1 (c1 int, c2 int, c3 text) with (storage_type=ustore);
+insert into t1 values (1,2,'hi');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  2
+(1 row)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c1=2 where c1=3;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] UPDATE 0
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  2
+ 10 | 20
+(2 rows)
+
+-- case 9e: concurrent toast insert/update and lock; lock is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9e
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=2" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9e
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=off';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9e';
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('y',10000),repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c1 = 100; select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1  | c2 
+--?.* \[terminal 2\] -----\+----
+--?.* \[terminal 2\]    1 |  5
+--?.* \[terminal 2\]    1 |  6
+--?.* \[terminal 2\]    3 |  9
+--?.* \[terminal 2\]  100 |  1
+--?.* \[terminal 2\] \(4 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1  | c2 
+-----+----
+   1 |  5
+   1 |  6
+   3 |  9
+ 100 |  1
+  10 | 20
+(5 rows)
+
+-- case 9f: concurrent toast insert/update and fetch; fetch is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9f
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=2" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=off';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9f';
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('a',10000),repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\] \(4 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+ 10 | 20
+(5 rows)
+
+-- case 9g: concurrent toast insert/update and page prune; page prune is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9g
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=2" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9g
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9g';
+drop table if exists t1;
+create table t1(c1 integer, c2 varchar) with (storage_type=USTORE);
+insert into t1 values(60, 'fbc');
+insert into t1 values(70, 'gbc');
+select c1, c2 from t1;
+ c1 | c2  
+----+-----
+ 60 | fbc
+ 70 | gbc
+(2 rows)
+
+update t1 set c2 = 'hello' where c1 > 60;
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c2 = 'abcabcabc' where c1 >= 60;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] UPDATE 2
+--?.* \[terminal 1\] INSERT 0 1
+select c1 from t1;
+ c1 
+----
+ 60
+ 70
+ 10
+(3 rows)
+
+-- case 9h: concurrent toast insert/update and toast delete; toast delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9h
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=2" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=off';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9h';
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('a',10000),repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] DELETE 3
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  3 |  9
+ 10 | 20
+(2 rows)
+
+-- case 9i: concurrent toast insert/update and toast insert; toast insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9i
+\! echo "UHEAP_INSERT,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=2" >> @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=off';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000)) with (storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9i';
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES (10,20,repeat('a',10000),repeat('z',10000));" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (3,15,repeat('e',10000),repeat('d',10000)); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint UHEAP_INSERT timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\]   3 | 15
+--?.* \[terminal 2\] \(5 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+  3 | 15
+ 10 | 20
+(6 rows)
+
+-- drop all tables
+drop table t1;
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9a
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9b
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9c
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9d
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9e
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9f
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9g
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9h
+\! rm -f @abs_srcdir@/concurrent_uheap_toastInsertOrUpdate_9i

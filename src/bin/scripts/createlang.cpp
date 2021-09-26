@@ -209,7 +209,7 @@ int main(int argc, char* argv[])
 
 static void help(const char* progname)
 {
-    printf(_("%s installs a procedural language into a PostgreSQL database.\n\n"), progname);
+    printf(_("%s installs a procedural language into a openGauss database.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... LANGNAME [DBNAME]\n"), progname);
     printf(_("\nOptions:\n"));

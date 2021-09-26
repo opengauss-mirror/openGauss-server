@@ -4,7 +4,7 @@
  *	  Checksum implementation for data pages.
  *
  * This file exists for the benefit of external programs that may wish to
- * check Postgres page checksums.  They can #include this to get the code
+ * check openGauss page checksums.  They can #include this to get the code
  * referenced by storage/checksum.h.  (Note: you may need to redefine
  * Assert() as empty to compile this successfully externally.)
  *
@@ -28,7 +28,7 @@
  *
  * FNV-1a algorithm is described at http://www.isthe.com/chongo/tech/comp/fnv/
  *
- * PostgreSQL doesn't use FNV-1a hash directly because it has bad mixing of
+ * openGauss doesn't use FNV-1a hash directly because it has bad mixing of
  * high bits - high order bits in input data only affect high order bits in
  * output data. To resolve this we xor in the value prior to multiplication
  * shifted right by 17 bits. The number 17 was chosen because it doesn't

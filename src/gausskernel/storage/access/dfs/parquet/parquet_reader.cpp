@@ -21,6 +21,10 @@
  *
  * -------------------------------------------------------------------------
  */
+
+#include "parquet/platform.h"
+#include "parquet/types.h"
+
 #include "parquet_reader.h"
 #include "parquet_file_reader.h"
 

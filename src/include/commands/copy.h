@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * copy.h
- *	  Definitions for using the POSTGRES copy command.
+ *	  Definitions for using the openGauss copy command.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -17,9 +17,11 @@
 #include "nodes/execnodes.h"
 #include "nodes/parsenodes.h"
 #include "tcop/dest.h"
-#include "executor/execdesc.h"
+#include "executor/exec/execdesc.h"
 #include "commands/gds_stream.h"
+#include "commands/copypartition.h"
 #include "bulkload/utils.h"
+#include "gs_ledger/ledger_utils.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -125,6 +127,12 @@ struct user_time_format {
     void* fmt;
 };
 
+/* The typmod of assigned typename under transform condition. */
+struct AssignTypmod {
+    int32 typemod;
+    bool assign;
+};
+
 /* OBS Manipulation functions */
 extern void initOBSModeState(CopyState cstate, const char* filename, List* totalTask);
 extern void endOBSModeBulkLoad(CopyState cstate);
@@ -189,6 +197,10 @@ typedef struct CopyStateData {
     bool header_line;     /* CSV header line? */
     bool force_quote_all; /* FORCE QUOTE *? */
     bool without_escaping;
+    List *trans_expr_list;  /* list of information for each transformed column */
+    TupleDesc trans_tupledesc;  /* tuple desc after exec transform expression */
+    const char *source_query_string;      /* source SQL string for copy */
+    const char *transform_query_string;   /* transform expression SQL string */
 
     /* these are just for error messages, see CopyFromErrorCallback */
     const char* cur_relname; /* table name for error messages */
@@ -229,6 +241,8 @@ typedef struct CopyStateData {
     Relation err_table;      /* opened copy_error_log table */
     CopyErrorLogger* logger; /* logger used for copy from error logging*/
     FmgrInfo* err_out_functions; /* lookup info for output functions of copy_error_log*/
+    AssignTypmod *as_typemods;   /* array of typmod for each transformed column */
+    ExprState** transexprs;     /* array of expr for each transformed column */
 
     /*
      * These variables are used to reduce overhead in textual COPY FROM.
@@ -319,6 +333,8 @@ typedef struct CopyStateData {
 
     /* adaptive memory assigned for the stmt */
     AdaptMem memUsage;
+
+    LedgerHashState hashstate;
 } CopyStateData;
 
 #define IS_CSV(cstate) ((cstate)->fileformat == FORMAT_CSV)
@@ -327,11 +343,19 @@ typedef struct CopyStateData {
 #define IS_TEXT(cstate) ((cstate)->fileformat == FORMAT_TEXT)
 #define IS_REMOTEWRITE(cstate) ((cstate)->fileformat == FORMAT_WRITABLE)
 
+CopyState BeginCopyTo(
+    Relation rel, Node* query, const char* queryString, const char* filename, List* attnamelist, List* options);
+void EndCopyTo(CopyState cstate);
+uint64 DoCopyTo(CopyState cstate);
 extern uint64 DoCopy(CopyStmt* stmt, const char* queryString);
+template<bool skipEol>
+void CopySendEndOfRow(CopyState cstate);
+void CopyOneRowTo(CopyState cstate, Oid tupleOid, Datum* values, const bool* nulls);
 
 extern void ProcessCopyOptions(CopyState cstate, bool is_from, List* options);
 extern bool IsTypeAcceptEmptyStr(Oid typeOid);
-extern CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, List* options, void* mem_info);
+extern CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, 
+    List* options, void* mem_info, const char* queryString);
 extern void EndCopyFrom(CopyState cstate);
 extern bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* nulls, Oid* tupleOid);
 extern bool NextCopyFromRawFields(CopyState cstate, char*** fields, int* nfields);
@@ -381,4 +405,18 @@ extern char* limit_printout_length(const char* str);
 extern bool StrToInt32(const char* s, int *val);
 extern char* TrimStr(const char* str);
 
+extern void UHeapAddToBulkInsertSelect(CopyFromBulk bulk, Tuple tup, bool needCopy);
+
+extern void HeapAddToBulkInsertSelect(CopyFromBulk bulk, Tuple tup, bool needCopy);
+
+extern void UHeapAddToBulk(CopyFromBulk bulk, Tuple tup, bool needCopy);
+
+extern void HeapAddToBulk(CopyFromBulk bulk, Tuple tup, bool needCopy);
 #endif /* COPY_H */
+
+extern void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hi_options,
+    ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
+    HeapTuple* bufferedTuples, Partition partition, int2 bucketId);
+extern void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hiOptions,
+    ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
+    UHeapTuple* bufferedTuples, Partition partition, int2 bucketId);

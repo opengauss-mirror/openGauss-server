@@ -4,7 +4,7 @@
  *
  * initdb creates (initializes) a PostgreSQL database cluster (site,
  * instance, installation, whatever).  A database cluster is a
- * collection of PostgreSQL databases all managed by the same server.
+ * collection of openGauss databases all managed by the same server.
  *
  * To create the database cluster, we create the directory that contains
  * all its data, create the files that hold the global tables, create
@@ -19,9 +19,9 @@
  *
  * For largely-historical reasons, the template1 database is the one built
  * by the basic bootstrap process.	After it is complete, template0 and
- * the default database, postgres, are made just by copying template1.
+ * the default database, openGauss, are made just by copying template1.
  *
- * To create template1, we run the postgres (backend) program in bootstrap
+ * To create template1, we run the openGauss (backend) program in bootstrap
  * mode and feed it data from the postgres.bki library file.  After this
  * initial bootstrap phase, some additional stuff is created by normal
  * SQL commands fed to a standalone backend.  Some of those commands are
@@ -33,7 +33,7 @@
  *	 The program has some memory leakage - it isn't worth cleaning it up.
  *
  * This is a C implementation of the previous shell script for setting up a
- * PostgreSQL cluster location, and should be highly compatible with it.
+ * openGauss cluster location, and should be highly compatible with it.
  * author of C translation: Andrew Dunstan	   mailto:andrew@dunslane.net
  *
  * This code is released under the terms of the PostgreSQL License.
@@ -51,12 +51,15 @@
 
 #include <cipher.h>
 
+#include "access/ustore/undo/knl_uundoapi.h"
+#include "access/ustore/undo/knl_uundotxn.h"
 #include "libpq/pqsignal.h"
 #include "mb/pg_wchar.h"
 #include "getaddrinfo.h"
 #include "getopt_long.h"
 #include "miscadmin.h"
 #include "bin/elog.h"
+
 #ifdef ENABLE_MULTIPLE_NODES
 #include "distribute_core.h"
 #endif
@@ -172,12 +175,22 @@ static char* conf_file;
 #ifdef ENABLE_MOT
 static char* mot_conf_file;
 #endif
+static char* gazelle_conf_file;
 static char* conversion_file;
 static char* dictionary_file;
 static char* info_schema_file;
 static char* features_file;
 static char* system_views_file;
 static char* performance_views_file;
+#ifdef ENABLE_PRIVATEGAUSS
+static char* private_system_views_file;
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+static char* snapshot_names[] = { "schema", "create", "prepare", "sample", "publish", "purge" };
+#define SNAPSHOT_LEN (sizeof(snapshot_names) / sizeof(snapshot_names[0]))
+static char* snapshot_files[SNAPSHOT_LEN];
+static bool enableDCF = false;
+#endif
 static bool made_new_pgdata = false;
 static bool found_existing_pgdata = false;
 static bool made_new_xlogdir = false;
@@ -265,6 +278,9 @@ static void get_set_pwd(void);
 static void setup_depend(void);
 static void setup_sysviews(void);
 static void setup_perfviews(void);
+#ifdef ENABLE_PRIVATEGAUSS
+static void setup_privsysviews(void);
+#endif
 static void setup_update(void);
 #ifdef PGXC
 static void setup_nodeself(void);
@@ -312,8 +328,10 @@ static void mkdirForPgLocationDir();
 static int CreateRestrictedProcess(char* cmd, PROCESS_INFORMATION* processInfo);
 #endif
 
+static void InitUndoSubsystemMeta();
+
 /*
- * macros for running pipes to postgres
+ * macros for running pipes to openGauss
  */
 #define PG_CMD_DECL      \
     char cmd[MAXPGPATH]; \
@@ -1197,7 +1215,7 @@ static void setup_config(void)
     securec_check_ss_c(nRet, "\0", "\0");
     conflines = replace_token(conflines, "#default_text_search_config = 'pg_catalog.simple'", repltok);
 #ifdef PGXC
-    /* Add Postgres-XC node name to configuration file */
+    /* Add openGauss node name to configuration file */
     buf_nodename = escape_quotes(nodename);
 
     nRet = sprintf_s(repltok, sizeof(repltok), "pgxc_node_name = '%s'", buf_nodename);
@@ -1215,6 +1233,13 @@ static void setup_config(void)
         securec_check_ss_c(nRet, "\0", "\0");
         conflines = replace_token(conflines, "#log_timezone = 'GMT'", repltok);
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    if (enableDCF) {
+        nRet = strcpy_s(repltok, sizeof(repltok), "enable_dcf = on");
+        securec_check_ss_c(nRet, "\0", "\0");
+        conflines = replace_token(conflines, "#enable_dcf = off", repltok);
+    }
+#endif
 
     nRet = sprintf_s(path, sizeof(path), "%s/postgresql.conf", pg_data);
     securec_check_ss_c(nRet, "\0", "\0");
@@ -1236,6 +1261,17 @@ static void setup_config(void)
 
     FREE_AND_RESET(conflines);
 #endif
+
+    /* gs_gazelle.conf */
+
+    conflines = readfile(gazelle_conf_file);
+    nRet = sprintf_s(path, sizeof(path), "%s/gs_gazelle.conf", pg_data);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    writefile(path, conflines);
+    (void)chmod(path, S_IRUSR | S_IWUSR);
+
+    FREE_AND_RESET(conflines);
 
     /* pg_hba.conf */
 
@@ -1441,8 +1477,8 @@ static void bootstrap_template1(void)
     /* Also ensure backend isn't confused by this environment var: */
     (void)unsetenv("PGCLIENTENCODING");
 
-    nRet =
-        snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" --boot -x1 %s  %s", backend_exec, boot_options, talkargs);
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" --boot -x1 %s  %s 2>&1", backend_exec, boot_options, talkargs);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1478,7 +1514,7 @@ static void setup_auth(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1492,7 +1528,7 @@ static void setup_auth(void)
 }
 
 /*
- * get the superuser password if required, and call postgres to set it
+ * get the superuser password if required, and call openGauss to set it
  */
 static void get_set_pwd(void)
 {
@@ -1600,7 +1636,7 @@ static void get_set_pwd(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1700,7 +1736,7 @@ static void setup_depend(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1732,7 +1768,7 @@ static void setup_sysviews(void)
      * We use -j here to avoid backslashing stuff in system_views.sql
      */
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1768,7 +1804,7 @@ static void setup_perfviews(void)
      * We use -j here to avoid backslashing stuff in performance_views.sql
      */
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1785,6 +1821,83 @@ static void setup_perfviews(void)
     check_ok();
 }
 
+#ifdef ENABLE_PRIVATEGAUSS
+/*
+ * set up private system views
+ */
+static void setup_privsysviews(void)
+{
+    PG_CMD_DECL;
+    char** line;
+    char** privsysviews_setup;
+    int nRet = 0;
+
+    fputs(_("creating private system views ... "), stdout);
+    (void)fflush(stdout);
+
+    privsysviews_setup = readfile(private_system_views_file);
+
+    /*
+     * We use -j here to avoid backslashing stuff in system_views.sql
+     */
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    PG_CMD_OPEN;
+
+    for (line = privsysviews_setup; *line != NULL; line++) {
+        PG_CMD_PUTS(*line);
+        FREE_AND_RESET(*line);
+    }
+
+    PG_CMD_CLOSE;
+
+    FREE_AND_RESET(privsysviews_setup);
+
+    check_ok();
+}
+#endif
+
+/*
+ * set up snapshots
+ */
+#ifndef ENABLE_MULTIPLE_NODES
+static void setup_snapshots(void)
+{
+    PG_CMD_DECL;
+    char** line;
+    char** current_setup;
+    int nRet = 0;
+
+    fputs(_("creating snapshots catalog ... "), stdout);
+    (void)fflush(stdout);
+
+    for (unsigned i = 0; i < SNAPSHOT_LEN; i++)
+    {
+        current_setup = readfile(snapshot_files[i]);
+
+        nRet = snprintf_s(
+            cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s 2>&1",
+            backend_exec, backend_options, DEVNULL);
+        securec_check_ss_c(nRet, "\0", "\0");
+
+        PG_CMD_OPEN;
+
+        for (line = current_setup; *line != NULL; line++) {
+            PG_CMD_PUTS(*line);
+            FREE_AND_RESET(*line);
+        }
+
+        PG_CMD_CLOSE;
+
+        FREE_AND_RESET(current_setup);
+    }
+
+    check_ok();
+}
+#endif
+
 /* * update system tables as we needed */
 static void setup_update(void)
 {
@@ -1796,7 +1909,7 @@ static void setup_update(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1834,7 +1947,7 @@ static void setup_nodeself(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1898,7 +2011,7 @@ static void setup_description(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -1999,7 +2112,7 @@ static void setup_collation(void)
 
 #if defined(HAVE_LOCALE_T) && !defined(WIN32)
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     locale_a_handle = popen_check("locale -a", "r");
@@ -2132,7 +2245,7 @@ static void setup_conversion(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2168,7 +2281,7 @@ static void setup_dictionary(void)
      * We use -j here to avoid backslashing stuff
      */
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2202,7 +2315,7 @@ static void setup_privileges(void)
     PG_CMD_DECL;
     char** line;
     char** priv_lines;
-    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 17);
+    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 19);
     int nRet = 0;
 
     privileges_setup[0] = xstrdup("UPDATE pg_class "
@@ -2223,7 +2336,9 @@ static void setup_privileges(void)
     privileges_setup[13] = xstrdup("REVOKE ALL on gs_masking_policy FROM public;\n");
     privileges_setup[14] = xstrdup("REVOKE ALL on gs_masking_policy_actions FROM public;\n");
     privileges_setup[15] = xstrdup("REVOKE ALL on gs_masking_policy_filters FROM public;\n");
-    privileges_setup[16] = NULL;
+    privileges_setup[16] = xstrdup("GRANT USAGE ON SCHEMA sqladvisor TO PUBLIC;\n");
+    privileges_setup[17] = xstrdup("GRANT USAGE ON SCHEMA dbe_pldebugger TO PUBLIC;\n");
+    privileges_setup[18] = NULL;
     /* In security mode, we will revoke privilege of public on schema public. */
     if (security) {
         privileges_setup[7] = xstrdup("REVOKE ALL on schema public FROM public;\n");
@@ -2235,7 +2350,7 @@ static void setup_privileges(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2308,7 +2423,7 @@ static void setup_schema(void)
      * We use -j here to avoid backslashing stuff in information_schema.sql
      */
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s -j template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2323,7 +2438,7 @@ static void setup_schema(void)
     PG_CMD_CLOSE;
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2386,10 +2501,8 @@ static void setup_bucketmap_len(void)
     fputs(_("initialize global configure for bucketmap length ... "), stdout);
     (void)fflush(stdout);
 
-    nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1,
-                "\"%s\" %s template1 >%s",
-                backend_exec, backend_options,
-                DEVNULL);
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     nRet = sprintf_s(sql, sizeof(sql),
@@ -2418,7 +2531,7 @@ static void load_plpgsql(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2439,7 +2552,7 @@ static void load_dist_fdw(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2473,7 +2586,7 @@ static void load_hdfs_fdw(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2495,7 +2608,7 @@ static void load_gc_fdw(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2518,7 +2631,7 @@ static void load_packages_extension(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2547,7 +2660,7 @@ static void load_gsredistribute_extension(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2571,7 +2684,7 @@ static void load_searchserver_extension()
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2592,7 +2705,7 @@ static void load_tsdb_extension(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2612,10 +2725,8 @@ static void load_streaming_extension(void)
     fputs(_("loading streaming extension ... "), stdout);
     (void)fflush(stdout);
 
-    nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd)-1,
-             "\"%s\" %s template1 >%s",
-             backend_exec, backend_options,
-             DEVNULL);
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2637,10 +2748,8 @@ static void load_mot_fdw(void)
     fputs(_("loading foreign-data wrapper for MOT access ... "), stdout);
     (void)fflush(stdout);
 
-    nRet = snprintf_s(cmd, sizeof(cmd), sizeof(cmd)-1,
-                      "\"%s\" %s template1 >%s",
-                      backend_exec, backend_options,
-                      DEVNULL);
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2664,7 +2773,7 @@ static void load_hstore_extension(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2683,7 +2792,7 @@ static void load_log_extension(void)
 
     PG_CMD_DECL;
     int nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2699,7 +2808,7 @@ static void load_security_plugin()
 
     PG_CMD_DECL;
     int nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2715,7 +2824,7 @@ static void load_supported_extension(void)
     /* loading foreign-data wrapper for hdfs access */
     load_hdfs_fdw();
 
-    /* loading foreign-data wrapper for postgres access */
+    /* loading foreign-data wrapper for openGauss access */
 #ifdef ENABLE_MULTIPLE_NODES
     load_gc_fdw();
 #endif
@@ -2767,7 +2876,7 @@ static void vacuumfreeze(const char* dbname)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s %s >%s", backend_exec, backend_options, dbname, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s %s >%s 2>&1", backend_exec, backend_options, dbname, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2792,7 +2901,7 @@ static void vacuum_db(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2845,7 +2954,7 @@ static void make_template0(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -2874,7 +2983,7 @@ static void make_postgres(void)
     (void)fflush(stdout);
 
     nRet = snprintf_s(
-        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s", backend_exec, backend_options, DEVNULL);
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\" %s template1 >%s 2>&1", backend_exec, backend_options, DEVNULL);
     securec_check_ss_c(nRet, "\0", "\0");
 
     PG_CMD_OPEN;
@@ -3123,6 +3232,14 @@ static bool check_locale_encoding(const char* locale_encoding, int user_enc)
  */
 static void setlocales(void)
 {
+#define FREE_NOT_STATIC_STRING(s)                       \
+    do {                                                     \
+        if ((s) && (char*)(s) != (char*)"" && s != locale) { \
+            free(s);                                         \
+            (s) = NULL;                                      \
+        }                                                    \
+    } while (0)
+
     char* canonname = NULL;
 
     /* set empty lc_* values to locale config if set */
@@ -3144,25 +3261,32 @@ static void setlocales(void)
 
     /*
      * canonicalize locale names, and override any missing/invalid values from
-     * our current environment
+     * our current environment, should free memory before setting new address
      */
 
     check_locale_name(LC_CTYPE, lc_ctype, &canonname);
+    FREE_NOT_STATIC_STRING(lc_ctype);
     lc_ctype = canonname;
     check_locale_name(LC_COLLATE, lc_collate, &canonname);
+    FREE_NOT_STATIC_STRING(lc_collate);
     lc_collate = canonname;
     check_locale_name(LC_NUMERIC, lc_numeric, &canonname);
+    FREE_NOT_STATIC_STRING(lc_numeric);
     lc_numeric = canonname;
     check_locale_name(LC_TIME, lc_time, &canonname);
+    FREE_NOT_STATIC_STRING(lc_time);
     lc_time = canonname;
     check_locale_name(LC_MONETARY, lc_monetary, &canonname);
+    FREE_NOT_STATIC_STRING(lc_monetary);
     lc_monetary = canonname;
 #if defined(LC_MESSAGES) && !defined(WIN32)
     check_locale_name(LC_MESSAGES, lc_messages, &canonname);
+    FREE_NOT_STATIC_STRING(lc_messages);
     lc_messages = canonname;
 #else
     /* when LC_MESSAGES is not available, use the LC_CTYPE setting */
     check_locale_name(LC_CTYPE, lc_messages, &canonname);
+    FREE_NOT_STATIC_STRING(lc_messages);
     lc_messages = canonname;
 #endif
 }
@@ -3293,9 +3417,12 @@ static void usage(const char* prog_name)
     printf(_("  -A, --auth=METHOD         default authentication method for local connections\n"));
     printf(_("      --auth-host=METHOD    default authentication method for local TCP/IP connections\n"));
     printf(_("      --auth-local=METHOD   default authentication method for local-socket connections\n"));
+#ifndef ENABLE_MULTIPLE_NODES
+    printf(_("  -c, --enable-dcf          enable DCF mode\n"));
+#endif
     printf(_(" [-D, --pgdata=]DATADIR     location for this database cluster\n"));
 #ifdef ENABLE_MULTIPLE_NODES
-    printf(_("      --nodename=NODENAME   name of Postgres-XC node initialized\n"));
+    printf(_("      --nodename=NODENAME   name of openGauss node initialized\n"));
     printf(_("      --bucketlength=LENGTH length of bucketmap\n"));
 #else
     printf(_("      --nodename=NODENAME   name of single node initialized\n"));
@@ -3323,7 +3450,7 @@ static void usage(const char* prog_name)
     printf(_("  -n, --noclean             do not clean up after errors\n"));
     printf(_("  -s, --show                show internal settings\n"));
     printf(_("\nOther options:\n"));
-    printf(_("  -H, --host-ip             node_host of Postgres-XC node initialized\n"));
+    printf(_("  -H, --host-ip             node_host of openGauss node initialized\n"));
     printf(_("  -V, --version             output version information, then exit\n"));
     printf(_("  -?, --help                show this help, then exit\n"));
     printf(_("\nIf the data directory is not specified, the environment variable PGDATA\n"
@@ -3412,6 +3539,9 @@ int main(int argc, char* argv[])
         {"xlogdir", required_argument, NULL, 'X'},
         {"security", no_argument, NULL, 'S'},
         {"host-ip", required_argument, NULL, 'H'},
+#ifndef ENABLE_MULTIPLE_NODES
+        {"enable-dcf", no_argument, NULL, 'c'},
+#endif
 #ifdef PGXC
         {"nodename", required_argument, NULL, 12},
 #endif
@@ -3463,7 +3593,8 @@ int main(int argc, char* argv[])
         "pg_llog",
         "pg_llog/snapshots",
         "pg_llog/mappings",
-        "pg_errorinfo"};
+        "pg_errorinfo",
+        "undo"};
 
     progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_initdb"));
@@ -3485,7 +3616,7 @@ int main(int argc, char* argv[])
 
     /* process command-line options */
 
-    while ((c = getopt_long(argc, argv, "dD:E:L:nU:WA:SsT:X:C:w:H:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "cdD:E:L:nU:WA:SsT:X:C:w:H:", long_options, &option_index)) != -1) {
 #define FREE_NOT_STATIC_ZERO_STRING(s)        \
     do {                                      \
         if ((s) && (char*)(s) != (char*)"") { \
@@ -3520,6 +3651,11 @@ int main(int argc, char* argv[])
                     FREE_NOT_STATIC_ZERO_STRING(authmethodhost_tmp);
                 authmethodhost_tmp = xstrdup(optarg);
                 break;
+#ifndef ENABLE_MULTIPLE_NODES
+            case 'c':
+                enableDCF = true;
+                break;
+#endif
             case 'D':
                 FREE_NOT_STATIC_ZERO_STRING(pg_data);
                 pg_data = xstrdup(optarg);
@@ -3691,13 +3827,13 @@ int main(int argc, char* argv[])
 
 #ifdef PGXC
     if (nodename == NULL) {
-        write_stderr(_("%s: Postgres-XC node name is mandatory\n"), progname);
+        write_stderr(_("%s: openGauss node name is mandatory\n"), progname);
         write_stderr(_("Try \"%s --help\" for more information.\n"), progname);
         exit(1);
     }
 
     if (!is_valid_nodename(nodename)) {
-        write_stderr(_("%s: Postgres-XC node name:%s is invalid.\nThe node name must consist of lowercase letters "
+        write_stderr(_("%s: openGauss node name:%s is invalid.\nThe node name must consist of lowercase letters "
                         "(a-z), underscores (_), special characters #, digits (0-9), or dollar ($).\n"
                         "The node name must start with a lowercase letter (a-z),"
                         " or an underscore (_).\nThe max length of nodename is %d.\n"),
@@ -3777,7 +3913,7 @@ int main(int argc, char* argv[])
 #endif
 
     /*
-     * we have to set PGDATA for postgres rather than pass it on the command
+     * we have to set PGDATA for openGauss rather than pass it on the command
      * line to avoid dumb quoting problems on Windows, and we would especially
      * need quotes otherwise on Windows because paths there are most likely to
      * have embedded spaces.
@@ -3843,12 +3979,24 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MOT
     set_input(&mot_conf_file, "mot.conf.sample");
 #endif
+    set_input(&gazelle_conf_file, "gs_gazelle.conf.sample");
     set_input(&conversion_file, "conversion_create.sql");
     set_input(&dictionary_file, "snowball_create.sql");
     set_input(&info_schema_file, "information_schema.sql");
     set_input(&features_file, "sql_features.txt");
     set_input(&system_views_file, "system_views.sql");
     set_input(&performance_views_file, "performance_views.sql");
+#ifdef ENABLE_PRIVATEGAUSS
+    set_input(&private_system_views_file, "private_system_views.sql");
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    for (unsigned i = 0; i < SNAPSHOT_LEN; i++) {
+        char buf[128];
+        nRet = sprintf_s(buf, sizeof(buf), "db4ai/snapshots/%s.sql", snapshot_names[i]);
+        securec_check_ss_c(nRet, "\0", "\0");
+        set_input(&snapshot_files[i], buf);
+    }
+#endif
 
     set_info_version();
 
@@ -3861,6 +4009,7 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MOT
                      "MOT_CONF_SAMPLE=%s\n"
 #endif
+                     "GAZELLE_CONF_SAMPLE=%s\n"
                      "PG_HBA_SAMPLE=%s\nPG_IDENT_SAMPLE=%s\n",
             PG_VERSION,
             pg_data,
@@ -3874,6 +4023,7 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MOT
             mot_conf_file,
 #endif
+            gazelle_conf_file,
             hba_file,
             ident_file);
         if (show_setting)
@@ -3889,12 +4039,21 @@ int main(int argc, char* argv[])
 #ifdef ENABLE_MOT
     check_input(mot_conf_file);
 #endif
+    check_input(gazelle_conf_file);
     check_input(conversion_file);
     check_input(dictionary_file);
     check_input(info_schema_file);
     check_input(features_file);
     check_input(system_views_file);
     check_input(performance_views_file);
+#ifdef ENABLE_PRIVATEGAUSS
+    check_input(private_system_views_file);
+#endif
+#ifndef ENABLE_MULTIPLE_NODES
+    for (unsigned i = 0; i < SNAPSHOT_LEN; i++) {
+        check_input(snapshot_files[i]);
+    }
+#endif
 
     setlocales();
 
@@ -4257,6 +4416,9 @@ int main(int argc, char* argv[])
     /* Now create all the text config files */
     setup_config();
 
+    /* Init undo subsystem meta. */
+    InitUndoSubsystemMeta();
+
     /* Bootstrap template1 */
     bootstrap_template1();
 
@@ -4275,6 +4437,9 @@ int main(int argc, char* argv[])
     setup_depend();
     load_plpgsql();
     setup_sysviews();
+#ifdef ENABLE_PRIVATEGAUSS
+    setup_privsysviews();
+#endif
     setup_perfviews();
 
 #ifdef PGXC
@@ -4300,6 +4465,10 @@ int main(int argc, char* argv[])
 
     setup_update();
 
+#ifndef ENABLE_MULTIPLE_NODES
+    setup_snapshots();
+#endif
+
     vacuum_db();
 
     make_template0();
@@ -4321,11 +4490,11 @@ int main(int argc, char* argv[])
     get_parent_directory(bin_dir);
 
 #ifdef ENABLE_MULTIPLE_NODES
-    printf(_("\nSuccess.\n You can now start the database server of the Postgres-XC coordinator using:\n\n"
+    printf(_("\nSuccess.\n You can now start the database server of the openGauss coordinator using:\n\n"
              "    %s%s%sgaussdb%s --coordinator -D %s%s%s\n"
              "or\n"
              "    %s%s%sgs_ctl%s start -D %s%s%s -Z coordinator -l logfile\n\n"
-             " You can now start the database server of the Postgres-XC datanode using:\n\n"
+             " You can now start the database server of the openGauss datanode using:\n\n"
              "    %s%s%sgaussdb%s --datanode -D %s%s%s\n"
              "or \n"
              "    %s%s%sgs_ctl%s start -D %s%s%s -Z datanode -l logfile\n\n"),
@@ -4711,4 +4880,170 @@ static void create_pg_lockfiles(void)
         }
     }
     FREE_AND_RESET(filelockpath);
+}
+
+static bool InitUndoZoneMeta(int fd)
+{
+    int rc = 0;
+    uint64 writeSize = 0;
+    uint32 ret = 0;
+    uint32 totalZonePageCnt = 0;
+    char metaPageBuffer[UNDO_META_PAGE_SIZE] = {'\0'};
+    pg_crc32 zoneMetaPageCrc = 0;
+
+    /* Init undospace meta, persist meta info into disk. */
+    UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOZONE_COUNT_PER_PAGE, totalZonePageCnt);
+    for (uint32 loop = 0; loop < PERSIST_ZONE_COUNT; loop++) {
+        uint32 zoneId = loop;
+        uint32 offset = zoneId % UNDOZONE_COUNT_PER_PAGE;
+        undo::UndoZoneMetaInfo *uzoneMetaPoint = NULL;
+
+        if (zoneId % UNDOZONE_COUNT_PER_PAGE == 0) {
+            rc = memset_s(metaPageBuffer, UNDO_META_PAGE_SIZE, 0, UNDO_META_PAGE_SIZE);
+            securec_check(rc, "\0", "\0");
+
+            /* On last page, count of undospace meta maybe less than UNDOSPACE_COUNT_PER_PAGE. */
+            if ((uint32)(zoneId / UNDOZONE_COUNT_PER_PAGE) + 1 == totalZonePageCnt) {
+                writeSize = (PERSIST_ZONE_COUNT - (totalZonePageCnt - 1) * UNDOZONE_COUNT_PER_PAGE) *
+                    sizeof(undo::UndoZoneMetaInfo);
+            } else {
+                writeSize = sizeof(undo::UndoZoneMetaInfo) * UNDOZONE_COUNT_PER_PAGE;
+            }
+        }
+
+        uzoneMetaPoint = (undo::UndoZoneMetaInfo *)(metaPageBuffer + offset * sizeof(undo::UndoZoneMetaInfo));
+        uzoneMetaPoint->version = UNDO_ZONE_META_VERSION;
+        uzoneMetaPoint->lsn = 0;
+        uzoneMetaPoint->insert = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->discard = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->forceDiscard = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->recycleXid = 0;
+        uzoneMetaPoint->allocate = UNDO_LOG_BLOCK_HEADER_SIZE;
+        uzoneMetaPoint->recycle = UNDO_LOG_BLOCK_HEADER_SIZE;
+
+        if ((zoneId + 1) % UNDOZONE_COUNT_PER_PAGE == 0 || (zoneId == PERSIST_ZONE_COUNT - 1 &&
+            ((uint32)(zoneId / UNDOZONE_COUNT_PER_PAGE) + 1 == totalZonePageCnt))) {
+            INIT_CRC32C(zoneMetaPageCrc);
+            COMP_CRC32C(zoneMetaPageCrc, (void *)metaPageBuffer, writeSize);
+            FIN_CRC32C(zoneMetaPageCrc);
+            *(pg_crc32 *)(metaPageBuffer + writeSize) = zoneMetaPageCrc;
+
+            ret = write(fd, (void *)metaPageBuffer, UNDO_META_PAGE_SIZE);
+            if (ret != UNDO_META_PAGE_SIZE) {
+                printf("[INIT UNDO] Write undozone meta info fail, expect size(%u), real size(%u)",
+                    UNDO_META_PAGE_SIZE, ret);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static bool InitUndoSpaceMeta(int fd)
+{
+    int rc = 0;
+    uint64 writeSize = 0;
+    uint32 ret = 0;
+    uint32 totalUspPageCnt = 0;
+    char metaPageBuffer[UNDO_META_PAGE_SIZE] = {'\0'};
+    pg_crc32 spaceMetaPageCrc = 0;
+
+    /* Init undospace meta, persist meta info into disk. */
+    UNDOZONE_META_PAGE_COUNT(PERSIST_ZONE_COUNT, UNDOSPACE_COUNT_PER_PAGE, totalUspPageCnt);
+    for (uint32 loop = 0; loop < PERSIST_ZONE_COUNT; loop++) {
+        uint32 zoneId = loop;
+        uint32 offset = zoneId % UNDOSPACE_COUNT_PER_PAGE;
+        undo::UndoSpaceMetaInfo *uspMetaPoint = NULL;
+
+        if (zoneId % UNDOSPACE_COUNT_PER_PAGE == 0) {
+            rc = memset_s(metaPageBuffer, UNDO_META_PAGE_SIZE, 0, UNDO_META_PAGE_SIZE);
+            securec_check(rc, "\0", "\0");
+
+            /* On last page, count of undospace meta maybe less than UNDOSPACE_COUNT_PER_PAGE. */
+            if ((uint32)(zoneId / UNDOSPACE_COUNT_PER_PAGE) + 1 == totalUspPageCnt) {
+                writeSize = (PERSIST_ZONE_COUNT - (totalUspPageCnt - 1) * UNDOSPACE_COUNT_PER_PAGE) *
+                    sizeof(undo::UndoSpaceMetaInfo);
+            } else {
+                writeSize = sizeof(undo::UndoSpaceMetaInfo) * UNDOSPACE_COUNT_PER_PAGE;
+            }
+        }
+
+        uspMetaPoint = (undo::UndoSpaceMetaInfo *)(metaPageBuffer + offset * sizeof(undo::UndoSpaceMetaInfo));
+        uspMetaPoint->version = UNDO_SPACE_META_VERSION;
+        uspMetaPoint->lsn = 0;
+        uspMetaPoint->head = 0;
+        uspMetaPoint->tail = 0;
+
+        if ((zoneId + 1) % UNDOSPACE_COUNT_PER_PAGE == 0 || (zoneId == PERSIST_ZONE_COUNT - 1 &&
+            ((uint32)(zoneId / UNDOSPACE_COUNT_PER_PAGE) + 1 == totalUspPageCnt))) {
+            INIT_CRC32C(spaceMetaPageCrc);
+            COMP_CRC32C(spaceMetaPageCrc, (void *)metaPageBuffer, writeSize);
+            FIN_CRC32C(spaceMetaPageCrc);
+            *(pg_crc32 *)(metaPageBuffer + writeSize) = spaceMetaPageCrc;
+
+            ret = write(fd, (void *)metaPageBuffer, UNDO_META_PAGE_SIZE);
+            if (ret != UNDO_META_PAGE_SIZE) {
+                printf("[INIT UNDO] Write undospace meta info fail, expect size(%u), real size(%u)",
+                    UNDO_META_PAGE_SIZE, ret);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void InitUndoSubsystemMeta(void)
+{
+    int rc = 0;
+    char undoFilePath[MAXPGPATH] = {'\0'};
+    char tmpUndoFile[MAXPGPATH] = {'\0'};
+
+    printf("Begin init undo subsystem meta.\n");
+    rc = sprintf_s(undoFilePath, sizeof(undoFilePath), "%s/%s", pg_data, UNDO_META_FILE);
+    securec_check_ss_c(rc, "\0", "\0");
+    rc = sprintf_s(tmpUndoFile, sizeof(tmpUndoFile), "%s/%s_%s", pg_data, UNDO_META_FILE, "tmp");
+    securec_check_ss_c(rc, "\0", "\0");
+
+    if (access(undoFilePath, F_OK) != 0) {
+        /* First, delete tmpUndoFile. */
+        unlink(tmpUndoFile);
+        int fd = open(tmpUndoFile, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, S_IRUSR | S_IWUSR);
+        if (fd < 0) {
+            printf("[INIT UNDO] Open %s file failed, error (%s).", tmpUndoFile, strerror(errno));
+            return;
+        }
+
+        /* init undo zone meta */
+        if (!InitUndoZoneMeta(fd)) {
+            goto ERROR_PROC;
+        }
+        /* init undo space meta */
+        if (!InitUndoSpaceMeta(fd)) {
+            goto ERROR_PROC;
+        }
+        /* init slot space meta */
+        if (!InitUndoSpaceMeta((fd))) {
+            goto ERROR_PROC;
+        }
+
+        /* Flush buffer to disk and close fd. */
+        fsync(fd);
+        close(fd);
+
+        /* Rename tmpUndoFile to real undoFile. */
+        if (rename(tmpUndoFile, undoFilePath) != 0) {
+            printf("[INIT UNDO] Rename tmp undo meta file failed.\n");
+            unlink(tmpUndoFile);
+            goto ERROR_PROC;
+        }
+
+        printf("[INIT UNDO] Init undo subsystem meta successfully.\n");
+        return;
+
+    ERROR_PROC:
+        close(fd);
+        unlink(tmpUndoFile);
+        printf("[INIT UNDO] Init undo subsystem meta failed, exit.\n");
+        exit(1);
+    }
 }

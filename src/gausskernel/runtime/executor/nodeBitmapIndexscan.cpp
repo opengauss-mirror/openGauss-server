@@ -22,9 +22,10 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 #include "catalog/pg_partition_fn.h"
-#include "executor/execdebug.h"
-#include "executor/nodeBitmapIndexscan.h"
-#include "executor/nodeIndexscan.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeBitmapIndexscan.h"
+#include "executor/node/nodeIndexscan.h"
+#include "storage/tcap.h"
 #include "miscadmin.h"
 #include "utils/memutils.h"
 #include "optimizer/pruning.h"
@@ -33,10 +34,18 @@
 
 static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node);
 /* If bitmapscan uses global partition index, set tbm to global */
-static inline void GpiUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
+static inline void GPIUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
 {
     if (RelationIsGlobalIndex(node->biss_RelationDesc)) {
         tbm_set_global(tbm, true);
+    }
+}
+
+/* if bitmapscan uses crossbucket index, set tbm->crossbucket to true */
+static inline void CBIUpdateTbmType(BitmapIndexScanState* node, TIDBitmap* tbm)
+{
+    if (RelationIsCrossBucketIndex(node->biss_RelationDesc)) {
+        tbm_set_crossbucket(tbm, true);
     }
 }
 
@@ -50,6 +59,7 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
     IndexScanDesc scandesc;
     double nTuples = 0;
     bool doscan = false;
+    bool isUstore = ((BitmapIndexScan*)node->ss.ps.plan)->is_ustore;
 
     /* must provide our own instrumentation support */
     if (node->ss.ps.instrument)
@@ -67,25 +77,13 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
      * array key so we should do nothing.
      */
     if (!node->biss_RuntimeKeysReady && (node->biss_NumRuntimeKeys != 0 || node->biss_NumArrayKeys != 0)) {
-        if (node->ss.isPartTbl) {
-            if (PointerIsValid(node->biss_IndexPartitionList)) {
-                node->ss.ss_ReScan = true;
-
-                ExecReScan((PlanState*)node);
-                doscan = node->biss_RuntimeKeysReady;
-            } else {
-                doscan = false;
-            }
-        } else {
-            ExecReScan((PlanState*)node);
-            doscan = node->biss_RuntimeKeysReady;
+        if (node->ss.isPartTbl && PointerIsValid(node->biss_IndexPartitionList)) {
+            node->ss.ss_ReScan = true;
         }
+        ExecReScan((PlanState*)node);
+        doscan = node->biss_RuntimeKeysReady;
     } else {
-        if (node->ss.isPartTbl && !PointerIsValid(node->biss_IndexPartitionList)) {
-            doscan = false;
-        } else {
-            doscan = true;
-        }
+        doscan = !(node->ss.isPartTbl && !PointerIsValid(node->biss_IndexPartitionList));
     }
 
     /*
@@ -99,15 +97,21 @@ Node* MultiExecBitmapIndexScan(BitmapIndexScanState* node)
         node->biss_result = NULL; /* reset for next time */
     } else {
         /* XXX should we use less than u_sess->attr.attr_memory.work_mem for this? */
-        tbm = tbm_create(u_sess->attr.attr_memory.work_mem * 1024L);
+        tbm = TbmCreate(u_sess->attr.attr_memory.work_mem * 1024L, isUstore);
 
-        /* If bitmapscan uses global partition index, set tbm to global */
-        GpiUpdateTbmType(node, tbm);
+        /* If bitmapscan uses global partition index, set tbm to global. */
+        GPIUpdateTbmType(node, tbm);
+
+        /* If bitmapscan uses crossbucket index, set tbm->crossbucket to true. */
+        CBIUpdateTbmType(node, tbm);
     }
 
-    if (hbkt_idx_need_switch_bkt(scandesc, node->ss.ps.hbktScanSlot.currSlot)) {
+    /* Cross-bucket index scan should not switch the index bucket. */
+    if (hbkt_idx_need_switch_bkt(scandesc, node->ss.ps.hbktScanSlot.currSlot) && 
+        !RelationIsCrossBucketIndex(node->biss_RelationDesc)) {
         hbkt_idx_bitmapscan_switch_bucket(scandesc, node->ss.ps.hbktScanSlot.currSlot);
     }
+
     /*
      * Get TIDs from index and insert into bitmap
      */
@@ -264,6 +268,7 @@ BitmapIndexScanState* ExecInitBitmapIndexScan(BitmapIndexScan* node, EState* est
 {
     BitmapIndexScanState* indexstate = NULL;
     bool relistarget = false;
+    Snapshot scanSnap;
 
     /* check for unsupported flags */
     Assert(!(eflags & (EXEC_FLAG_BACKWARD | EXEC_FLAG_MARK)));
@@ -365,6 +370,12 @@ BitmapIndexScanState* ExecInitBitmapIndexScan(BitmapIndexScan* node, EState* est
         indexstate->biss_RuntimeContext = NULL;
     }
 
+    /*
+     * Choose user-specified snapshot if TimeCapsule clause exists, otherwise 
+     * estate->es_snapshot instead.
+     */
+    scanSnap = TvChooseScanSnap(indexstate->biss_RelationDesc, &node->scan, &indexstate->ss);
+
     /* get index partition list and table partition list */
     if (node->scan.isPartTbl) {
         indexstate->biss_ScanDesc = NULL;
@@ -385,9 +396,9 @@ BitmapIndexScanState* ExecInitBitmapIndexScan(BitmapIndexScan* node, EState* est
                     partitionGetRelation(indexstate->biss_RelationDesc, currentindex);
 
                 ExecCloseScanRelation(currentrel);
-    
+
                 indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
-                    estate->es_snapshot,
+                    scanSnap,
                     indexstate->biss_NumScanKeys,
                     (ScanState*)indexstate);
             }
@@ -397,7 +408,7 @@ BitmapIndexScanState* ExecInitBitmapIndexScan(BitmapIndexScan* node, EState* est
          * Initialize scan descriptor.
          */
         indexstate->biss_ScanDesc = scan_handler_idx_beginscan_bitmap(
-            indexstate->biss_RelationDesc, estate->es_snapshot, indexstate->biss_NumScanKeys, (ScanState*)indexstate);
+            indexstate->biss_RelationDesc, scanSnap, indexstate->biss_NumScanKeys, (ScanState*)indexstate);
     }
 
     /*
@@ -491,20 +502,24 @@ void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EStat
         indexstate->lockMode = lock;
         PruningResult* resultPlan = NULL;
         if (plan->scan.pruningInfo->expr) {
-            if (estate->pruningResult) {
-                resultPlan = estate->pruningResult;
+            if (ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+                if (estate->pruningResult) {
+                    resultPlan = estate->pruningResult;
+                } else {
+                    resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, rel);
+                    destroyPruningResult(estate->pruningResult);
+                    estate->pruningResult = resultPlan;
+                }
             } else {
                 resultPlan = GetPartitionInfo(plan->scan.pruningInfo, estate, rel);
-                destroyPruningResult(estate->pruningResult);
-                estate->pruningResult = resultPlan;
             }
         } else {
             resultPlan = plan->scan.pruningInfo;
         }
         if (resultPlan->ls_rangeSelectedPartitions != NULL) {
-            indexstate->part_id = resultPlan->ls_rangeSelectedPartitions->length;
+            indexstate->ss.part_id = resultPlan->ls_rangeSelectedPartitions->length;
         } else {
-            indexstate->part_id = 0;
+            indexstate->ss.part_id = 0;
         }
 
         ListCell* cell = NULL;

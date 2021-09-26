@@ -1,3 +1,4 @@
+set lc_monetary = 'C';
 
 --
 -- INT8

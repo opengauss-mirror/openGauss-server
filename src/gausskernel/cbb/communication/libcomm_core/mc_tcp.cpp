@@ -24,6 +24,13 @@
 #include "libcomm_utils/libcomm_util.h"
 #include "libcomm_utils/libcomm_err.h"
 
+#ifdef USE_SSL
+#include "knl/knl_session.h"
+#include "libpq/libpq-be.h"
+#include "libcomm/libcomm.h"
+#include "../libcomm_common.h"
+#endif
+
 void mc_tcp_setsockopt(int fd, int level, int optname, const void* optval, socklen_t optlen)
 {
     if (setsockopt(fd, level, optname, optval, optlen) < 0) {
@@ -195,11 +202,26 @@ int mc_tcp_read_block(int fd, void* data, int size, int flags)
     uint64 time_enter, time_now;
     time_enter = mc_timers_ms();
     ssize_t nbytes = 0;
+    int rc = 0;
+
+#ifdef USE_SSL
+    SSL *ssl = NULL;
+
+    LIBCOMM_FIND_SSL(ssl, fd, "(mc tcp read block)\tNot find ssl for sock ");
+#endif
 
     // In our application, if we do not get an integrated message, we must continue receiving.
     //
     while (nbytes != size) {
-        int rc = recv(fd, (char*)data + nbytes, size - nbytes, flags);
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_enable_SSL) {
+            rc = LibCommClientSSLRead(ssl, (char*)data + nbytes, size - nbytes);
+        } else
+#endif
+        {
+            rc = recv(fd, (char*)data + nbytes, size - nbytes, flags);
+        }
+
         if (rc > 0) {
             if (((char*)data)[0] == '\0') {
                 LIBCOMM_ELOG(ERROR, "(mc tcp read block)\tIllegal message from sock %d.", fd);
@@ -230,7 +252,6 @@ int mc_tcp_read_block(int fd, void* data, int size, int flags)
             }
         }
     }
-
     /* Orderly shutdown by the other peer or Signalise peer failure. */
     if ((nbytes == 0) || (nbytes == -1 && (errno == ECONNRESET || errno == ECONNREFUSED || errno == ETIMEDOUT ||
                                               errno == EHOSTUNREACH))) {
@@ -248,7 +269,19 @@ int mc_tcp_read_nonblock(int fd, void* data, int size, int flags)
         return -1;
     }
 #endif
-    ssize_t nbytes = recv(fd, data, size, flags);
+
+    ssize_t nbytes = 0;
+
+#ifdef USE_SSL
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+        SSL *ssl = NULL;
+        LIBCOMM_FIND_SSL(ssl, fd, "(mc tcp read nonblock)\tNot find ssl for sock ");
+        nbytes = LibCommClientSSLRead(ssl, data, size);
+    } else
+#endif /* USE_SSL */
+    {
+        nbytes = recv(fd, data, size, flags);
+    }
 
     //  Several errors are OK. When speculative read is being done we may not
     //  be able to read a single byte to the socket. Also, SIGSTOP issued
@@ -275,7 +308,7 @@ int mc_tcp_read_nonblock(int fd, void* data, int size, int flags)
 
 int mc_tcp_check_socket(int sock)
 {
-    char temp_buf[IOV_DATA_SIZE];
+    char temp_buf[IOV_DATA_SIZE] = {0};
     bool is_sock_err = false;
     int error = -1;
 
@@ -283,9 +316,23 @@ int mc_tcp_check_socket(int sock)
         return -1;
     }
 
-    while (false == is_sock_err) {
-        error = recv(sock, temp_buf, IOV_DATA_SIZE, 0);
+#ifdef USE_SSL
+    SSL *ssl = NULL;
 
+    LIBCOMM_FIND_SSL(ssl, sock, "(mc tcp check socket)\tNot find ssl for sock ");
+#endif
+
+    LIBCOMM_ELOG(LOG, "mc_tcp_check_socket start.");
+
+    while (false == is_sock_err) {
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_enable_SSL) {
+            error = LibCommClientSSLRead(ssl, temp_buf, IOV_DATA_SIZE);
+        } else
+#endif
+        {
+            error = recv(sock, temp_buf, IOV_DATA_SIZE, 0);
+        }
         if (error < 0) {
             // no data to recieve, and no socket error
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -336,12 +383,25 @@ int mc_tcp_write_block(int fd, const void* data, int size)
     uint64 time_enter, time_now;
     time_enter = mc_timers_ms();
 
+#ifdef USE_SSL
+    SSL *ssl = NULL;
+
+    LIBCOMM_FIND_SSL(ssl, fd, "(mc tcp write block)\tNot find ssl for sock ");
+#endif
+
     //  Several errors are OK. When speculative write is being done we may not
     //  be able to write a single byte to the socket. Also, SIGSTOP issued
     //  by a debugging tool can result in EINTR error.
     //
     while (nSend != size) {
-        nbytes = send(fd, (const void*)((char*)data + nSend), size - nSend, flags);
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_enable_SSL) {
+            nbytes = LibCommClientSSLWrite(ssl, (void*)((char*)data + nSend), size - nSend);
+        } else
+#endif
+        {
+            nbytes = send(fd, (const void*)((char*)data + nSend), size - nSend, flags);
+        }
 
         if (nbytes <= 0) {
             if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || errno == ENOBUFS)) {
@@ -378,11 +438,24 @@ int mc_tcp_write_noblock(int fd, const void* data, int size)
     ssize_t nbytes;
     const int flags = 0;
 
+#ifdef USE_SSL
+    SSL *ssl = NULL;
+
+    LIBCOMM_FIND_SSL(ssl, fd, "(mc tcp write nonblock)\tNot find ssl for sock ");
+#endif
+
     //  Several errors are OK. When speculative write is being done we may not
     //  be able to write a single byte to the socket. Also, SIGSTOP issued
     //  by a debugging tool can result in EINTR error.
     //
-    nbytes = send(fd, data, size, flags);
+#ifdef USE_SSL
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+        nbytes = LibCommClientSSLWrite(ssl, data, size);
+    } else
+#endif
+    {
+        nbytes = send(fd, data, size, flags);
+    }
 
     if (nbytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR || errno == ENOBUFS)) {
         return 0;

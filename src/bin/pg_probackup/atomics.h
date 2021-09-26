@@ -7,7 +7,7 @@
  * atomically and dealing with cache coherency. Used to implement locking
  * facilities and lockless algorithms/data structures.
  *
- * To bring up postgres on a platform/compiler at the very least
+ * To bring up openGauss on a platform/compiler at the very least
  * implementations for the following operations should be provided:
  * * pg_compiler_barrier(), pg_write_barrier(), pg_read_barrier()
  * * pg_atomic_compare_exchange_u32(), pg_atomic_fetch_add_u32()
@@ -25,7 +25,7 @@
  * Use higher level functionality (lwlocks, spinlocks, heavyweight locks)
  * whenever possible. Writing correct code using these facilities is hard.
  *
- * For an introduction to using memory barriers within the PostgreSQL backend,
+ * For an introduction to using memory barriers within the openGauss backend,
  * see src/backend/storage/lmgr/README.barrier
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
@@ -60,7 +60,7 @@
  *
  * It will often make sense to define memory barrier semantics here, since
  * e.g. generic compiler intrinsics for x86 memory barriers can't know that
- * postgres doesn't need x86 read/write barriers do anything more than a
+ * openGauss doesn't need x86 read/write barriers do anything more than a
  * compiler barrier.
  *
  */

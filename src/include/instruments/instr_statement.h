@@ -168,7 +168,7 @@ typedef struct StatementStatContext {
                                     or knl_u_unique_sql_context's curr_single_unique_sql */
     TimestampTz start_time;     /* from PgBackendStatus's st_activity_start_timestamp */
     TimestampTz finish_time;    /* commit's GetCurrentTimestamp */
-    int slow_query_threshold;   /* from knl_session_attr_storage's log_min_duration_statement */
+    int64 slow_query_threshold;   /* from knl_session_attr_storage's log_min_duration_statement */
 
     int64 timeModel[TOTAL_TIME_INFO_TYPES];     /* from knl_u_stat_context's localTimeInfoArray */
     uint64 networkInfo[TOTAL_NET_INFO_TYPES];   /* from knl_u_stat_context's localNetInfo */

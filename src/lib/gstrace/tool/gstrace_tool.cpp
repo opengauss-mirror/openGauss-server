@@ -1340,7 +1340,7 @@ static int getBufferSize(int argc, char** argv)
 }
 
 // Find the buffer size if user has set with command line
-static int getTracePid(int argc, char** argv)
+static int getTracePort(int argc, char** argv)
 {
     const char* option = "-p";
     char* opt = getCmdOption(argc, argv, option, strlen(option) + 1);
@@ -1392,21 +1392,21 @@ static char* getOutputFile(int argc, char** argv)
 static void printUsage(int argc, char** argv)
 {
     printf("Usage:\n");
-    printf("%s start -m <mask> -s <buffer size> -p <pid>\n", argv[0]);
+    printf("%s start -m <mask> -s <buffer size> -p <port>\n", argv[0]);
     printf("\tStart trace against process.\n");
-    printf("\t-p  pid\n");
+    printf("\t-p  CN or DN's listening port\n");
     printf("\t-m  [comp1,comp2,…][ALL].[func1,func2,…][ALL].Default is ALL\n");
     printf("\t-s  the size of the shared memory for recording tracing.Default is 1073741824 bytes(1GB)\n");
 
-    printf("%s stop -p <pid>\n", argv[0]);
+    printf("%s stop -p <port>\n", argv[0]);
     printf("\tStop trace against process.\n");
-    printf("\t-p  pid\n");
+    printf("\t-p  CN or DN's listening port\n");
 
-    printf("%s config -p <pid>\n", argv[0]);
+    printf("%s config -p <port>\n", argv[0]);
     printf("\tDisplay the configurations of gstrace.\n");
-    printf("\t-p  pid\n");
+    printf("\t-p  CN or DN's listening port\n");
 
-    printf("%s dump -p <pid> -o <output file>\n", argv[0]);
+    printf("%s dump -p <port> -o <output file>\n", argv[0]);
     printf("\tDump the traced information from the shared memory to a binary file.\n");
     printf("\t-o  binary dump file name\n");
 
@@ -1495,7 +1495,7 @@ static void print_result_message(trace_msg_code rc, int argc, char** argv)
 int main(int argc, char** argv)
 {
     trace_msg_code rc = TRACE_OK;
-    int pid;
+    int port;
     char* trcFile = NULL;
     char* outputFile = NULL;
     int stepSize;
@@ -1507,24 +1507,24 @@ int main(int argc, char** argv)
         goto exit;
     }
 
-    pid = getTracePid(argc, argv);
+    port = getTracePort(argc, argv);
     trcFile = getTraceFile(argc, argv);
     outputFile = getOutputFile(argc, argv);
     stepSize = getAnalyzeStepSize(argc, argv);
 
-    if (0 == strcmp(argv[1], "start") && pid != -1) {
+    if (0 == strcmp(argv[1], "start") && port != -1) {
         trcFile = getTraceFile(argc, argv);
         uint64_t uBufferSize = getBufferSize(argc, argv);
         char* mask = getCmdOption(argc, argv, "-m", sizeof("-m"));
-        rc = gstrace_start(pid, mask, uBufferSize, trcFile);
-    } else if (0 == strcmp(argv[1], "stop") && pid != -1) {
+        rc = gstrace_start(port, mask, uBufferSize, trcFile);
+    } else if (0 == strcmp(argv[1], "stop") && port != -1) {
         // Stop will disable tracing and delete the shared memory buffer
-        rc = gstrace_stop(pid);
-    } else if (0 == strcmp(argv[1], "config") && pid != -1) {
-        rc = gstrace_config(pid);
-    } else if (0 == strcmp(argv[1], "dump") && pid != -1 && outputFile != NULL) {
+        rc = gstrace_stop(port);
+    } else if (0 == strcmp(argv[1], "config") && port != -1) {
+        rc = gstrace_config(port);
+    } else if (0 == strcmp(argv[1], "dump") && port != -1 && outputFile != NULL) {
         // dump will dump the contents of the trace buffer to a binary file
-        rc = gstrace_dump(pid, outputFile);
+        rc = gstrace_dump(port, outputFile);
     } else if (argc == two_paras && (0 == strcmp(argv[1], "detail")) && trcFile != NULL && outputFile != NULL) {
         // detail will format the binary file to a human readable file
         rc = formatTrcDumpFile(trcFile, outputFile);

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * postinit.c
- *	  postgres initialization utilities
+ *	  openGauss initialization utilities
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -26,6 +26,8 @@
 #include "catalog/gs_client_global_keys.h"
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_encrypted_columns.h"
+#include "catalog/gs_encrypted_proc.h"
+#include "access/ustore/undo/knl_uundoapi.h"
 #include "catalog/catalog.h"
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
@@ -35,8 +37,8 @@
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_hashbucket_fn.h"
 #include "executor/executor.h"
-#include "executor/execStream.h"
-#include "executor/nodeModifyTable.h"
+#include "executor/exec/execStream.h"
+#include "executor/node/nodeModifyTable.h"
 #include "gs_policy/policy_common.h"
 #include "job/job_scheduler.h"
 #include "job/job_worker.h"
@@ -53,17 +55,21 @@
 #include "pgxc/pgxcnode.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/postmaster.h"
+#include "postmaster/bgworker.h"
+#include "postmaster/snapcapturer.h"
+#include "postmaster/rbcleaner.h"
 #include "replication/catchup.h"
 #include "replication/walsender.h"
 #include "storage/buf/bufmgr.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/ipc.h"
+#include "storage/smgr/knl_usync.h"
 #include "storage/lmgr.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/procsignal.h"
 #include "storage/sinvaladt.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "tcop/tcopprot.h"
 #include "threadpool/threadpool.h"
 #include "utils/acl.h"
@@ -100,6 +106,10 @@
 static void AlterPgxcNodePort(void);
 #endif
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 bool ConnAuthMethodCorrect = true;
 Alarm alarmItemTooManyDatabaseConn[1] = {ALM_AI_Unknown, ALM_AS_Normal, 0, 0, 0, 0, {0}, {0}, NULL};
 
@@ -112,7 +122,7 @@ static bool ThereIsAtLeastOneRole(void);
 static void process_startup_options(Port* port, bool am_superuser);
 static void process_pgoptions(Port* port, bool am_superuser);
 static void process_settings(Oid databaseid, Oid roleid);
-static int8 getClientCacheRefreshType();
+static uint8 getClientCacheRefreshType();
 static bool hasTuples(const Oid relOid);
 
 THR_LOCAL LoginUserPtr user_login_hook = nullptr;
@@ -276,37 +286,6 @@ static void PerformAuthentication(Port* port)
 
     /* This should be set already, but let's make sure */
     u_sess->ClientAuthInProgress = true; /* limit visibility of log messages */
-
-    /*
-     * In EXEC_BACKEND case, we didn't inherit the contents of pg_hba.conf
-     * etcetera from the postmaster, and have to load them ourselves.  Note we
-     * are loading them into the startup transaction's memory context, not
-     * t_thrd.mem_cxt.postmaster_mem_cxt, but that shouldn't matter.
-     */
-#ifdef EXEC_BACKEND
-
-    int loadhbaCount = 0;
-    while (!load_hba()) {
-        loadhbaCount++;
-        pg_usleep(200000L);  // slepp 200ms for reload
-        if (loadhbaCount >= 3) {
-            /*
-             * It makes no sense to continue if we fail to load the HBA file,
-             * since there is no way to connect to the database in this case.
-             */
-            ereport(FATAL, (errmsg("could not load pg_hba.conf")));
-        }
-    }
-
-    /*
-     * It is ok to continue if we fail to load the IDENT file, although it
-     * means that we do not exist any authentication mapping between sys_user
-     * and database user. load_ident() already logged the details of error
-     * to the log.
-     */
-    (void)load_ident();
-
-#endif
 
     /*
      * Set up a timeout in case a buggy or malicious client fails to respond
@@ -478,12 +457,11 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
         /*
          * Check that the database is currently allowing connections.
          */
-        if (!IsAutoVacuumWorkerProcess() &&
-            !dbform->datallowconn && 
-            (u_sess->attr.attr_common.upgrade_mode == 0 || !am_superuser))
-            ereport(FATAL,
-                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-                    errmsg("database \"%s\" is not currently accepting connections", name)));
+        if ((!IsAutoVacuumWorkerProcess() && !IsTxnSnapCapturerProcess() && !IsTxnSnapWorkerProcess() && !IsRbCleanerProcess() &&
+            !IsRbWorkerProcess()) &&
+            !dbform->datallowconn && (u_sess->attr.attr_common.upgrade_mode == 0 || !am_superuser))
+            ereport(FATAL, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("database \"%s\" is not currently accepting connections", name)));
 
         /*
          * Check privilege to connect to the database.	(The am_superuser test
@@ -526,7 +504,8 @@ static void CheckMyDatabase(const char* name, bool am_superuser)
 
 static void CheckConnAuthority(const char* name, bool am_superuser)
 {
-    if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess() && !IsJobSchedulerProcess() && !IsJobWorkerProcess()) {
+    if (IsUnderPostmaster && !IsAutoVacuumWorkerProcess() && !IsJobSchedulerProcess() && !IsJobWorkerProcess() &&
+        !IsBgWorkerProcess() && !IsTxnSnapCapturerProcess() && !IsTxnSnapWorkerProcess() && !IsRbCleanerProcess() && !IsRbWorkerProcess()) {
         /* Database Security: Check privilege to connect to the database.
          * Only superuser on the local machine can connect to "template1".*/
         if (IS_PGXC_COORDINATOR && IsConnFromApp() &&
@@ -555,7 +534,7 @@ static void InitCommunication(void)
     if (!IsUnderPostmaster) /* postmaster already did this */
     {
         /*
-         * We're running a postgres bootstrap process or a standalone backend.
+         * We're running a openGauss bootstrap process or a standalone backend.
          * Create private "shmem" and semaphores.
          */
         CreateSharedMemoryAndSemaphores(true, 0);
@@ -569,7 +548,7 @@ static void InitCommunication(void)
  * for ensuring the argv array is large enough.  The maximum possible number
  * of arguments added by this routine is (strlen(optstr) + 1) / 2.
  *
- * Since no current POSTGRES arguments require any quoting characters,
+ * Since no current openGauss arguments require any quoting characters,
  * we can use the simple-minded tactic of assuming each set of space-
  * delimited characters is a separate argv element.
  *
@@ -616,12 +595,14 @@ void BaseInit(void)
 
     /* Do local initialization of file, storage and buffer managers */
     InitFileAccess();
+    InitSync();
     smgrinit();
     InitBufferPoolAccess();
+    undo::UndoLogInit();
 }
 
 /* -------------------------------------
- * Postgres reset username and pgoption.
+ * openGauss reset username and pgoption.
  * -------------------------------------
  */
 void PostgresResetUsernamePgoption(const char* username)
@@ -657,7 +638,7 @@ void PostgresResetUsernamePgoption(const char* username)
 
     /*
      * Perform client authentication if necessary, then figure out our
-     * postgres user ID, and see if we are a superuser.
+     * openGauss user ID, and see if we are a superuser.
      *
      * In standalone mode and in autovacuum worker processes, we use a fixed
      * ID, otherwise we figure it out from the authenticated user name.
@@ -991,14 +972,14 @@ static bool ThereIsAtLeastOneRole(void)
 }
 
 /*
- * when initializing a Postgres-XC cluster node, it executes "CREATE
+ * when initializing a openGauss cluster node, it executes "CREATE
  * NODE nodename WITH (type = 'coordinator');"  to create node for the
  * current node. The port is not given in this statement, so use the
  * default value 5432. That is why we see the current node's port is 5432,
  * no matter we modify the port or not before start up.
  *
  * This function is used to repair the port of current node in pgxc_node
- * catalog. It is called at the initializing process of postgress, in order
+ * catalog. It is called at the initializing process of openGauss, in order
  * to repair the port only once, we use a mutex variable and a static variable.
  */
 #ifdef PGXC
@@ -1110,9 +1091,9 @@ static bool hasTuples(const Oid relOid)
 
     return result;
 }
-static int8 getClientCacheRefreshType ()
+static uint8 getClientCacheRefreshType ()
 {
-    int8 result = 0;
+    uint8 result = 0;
     if (!hasTuples(ClientLogicGlobalSettingsId)) {
         return result;
     } else {
@@ -1121,6 +1102,9 @@ static int8 getClientCacheRefreshType ()
             result = result | 2; /* 2：CEK type */
             if (hasTuples(ClientLogicCachedColumnsId)) {
                 result = result | 4; /* 4: COLUMNS type */
+            }
+            if (hasTuples(ClientLogicProcId)) {
+                result = result | 0x20; /* 0x20: PROCS */
             }
         }
     }
@@ -1151,6 +1135,17 @@ void PostgresInitializer::SetDatabaseAndUser(const char* in_dbname, Oid dboid, c
     m_indbname = in_dbname;
     m_dboid = dboid;
     m_username = username;
+}
+
+void PostgresInitializer::InitFencedSysCache()
+{
+    InitSysCache();
+
+    u_sess->proc_cxt.MyDatabaseTableSpace = DEFAULTTABLESPACE_OID;
+
+    SetFencedMasterDatabase();
+
+    LoadSysCache();
 }
 
 void PostgresInitializer::InitBootstrap()
@@ -1237,6 +1232,38 @@ void PostgresInitializer::InitJobExecuteWorker()
 
     FinishInit();
 }
+
+void PostgresInitializer::InitBgWorker()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    InitUser();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+}
+
+
 
 void PostgresInitializer::InitSnapshotWorker()
 {
@@ -1408,6 +1435,50 @@ void PostgresInitializer::InitCsnminSync()
     return;
 }
 
+void PostgresInitializer::InitUndoLauncher()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    return;
+}
+
+void PostgresInitializer::InitUndoWorker()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+
+    AuditUserLogin();
+}
+
 void PostgresInitializer::InitAutoVacWorker()
 {
     InitThread();
@@ -1436,6 +1507,131 @@ void PostgresInitializer::InitAutoVacWorker()
     InitSettings();
 
     FinishInit();
+}
+
+void PostgresInitializer::InitRbWorker()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+
+    AuditUserLogin();
+}
+
+void PostgresInitializer::InitRbCleaner()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+
+    AuditUserLogin();
+}
+
+void PostgresInitializer::InitTxnSnapCapturer()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+
+    AuditUserLogin();
+}
+
+
+void PostgresInitializer::InitTxnSnapWorker()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserStandalone();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+
+    AuditUserLogin();
 }
 
 void PostgresInitializer::InitCatchupWorker()
@@ -1467,6 +1663,10 @@ void PostgresInitializer::InitBackendWorker()
 
     if (!IS_THREAD_POOL_WORKER) {
         InitSession();
+        /* Registering backend_version */
+        if (!IS_THREAD_POOL_WORKER && t_thrd.proc && contain_backend_version(t_thrd.proc->workingVersionNum)) {
+            register_backend_version(t_thrd.proc->workingVersionNum);
+        }
     } else {
         pgstat_bestart();
         pgstat_report_appname("ThreadPoolWorker");
@@ -1883,9 +2083,8 @@ void PostgresInitializer::InitUser()
      * address. We have freed and reinitialized u_sess->proc_cxt.MyProcPort->user_name
      * in function InitializeSessionUserId, and we need to initialize m_username here.
      */
-    if (u_sess->proc_cxt.IsInnerMaintenanceTools) {
+    if (u_sess->proc_cxt.IsInnerMaintenanceTools)
         m_username = u_sess->proc_cxt.MyProcPort->user_name;
-    }
 #endif
 }
 
@@ -2025,6 +2224,15 @@ void PostgresInitializer::SetDefaultDatabase()
     Assert(!u_sess->proc_cxt.DatabasePath);
     u_sess->proc_cxt.DatabasePath =
         MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
+}
+
+
+void PostgresInitializer::SetFencedMasterDatabase()
+{
+    m_fullpath = GetDatabasePath(u_sess->proc_cxt.MyDatabaseId, u_sess->proc_cxt.MyDatabaseTableSpace);
+    u_sess->utils_cxt.RecentGlobalXmin = FirstNormalTransactionId;
+    u_sess->proc_cxt.DatabasePath = 
+		MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
 }
 
 void PostgresInitializer::SetDatabase()

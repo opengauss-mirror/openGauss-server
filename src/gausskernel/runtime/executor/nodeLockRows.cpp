@@ -22,8 +22,9 @@
 #include "knl/knl_variable.h"
 
 #include "access/xact.h"
+#include "access/ustore/knl_uheap.h"
 #include "executor/executor.h"
-#include "executor/nodeLockRows.h"
+#include "executor/node/nodeLockRows.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -49,6 +50,7 @@ TupleTableSlot* ExecLockRows(LockRowsState* node)
     Relation target_rel = NULL;
     Partition target_part = NULL;
     Relation bucket_rel = NULL;
+
     /*
      * get information from the node
      */
@@ -76,7 +78,10 @@ lnext:
     target_rel = NULL;
     target_part = NULL;
 
+    /* Set flag let executor to acquire RowShareLock */
+    u_sess->exec_cxt.isLockRows = true;
     slot = ExecProcNode(outer_plan);
+    u_sess->exec_cxt.isLockRows = false;
 
     outer_plan->state->es_skip_early_free = orig_early_free;
     outer_plan->state->es_skip_early_deinit_consumer = orig_early_deinit;
@@ -94,18 +99,20 @@ lnext:
         ExecRowMark* erm = aerm->rowmark;
         Datum datum;
         bool isNull = false;
+        bool rowMovement = false;
         HeapTupleData tuple;
+        struct {
+            HeapTupleHeaderData hdr;
+            char data[MaxHeapTupleSize];
+        } tbuf;
+
         Buffer buffer;
         TM_FailureData tmfd;
         LockTupleMode lock_mode;
         TM_Result test;
-        HeapTuple copy_tuple;
+        Tuple copy_tuple;
 
         target_part = NULL;
-
-        /* clear any leftover test tuple for this rel */
-        if (node->lr_epqstate.estate != NULL)
-            EvalPlanQualSetTuple(&node->lr_epqstate, erm->rti, NULL);
 
         /* if child rel, must check whether it produced this row */
         if (erm->rti != erm->prti) {
@@ -141,13 +148,13 @@ lnext:
             Datum part_datum;
 
             part_datum = ExecGetJunkAttribute(slot, aerm->toidAttNo, &isNull);
-
+            rowMovement = erm->relation->rd_rel->relrowmovement;
             tblid = DatumGetObjectId(part_datum);
             /* if it is a partition */
             if (tblid != erm->relation->rd_id) {
                 searchFakeReationForPartitionOid(estate->esfRelations,
                     estate->es_query_cxt, erm->relation, tblid, target_rel,
-                    target_part, RowExclusiveLock);
+                    target_part, RowShareLock);
                 Assert(tblid == target_rel->rd_id);
             }
         } else {
@@ -167,6 +174,7 @@ lnext:
             ereport(
                 ERROR, (errcode(ERRCODE_NULL_JUNK_ATTRIBUTE), errmsg("ctid is NULL when try to lock current row.")));
         tuple.t_self = *((ItemPointer)DatumGetPointer(datum));
+        tuple.t_data = &tbuf.hdr;
 
         bucket_rel = target_rel;
         if (RELATION_OWN_BUCKET(target_rel)) {
@@ -178,15 +186,18 @@ lnext:
         else
             lock_mode = LockTupleShared;
 
+        /* Need to merge the ustore logic with AM logic */
         test = tableam_tuple_lock(bucket_rel, &tuple, &buffer, 
                                       estate->es_output_cid, lock_mode, erm->noWait, &tmfd,
-                                      false, false, false, InvalidSnapshot, NULL, false);
+                                      false, false, false, estate->es_snapshot, NULL, true);
         ReleaseBuffer(buffer);
+
         switch (test) {
             case TM_SelfCreated:
                 ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
                     errmsg("attempted to lock invisible tuple")));
                 break;
+            case TM_SelfUpdated:
             case TM_SelfModified:
                 /* treat it as deleted; do not process */
                 goto lnext;
@@ -211,13 +222,23 @@ lnext:
                 }
 
                 /* updated, so fetch and lock the updated version */
-                copy_tuple = tableam_tuple_lock_updated(estate->es_output_cid, bucket_rel, lock_mode, &tmfd.ctid, tmfd.xmax);
+                copy_tuple = tableam_tuple_lock_updated(estate->es_output_cid, bucket_rel, lock_mode, &tmfd.ctid, tmfd.xmax, estate->es_snapshot, true);
                 if (copy_tuple == NULL) {
                     /* Tuple was deleted, so don't return it */
+                    if (rowMovement) {
+                        /*
+                        * the may be a row movement update action which delete tuple from original
+                        * partition and insert tuple to new partition or we can add lock on the tuple to
+                        * be delete or updated to avoid throw exception
+                        */
+                        ereport(ERROR, (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                            errmsg("partition table update conflict"),
+                            errdetail("disable row movement of table can avoid this conflict")));
+                    }
                     goto lnext;
                 }
                 /* remember the actually locked tuple's TID */
-                tuple.t_self = copy_tuple->t_self;
+                tuple.t_self = ((HeapTuple)copy_tuple)->t_self;
 
                 /*
                  * Need to run a recheck subquery.	Initialize EPQ state if we
@@ -227,7 +248,7 @@ lnext:
                     EvalPlanQualBegin(&node->lr_epqstate, estate);
                     epq_started = true;
                 }
-
+                
                 /* Store target tuple for relation's scan node */
                 EvalPlanQualSetTuple(&node->lr_epqstate, erm->rti, copy_tuple);
 
@@ -242,12 +263,24 @@ lnext:
 
                 /* Tuple was deleted, so don't return it */
                 Assert(ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+
+                if (rowMovement) {
+                    /*
+                     * the may be a row movement update action which delete tuple from original
+                     * partition and insert tuple to new partition or we can add lock on the tuple to
+                     * be delete or updated to avoid throw exception
+                     */
+                    ereport(ERROR, (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                        errmsg("partition table update conflict"),
+                        errdetail("disable row movement of table can avoid this conflict")));
+                }
+
                 goto lnext;
 
             default:
                 ereport(ERROR,
                     (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                        errmsg("unrecognized heap_lock_tuple status: %d when lock a tuple", test)));
+                        errmsg("unrecognized tuple_lock_tuple status: %d when lock a tuple", test)));
         }
 
         /* Remember locked tuple's TID for WHERE CURRENT OF */
@@ -302,7 +335,7 @@ lnext:
                         tblid,
                         target_rel,
                         target_part,
-                        RowExclusiveLock);
+                        RowShareLock);
                 }
             } else {
                 /* for non-partitioned table */
@@ -329,7 +362,7 @@ lnext:
                     (errcode(ERRCODE_FETCH_DATA_FAILED), errmsg("failed to fetch tuple for EvalPlanQual recheck")));
 
             /* successful, copy and store tuple */
-            EvalPlanQualSetTuple(&node->lr_epqstate, erm->rti, (HeapTuple)tableam_tops_copy_tuple(&tuple));
+            EvalPlanQualSetTuple(&node->lr_epqstate, erm->rti, tableam_tops_copy_tuple(&tuple));
             ReleaseBuffer(buffer);
         }
 
@@ -384,10 +417,13 @@ LockRowsState* ExecInitLockRows(LockRows* node, EState* estate, int eflags)
      */
     ExecInitResultTupleSlot(estate, &lrstate->ps);
 
+    /* Set flag let executor to acquire RowShareLock */
+    u_sess->exec_cxt.isLockRows = true;
     /*
      * then initialize outer plan
      */
     outerPlanState(lrstate) = ExecInitNode(outer_plan, estate, eflags);
+    u_sess->exec_cxt.isLockRows = false;
 
     /*
      * LockRows nodes do no projections, so initialize projection info for
@@ -467,4 +503,3 @@ void ExecReScanLockRows(LockRowsState* node)
     if (node->ps.lefttree->chgParam == NULL)
         ExecReScan(node->ps.lefttree);
 }
-

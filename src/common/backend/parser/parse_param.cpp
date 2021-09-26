@@ -57,9 +57,7 @@ static Node* variable_paramref_hook(ParseState* pstate, ParamRef* pref);
 static Node* variable_coerce_param_hook(
     ParseState* pstate, Param* param, Oid targetTypeId, int32 targetTypeMod, int location);
 static bool check_parameter_resolution_walker(Node* node, ParseState* pstate);
-#ifndef ENABLE_MULTIPLE_NODES
-static Node *variable_post_column_ref_hook(ParseState *pstate, ColumnRef *cref, Node *var);
-#endif
+
 
 /*
  * Set up to process a query containing references to fixed parameters.
@@ -78,64 +76,17 @@ void parse_fixed_parameters(ParseState* pstate, Oid* paramTypes, int numParams)
 /*
  * Set up to process a query containing references to variable parameters.
  */
-#ifdef ENABLE_MULTIPLE_NODES
 void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numParams)
-#else
-void parse_variable_parameters(ParseState* pstate, Oid** paramTypes, int* numParams,
-     char** paramTypeNames)
-#endif
 {
     VarParamState* parstate = (VarParamState*)palloc(sizeof(VarParamState));
 
     parstate->paramTypes = paramTypes;
     parstate->numParams = numParams;
-#ifndef ENABLE_MULTIPLE_NODES
-    parstate->paramTypeNames = paramTypeNames;
-    pstate->p_post_columnref_hook = variable_post_column_ref_hook;
-#endif
     pstate->p_ref_hook_state = (void*)parstate;
     pstate->p_paramref_hook = variable_paramref_hook;
     pstate->p_coerce_param_hook = variable_coerce_param_hook;
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
-static Node *variable_post_column_ref_hook(ParseState *pstate, ColumnRef *cref, Node *var)
-{
-    VarParamState *parstate = (VarParamState *) pstate->p_ref_hook_state;
-    /* already resolved */
-    if (var != NULL) {
-        return NULL;
-    }
-
-    /* did not supply parameter names */
-    if (!parstate->paramTypeNames) {
-        return NULL;
-    }
-
-    if (list_length(cref->fields) == 1) {
-        Node *field1 = (Node *) linitial(cref->fields);
-        char *name1;
-        int i;
-        Param *param;
-
-        Assert(IsA(field1, String));
-        name1 = strVal(field1);
-        for (i = 0; i < *parstate->numParams; i++) {
-            if (strcmp(name1, parstate->paramTypeNames[i]) == 0) {
-                param = makeNode(Param);
-                param->paramkind = PARAM_EXTERN;
-                param->paramid = i + 1;
-                param->paramtype = (*parstate->paramTypes)[i];
-                param->paramtypmod = -1;
-                param->paramcollid = InvalidOid;
-                param->location = -1;
-                return (Node *) param;
-            }
-        }
-    }
-    return NULL;
-}
-#endif
 /*
  * Transform a ParamRef using fixed parameter types.
  */

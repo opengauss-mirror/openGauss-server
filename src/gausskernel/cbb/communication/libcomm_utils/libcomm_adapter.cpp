@@ -53,22 +53,24 @@
 #include "storage/ipc.h"
 #include "utils/ps_status.h"
 #include "utils/dynahash.h"
+#include "executor/executor.h"
 
 #include "vecexecutor/vectorbatch.h"
 #include "vecexecutor/vecnodes.h"
-#include "executor/execStream.h"
+#include "executor/exec/execStream.h"
 #include "miscadmin.h"
 #include "gssignal/gs_signal.h"
 #include "pgxc/pgxc.h"
-
+#include "communication/commproxy_interface.h"
 #ifdef ENABLE_UT
 #define static
 #endif
 
+#define INVALID_FD (-1)
 #define MSG_HEAD_TEMP_CHECKSUM 0xCE3BA6CE
-
 #define MSG_HEAD_MAGIC_NUM 0x9D
 #define MSG_HEAD_MAGIC_NUM2 0x3E
+#define MAX_NUMA_NODE 16
 
 // libcomm delay message number
 static int libcomm_delay_no = 0;
@@ -356,7 +358,7 @@ static int libcomm_tcp_recv_noidx(LibcommRecvInfo* recv_info)
 
     // recv msg head finish
     error = mc_tcp_read_block(sock, iov->iov_base, msg_head.msg_len, 0);
-    if (error <= 0) {
+    if (error < 0) {
         libcomm_free_iov_item(&iov_item, IOV_DATA_SIZE);
         return RECV_NET_ERROR;
     }
@@ -704,6 +706,17 @@ void gs_accept_ctrl_conntion(struct sock_id* t_fd_id, struct FCMSG_T* fcmsgr)
         if (rc <= 0 || (ack == 'r')) {
             if (current_mode == STANDBY_MODE) {
                 LIBCOMM_ELOG(WARNING, "(r|flow ctrl)\tCannot accept connection in standby mode.");
+                /*
+                 * When the standby node is promoting,
+                 * if not promoting immediately,
+                 * wait to avoid tons of LIBCOMM log printed.
+                 */
+                DbState db_state = get_local_dbstate();
+                if (db_state != PROMOTING_STATE) {
+                    (void)sleep(1);
+                    LIBCOMM_ELOG(WARNING,
+                        "(r|flow ctrl)\tCannot accept connection because the standby is not promoting immediately.");
+                }
             } else if (current_mode == PENDING_MODE) {
                 // sleep 1 second to wait process starting
                 (void)sleep(1);
@@ -900,10 +913,25 @@ static int libcomm_build_tcp_connection(libcommaddrinfo* libcomm_addrinfo, int n
         mc_tcp_close(sock);
         return -1;
     }
+    g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->socket = sock;
+#ifdef USE_SSL
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+        LibcommPollingStatusType status =
+            LibCommClientSecureOpen(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1], false);
+        if (status != LIBCOMM_POLLING_OK) {
+            LIBCOMM_ELOG(LOG, "comm_data_channel_conn open ssl failed status:%d\n", status);
+        }
+    }
+#endif
 
     fd_id.fd = sock;
     fd_id.id = 0;
     if (gs_update_fd_to_htab_socket_version(&fd_id) < 0) {
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->ssl != NULL) {
+            LibCommClientSSLClose(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]);
+        }
+#endif
         mc_tcp_close(sock);
         LIBCOMM_ELOG(WARNING, "(s|build tcp connection)\tFailed to save socket[%d,%d], close it.", fd_id.fd, fd_id.id);
         return -1;
@@ -926,9 +954,11 @@ static int libcomm_build_tcp_connection(libcommaddrinfo* libcomm_addrinfo, int n
     msg_head.msg_len = msg_len;
     msg_head.version = 0;
 
-    error = mc_tcp_write_block(sock, (char*)&msg_head, sizeof(MsgHead));
+    error = LibCommClientWriteBlock(
+        g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1], (char*)&msg_head, sizeof(MsgHead));
     if (error > 0) {
-        error = mc_tcp_write_block(sock, (char*)&connect_package, msg_len);
+        error = LibCommClientWriteBlock(
+            g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1], (char*)&connect_package, msg_len);
     }
 
     if (error <= 0) {
@@ -940,30 +970,46 @@ static int libcomm_build_tcp_connection(libcommaddrinfo* libcomm_addrinfo, int n
             node_idx,
             g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename,
             sock);
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->ssl != NULL) {
+            LibCommClientSSLClose(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]);
+        }
+#endif
         mc_tcp_close(sock);
         return -1;
     }
 
     if (gs_map_sock_id_to_node_idx(fd_id, node_idx) < 0) {
         LIBCOMM_ELOG(WARNING, "(s|build tcp connection)\tFailed to save sock and sockid.");
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->ssl != NULL) {
+            LibCommClientSSLClose(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]);
+        }
+#endif
         mc_tcp_close(sock);
         return -1;
     }
 
 retry_read:
     struct libcomm_accept_package ack_msg = {0, 0};
-    error = mc_tcp_read_block(sock, &ack_msg, sizeof(ack_msg), 0);
+    error = LibCommClientReadBlock(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1],
+                                    &ack_msg, sizeof(ack_msg), 0);
 
     // if failed, we close the bad one and return -1
     if (error < 0 || ack_msg.result != 1 || ack_msg.type != LIBCOMM_PKG_TYPE_ACCEPT) {
         LIBCOMM_ELOG(WARNING,
             "(s|build tcp connection)\tFailed to recv assoc id from %s:%d "
-            "for node[%d]:%s on socket[%d].",
+            "for node[%d]:%s on socket[%d] error:[%d].",
             libcomm_addrinfo->host,
             libcomm_addrinfo->listen_port,
             node_idx,
             g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename,
-            sock);
+            sock, error);
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]->ssl != NULL) {
+            LibCommClientSSLClose(g_instance.attr.attr_network.comm_data_channel_conn[node_idx - 1]);
+        }
+#endif
         mc_tcp_close(sock);
         return -1;
     } else if (error == 0) {
@@ -1092,7 +1138,17 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
             remote_tcp_port,
             mc_strerror(errno));
     }
-
+    
+    g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->socket = tcp_sock;
+#ifdef USE_SSL
+    if (g_instance.attr.attr_network.comm_enable_SSL) {
+        LibcommPollingStatusType status = 
+            LibCommClientSecureOpen(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1], false);
+        if (status != LIBCOMM_POLLING_OK) {
+            LIBCOMM_ELOG(LOG, "comm_ctrl_channel_conn secure open failed status:%d\n", status);
+        }
+    }
+#endif
     // wait ack from remote node, reject when the state of remote node is incorrect, such as standby mode;
     struct FCMSG_T fcmsgs = {0x0};
     if (IS_PGXC_COORDINATOR) {
@@ -1112,9 +1168,15 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
     securec_check(ss_rc, "\0", "\0");
     fcmsgs.nodename[cpylen] = '\0';
 
-    error = gs_send_ctrl_msg_by_socket(tcp_sock, &fcmsgs, node_idx);
+    error = gs_send_ctrl_msg_by_socket(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1],
+                                        &fcmsgs, node_idx);
     if (error < 0) {
-        mc_tcp_close(tcp_sock);
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->ssl != NULL) {
+            LibCommClientSSLClose(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]);
+        }
+#endif
+        mc_tcp_close(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->socket);
         LIBCOMM_ELOG(WARNING,
             "(s|connect)\tSend ctrl msg failed remote[%s] with addr[%s:%d].",
             remote_nodename,
@@ -1130,6 +1192,11 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
     if (IS_PGXC_COORDINATOR) {
         error = mc_tcp_read_block(tcp_sock, &ack, sizeof(char), 0);
         if (error < 0 || ack != 'o') {
+#ifdef USE_SSL
+            if (g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->ssl != NULL) {
+                LibCommClientSSLClose(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]);
+            }
+#endif
             mc_tcp_close(tcp_sock);
             LIBCOMM_ELOG(WARNING,
                 "(s|connect)\tControl channel connect reject by remote[%s] with addr[%s:%d], remote is not a primary "
@@ -1145,8 +1212,14 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
          * wait the reply of CN, to make sure CN has received ctrl connection request
          * then send ctrl msgs to CN
          */
-        error = mc_tcp_read_block(tcp_sock, &ack, sizeof(char), 0);
+        error = LibCommClientReadBlock(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1],
+                                        &ack, sizeof(char), 0);
         if (error < 0 || ack != 'o') {
+#ifdef USE_SSL
+            if (g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->ssl != NULL) {
+                LibCommClientSSLClose(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]);
+            }
+#endif
             mc_tcp_close(tcp_sock);
             LIBCOMM_ELOG(WARNING,
                 "(s|connect)\tControl channel connect reject by remote[%s] with addr[%s:%d].",
@@ -1161,6 +1234,11 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
     struct sock_id fd_id = {tcp_sock, 0};
     // if we successfully to connect, we should record the socket(fd) and the version(id)
     if (gs_update_fd_to_htab_socket_version(&fd_id) < 0) {
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->ssl != NULL) {
+            LibCommClientSSLClose(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]);
+        }
+#endif
         mc_tcp_close(tcp_sock);
         LIBCOMM_ELOG(WARNING, "(s|connect)\tFailed to malloc for socket.");
         errno = ECOMMTCPMEMALLOC;
@@ -1169,6 +1247,11 @@ int gs_s_build_tcp_ctrl_connection(libcommaddrinfo* libcomm_addrinfo, int node_i
 
     if (gs_map_sock_id_to_node_idx(fd_id, node_idx) < 0) {
         LIBCOMM_ELOG(WARNING, "(s|connect)\tFailed to save sock and sockid.");
+#ifdef USE_SSL
+        if (g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]->ssl != NULL) {
+            LibCommClientSSLClose(g_instance.attr.attr_network.comm_ctrl_channel_conn[node_idx - 1]);
+        }
+#endif
         mc_tcp_close(tcp_sock);
         return -1;
     }
@@ -1316,3 +1399,578 @@ void gs_delay_survey()
     libcomm_delay_no++;
 }
 
+#define EXTERNAL_INTERFACES_API
+int CommEpollCreate(int size)
+{
+    CommSetEpollOption(CommEpollThreadPoolListener);
+    int epfd = comm_epoll_create(size);
+    if (epfd < 0) {
+        LIBCOMM_ELOG(WARNING, "Trace: CommEpollCreate epoll_create failed, detail: epfd[%d]%m", epfd);
+        return epfd;
+    }
+
+    LogicEpollCreate(epfd, size);
+    return epfd;
+}
+
+int CommEpollCtl(int epfd, int op, int fd, struct epoll_event *event)
+{
+    int rc = -1;
+    /* 
+     * If the current connection is libcomm, the upper-layer fd value is -1.
+     * When the current connection is libpq, the upper-layer fd value is a valid value.
+     * The CN DN logical connection function must be compatible with the preceding two modes.
+     */
+    if (fd >= 0) {
+        rc = comm_epoll_ctl(epfd, op, fd, event);
+        if (rc < 0) {
+            LIBCOMM_ELOG(WARNING, "Trace: CommEpollCtl epoll_ctl failed, detail: epfd[%d]%m", epfd);
+            return rc;
+        }
+    } else {
+        CommEpollFd *comm_epfd = GetCommEpollFd(epfd);
+        if (comm_epfd != NULL) {
+            rc = comm_epfd->EpollCtl(op, fd, event);
+        }
+    }
+    return rc;
+}
+
+int CommEpollWait(int epfd, struct epoll_event *event, int maxevents, int timeout)
+{
+    CommEpollFd *comm_epfd = GetCommEpollFd(epfd);
+    if ((!comm_epfd) || (maxevents <= 0)) {
+        LIBCOMM_ELOG(ERROR, "Trace: error, epfd %d not found or maxevents <= 0 (=%d)", epfd, maxevents);
+        errno = (maxevents <= 0) ? EINVAL : EBADF;
+        return -1;
+    }
+
+    int rc = comm_epfd->EpollWait(epfd, event, maxevents, timeout);
+    return rc;
+}
+
+int CommEpollClose(int epfd)
+{
+    if (epfd < 0) {
+        Assert(epfd >= 0);
+        LIBCOMM_ELOG(ERROR, "Trace: CommEpollClose failed, detail epfd[%d]%m.", epfd);
+        return -1;
+    }
+
+    /* deconstruct epfd in user side */
+    CloseLogicEpfd(epfd);
+
+    /* close epfd from OS */
+    close(epfd);
+    return 0;
+}
+
+void InitCommLogicResource()
+{
+    if (g_instance.comm_logic_cxt.comm_fd_collection != NULL) {
+        Assert(0);
+        LIBCOMM_ELOG(ERROR, "Trace: InitCommLogicResource failed, detail comm_fd_collection is null.");
+        return;
+    }
+
+    g_instance.comm_logic_cxt.comm_logic_mem_cxt = AllocSetContextCreate(g_instance.instance_context,
+        "CommLogicMemCxt",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE,
+        SHARED_CONTEXT);
+    g_instance.comm_logic_cxt.comm_fd_collection = New(g_instance.comm_logic_cxt.comm_logic_mem_cxt) FdCollection();
+    g_instance.comm_logic_cxt.comm_fd_collection->Init();
+    return;
+}
+
+void ProcessCommLogicTearDown()
+{
+    if (g_instance.comm_logic_cxt.comm_fd_collection) {
+        g_instance.comm_logic_cxt.comm_fd_collection->DeInit();
+        delete g_instance.comm_logic_cxt.comm_fd_collection;
+
+        MemoryContextDelete(g_instance.comm_logic_cxt.comm_logic_mem_cxt);
+        g_instance.comm_logic_cxt.comm_logic_mem_cxt = NULL;
+        LIBCOMM_ELOG(LOG, "Trace: ProcessCommLogicTearDown success");
+    } else {
+        LIBCOMM_ELOG(WARNING, "Trace: ProcessCommLogicTearDown failed, detail comm_fd_collection is null.");
+    }
+}
+
+#define INNER_INTERFACES_API
+CommEpollFd *GetCommEpollFd(int epfd)
+{
+    if (g_instance.comm_logic_cxt.comm_fd_collection) {
+        return g_instance.comm_logic_cxt.comm_fd_collection->GetCommEpollFd(epfd);
+    }
+    return NULL;
+}
+
+void LogicEpollCreate(int epfd, int size)
+{
+    if (g_instance.comm_logic_cxt.comm_fd_collection) {
+        g_instance.comm_logic_cxt.comm_fd_collection->AddEpfd(epfd, size);
+    }
+}
+
+void CloseLogicEpfd(int epfd)
+{
+    if (g_instance.comm_logic_cxt.comm_fd_collection) {
+        g_instance.comm_logic_cxt.comm_fd_collection->DelEpfd(epfd);
+    }
+}
+
+FdCollection::FdCollection()
+{
+    m_logicfd_nums = 0;
+    m_logicfd_htab = NULL;
+    LIBCOMM_ELOG(LOG, "Trace: FdCollection");
+}
+
+FdCollection::~FdCollection()
+{
+    m_logicfd_nums = 0;
+    m_logicfd_htab = NULL;
+    LIBCOMM_ELOG(LOG, "Trace: ~FdCollection");
+}
+
+void FdCollection::Init()
+{
+    /* Quick Locating CommEpollFd */
+    AutoContextSwitch acontext(g_instance.comm_logic_cxt.comm_logic_mem_cxt);
+
+    /* Init epfd hash table */
+    HASHCTL hinfo;
+    securec_check_c((memset_s(&hinfo, sizeof(hinfo), 0, sizeof(hinfo))), "", "")
+    hinfo.keysize = sizeof(int);
+    hinfo.entrysize = sizeof(CommEpFdInfo);
+    hinfo.hcxt = g_instance.comm_logic_cxt.comm_logic_mem_cxt;
+    m_epfd_htab = hash_create("epfd_htab", MAX_NUMA_NODE, &hinfo, HASH_ELEM | HASH_CONTEXT);
+    pthread_mutex_init(&m_epfd_htab_lock, NULL);
+
+    /* Init logicfd hash table */
+    securec_check_c((memset_s(&hinfo, sizeof(hinfo), 0, sizeof(hinfo))), "", "")
+    hinfo.keysize = sizeof(LogicFd);
+    hinfo.entrysize = sizeof(SessionInfo);
+    hinfo.hcxt = g_instance.comm_logic_cxt.comm_logic_mem_cxt;
+    hinfo.hash = tag_hash;
+    m_logicfd_htab = hash_create(
+        "logicfd_htab", g_instance.attr.attr_network.MaxConnections, &hinfo, HASH_ELEM | HASH_CONTEXT | HASH_FUNCTION);
+    pthread_mutex_init(&m_logicfd_htab_lock, NULL);
+    LIBCOMM_ELOG(LOG, "Trace: FdCollection::Init success");
+}
+
+void FdCollection::DeInit()
+{
+    AutoContextSwitch acontext(g_instance.comm_logic_cxt.comm_logic_mem_cxt);
+    CleanEpfd();
+    hash_destroy(m_epfd_htab);
+
+    CleanLogicFd();
+    hash_destroy(m_logicfd_htab);
+}
+
+inline bool FdCollection::IsEpfdValid(int fd)
+{
+    if (fd < 0) {
+        return false;
+    }
+    return true;
+}
+
+int FdCollection::AddEpfd(int epfd, int size)
+{
+    if (!IsEpfdValid(epfd)) {
+        return -1;
+    }
+
+    CommEpollFd *comm_epfd = GetCommEpollFd(epfd);
+    if (comm_epfd) {
+        Assert(0);
+        LIBCOMM_ELOG(ERROR, "Trace: AddEpfd failed, detail: epfd[%d] is already created.", epfd);
+        return -1;
+    }
+
+    AutoContextSwitch acontext(g_instance.comm_logic_cxt.comm_logic_mem_cxt);
+    comm_epfd = New(g_instance.comm_logic_cxt.comm_logic_mem_cxt) CommEpollFd(epfd, size);
+    if (comm_epfd == NULL) {
+        LIBCOMM_ELOG(ERROR, "Trace: FdCollection::AddEpfd New CommEpollFd failed, detail: epfd[%d]%m", epfd);
+        return -1;
+    }
+
+    comm_epfd->Init(epfd);
+    AutoMutexLock mutex(&m_epfd_htab_lock);
+    mutex.lock();
+    CommEpFdInfo *comm_epfd_info = (CommEpFdInfo*)hash_search(m_epfd_htab, &epfd, HASH_ENTER, NULL);
+    if (comm_epfd_info == NULL) {
+        mutex.unLock();
+        LIBCOMM_ELOG(ERROR, "Trace: AddEpfd HASH_ENTER failed, detail: epfd[%d]%m", epfd);
+        return -1;
+    }
+
+    comm_epfd_info->comm_epfd = comm_epfd;
+    mutex.unLock();
+    LIBCOMM_ELOG(LOG, "Trace: AddEpfd success, detail: epfd[%d]", epfd);
+    return 0;
+}
+
+int FdCollection::DelEpfd(int epfd)
+{
+    CommEpollFd *comm_epfd = NULL;
+    AutoMutexLock mutex(&m_epfd_htab_lock);
+    mutex.lock();
+    CommEpFdInfo *comm_epfd_info = (CommEpFdInfo*)hash_search(m_epfd_htab, &epfd, HASH_FIND, NULL);
+    if (comm_epfd_info) {
+        comm_epfd = comm_epfd_info->comm_epfd;
+        comm_epfd_info->comm_epfd = NULL;
+    } else {
+        LIBCOMM_ELOG(WARNING, "Trace: DelEpfd HASH_FIND failed, detail: epfd[%d] is already deleted.", epfd);
+        mutex.unLock();
+        return 0;
+    }
+
+    if (hash_search(m_epfd_htab, &epfd, HASH_REMOVE, NULL) == NULL) {
+        mutex.unLock();
+        LIBCOMM_ELOG(ERROR, "Trace: DelEpfd HASH_REMOVE failed, Detail epfd[%d]%m", epfd);
+        return -1;
+    }
+
+    mutex.unLock();
+    if (comm_epfd) {
+        comm_epfd->DeInit();
+        delete comm_epfd;
+    }
+    LIBCOMM_ELOG(LOG, "Trace: DelEpfd success, detail: epfd[%d]", epfd);
+    return 0;
+}
+
+void FdCollection::CleanEpfd()
+{
+    HASH_SEQ_STATUS hash_seq_status;
+    CommEpFdInfo *entry = NULL;
+    int clear_cnt = 0;
+
+    AutoMutexLock mutex(&m_epfd_htab_lock);
+    mutex.lock();
+    hash_seq_init(&hash_seq_status, m_epfd_htab);
+    while ((entry = (CommEpFdInfo *)hash_seq_search(&hash_seq_status))) {
+        if (entry->comm_epfd) {
+            delete entry->comm_epfd;
+            entry->comm_epfd = NULL;
+        } else {
+            LIBCOMM_ELOG(WARNING, "Trace: CleanEpfd failed, detail: epfd[%d] is already deleted", entry->epfd);
+        }
+
+        if (hash_search(m_logicfd_htab, &entry->epfd, HASH_REMOVE, NULL) == NULL) {
+            LIBCOMM_ELOG(ERROR, "Trace: CleanEpfd HASH_REMOVE failed, detail: epfd[%d]", entry->epfd);
+        }
+        clear_cnt++;
+    }
+    mutex.unLock();
+
+    LIBCOMM_ELOG(LOG, "Trace: CleanEpfd success, Detail clear_cnt[%d]", clear_cnt);
+    return;
+}
+
+inline CommEpollFd* FdCollection::GetCommEpollFd(int epfd)
+{
+    if (!IsEpfdValid(epfd)) {
+        return NULL;
+    }
+
+    AutoMutexLock mutex(&m_epfd_htab_lock);
+    mutex.lock();
+    CommEpFdInfo *comm_epfd_info = (CommEpFdInfo*)hash_search(m_epfd_htab, &epfd, HASH_FIND, NULL);
+    mutex.unLock();
+    return (comm_epfd_info ? comm_epfd_info->comm_epfd : NULL);
+}
+
+int FdCollection::AddLogicFd(CommEpollFd *comm_epfd, void *session_ptr)
+{
+    knl_session_context *session = (knl_session_context*)session_ptr;
+    SessionInfo *session_info = NULL;
+    LogicFd logic_fd = {session->proc_cxt.MyProcPort->gs_sock.idx, session->proc_cxt.MyProcPort->gs_sock.sid};
+
+    AutoMutexLock mutex(&m_logicfd_htab_lock);
+    mutex.lock();
+    session_info = (SessionInfo*)hash_search(m_logicfd_htab, &logic_fd, HASH_FIND, NULL);
+    if (session_info != NULL) {
+        LIBCOMM_ELOG(WARNING,
+            "Trace: AddLogicFd HASH_FIND session_info is not null, detail: epfd[%d], idx[%d], sid[%d], "
+            "in_hash: {epfd[%d], idx[%d], streamid[%d]}",
+            comm_epfd->m_epfd, logic_fd.idx, logic_fd.streamid,
+            session_info->comm_epfd_ptr->m_epfd,
+            session_info->commfd.logic_fd.idx,
+            session_info->commfd.logic_fd.sid);
+        mutex.unLock();
+        DelLogicFd(&logic_fd);
+        mutex.lock();
+    }
+
+    AutoContextSwitch acontext(g_instance.comm_logic_cxt.comm_logic_mem_cxt);
+    session_info = (SessionInfo*)hash_search(m_logicfd_htab, &logic_fd, HASH_ENTER, NULL);
+    if (session_info == NULL) {
+        mutex.unLock();
+        LIBCOMM_ELOG(ERROR,
+            "Trace: AddLogicFd HASH_ENTER failed, detail: idx[%d], sid[%d]%m", logic_fd.idx, logic_fd.streamid);
+        return -1;
+    }
+
+    session_info->session_ptr = session;
+    session_info->comm_epfd_ptr = comm_epfd;
+    session_info->commfd.logic_fd = session->proc_cxt.MyProcPort->gs_sock;
+    session_info->commfd.fd = g_instance.comm_cxt.g_receivers->receiver_conn[logic_fd.idx].socket;
+    session_info->is_idle = (int)true;
+    session_info->wakeup_cnt = 0;
+    session_info->handle_wakeup_cnt = 0;
+    m_logicfd_nums++;
+    mutex.unLock();
+    session->session_info_ptr = session_info;
+    LIBCOMM_ELOG(LOG,
+        "Trace: AddLogicFd success, detail: epfd[%d], idx[%d], sid[%d]"
+        "in_hash:{epfd[%d], idx[%d], streamid[%d]}, ",
+        comm_epfd->m_epfd, logic_fd.idx, logic_fd.streamid,
+        session_info->comm_epfd_ptr->m_epfd,
+        session_info->commfd.logic_fd.idx,
+        session_info->commfd.logic_fd.sid);
+
+    WakeupSession(session_info, false, __FUNCTION__);
+    return 0;
+}
+
+int FdCollection::DelLogicFd(const LogicFd *logic_fd)
+{
+    AutoMutexLock mutex(&m_logicfd_htab_lock);
+    mutex.lock();
+    SessionInfo *session_info = (SessionInfo*)hash_search(m_logicfd_htab, logic_fd, HASH_FIND, NULL);
+    if (session_info == NULL) {
+        mutex.unLock();
+        LIBCOMM_ELOG(WARNING,
+            "Trace: DelLogicFd HASH_FIND failed, detail: idx[%d], sid[%d] is already deleted.",
+            logic_fd->idx, logic_fd->streamid);
+        return 0;
+    }
+
+    int epfd = session_info->comm_epfd_ptr->m_epfd;
+    if (hash_search(m_logicfd_htab, logic_fd, HASH_REMOVE, NULL) == NULL) {
+        mutex.unLock();
+        LIBCOMM_ELOG(ERROR, "Trace: DelLogicFd HASH_REMOVE failed, Detail epfd[%d], idx[%d], sid[%d]%m",
+            epfd, logic_fd->idx, logic_fd->streamid);
+        return -1;
+    }
+
+    m_logicfd_nums--;
+    mutex.unLock();
+    LIBCOMM_ELOG(LOG, "Trace: DelLogicFd HASH_REMOVE success, Detail epfd[%d], idx[%d], sid[%d]",
+        epfd, logic_fd->idx, logic_fd->streamid);
+    return 0;
+}
+
+void FdCollection::CleanLogicFd()
+{
+    HASH_SEQ_STATUS hash_seq_status;
+    SessionInfo *entry = NULL;
+    int clear_cnt = 0;
+
+    AutoMutexLock mutex(&m_logicfd_htab_lock);
+    mutex.lock();
+    hash_seq_init(&hash_seq_status, m_logicfd_htab);
+    while ((entry = (SessionInfo *)hash_seq_search(&hash_seq_status))) {
+        hash_search(m_logicfd_htab, &entry->logic_fd, HASH_REMOVE, NULL);
+        clear_cnt++;
+    }
+    mutex.unLock();
+
+    LIBCOMM_ELOG(LOG, "Trace: CleanLogicFd success, Detail clear_cnt[%d]", clear_cnt);
+    return;
+}
+
+SessionInfo* FdCollection::GetSessionInfo(const LogicFd *logic_fd)
+{
+    AutoMutexLock mutex(&m_logicfd_htab_lock);
+    mutex.lock();
+    SessionInfo *session_info = (SessionInfo*)hash_search(m_logicfd_htab, logic_fd, HASH_FIND, NULL);
+    mutex.unLock();
+    return session_info;
+}
+
+CommEpollFd::CommEpollFd(int epfd, int size) : m_max_session_size(size)
+{
+    LIBCOMM_ELOG(LOG, "Trace: CommEpollFd init, Detail epfd[%d], size[%d].", epfd, size);
+}
+
+CommEpollFd::~CommEpollFd()
+{
+    LIBCOMM_ELOG(LOG, "Trace: ~CommEpollFd, Detail epfd[%d].", m_epfd);
+}
+
+void CommEpollFd::Init(int epfd)
+{
+    Assert(g_instance.comm_logic_cxt.comm_fd_collection);
+    m_comm_fd_collection = g_instance.comm_logic_cxt.comm_fd_collection;
+    AutoContextSwitch acontext(g_instance.comm_logic_cxt.comm_logic_mem_cxt);
+    m_ready_events_queue.initialize(m_max_session_size);
+    SetWakeupEpfd(epfd);
+    LIBCOMM_ELOG(LOG, "Trace: CommEpollFd init, Detail epfd[%d].", m_epfd);
+    m_ready_events = (struct epoll_event *)palloc0(sizeof(struct epoll_event) * m_max_session_size);
+}
+
+void CommEpollFd::DeInit()
+{
+    pfree_ext(m_ready_events);
+}
+
+int CommEpollFd::EpollCtl(int op, int fd, const struct epoll_event *event)
+{
+    int rc = 0;
+
+    /* Input parameter validation */
+    if (event == NULL) {
+        Assert(event);
+        LIBCOMM_ELOG(ERROR, "Trace: CommEpollCtl op[%d]: event is null", op);
+        return -1;
+    }
+    if (op != EPOLL_CTL_ADD && op != EPOLL_CTL_MOD && op != EPOLL_CTL_DEL) {
+        Assert(0);
+        LIBCOMM_ELOG(ERROR, "Trace: CommEpollCtl: Incorrect operator op[%d] ", op);
+        return -1;
+    }
+
+    knl_session_context *session = GetSessionBaseOnEvent(event);
+    int idx = session->proc_cxt.MyProcPort->gs_sock.idx;
+    int streamid = session->proc_cxt.MyProcPort->gs_sock.sid;
+    if (idx <= 0 || streamid <= 0) {
+        LIBCOMM_ELOG(WARNING, "Trace: CommEpollFd::EpollCtl invalid params, Detail idx[%d], streamid[%d]",
+            idx, streamid);
+        return -1;
+    }
+
+    if (op == EPOLL_CTL_ADD) {
+        rc = RegisterNewSession(session);
+    } else if (op == EPOLL_CTL_MOD) {
+        rc = ResetSession(session);
+    } else if (op == EPOLL_CTL_DEL) {
+        rc = UnRegisterSession(session);
+    }
+
+    if (rc == 0) {
+        LIBCOMM_ELOG(LOG, "Trace: CommEpollFd::EpollCtl op[%d] success, Detail idx[%d], streamid[%d]",
+            op, idx, streamid);
+    } else {
+        LIBCOMM_ELOG(ERROR, "Trace: CommEpollFd::EpollCtl op[%d] failed, Detail idx[%d], streamid[%d]",
+            op, idx, streamid);
+    }
+    return 0;
+}
+
+int CommEpollFd::RegisterNewSession(knl_session_context* session)
+{
+    return m_comm_fd_collection->AddLogicFd(this, session);
+}
+
+int CommEpollFd::ResetSession(const knl_session_context* session)
+{
+    SessionInfo *session_info = session->session_info_ptr;
+    if (gs_compare_and_swap_32(&session_info->is_idle, (int)false, (int)true) == false) {
+        LIBCOMM_ELOG(WARNING, "Trace: ResetSession, invalid status "
+            "detail: idx[%d], streamid[%d], is_idle[false]",
+            session_info->commfd.logic_fd.idx,
+            session_info->commfd.logic_fd.sid);
+        return 0;
+    }
+
+    if (CheckError(session_info)) {
+        WakeupSession(session_info, true, __FUNCTION__);
+    } else if (CheckEvent(session_info)) {
+        WakeupSession(session_info, false, __FUNCTION__);
+    }
+    return 0;
+}
+
+int CommEpollFd::UnRegisterSession(const knl_session_context* session)
+{
+    Assert(session);
+    LogicFd logic_fd = {session->proc_cxt.MyProcPort->gs_sock.idx, session->proc_cxt.MyProcPort->gs_sock.sid};
+    return m_comm_fd_collection->DelLogicFd(&logic_fd);
+}
+
+void CommEpollFd::PushReadyEvent(SessionInfo *session_info, bool err_occurs)
+{
+    if (session_info == NULL) {
+        LIBCOMM_ELOG(ERROR, "Trace: PushReadyEvent: session_info is null, epfd[%d]", m_epfd);
+        return;
+    }
+
+    session_info->err_occurs = err_occurs;
+    session_info->wakeup_cnt++;
+    m_ready_events_queue.push(session_info);
+}
+
+const bool CommEpollFd::CheckError(const SessionInfo *session_info)
+{
+    struct c_mailbox* cmailbox = &(C_MAILBOX(session_info->commfd.logic_fd.idx, session_info->commfd.logic_fd.sid));
+    return ((cmailbox != NULL && cmailbox->state == MAIL_CLOSED) ||
+        g_instance.comm_cxt.g_receivers->receiver_conn[session_info->commfd.logic_fd.idx].socket == -1 ||
+        (cmailbox != NULL && session_info->commfd.logic_fd.ver != cmailbox->local_version));
+}
+
+const bool CommEpollFd::CheckEvent(const SessionInfo *session_info)
+{
+    struct c_mailbox* cmailbox = &(C_MAILBOX(session_info->commfd.logic_fd.idx, session_info->commfd.logic_fd.sid));
+    return (cmailbox != NULL && cmailbox->buff_q->is_empty == 0);
+}
+
+int CommEpollFd::EpollWait(int epfd, epoll_event *events, int maxevents, int timeout)
+{
+    int i, ready_fds, fd, rc;
+    m_events = events;
+    m_maxevents = maxevents;
+    m_timeout = timeout;
+
+    /* Reset the result set of ready events. */
+    Assert(epfd == m_epfd);
+    m_all_ready_fds = 0;
+
+    do {
+        rc = GetReadyEvents();
+        if (rc > 0) {
+            return rc;
+        }
+
+        ready_fds = comm_epoll_wait(m_epfd, m_ready_events, m_maxevents, timeout);
+        if (ready_fds < 0) {
+            LIBCOMM_ELOG(WARNING, "Trace: EpollWait epfd[%d], ready_fds[%d]", m_epfd, ready_fds);
+            return ready_fds;
+        }
+
+        for (i = 0; i < ready_fds; i++) {
+            fd = m_ready_events[i].data.fd;
+
+            if (IsWakeupFd(fd)) {
+                rc = GetReadyEvents();
+                RemoveWakeupFd();
+            } else {
+                m_events[m_all_ready_fds++] = m_ready_events[i];
+            }
+        }
+    } while (m_all_ready_fds == 0);
+    return m_all_ready_fds;
+}
+
+int CommEpollFd::GetReadyEvents()
+{
+    SessionInfo *item = NULL;
+    while (m_ready_events_queue.size()) {
+        item = m_ready_events_queue.pop(item);
+        if (item == NULL) {
+            continue;
+        }
+
+        m_events[m_all_ready_fds].events = (item->err_occurs) ? EPOLLERR : EPOLLIN;
+        m_events[m_all_ready_fds].data.ptr = item->session_ptr;
+        item->handle_wakeup_cnt++;
+        m_all_ready_fds++;
+    }
+    return m_all_ready_fds;
+}

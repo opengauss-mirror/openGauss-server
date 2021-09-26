@@ -14,7 +14,7 @@
 #
 # ----------------------------------------------------------------------------
 #
-# Postgres-XC CM common makefile
+# openGauss CM common makefile
 #
 # Copyright(c) 2010-2012 Postgres-XC Development Group
 #
@@ -33,7 +33,7 @@ else
   override CPPFLAGS :=  -I$(top_srcdir)/src/include/libcomm -I../ -I./ $(CPPFLAGS)
 endif
 
-SUBDIRS = libcomm_core libcomm_utils
+SUBDIRS = libcomm_core libcomm_utils comm_proxy
 
 ifneq "$(MAKECMDGOALS)" "clean"
   ifneq "$(MAKECMDGOALS)" "distclean"

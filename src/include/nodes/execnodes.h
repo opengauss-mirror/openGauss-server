@@ -97,6 +97,7 @@ typedef struct IndexInfo {
     bool ii_ReadyForInserts;
     bool ii_Concurrent;
     bool ii_BrokenHotChain;
+    int  ii_ParallelWorkers;
     short ii_PgClassAttrId;
     UtilityDesc ii_desc; /* meminfo for index create */
 } IndexInfo;
@@ -566,6 +567,8 @@ typedef struct EState {
 
     List* es_rowMarks; /* List of ExecRowMarks */
 
+    List *es_modifiedRowHash; /* List of prevHash of modified rows */
+
     uint64 es_processed; /* # of tuples processed */
 
     uint64 deleteLimitCount; /* delete Limit */
@@ -602,7 +605,8 @@ typedef struct EState {
      * remember if the tuple has been returned already.  Arrays are of size
      * list_length(es_range_table) and are indexed by scan node scanrelid - 1.
      */
-    HeapTuple* es_epqTuple; /* array of EPQ substitute tuples */
+    Tuple* es_epqTuple; /* array of EPQ substitute tuples */
+    TupleTableSlot** es_epqTupleSlot;
     bool* es_epqTupleSet;   /* true if EPQ tuple is provided */
     bool* es_epqScanDone;   /* true if EPQ tuple has been fetched */
 
@@ -655,6 +659,16 @@ typedef struct ExecRowMark {
     ItemPointerData curCtid; /* ctid of currently locked tuple, if any */
     int numAttrs;            /* number of attributes in subplan */
 } ExecRowMark;
+
+#define PREV_HASH_LEN 36
+/*
+ * ExecModifiedRowHash -
+ *	   store previous hash of modified row.
+ *
+ */
+typedef struct ExecModifiedRowHash {
+    char hash[PREV_HASH_LEN]; /* value of previous hash */
+} ExecModifiedRowHash;
 
 /*
  * ExecAuxRowMark -
@@ -1142,6 +1156,7 @@ typedef struct HashFilterState {
     List* arg;       /* input expression */
     uint2* nodelist; /* Node indices where data is located */
     uint2* bucketMap;
+    int    bucketCnt;
 } HashFilterState;
 
 /* ----------------
@@ -1247,6 +1262,7 @@ typedef struct PlanState {
     List* plan_issues;
     bool recursive_reset; /* node already reset? */
     bool qual_is_inited;
+
     bool do_not_reset_rownum;
     int64 ps_rownum;    /* store current rownum */
 } PlanState;
@@ -1290,6 +1306,10 @@ typedef struct EPQState {
     Plan* plan;               /* plan tree to be executed */
     List* arowMarks;          /* ExecAuxRowMarks (non-locking only) */
     int epqParam;             /* ID of Param to force scan node re-eval */
+    /*
+     * We need its memory context to palloc es_epqTupleSlot if needed
+     */
+    EState                  *parentestate;
 } EPQState;
 
 /* ----------------
@@ -1562,9 +1582,6 @@ typedef struct ScanState {
     bool isSampleScan;               /* identify is it table sample scan or not. */
     SampleScanParams sampleScanInfo; /* TABLESAMPLE params include type/seed/repeatable. */
     ExecScanAccessMtd ScanNextMtd;
-
-    VectorBatch* m_pScanBatch;     // batch to work on
-    VectorBatch* m_pCurrentBatch;  // output batch
 } ScanState;
 
 /*
@@ -1625,7 +1642,6 @@ typedef struct IndexScanState {
     List* iss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation iss_CurrentIndexPartition;
-    int part_id;
 } IndexScanState;
 
 /* ----------------
@@ -1664,7 +1680,6 @@ typedef struct IndexOnlyScanState {
     List* ioss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation ioss_CurrentIndexPartition;
-    int part_id;
 } IndexOnlyScanState;
 
 /* ----------------
@@ -1699,7 +1714,6 @@ typedef struct BitmapIndexScanState {
     List* biss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation biss_CurrentIndexPartition;
-    int part_id;
 } BitmapIndexScanState;
 
 /* ----------------
@@ -1720,11 +1734,13 @@ typedef struct BitmapHeapScanState {
     TIDBitmap* tbm;
     TBMIterator* tbmiterator;
     TBMIterateResult* tbmres;
+    long exact_pages;
+    long lossy_pages;
     TBMIterator* prefetch_iterator;
     int prefetch_pages;
     int prefetch_target;
     GPIScanDesc gpi_scan;  /* global partition index scan use information */
-    int part_id;
+    CBIScanDesc cbi_scan;  /* for crossbucket index scan */
 } BitmapHeapScanState;
 
 /* ----------------
@@ -1745,7 +1761,10 @@ typedef struct TidScanState {
     int tss_TidPtr;
     int tss_MarkTidPtr;
     ItemPointerData* tss_TidList;
-    HeapTupleData tss_htup;
+    union {
+        HeapTupleData tss_htup;
+        UHeapTupleData tss_uhtup;
+    };
     /* put decompressed tuple data into tss_ctbuf_hdr be careful  , when malloc memory  should give extra mem for
      *xs_ctbuf_hdr. t_bits which is varlength arr  */
     HeapTupleHeaderData tss_ctbuf_hdr;
@@ -2483,8 +2502,6 @@ inline bool BitmapNodeNeedSwitchPartRel(BitmapHeapScanState* node)
 {
     return tbm_is_global(node->tbm) && GPIScanCheckPartOid(node->gpi_scan, node->tbmres->partitionOid);
 }
-
-extern RangeScanInRedis reset_scan_qual(Relation currHeapRel, ScanState *node);
 
 /*
  * DB4AI GD node: used for train models using Gradient Descent

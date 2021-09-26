@@ -1108,10 +1108,10 @@ sigset_t gs_signal_block_sigusr2(void)
     sigfillset(&intMask);
     sigdelset(&intMask, SIGPROF);
     (void)sigdelset(&intMask, SIGSEGV);
+    (void)sigdelset(&intMask, SIGBUS);
     (void)sigdelset(&intMask, SIGFPE);
     (void)sigdelset(&intMask, SIGILL);
     (void)sigdelset(&intMask, SIGSYS);
-    (void)sigdelset(&intMask, SIGBUS);
 
     pthread_sigmask(SIG_SETMASK, &intMask, &oldMask);
 

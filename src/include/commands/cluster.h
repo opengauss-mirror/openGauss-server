@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * cluster.h
- *	  header file for postgres cluster command stuff
+ *	  header file for openGauss cluster command stuff
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
@@ -30,6 +30,8 @@ extern Oid makePartitionNewHeap(Relation partitionedTableRel, TupleDesc partTabH
     Oid oldPartOid, Oid partToastOid, Oid NewTableSpace, bool isCStore = false);
 extern double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation NewHeap, TransactionId OldestXmin,
     TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem* memUsage);
+extern double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHeap, TransactionId oldestXmin,
+    TransactionId freezeXid, bool verbose, bool useSort, const AdaptMem* memUsage);
 extern TransactionId getPartitionRelfrozenxid(Relation ordTableRel);
 extern TransactionId getRelationRelfrozenxid(Relation ordTableRel);
 extern void  setRelationRelfrozenxid(Oid relid, TransactionId frozenXid);
@@ -42,6 +44,11 @@ extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_cata
 
 extern void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int freeze_table_age);
 extern void GpiVacuumFullMainPartiton(Oid parentOid);
+extern void CBIVacuumFullMainPartiton(Oid parentOid);
 extern void updateRelationName(Oid relOid, bool isPartition, const char* relNewName);
+extern List* GetIndexPartitionListByOrder(Relation indexRelation, LOCKMODE lockmode);
+extern bool IsNeedToTransfer(Relation rel1, Relation rel2);
+extern void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, bool swapBucket, bool swapIndex);
+extern int IndexGetindisusable(Oid indexOid);
 
 #endif /* CLUSTER_H */

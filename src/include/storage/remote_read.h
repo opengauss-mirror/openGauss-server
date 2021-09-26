@@ -58,11 +58,7 @@ extern void GetRemoteReadAddress(char* first_address, char* second_address, size
 
 extern void GetIPAndPort(char* address, char* ip, char* port, size_t len);
 
-extern void GetHostnamebyIP(const char* ip, char* hostname, size_t hostnameLen);
-
 extern bool CanRemoteRead();
-
-extern bool IsRemoteReadModeAuth();
 
 extern bool IsRemoteReadModeOn();
 extern int SetRemoteReadModeOffAndGetOldMode();

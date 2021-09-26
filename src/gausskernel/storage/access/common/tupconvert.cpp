@@ -20,9 +20,12 @@
  * -------------------------------------------------------------------------
  */
 #include "postgres.h"
+#include "client_logic/client_logic_proc.h"
+#include "utils/syscache.h"
 #include "knl/knl_variable.h"
 
 #include "access/tableam.h"
+#include "catalog/pg_type.h"
 #include "access/tupconvert.h"
 #include "utils/builtins.h"
 
@@ -61,7 +64,7 @@
  * outdesc as the "expected" rowtype.  This is okay for current uses but
  * might need generalization in future.
  */
-TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outdesc, const char *msg)
+TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outdesc, const char *msg, const Oid func_id)
 {
     TupleConversionMap *map = NULL;
     AttrNumber *attrMap = NULL;
@@ -71,7 +74,9 @@ TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
     int i;
     int j;
     bool same = false;
-
+    Datum *all_types_orig = NULL; /* original data types for gs_encrypted_proc */
+    Datum *all_types = NULL; /* will be used for replace data types in pg_proc */
+    bool gs_encrypted_proc_was_created = false;
     /* Verify compatibility and prepare attribute-number map */
     n = outdesc->natts;
     attrMap = (AttrNumber *)palloc0(n * sizeof(AttrNumber));
@@ -93,8 +98,26 @@ TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
             if (att->attisdropped)
                 continue;
             nincols++;
-            /* Found matching column, check type */
-            if (atttypid != att->atttypid || (atttypmod != att->atttypmod && atttypmod >= 0))
+            if (gs_encrypted_proc_was_created && !IsClientLogicType(att->atttypid)) {
+                all_types_orig[j] = -1;
+                all_types[j] = ObjectIdGetDatum(atttypid);
+            }
+            if (IsClientLogicType(att->atttypid)) {
+                if (!IsClientLogicType(atttypid)) {
+                    /* if we found on call phase that the in desc is client logic but out desc not */
+                    if (!gs_encrypted_proc_was_created) {
+                        all_types_orig = (Datum*)palloc(n * sizeof(Datum));
+                        all_types = (Datum*)palloc(n * sizeof(Datum));
+                        for (int k = 0; k < j; k++) {
+                            all_types_orig[k] = -1;
+                            all_types[k] = ObjectIdGetDatum(outdesc->attrs[k]->atttypid);
+                        }
+                        gs_encrypted_proc_was_created = true;
+                    }
+                    all_types_orig[j] = ObjectIdGetDatum(atttypid);
+                    all_types[j] = ObjectIdGetDatum(att->atttypid);
+                }
+            } else if (atttypid != att->atttypid || (atttypmod != att->atttypmod && atttypmod >= 0))
                 ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg_internal("%s", _(msg)),
                                 errdetail("Returned type %s does not match expected type %s in column %d.",
                                           format_type_with_typemod(att->atttypid, att->atttypmod),
@@ -148,6 +171,12 @@ TupleConversionMap *convert_tuples_by_position(TupleDesc indesc, TupleDesc outde
     } else
         same = false;
 
+    if (gs_encrypted_proc_was_created) {
+        add_allargtypes_orig(func_id, all_types_orig, all_types, n);
+        ereport(WARNING, (errcode(ERRCODE_CL_FUNCTION_UPDATE), errmsg_internal("%s", _(msg)),
+            errdetail("it happend during to client logic updating catalog table. if the results looks wrong please try "
+                      "once again")));
+    }
     if (same) {
         /* Runtime conversion is not needed */
         pfree(attrMap);

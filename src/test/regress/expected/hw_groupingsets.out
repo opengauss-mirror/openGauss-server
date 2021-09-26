@@ -2449,12 +2449,16 @@ explain (verbose on, costs off) select a, b, b from vec_t1 group by rollup(1, 2)
 
 analyze vec_t1;
 explain (verbose on, costs off) select a, grouping(a) from vec_t1 where 0 = 1 group by a;
-         QUERY PLAN         
-----------------------------
- Result
-   Output: a, NULL::integer
-   One-Time Filter: false
-(3 rows)
+                    QUERY PLAN                     
+---------------------------------------------------
+ Row Adapter
+   Output: a, (NULL::integer)
+   ->  Vector Result
+         Output: a, NULL::integer
+         One-Time Filter: false
+         ->  CStore Scan on hw_groupingsets.vec_t1
+               Output: a
+(7 rows)
 
 -- test AP func with const target list used in setop branch
 -- hashagg subplan
@@ -2528,8 +2532,8 @@ select 1 from vec_t1 minus (SELECT 1 Column_006 where 1=0 GROUP BY cube(Column_0
 -- stream added plan 
 explain (costs off, verbose on)
 select 1,1 from vec_t1 union SELECT 2 c1, 2 c2 from vec_t1 where 1=0 GROUP BY cube(c1, c2);
-                       QUERY PLAN                        
----------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Row Adapter
    Output: (1), (1)
    ->  Vector Sonic Hash Aggregate
@@ -2540,16 +2544,16 @@ select 1,1 from vec_t1 union SELECT 2 c1, 2 c2 from vec_t1 where 1=0 GROUP BY cu
                      Output: 1, 1
                ->  Vector Sort Aggregate
                      Output: (2), (2)
-                     Group By Key: (2), (2)
-                     Group By Key: (2)
+                     Group By Key: 2, 2
+                     Group By Key: 2
                      Group By Key: ()
-                     Sort Key: (2)
-                       Group By Key: (2)
-                     ->  Vector Adapter
-                           Output: (2), (2)
-                           ->  Result
-                                 Output: 2, 2
-                                 One-Time Filter: false
+                     Sort Key: 2
+                       Group By Key: 2
+                     ->  Vector Result
+                           Output: 2, 2
+                           One-Time Filter: false
+                           ->  CStore Scan on hw_groupingsets.vec_t1
+                                 Output: 'Dummy'
 (20 rows)
 
 select 1,1 from vec_t1 union SELECT 2 c1, 2 c2 from vec_t1 where 1=0 GROUP BY cube(c1, c2) order by 1;
@@ -2585,11 +2589,11 @@ select 1,1 from vec_t1 union SELECT 2 c1, count(distinct(b)) from vec_t1 where 1
                            ->  Vector Sort
                                  Output: (2), hw_groupingsets.vec_t1.a, hw_groupingsets.vec_t1.b
                                  Sort Key: hw_groupingsets.vec_t1.a, (2)
-                                 ->  Vector Adapter
-                                       Output: (2), hw_groupingsets.vec_t1.a, hw_groupingsets.vec_t1.b
-                                       ->  Result
-                                             Output: 2, hw_groupingsets.vec_t1.a, hw_groupingsets.vec_t1.b
-                                             One-Time Filter: false
+                                 ->  Vector Result
+                                       Output: 2, hw_groupingsets.vec_t1.a, hw_groupingsets.vec_t1.b
+                                       One-Time Filter: false
+                                       ->  CStore Scan on hw_groupingsets.vec_t1
+                                             Output: hw_groupingsets.vec_t1.a, hw_groupingsets.vec_t1.b
 (27 rows)
 
 select 1,1 from vec_t1 union SELECT 2 c1, count(distinct(b)) from vec_t1 where 1=0 GROUP BY cube(a, c1) order by 1;
@@ -2602,8 +2606,8 @@ select 1,1 from vec_t1 union SELECT 2 c1, count(distinct(b)) from vec_t1 where 1
 -- const column in AP func and non-AP func
 explain (costs off, verbose on)
 select 1,1,1 from vec_t1 union SELECT 2 c1, 2 c2, 4 c3 from vec_t1 where 1=0 GROUP BY cube(c1, c2);
-                       QUERY PLAN                        
----------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Row Adapter
    Output: (1), (1), (1)
    ->  Vector Sonic Hash Aggregate
@@ -2614,16 +2618,16 @@ select 1,1,1 from vec_t1 union SELECT 2 c1, 2 c2, 4 c3 from vec_t1 where 1=0 GRO
                      Output: 1, 1, 1
                ->  Vector Sort Aggregate
                      Output: (2), (2), 4
-                     Group By Key: (2), (2)
-                     Group By Key: (2)
+                     Group By Key: 2, 2
+                     Group By Key: 2
                      Group By Key: ()
-                     Sort Key: (2)
-                       Group By Key: (2)
-                     ->  Vector Adapter
-                           Output: (2), (2)
-                           ->  Result
-                                 Output: 2, 2
-                                 One-Time Filter: false
+                     Sort Key: 2
+                       Group By Key: 2
+                     ->  Vector Result
+                           Output: 2, 2
+                           One-Time Filter: false
+                           ->  CStore Scan on hw_groupingsets.vec_t1
+                                 Output: 'Dummy'
 (20 rows)
 
 select 1,1,1 from vec_t1 union SELECT 2 c1, 2 c2, 4 c3 from vec_t1 where 1=0 GROUP BY cube(c1, c2) order by 1;
@@ -2636,8 +2640,8 @@ select 1,1,1 from vec_t1 union SELECT 2 c1, 2 c2, 4 c3 from vec_t1 where 1=0 GRO
 -- unknown type
 explain (costs off, verbose on)
 select 1, '1' from vec_t1 union select 1, '243' xx from vec_t1 where 1=0 group by cube(1);
-                       QUERY PLAN                        
----------------------------------------------------------
+                             QUERY PLAN                              
+---------------------------------------------------------------------
  Row Adapter
    Output: (1), ('1'::text)
    ->  Vector Sonic Hash Aggregate
@@ -2648,13 +2652,13 @@ select 1, '1' from vec_t1 union select 1, '243' xx from vec_t1 where 1=0 group b
                      Output: 1, '1'::text
                ->  Vector Sort Aggregate
                      Output: (1), '243'::text
-                     Group By Key: (1)
+                     Group By Key: 1
                      Group By Key: ()
-                     ->  Vector Adapter
-                           Output: (1)
-                           ->  Result
-                                 Output: 1
-                                 One-Time Filter: false
+                     ->  Vector Result
+                           Output: 1
+                           One-Time Filter: false
+                           ->  CStore Scan on hw_groupingsets.vec_t1
+                                 Output: 'Dummy'
 (17 rows)
 
 select 1, '1' from vec_t1 union select 1, '243' xx from vec_t1 where 1=0 group by cube(1) order by 1;

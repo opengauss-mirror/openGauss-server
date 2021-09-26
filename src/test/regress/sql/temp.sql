@@ -4,7 +4,6 @@
 --
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 -- test temp table/index masking
 
@@ -53,7 +52,6 @@ CREATE TEMP TABLE temptest(col int);
 \c
 
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 SELECT * FROM temptest;
 
@@ -322,14 +320,3 @@ Drop table test_base;
 Drop table test_temp1, test_ordinary;
 Drop table test_temp1, test_temp2;
 Drop table temp_col1, temp_col2;
-
--- Test types in temp schema
-set search_path = pg_temp, public;
-create domain pg_temp.nonempty as text check (value <> '');
--- function-syntax invocation of types matches rules for functions
-select nonempty('');
-select pg_temp.nonempty('');
--- other syntax matches rules for tables
-select ''::nonempty;
-
-reset search_path;

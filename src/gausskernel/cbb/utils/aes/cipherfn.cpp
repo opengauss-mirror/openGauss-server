@@ -37,12 +37,17 @@
 #include "gaussdb_version.h"
 #include "gssapi/gssapi_krb5.h"
 
-#include "keymanagement/KeyManager.h"
+#include "tde_key_management/tde_key_manager.h"
 
 #include "openssl/rand.h"
 #include "openssl/evp.h"
 #include "openssl/crypto.h"
-#include "commands/defrem.h"
+
+#include "utils/evp_cipher.h"
+
+#ifdef ENABLE_UT
+#define static
+#endif
 
 const char* pgname = "gs_encrypt";
 void getOBSKeyString(GS_UCHAR** cipherKey);
@@ -58,14 +63,8 @@ static void do_advice(void);
 static void free_global_value(void);
 static bool is_prefix_in_key_mode(const char* mode);
 
-GS_UCHAR* trans_encrypt_dek = NULL;
-GS_UCHAR* trans_encrypt_iv = NULL;
-
 // Fi root certificate path
 char* g_fi_ca_path = NULL;
-
-// tde algo
-TDE_ALGO g_tde_algo = TDE_ALGO_NULL;
 
 // the prefix of the output cipher/randfile
 char* g_prefix = NULL;
@@ -159,7 +158,7 @@ bool gs_decrypt_aes(GS_UCHAR* ciphertext, GS_UINT32 cipherlen, GS_UCHAR* key, GS
  * Revision	:Using random initial vector and one fixed salt in one thread
  * 			  in order to avoid generating deriveKey everytime.
  */
-bool gs_encrypt_aes128_function(FunctionCallInfo fcinfo, text** outtext)
+static bool gs_encrypt_aes128_function(FunctionCallInfo fcinfo, text** outtext)
 {
     char* key = NULL;
     GS_UINT32 keylen = 0;
@@ -170,7 +169,7 @@ bool gs_encrypt_aes128_function(FunctionCallInfo fcinfo, text** outtext)
     GS_UINT32 retval = 0;
     char* encodetext = NULL;
     GS_UINT32 encodetextlen = 0;
-    GS_UINT32 ciphertextlen_max = 0;	
+    GS_UINT32 ciphertextlen_max = 0;
     errno_t errorno = EOK;
 
     plaintext = text_to_cstring(PG_GETARG_TEXT_P(0));
@@ -255,7 +254,7 @@ bool gs_decrypt_aes128_function(FunctionCallInfo fcinfo, text** outtext)
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 retval = 0;
     GS_UCHAR* decodetext = NULL;
-    GS_UINT32 decodetextlen = 0;	
+    GS_UINT32 decodetextlen = 0;
     errno_t errorno = EOK;
 
     decodetext = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
@@ -293,7 +292,6 @@ bool gs_decrypt_aes128_function(FunctionCallInfo fcinfo, text** outtext)
      *  if the old one also failed, return alarm.
      */
     retval = gs_decrypt_aes_speed(ciphertext, decodetextlen, key, plaintext, &plaintextlen);
-
     if (!retval) {
         /* reset plaintext */
         errorno = memset_s(plaintext, decodetextlen, '\0', decodetextlen);
@@ -812,7 +810,7 @@ static GS_UCHAR* getECKeyString(KeyMode mode)
     char* gshome = NULL;
     char cipherdir[MAXPGPATH] = {0};
     char cipherfile[MAXPGPATH] = {0};
-    const char *cipherPrefix = (mode == SOURCE_MODE ? "datasource" : "usermapping");
+    const char *cipherPrefix = ((mode == SOURCE_MODE) ? "datasource" : "usermapping");
     int ret = 0;
 
     /*
@@ -848,9 +846,9 @@ static GS_UCHAR* getECKeyString(KeyMode mode)
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_FILE),
-                errmsg("No key file %s.key.cipher", cipherPrefix),
-                errhint("Please create %s.key.cipher file with gs_guc and gs_ssh, such as : gs_ssh -c \"gs_guc generate -S XXX -D "
-                        "$GAUSSHOME/bin -o %s\"", cipherPrefix, cipherPrefix)));
+             errmsg("No key file %s.key.cipher", cipherPrefix),
+             errhint("Please create %s.key.cipher file with gs_guc and gs_ssh, such as :"
+                     "gs_ssh -c \"gs_guc generate -S XXX -D $GAUSSHOME/bin -o %s\"", cipherPrefix, cipherPrefix)));
     }
     /*
      * Note: plainkey is of length RANDOM_LEN + 1
@@ -967,7 +965,8 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
  * @IN dest_plain_length: dest buffer length which is given by the caller
  * @RETURN: bool, true if encrypt success, false if not
  */
-bool decryptECString(const char* src_cipher_text, char* dest_plain_text, uint32 dest_plain_length, bool isDataSource)
+bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
+                          uint32 dest_plain_length, bool isDataSource)
 {
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
@@ -1073,7 +1072,7 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
 {
     int i;
     char* srcString = NULL;
-    char encryptString[EC_CIPHER_TEXT_LENGTH];
+    char encryptString[EC_CIPHER_TEXT_LENGTH] = {0};
     errno_t ret;
     ListCell* cell = NULL;
     bool isPrint = false;
@@ -1092,7 +1091,7 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
             continue;
 
         for (i = 0; i < arrayLength; i++) {
-            if (0 == pg_strcasecmp(def->defname, sensitiveOptionsArray[i])) {
+            if (pg_strcasecmp(def->defname, sensitiveOptionsArray[i]) == 0) {
                 /* For string with prefix='encryptOpt' (probably encrypted), we do not encrypt again */
                 if (IsECEncryptedString(srcString)) {
                     /* We report warning only once in a CREATE/ALTER stmt. */
@@ -1131,158 +1130,227 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
     }
 }
 
+char int2hex(uint8 n)
+{
+    char ret;
+    if (n >= 0x0 && n <= 0x9) {
+        ret = n + '0';
+    } else if (n >= 0xa && n <= 0xf) {
+        ret = (n - 0xa) + 'a';
+    } else {
+        ret = '0';
+    }
+
+    return ret;
+}
+
+uint8 hex2int(char ch)
+{
+    uint8 ret;
+    if (ch >= '0' && ch <= '9') {
+        ret = ch - '0';
+    } else if (ch >= 'a' && ch <= 'f') {
+        ret = (ch - 'a') + 10;
+    } else if (ch >= 'A' && ch <= 'F') {
+        ret = (ch - 'A') + 10;
+    } else {
+        ret = 0;
+    }
+
+    return ret;
+}
+
+int GetTdeCipherLenByAlog(uint8 algo)
+{
+    int cipher_len;
+    switch (algo) {
+        case TDE_ALGO_AES_128_CTR:
+        case TDE_ALGO_SM4_CTR:
+            cipher_len = DEK_CIPHER_AES128_LEN_PAGE;
+            break;
+        case TDE_ALGO_AES_256_CTR:
+            cipher_len = DEK_CIPHER_AES256_LEN_PAGE;
+            break;
+        default:
+            cipher_len = DEK_CIPHER_AES128_LEN_PAGE;
+            break;
+    }
+    return cipher_len;
+}
+
 /*
- * encryptBlockAndCU:
- * 	encrypt block or CU exclude header and filling,user data must encrypt,if block or cu encrypt failed,
- *  retry three times,if it still failed then quit process,shoud use panic not fatal for result in hang
- *  on checkpoint or bgwriter
+ * Description:
+ * Transform TdePageInfo to TdeInfo format
+ * @IN tde_page_info: the tde info read from page
+ * @OUT tde_info: used for encryption and decryption
+ * @RETURN NONE
+ */
+void transformTdeInfoFromPage(TdeInfo* tde_info, TdePageInfo* tde_page_info)
+{
+    int i, j;
+    int cipher_len;
+    errno_t ret;
+    const uint8 cmk_id_format[CMK_ID_LEN] = "1234abcd-1234-abcd-1234-1234abcd1234";
+
+    cipher_len = GetTdeCipherLenByAlog(tde_page_info->algo);
+    for (i = 0, j = 0; i < cipher_len && j < DEK_CIPHER_LEN - 1; i++, j += 2) {
+        tde_info->dek_cipher[j] = int2hex(tde_page_info->dek_cipher[i] >> 4);
+        tde_info->dek_cipher[j + 1] = int2hex(tde_page_info->dek_cipher[i] & 0x0f);
+    }
+
+    if (j < DEK_CIPHER_LEN - 1) {
+        tde_info->dek_cipher[j] = '\0';
+    } else {
+        tde_info->dek_cipher[DEK_CIPHER_LEN - 1] = '\0';
+    }
+
+    for (i = 0, j = 0; i < CMK_ID_LEN_PAGE && j < CMK_ID_LEN - 1; j++) {
+        if (cmk_id_format[j] == '-') {
+            tde_info->cmk_id[j] = '-';
+            continue;
+        }
+        tde_info->cmk_id[j] = int2hex(tde_page_info->cmk_id[i] >> 4);
+        tde_info->cmk_id[j + 1] = int2hex(tde_page_info->cmk_id[i] & 0x0f);
+        i++;
+        j++;
+    }
+
+    /* here j should be 36 and check it for clearing warning */
+    if (j < CMK_ID_LEN - 1) {
+        tde_info->cmk_id[j] = '\0';
+    } else {
+        tde_info->cmk_id[CMK_ID_LEN - 1] = '\0';
+    }
+
+    tde_info->algo = tde_page_info->algo;
+    ret = memcpy_s(tde_info->iv, RANDOM_IV_LEN, tde_page_info->iv, RANDOM_IV_LEN);
+    securec_check(ret, "\0", "\0");
+    ret = memcpy_s(tde_info->tag, GCM_TAG_LEN, tde_page_info->tag, GCM_TAG_LEN);
+    securec_check(ret, "\0", "\0");
+}
+
+/*
+ * Description:
+ * To reduce storage space usage on page, tde_info.dek_cipher and tde_info.cmk_id formats are converted
+ * @IN tde_info: used for encryption and decryption
+ * @OUT tde_page_info: tde info to be written to page
+ * @RETURN NONE
+ */
+void transformTdeInfoToPage(TdeInfo* tde_info, TdePageInfo* tde_page_info)
+{
+    int i, j;
+    int cipher_len;
+    errno_t ret;
+
+    cipher_len = GetTdeCipherLenByAlog(tde_info->algo);
+    for (i = 0, j = 0; i < cipher_len && j < DEK_CIPHER_LEN - 1; i++, j += 2) {
+        tde_page_info->dek_cipher[i] = hex2int(tde_info->dek_cipher[j]) << 4 | hex2int(tde_info->dek_cipher[j + 1]);
+    }
+
+    for (i = 0, j = 0; i < CMK_ID_LEN_PAGE && j < CMK_ID_LEN - 1; j++) {
+        if (tde_info->cmk_id[j] == '-') {
+            continue;
+        }
+        tde_page_info->cmk_id[i] = hex2int(tde_info->cmk_id[j]) << 4 | hex2int(tde_info->cmk_id[j + 1]);
+        i++;
+        j++;
+    }
+
+    tde_page_info->algo = tde_info->algo;
+    ret = memcpy_s(tde_page_info->iv, RANDOM_IV_LEN, tde_info->iv, RANDOM_IV_LEN);
+    securec_check(ret, "\0", "\0");
+    ret = memcpy_s(tde_page_info->tag, GCM_TAG_LEN, tde_info->tag, GCM_TAG_LEN);
+    securec_check(ret, "\0", "\0");
+}
+
+/*
+ * Description:
+ * encrypt block or CU exclude header and filling,user data must encrypt,if block or cu encrypt failed,
+ * retry three times, if it still failed then quit process, shoud use panic not fatal for result in hang
+ * on checkpoint or bgwriter
  * @IN plain text and plain text length
  * @OUT cipher text and cipher text length
  * @RETURN: NONE
  */
-void encryptBlockOrCUData(const char* plainText, const size_t plainLength, char* cipherText, size_t* cipherLength)
+void encryptBlockOrCUData(const char* plainText, const size_t plainLength,
+    char* cipherText, size_t* cipherLength, TdeInfo* tdeInfo)
 {
-    int retryCnt = 0;
-    GS_UINT32 ret = 0;
+    int retryCnt = 3; /* retry at most three times when encrypt failed */
+    unsigned char* iv = tdeInfo->iv;
+    TdeAlgo algo = (TdeAlgo)tdeInfo->algo;
+    unsigned char key[KEY_128BIT_LEN] = {0};
+    const char* plain_key = NULL;
+    unsigned int i, j;
 
-    /*
-     * 	decrypt block or CU exclude header and filling,user data must decrypt,if block or cu decrypt failed,
-     *  retry three times,if it still failed then quit process,shoud use panic not fatal for result in hang
-     *  on autovacuum
-     *
-     * @IN cipher text and cipher text length
-     * @OUT plain text and plain text length
-     * @RETURN: NONE
-     */
-    if ((trans_encrypt_dek == NULL || *trans_encrypt_dek == '\0') ||
-        (trans_encrypt_iv == NULL || *trans_encrypt_iv == '\0')) {
-        ereport(PANIC,
-            (errmsg("it's an encrypted cluster, but parameter not initialized!"),
-                errdetail("decrypt DEK or IV is empty or both length is not equal 16")));
+    /* get dek plaintext by cmk_id and dek_cipher from TDE Key Manager */
+    TDEKeyManager *tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
+    tde_key_manager->init();
+    plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
+    Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
+    /* transform tde plaintext from hex string to int array */
+    for (i = 0, j = 0; i < KEY_128BIT_LEN && j < strlen(plain_key); i++, j += 2) {
+        key[i] = hex2int(plain_key[j]) << 4 | hex2int(plain_key[j + 1]);
     }
+    DELETE_EX2(tde_key_manager);
 
     do {
-        if (g_tde_algo == TDE_ALGO_SM4_CTR_128) {
-            ret = sm4_ctr_enc_partial_mode(
-                plainText, plainLength, cipherText, cipherLength, trans_encrypt_dek, trans_encrypt_iv);
-        } else {
-            ret = aes_ctr_enc_partial_mode(
-                plainText, plainLength, cipherText, cipherLength, trans_encrypt_dek, trans_encrypt_iv);
+        if (encrypt_partial_mode(plainText, plainLength, cipherText, cipherLength, key, iv, algo)) {
+            break;
         }
-        if (ret != 0) {
-            retryCnt++;
-        } else {
-            if (plainLength != *cipherLength) {
-                ereport(PANIC,
-                    (errmsg("encrypt failed, return code is %u!", ret),
-                        errdetail("cipher length is not correct, \
-				 plian length is %lu, cipher length is %lu",
-                            plainLength,
-                            *cipherLength)));
-            }
-            return;
-        }
-        if (retryCnt == 2) {
-            ereport(PANIC,
-                (errmsg("encrypt failed after retry three times, error code is %u!", ret),
-                    errdetail("ret code is Invalid arguments or \
-					 Invalid IV length or  Internal error ")));
-        }
-    } while (retryCnt < 3);
+        retryCnt--;
+    } while (retryCnt > 0);
+
+    if (retryCnt == 0) {
+        ereport(PANIC,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("encrypt failed after retry three times"),
+                errdetail("invalid arguments or internal error")));
+    }
 }
 
 /*
- * 	decrypt block or CU exclude header and filling,user data must decrypt,if block or cu decrypt failed,
- *  retry three times,if it still failed then quit process,shoud use panic not fatal for result in hang
- *  on autovacuum
- *
+ * Description:
+ * decrypt block or CU exclude header and filling,user data must decrypt, if block or cu decrypt failed,
+ * retry three times, if it still failed then quit process, shoud use panic not fatal for result in hang
+ * on autovacuum
  * @IN cipher text and cipher text length
  * @OUT plain text and plain text length
  * @RETURN: NONE
  */
-void decryptBlockOrCUData(const char* cipherText, const size_t cipherLength, char* plainText, size_t* plainLength)
+void decryptBlockOrCUData(const char* cipherText, const size_t cipherLength,
+    char* plainText, size_t* plainLength, TdeInfo* tdeInfo)
 {
-    int retryCnt = 0;
-    GS_UINT32 ret = 0;
-    if ((trans_encrypt_dek == NULL || *trans_encrypt_dek == '\0') ||
-        (trans_encrypt_iv == NULL || *trans_encrypt_iv == '\0')) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                errmsg("it's an encrypted cluster, but parameter not initialized!"),
-                errdetail("decrypt DEK or IV is empty or both length is not equal 16")));
+    int retryCnt = 3; /* retry at most three times when decrypt failed */
+    unsigned char* iv = tdeInfo->iv;
+    TdeAlgo algo = (TdeAlgo)tdeInfo->algo;
+    unsigned char key[KEY_128BIT_LEN] = {0};
+    const char* plain_key = NULL;
+    unsigned int i, j;
+
+    /* get dek plaintext by cmk_id and dek_cipher from TDE Key Manager */
+    TDEKeyManager *tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
+    tde_key_manager->init();
+    plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
+    Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
+    /* transform tde plaintext from hex string to int array */
+    for (i = 0, j = 0; i < KEY_128BIT_LEN && j < strlen(plain_key); i++, j += 2) {
+        key[i] = hex2int(plain_key[j]) << 4 | hex2int(plain_key[j + 1]);
     }
+    DELETE_EX2(tde_key_manager);
+
     do {
-        if (g_tde_algo == TDE_ALGO_SM4_CTR_128) {
-            ret = sm4_ctr_dec_partial_mode(
-                cipherText, cipherLength, plainText, plainLength, trans_encrypt_dek, trans_encrypt_iv);
-        } else {
-            ret = aes_ctr_dec_partial_mode(
-                cipherText, cipherLength, plainText, plainLength, trans_encrypt_dek, trans_encrypt_iv);
+        if (decrypt_partial_mode(cipherText, cipherLength, plainText, plainLength, key, iv, algo)) {
+            break;
         }
-        if (ret != 0) {
-            retryCnt++;
-        } else {
-            if (cipherLength != *plainLength) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_STRING_DATA_LENGTH_MISMATCH),
-                        errmsg("decrypt failed, return code is %u!", ret),
-                        errdetail("plainLength length is not correct, cipher length is %lu,plian length is %lu",
-                            cipherLength,
-                            *plainLength)));
-            }
-            return;
-        }
-        if (retryCnt == 2) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("decrypt failed after retry three times, error code is %u!", ret),
-                    errdetail("ret code is Invalid arguments or Invalid IV length or Internal error ")));
-        }
-    } while (retryCnt < 3);
-}
+        retryCnt--;
+    } while (retryCnt > 0);
 
-/* Get the FI root cert */
-void add_fi_ca_cert()
-{
-    if (g_fi_ca_path != NULL) {
-        return;
+    if (retryCnt == 0) {
+        ereport(PANIC,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("decrypt failed after retry three times"),
+                errdetail("invalid arguments or internal error")));
     }
-
-    char* node_agent_env = gs_getenv_r("NODE_AGENT_HOME");
-    char real_node_agent_home[PATH_MAX + 1] = {'\0'};
-    if (node_agent_env == NULL || realpath(node_agent_env, real_node_agent_home) == NULL) {
-        (void)fprintf(stderr, _("Transparent encryption get environment variable NODE_AGENT_HOME failed.\n"));
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("Transparent encryption Getting environment variable NODE_AGENT_HOME failed.\n")));
-    }
-    node_agent_env = real_node_agent_home;    
-    check_backend_env(node_agent_env);
-    
-    g_fi_ca_path = (char*)palloc0(MAXPGPATH);
-    int ret =
-        snprintf_s(g_fi_ca_path, MAXPGPATH, MAXPGPATH - 1, "%s/security/cert/subcert/certFile/ca.crt", node_agent_env);
-    securec_check_ss_c(ret, "\0", "\0");
-}
-
-/* Using MPPDB_KRB5_FILE_PATH instead of KRB5_CONF. Add the FI root cert. */
-void init_the_kerberos_env()
-{
-    char* gaussdb_krb5_env = gs_getenv_r("MPPDB_KRB5_FILE_PATH");
-
-    char real_mppdb_krb5_file_path[PATH_MAX + 1] = {'\0'};
-    if (gaussdb_krb5_env == NULL || realpath(gaussdb_krb5_env, real_mppdb_krb5_file_path) == NULL) {
-        (void)fprintf(stderr, _("Transparent encryption Getting environment variable MPPDB_KRB5_FILE_PATH failed.\n"));
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("Transparent encryption Getting environment variable MPPDB_KRB5_FILE_PATH failed.\n")));
-    }
-    gaussdb_krb5_env = real_mppdb_krb5_file_path;
-
-    check_backend_env(gaussdb_krb5_env);
-    krb5_set_profile_path(gaussdb_krb5_env);
-
-    add_fi_ca_cert();
 }
 
 static void do_advice(void)
@@ -1303,11 +1371,6 @@ static void do_help(void)
     (void)printf(_("  -f, --file-prefix=FilePrefix      the cipher files prefix.\n"));
     (void)printf(_("  -B, --key-base64=Value            the key value encoded in base64.\n"));
     (void)printf(_("  -D, --vector-base64=Value         the random value encoded in base64.\n"));
-    (void)printf(_("  -N, --key-name=Value              the cluster key name in KMS.\n"));
-    (void)printf(_("  -U, --kms-url-=Value              the kms internet address. for "
-                   "example,\"kms://https@host2;host3:29800/kms\".\n"));
-    (void)printf(_("  -I, --init=Value                  init the tde key. " 
-                   "the value must be SM4-CTR-128 or AES-CTR-128.\n"));
     (void)printf(_("  PLAINTEXT                         the plain text you want to encrypt.\n"));
 }
 
@@ -1346,15 +1409,11 @@ static bool is_prefix_in_key_mode(const char* mode)
     int clen = strlen("client");
     int srclen = strlen("source");
     int obslen = strlen("obsserver");
-    int sm4len = strlen("SM4-CTR-128");
-    int aeslen = strlen("AES-CTR-128");
 
     if ((0 == strncmp(mode, "server", slen) && '\0' == mode[slen]) ||
         (0 == strncmp(mode, "client", clen) && '\0' == mode[clen]) ||
         (0 == strncmp(mode, "source", srclen) && '\0' == mode[srclen]) ||
-        (0 == strncmp(mode, "obsserver", obslen) && '\0' == mode[obslen]) ||
-        (0 == strncmp(mode, "SM4-CTR-128", sm4len) && '\0' == mode[sm4len]) ||
-        (0 == strncmp(mode, "AES-CTR-128", aeslen) && '\0' == mode[aeslen])) {
+        (0 == strncmp(mode, "obsserver", obslen) && '\0' == mode[obslen])) {
         return true;
     } else {
         return false;
@@ -1364,6 +1423,7 @@ static bool is_prefix_in_key_mode(const char* mode)
 #define CIPHERTEXT_LEN 512
 int encrypte_main(int argc, char* const argv[])
 {
+
 #define MAXLOGINFOLEN 1024
     static struct option long_options[] = {{"help", no_argument, NULL, '?'},
         {"version", no_argument, NULL, 'V'},
@@ -1372,9 +1432,6 @@ int encrypte_main(int argc, char* const argv[])
         {"vector", required_argument, NULL, 'v'},
         {"key-base64", required_argument, NULL, 'B'},
         {"vector-base64", required_argument, NULL, 'D'},
-        {"init", required_argument, NULL, 'I'},
-        {"key-name", required_argument, NULL, 'N'},
-        {"kms-url", required_argument, NULL, 'U'},
         {NULL, 0, NULL, 0}};
 
     int ret = 0;
@@ -1385,9 +1442,6 @@ int encrypte_main(int argc, char* const argv[])
     GS_UINT32 ciphertextlen = 0;
     char* encodetext = NULL;
     GS_UCHAR* decipherkey = NULL;
-    char* kmsurl = NULL;
-    char* keyname = NULL;
-    char* tdealgo = NULL;
     char* cipherpath = NULL;
     char cipherkeyfile[MAXPGPATH] = {'\0'};
     char destciphertext[CIPHERTEXT_LEN] = {0};
@@ -1413,7 +1467,7 @@ int encrypte_main(int argc, char* const argv[])
     }
 
     /* process command-line options */
-    while ((c = getopt_long(argc, argv, "f:v:k:B:D:I:N:U:", long_options, &optindex)) != -1) {
+    while ((c = getopt_long(argc, argv, "f:v:k:B:D:", long_options, &optindex)) != -1) {
         switch (c) {
             case 'f': {
                 GS_FREE(g_prefix);
@@ -1514,94 +1568,12 @@ int encrypte_main(int argc, char* const argv[])
                 g_vector_len = (int)decodelen;
                 break;
             }
-            case 'N': {
-                GS_FREE(keyname);
-                keyname = gs_strdup(optarg);
-                if (keyname == NULL) {
-                    (void)fprintf(stderr, _("%s: Key name is wrong, it must be usable!\n"), pgname);
-                    free_global_value();
-                    do_advice();
-                    exit(1);
-                }
-                break;
-            }
-            case 'U': {
-                GS_FREE(kmsurl);
-                kmsurl = gs_strdup(optarg);
-                if (strlen(kmsurl) == 0) {
-                    (void)fprintf(
-                        stderr, _("%s: KMS url is wrong, it must be an accessible network address.\n"), pgname);
-                    free_global_value();
-                    do_advice();
-                    exit(1);
-                }
-                break;
-            }
-            case 'I': {
-                GS_FREE(tdealgo);
-                tdealgo = gs_strdup(optarg);
-                if (!is_prefix_in_key_mode(tdealgo)) {
-                    (void)fprintf(stderr,
-                        _("%s: Init TDE failed. The algorithm is wrong, it must be SM4-CTR-128 or AES-CTR-128.\n"),
-                        pgname);
-                    free_global_value();
-                    do_advice();
-                    exit(1);
-                }
-
-            } break;
             default:
                 do_help();
                 exit(1);
         }
     }
-    /* init the key */
-    if (tdealgo != NULL) {
-        if (keyname == NULL) {
-            (void)fprintf(stderr, _("%s: Init TDE failed. Key name is wrong, you must add -N keyname.\n"), pgname);
-            do_advice();
-            exit(1);
-        }
 
-        init_the_kerberos_env();
-        KeyManager table_a_key("0", "0");  // next version for different tabe and database.
-        char* gausshome = getGaussHome();
-        if (gausshome == NULL) {
-            (void)fprintf(stderr, _("%s: Getting environment variable $GAUSSHOME error, please check.\n"), pgname);
-            exit(1);
-        }
-        table_a_key.setfile(gausshome);
-
-        if (kmsurl != NULL) {
-            g_instance.attr.attr_common.transparent_encrypt_kms_url = kmsurl;
-        }
-
-        if (!table_a_key.init_Key(tdealgo, keyname)) {
-            (void)fprintf(stderr, _("%s: Init key failed, please check net.\n"), pgname);
-            do_advice();
-            exit(1);
-        }
-
-        if (getAndCheckTranEncryptDEK() && trans_encrypt_dek != NULL) {
-            (void)fprintf(stdout, _("%s: Init DEK succeeded.\n"), pgname);
-        } else {
-            (void)fprintf(stderr, _("%s: Init DEK failed.\n"), pgname);
-            exit(1);
-        }
-        exit(0);
-    }
-    if (tdealgo != NULL) {
-        free(tdealgo);
-        tdealgo = NULL;
-    }
-    if (kmsurl != NULL) {
-        free(kmsurl);
-        kmsurl = NULL;
-    }
-    if (keyname != NULL) {
-        free(keyname);
-        keyname = NULL;
-    }
     /* Get plaintext from command line */
     if (optind < argc) {
         plaintext = (GS_UCHAR*)gs_strdup(argv[optind]);
@@ -1717,6 +1689,7 @@ int encrypte_main(int argc, char* const argv[])
 
     /* default branch should do decode */
     /* -f is in key mode */
+
     if ((NULL == g_prefix && NULL == g_key && NULL == g_vector) ||
         (NULL != g_prefix && is_prefix_in_key_mode((const char*)g_prefix))) {
         /* get key from file */
@@ -1761,7 +1734,9 @@ int encrypte_main(int argc, char* const argv[])
     ret = memcpy_s(destciphertext, CIPHERTEXT_LEN, encodetext, (strlen(encodetext) + 1));
     securec_check(ret, "\0", "\0");
 
+#ifndef ENABLE_UT
     (void)fprintf(stdout, _("%s\n"), destciphertext);
+#endif
 
 ENCRYPTE_MAIN_EXIT:
     /* clean all footprint for security. */
@@ -1837,209 +1812,6 @@ bool getKeyVectorFromCipherFile(const char* cipherkeyfile, const char* cipherrnd
     return true;
 }
 
-/* getTransEncryptKeyString:
- * Get the key which used to encrypted ak/sk in transparent encryption.
- * cipherKey: [input] Pointer to the buffer pointer which stores the key in trans_encrypt.key.cipher.
- * rndm:      [input] Pointer to the buffer pointer which stores the vector(random) value in
- *                    trans_encrypt.key.rand.
- * NOTICE:    The caller should free the memory allocated to *cipherKey and *rndm
- */
-bool getTransEncryptKeyString(GS_UCHAR** cipherKey, GS_UCHAR** rndm)
-{
-    int ret = 0;
-    char* gausshome = NULL;
-    char cipherkeyfile[MAXPGPATH] = {'\0'};
-    char cipherrndfile[MAXPGPATH] = {'\0'};
-
-    gausshome = getGaussHome();
-    ret = snprintf_s(cipherrndfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/trans_encrypt" RAN_KEY_FILE, gausshome);
-    securec_check_ss_c(ret, "\0", "\0");
-    ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/trans_encrypt" CIPHER_KEY_FILE, gausshome);
-    securec_check_ss_c(ret, "\0", "\0");
-    pfree_ext(gausshome);
-    gausshome = NULL;
-    *cipherKey = (GS_UCHAR*)malloc(CIPHER_LEN + 1);
-    if (*cipherKey == NULL) {
-        (void)fprintf(stderr, _("Out of memory while getting transparent encryption key string."));
-        return false;
-    }
-    ret = memset_s(*cipherKey, CIPHER_LEN + 1, 0, CIPHER_LEN + 1);
-    securec_check_c(ret, "\0", "\0");
-
-    /* Here we use CIPHER_LEN, because that CipherkeyFile.vector is with length of CIPHER_LEN+1  */
-    *rndm = (GS_UCHAR*)malloc(CIPHER_LEN + 1);
-    if (NULL == *rndm) {
-        (void)fprintf(stderr, _("Out of memory while getting transparent encryption key string."));
-        free(*cipherKey);
-        *cipherKey = NULL;
-        return false;
-    }
-    ret = memset_s(*rndm, CIPHER_LEN + 1, 0, CIPHER_LEN + 1);
-    securec_check_c(ret, "\0", "\0");
-
-    if (!file_exists(cipherkeyfile)) {
-        (void)fprintf(stderr, _("%s not exists."), cipherkeyfile);
-        free(*cipherKey);
-        free(*rndm);
-        *cipherKey = NULL;
-        *rndm = NULL;
-        return false;
-    } else if (!file_exists(cipherrndfile)) {
-        (void)fprintf(stderr, _("%s not exists."), cipherrndfile);
-        free(*cipherKey);
-        free(*rndm);
-        *cipherKey = NULL;
-        *rndm = NULL;
-        return false;
-    } else if (!getKeyVectorFromCipherFile(cipherkeyfile, cipherrndfile, *cipherKey, *rndm)) {
-        (void)fprintf(stderr, _("Failed to decrypt key from transparent encryption cipher file %s.\n"), cipherrndfile);
-        free(*cipherKey);
-        free(*rndm);
-        *cipherKey = NULL;
-        *rndm = NULL;
-        return false;
-    }
-
-    (void)fprintf(stderr, _("Successfully to decrypt %s.\n"), cipherkeyfile);
-    return true;
-}
-
-/*
- * AK: '0-9A-Za-z'
- * SK: '0-9A-Za-z'
- */
-bool getAkSkForTransEncrypt(char* ak, int akbuflen, char* sk, int skbuflen)
-{
-#define MAX_AK_SK_FILE_SIZE 2048
-
-    GS_UCHAR* key = NULL;
-    GS_UCHAR* vector = NULL;
-    char* gausshome = NULL;
-    char akskfile[MAXPGPATH] = {'\0'};
-    FILE* fp = NULL;
-    int ret;
-    size_t cnt;
-    GS_UINT32 akskenplainlen = 0;
-    char akskfilecontent[MAX_AK_SK_FILE_SIZE] = {'\0'};
-    char akskplaintext[MAX_AK_SK_FILE_SIZE] = {'\0'};
-    char* enterlocation = NULL;
-    int aklen, sklen;
-    GS_UCHAR* decodestring = NULL;
-    GS_UINT32 decodelen = 0;
-
-    gausshome = getGaussHome();
-
-    ret = snprintf_s(akskfile, MAXPGPATH, MAXPGPATH - 1, "%s/bin/trans_encrypt_ak_sk.key", gausshome);
-    securec_check_ss_c(ret, "\0", "\0");
-
-    pfree_ext(gausshome);
-    gausshome = NULL;
-
-    if (!file_exists(akskfile)) {
-        (void)fprintf(stderr, _("AK/SK file for transparent encryption does not exist: %s\n"), akskfile);
-        return false;
-    }
-
-    if (-1 == access(akskfile, R_OK)) {
-        (void)fprintf(stderr, _("Permission denied to access AK/SK file for transparent encryption: %s\n"), akskfile);
-        return false;
-    }
-
-    canonicalize_path(akskfile);
-
-    fp = fopen(akskfile, "rb");
-    if (NULL == fp) {
-        (void)fprintf(stderr, _("Failed to open AK/SK file for transparent encryption: %s\n"), akskfile);
-        return false;
-    }
-
-    cnt = fread(akskfilecontent, 1, sizeof(akskfilecontent), fp);
-    (void)fclose(fp);
-    fp = NULL;
-
-    /* akskfile is just an encrypted file of ak&sk. Its length should be less than MAX_AK_SK_FILE_SIZE. */
-    if (cnt >= sizeof(akskfilecontent)) {
-        (void)fprintf(stderr, _("Corrupted AK/SK file(too long) for transparent encryption: %s\n"), akskfile);
-        return false;
-    }
-
-    akskfilecontent[MAX_AK_SK_FILE_SIZE - 1] = '\0';
-
-    if (!getTransEncryptKeyString(&key, &vector)) {
-        return false;
-    }
-
-    decodestring = (GS_UCHAR*)SEC_decodeBase64((char*)akskfilecontent, &decodelen);
-
-    if (decodestring == NULL ||
-        !gs_decrypt_aes_128((GS_UCHAR*)decodestring, (GS_UINT32)decodelen, (GS_UCHAR*)key,
-                            CIPHER_LEN, (GS_UCHAR*)akskplaintext, &akskenplainlen)) {
-        (void)fprintf(stderr, _("Failed to decrypt AK/SK file for transparent encryption: %s\n"), akskfile);
-        free(key);
-        free(vector);
-        key = NULL;
-        vector = NULL;
-        if (decodestring != NULL) {
-            OPENSSL_free(decodestring);
-            decodestring = NULL;
-        }
-        return false;
-    }
-    free(key);
-    free(vector);
-    OPENSSL_free(decodestring);
-    decodestring = NULL;
-    key = NULL;
-    vector = NULL;
-    /* akskplaintext: "ak\nsk" */
-    enterlocation = strchr(akskplaintext, '|');
-
-    if (enterlocation == NULL) {
-        (void)fprintf(stderr, _("Failed to split AK/SK file content for transparent encryption: %s\n"), akskfile);
-        return false;
-    }
-
-    aklen = enterlocation - akskplaintext;
-    sklen = akskplaintext + akskenplainlen - enterlocation - 1;
-    if (aklen > (akbuflen - 1) || 0 == aklen) {
-        (void)fprintf(stderr, _("Invalid AK length for transparent encryption: %s\n"), akskfile);
-        return false;
-    }
-
-    if (sklen > (skbuflen - 1) || 0 == sklen) {
-        (void)fprintf(stderr, _("Invalid SK length for transparent encryption: %s\n"), akskfile);
-        return false;
-    }
-
-    ret = strncpy_s(ak, akbuflen, akskplaintext, aklen);
-    securec_check_c(ret, "\0", "\0");
-    ak[aklen] = '\0';
-
-    ret = strncpy_s(sk, skbuflen, enterlocation + 1, sklen);
-    securec_check_c(ret, "\0", "\0");
-    sk[sklen] = '\0';
-
-    for (int i = 0; ak[i]; i++) {
-        if (NULL == strchr(AK_VALID_CHRS, ak[i])) {
-            (void)fprintf(stderr, _("Illegal character(%c) in AK for transparent encryption: %s\n"), ak[i], akskfile);
-            return false;
-        }
-    }
-
-    for (int i = 0; sk[i]; i++) {
-        if (NULL == strchr(SK_VALID_CHRS, sk[i])) {
-            (void)fprintf(stderr, _("Illegal character(%c) in SK for transparent encryption: %s\n"), sk[i], akskfile);
-            return false;
-        }
-    }
-
-    (void)fprintf(stderr, _("Successfully to decrypt ak/sk for transparent encryption.\n"));
-
-    return true;
-
-#undef MAX_AK_SK_FILE_SIZE
-}
-
 /* Get $GAUSSHOME, and check if any injection risk in it.
  * If any, throw a PANIC error.
  */
@@ -2085,327 +1857,7 @@ char* getGaussHome()
     return tmp_tmp;
 }
 
-/* 
- * check kms url and region variables for TDE, kms_url and kms_region should not be null or '\0'.
- */
-
-static inline void CheckKmsUrlRegin()
-{
-    if (NULL == g_instance.attr.attr_common.transparent_encrypt_kms_url ||
-        '\0' == g_instance.attr.attr_common.transparent_encrypt_kms_url[0] ||
-        NULL == g_instance.attr.attr_security.transparent_encrypt_kms_region ||
-        '\0' == g_instance.attr.attr_security.transparent_encrypt_kms_region[0]) {
-        ereport(PANIC,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("transparent_encrypt_kms_url and transparent_encrypt_kms_region should not be empty when "
-                       "transparent encryption enabled.\n")));
-    }
-}
-
-/*
- * Get DEK from KMS.
- * Throw a PANIC if any error occurs.
- * dek: the buffer to store DEK, which length should be with CIHPER_LEN + 1.
- */
-void getTransEncryptDEK(GS_UCHAR* dek)
-{
-    FILE* fp = NULL;
-    char *cmd = NULL;
-    char *cmd_log = NULL;
-    char *url = NULL;
-    char *tmp = NULL;
-    char *region = NULL;
-    char* get_result = NULL;
-    int rc = 0;
-
-    /* On POSIX Linux, max command line length is 4096. */
-    const int MAX_CMD_LEN = 4096;
-    char* gausshome = NULL;
-    int i = 0;
-    char ak[AK_LEN] = {'\0'};
-    char sk[SK_LEN] = {'\0'};
-    GS_UCHAR* decodedkey = NULL;
-    GS_UINT32 decodedlen = 0;
-
-    CheckKmsUrlRegin();
-
-    if (!getAkSkForTransEncrypt(ak, sizeof(ak), sk, sizeof(sk))) {
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("Failed to get ak/sk for transparent encryption.\n")));
-    }
-
-    cmd = (char*)palloc0(MAX_CMD_LEN);
-    url = (char*)palloc0(MAX_CMD_LEN);
-    region = (char*)palloc0(MAX_CMD_LEN);
-
-    /* Replace $ with "\$" . */
-    for (i = 0, tmp = g_instance.attr.attr_common.transparent_encrypt_kms_url; i < MAX_CMD_LEN && *tmp; i++, tmp++) {
-        if (*tmp == '$') {
-            url[i++] = '\\';
-        }
-        url[i] = *tmp;
-    }
-
-    for (i = 0, tmp = g_instance.attr.attr_security.transparent_encrypt_kms_region; i < MAX_CMD_LEN && *tmp;
-         i++, tmp++) {
-        if (*tmp == '$') {
-            region[i++] = '\\';
-        }
-        region[i] = *tmp;
-    }
-
-    /* If we need to expand the transparent encryption to FI, use security_mode to
-     * identify whether it's running on DWS now.
-     */
-    gausshome = getGaussHome();
-    rc = snprintf_s(cmd,
-        MAX_CMD_LEN,
-        MAX_CMD_LEN - 1,
-        "export JRE_HOME=$GAUSSHOME/jre;export "
-        "LD_LIBRARY_PATH=$JRE_HOME/lib/amd64/server:$LD_LIBRARY_PATH;export "
-        "PATH=$JRE_HOME/bin:$PATH;java -jar \"%s/bin/getDEK.jar\" \"%s\" \"%s\" \"%s\" \"%s\"",
-        gausshome,
-        url,
-        region,
-        ak,
-        sk);
-    securec_check_ss(rc, "", "");
-
-    /* This command is for logging, masked AK/SK to avoid password leak risk. */
-    cmd_log = (char*)palloc(MAX_CMD_LEN);
-    rc = snprintf_s(cmd_log,
-        MAX_CMD_LEN,
-        MAX_CMD_LEN - 1,
-        "export JRE_HOME=$GAUSSHOME/jre;export "
-        "LD_LIBRARY_PATH=$JRE_HOME/lib/amd64/server:$LD_LIBRARY_PATH;export "
-        "PATH=$JRE_HOME/bin:$PATH;java -jar \"%s/bin/getDEK.jar\" \"%s\" \"%s\" \"ak\" \"sk\"",
-        gausshome,
-        url,
-        region);
-    securec_check_ss(rc, "", "");
-
-    pfree_ext(region);
-    pfree_ext(url);
-    pfree_ext(gausshome);
-    fp = popen(cmd, "r");
-    pfree_ext(cmd);
-
-    get_result = (char*)palloc0(MAX_CMD_LEN + 1);
-
-    if (NULL == fp || fgets(get_result, MAX_CMD_LEN, fp) == NULL) {
-        if (fp != NULL) {
-            pclose(fp);
-        }
-
-        pfree_ext(get_result);
-
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("Failed to fork subprocess to get DEK for transparent encryption. Failure command is: [%s]\n",
-                    cmd_log)));
-    }
-
-    pclose(fp);
-
-    i = (int)strlen(get_result);
-
-    /* If any error occurs, getDEK.jar will give a message starts with "ERROR:". */
-    if (0 == i || strncmp(get_result, "ERROR:", 6) == 0) {
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("Failed to get DEK for transparent encryption. Failure command is [%s], error message is [%s]\n",
-                    cmd_log,
-                    ((i == 0) ? "<NULL>" : get_result))));
-    }
-
-    if (get_result[i - 1] == '\n') {
-        get_result[i - 1] = '\0';
-    }
-
-    decodedkey = (GS_UCHAR*)SEC_decodeBase64(get_result, &decodedlen);
-
-    /* Here we failed to decode DEK, so get_result must be error message. */
-    if (NULL == decodedkey || decodedlen != DEK_LEN) {
-        ereport(ERROR,
-            (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION),
-                errmsg("Failed to get decode DEK for transparent encryption. Failure content is [%s].\n", get_result)));
-    } else {
-        rc = memcpy_s(dek, DEK_LEN, decodedkey, decodedlen);
-        securec_check(rc, "\0", "\0");
-
-        pfree_ext(cmd_log);
-        pfree_ext(get_result);
-        OPENSSL_free(decodedkey);
-        decodedkey = NULL;
-    }
-}
-
-/* Get iv from transparent encrypted string */
-static void getIV(GS_UCHAR* encrypted_string, GS_UINT32 decodelen)
-{
-    GS_UINT32 cipherpartlen = decodelen - RANDOM_LEN;
-    int ret = memcpy_s(trans_encrypt_iv, TDE_IV_LEN, encrypted_string + cipherpartlen, RANDOM_LEN);
-    securec_check(ret,"\0","\0");
-    ereport(LOG, (errmsg("Successfully get IV from transparent encrypted string.\n")));
-}
-
-/* check if it's the correct database encryption key. */
-static void testDEK(GS_UCHAR* dek)
-{
-    GS_UCHAR* encrypted_sample_string = NULL;
-    GS_UINT32 decodelen = 0;
-    GS_UINT32 plainlen = 0;
-    GS_UCHAR* plaintext = NULL;
-
-    /* The guc transparent_encrypted_string is a string in base64 mode. */
-    encrypted_sample_string =
-        (GS_UCHAR*)SEC_decodeBase64((char *)g_instance.attr.attr_security.transparent_encrypted_string, &decodelen);
-
-    if (encrypted_sample_string == NULL || decodelen < RANDOM_LEN) {
-        if (encrypted_sample_string != NULL) {
-            OPENSSL_free(encrypted_sample_string);
-            encrypted_sample_string = NULL;
-        }
-        ereport(PANIC,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Decode transparent_encrypted_string failed, please check it.\n")));
-    }
-    getIV(encrypted_sample_string, decodelen);
-
-    plaintext = (GS_UCHAR*)palloc0(decodelen);
-
-    if (!gs_decrypt_aes_128(encrypted_sample_string, decodelen, dek, DEK_LEN, plaintext, &plainlen)) {
-        OPENSSL_free(encrypted_sample_string);
-        encrypted_sample_string = NULL;
-        pfree_ext(plaintext);
-        ereport(PANIC,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Decrypt transparent_encrypted_string failed, please check it!\n")));
-    }
-
-    if (encrypted_sample_string != NULL) {
-        OPENSSL_free(encrypted_sample_string);
-        encrypted_sample_string = NULL;
-    }
-    if ((size_t)plainlen != strlen(DEK_SAMPLE_STRING) ||
-        strncmp((const char*)plaintext, DEK_SAMPLE_STRING, strlen(DEK_SAMPLE_STRING)) != 0) {
-        pfree_ext(plaintext);
-        ereport(PANIC,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Decrypt transparent_encrypted_string failed, please check it!\n")));
-    }
-
-    pfree_ext(plaintext);
-}
-
-bool getAndCheckTranEncryptDEK()
-{
-    GS_UCHAR dek[DEK_LEN] = {'\0'};
-    int ret = 0;
-
-    /* Transparent encryption disabled. */
-    if (!isEncryptedCluster()) {
-        ereport(LOG, (errmsg("Transparent encryption disabled.\n")));
-        return true;
-    }
-
-    ereport(LOG, (errmsg("Transparent encryption enabled.\n")));
-
-    if (trans_encrypt_iv == NULL) {
-        trans_encrypt_iv = (GS_UCHAR*)palloc0(TDE_IV_LEN);
-        if (trans_encrypt_iv == NULL) {
-            ereport(ERROR,
-                (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Out of memory while getting transparent encryption iv.\n")));
-            return false;
-        }
-    }
-
-    if (isSecurityMode) {
-        getTransEncryptDEK(dek);
-        testDEK((GS_UCHAR*)dek);
-
-    } else {
-        init_the_kerberos_env();
-        char* gausshome = getGaussHome();
-        if (gausshome == NULL) {
-            ereport(WARNING, (errmsg("Transparent encryption Getting environment variable $GAUSSHOME error.\n")));
-            (void)fprintf(stderr, _("%s:Getting environment variable $GAUSSHOME error, please check.\n"), pgname);
-            return false;
-        }
-
-        KeyManager table_a_key("1", "1");  // next version for different database or table.
-        table_a_key.setfile(gausshome);
-        pfree_ext(gausshome);
-
-        if (!table_a_key.init_Key()) {
-            ereport(WARNING, (errmsg("Transparent encryption init key failed.\n")));
-            return false;
-        }
-
-        std::string dek_b64 = table_a_key.getDEK();
-        std::string tde_sample_str = table_a_key.getEncryptedSampleStr();
-        if (tde_sample_str.empty()) {
-            ereport(WARNING, (errmsg("Transparent encryption tde_sample_str error, please check.\n")));
-            (void)fprintf(stderr, _("%s:tde_sample_str error, please check.\n"), pgname);
-            return false;
-        }
-
-        if (dek_b64.length() < DEK_LEN) {
-            ereport(WARNING, (errmsg("Transparent encryption get key failed.\n")));
-            return false;
-        }
-
-        GS_UINT32 dek_origian_len = 0;
-        char* dek_origian = SEC_decodeBase64((char*)dek_b64.c_str(), &dek_origian_len);
-        if (dek_origian == NULL) {
-            ereport(WARNING, (errmsg("decode Base64 failed.\n")));
-            return false;
-        }
-        ret = memcpy_s(dek, DEK_LEN, dek_origian, dek_origian_len);
-        securec_check(ret, "\0", "\0");
-        OPENSSL_free(dek_origian);
-        dek_origian = NULL;
-
-        if (!table_a_key.check_key((unsigned char*)dek)) {
-            ereport(WARNING, (errmsg("Transparent encryption get key failed.\n")));
-            return false;
-        }
-
-        table_a_key.getIV(trans_encrypt_iv);
-        g_tde_algo = table_a_key.get_tde_algo();
-    }
-
-    /* init dek and iv global values */
-    trans_encrypt_dek = (GS_UCHAR*)palloc0(DEK_LEN);
-    ret = memcpy_s(trans_encrypt_dek, DEK_LEN, dek, DEK_LEN);
-    securec_check(ret, "\0", "\0");
-
-    ereport(LOG, (errmsg("Succeeded to check DEK for transparent encryption.\n")));
-    return true;
-}
-
-bool isEncryptedCluster()
-{
-    if (isSecurityMode && (g_instance.attr.attr_security.transparent_encrypted_string == NULL ||
-                              *g_instance.attr.attr_security.transparent_encrypted_string == '\0')) {
-        ereport(DEBUG5, (errmsg("Transparent encryption disabled in DWS.\n")));
-        return false;
-
-    } else if ((!isSecurityMode) && (g_instance.attr.attr_common.transparent_encrypt_kms_url == NULL ||
-                                        *g_instance.attr.attr_common.transparent_encrypt_kms_url == '\0')) {
-        ereport(DEBUG5, (errmsg("Transparent encryption disabled in GaussDB.\n")));
-        return false;
-    }
-
-    if (is_feature_disabled(TRANSPARENT_ENCRYPTION) == true) {
-        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("TDE is not supported.")));
-        return false;
-    }
-    return true;
-}
-
-bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
+static bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
 {
     char* key = NULL;
     GS_UINT32 keylen = 0;
@@ -2417,8 +1869,7 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     GS_UINT32 encodetextlen = 0;
     GS_UINT32 ciphertextlenmax = 0;
     GS_UCHAR user_key[SM4_KEY_LENGTH];
-    GS_UCHAR user_iv[SM4_IV_LENGTH] = {0};
-	
+    GS_UCHAR userIv[SM4_IV_LENGTH] = {0};
     errno_t errorno = EOK;
     GS_UINT32 ret = 0;
     size_t cipherLength = 0;
@@ -2447,9 +1898,9 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     securec_check(errorno, "\0", "\0");
     pfree_ext(key);
 
-    ret = RAND_priv_bytes(user_iv, SM4_IV_LENGTH);
+    ret = RAND_priv_bytes(userIv, SM4_IV_LENGTH);
     if (ret != 1) {
-        errorno = memset_s(user_iv, SM4_IV_LENGTH, '\0', SM4_IV_LENGTH);
+        errorno = memset_s(userIv, SM4_IV_LENGTH, '\0', SM4_IV_LENGTH);
         securec_check(errorno, "", "");
         ereport(ERROR, (errmsg("generate random sm4 vector failed,errcode:%d", ret)));
     }
@@ -2464,15 +1915,15 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     ciphertext = (char*)palloc(ciphertextlenmax);
     errorno = memset_s(ciphertext, ciphertextlenmax, '\0', ciphertextlenmax);
     securec_check(errorno, "\0", "\0");
-    errorno = memcpy_s(ciphertext , SM4_IV_LENGTH, user_iv, SM4_IV_LENGTH);
+    errorno = memcpy_s(ciphertext, SM4_IV_LENGTH, userIv, SM4_IV_LENGTH);
     securec_check(errorno, "\0", "\0");
 
-    ret = sm4_ctr_enc_partial_mode(
-        plaintext, plaintextlen, ciphertext + SM4_IV_LENGTH, &cipherLength, user_key, user_iv);
+    ret = encrypt_partial_mode(
+        plaintext, plaintextlen, ciphertext + SM4_IV_LENGTH, &cipherLength, user_key, userIv, TDE_ALGO_SM4_CTR);
     errorno = memset_s(plaintext, plaintextlen, '\0', plaintextlen);
     securec_check(errorno, "\0", "\0");
     pfree_ext(plaintext);
-    if (ret !=  0) {
+    if (ret !=  true) {
         errorno = memset_s(ciphertext, cipherLength, '\0', cipherLength);
         securec_check(errorno, "\0", "\0");
         pfree_ext(ciphertext);
@@ -2504,7 +1955,7 @@ bool gs_encrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     return true;
 }
 
-bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
+static bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
 {
     char* key = NULL;
     GS_UINT32 keylen = 0;
@@ -2513,13 +1964,13 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     GS_UINT32 cipherpartlen;
     char* encodetext = NULL;
     char* cipherpart = NULL;
-    GS_UCHAR* decodetext;
+    GS_UCHAR* decodetext = NULL;
     GS_UINT32 ret = 0;
 
     GS_UINT32 decodetextlen = 0;
     GS_UINT32 ciphertextlenmax = 0;
     GS_UCHAR userkey[SM4_KEY_LENGTH];
-    GS_UCHAR user_iv[SM4_IV_LENGTH] = {0};
+    GS_UCHAR userIv[SM4_IV_LENGTH] = {0};
 
     errno_t errorno = EOK;
     size_t encodetextlen = 0;
@@ -2549,7 +2000,7 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     pfree_ext(key);
     decodetext = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(0)));
     decodetextlen = strlen((const char*)decodetext);
-    ciphertext = (char*)(SEC_decodeBase64((const char*)decodetext , &ciphertextlen));
+    ciphertext = (char*)(SEC_decodeBase64((const char*)decodetext, &ciphertextlen));
     if ((ciphertext == NULL) || (ciphertextlen < (SM4_IV_LENGTH + 1))) {
         if (ciphertext != NULL) {
             OPENSSL_free(ciphertext);
@@ -2568,7 +2019,7 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     securec_check(errorno, "\0", "\0");
     pfree_ext(decodetext);
 
-    errorno = memcpy_s(user_iv, SM4_IV_LENGTH,ciphertext, SM4_IV_LENGTH);
+    errorno = memcpy_s(userIv, SM4_IV_LENGTH, ciphertext, SM4_IV_LENGTH);
     securec_check(errorno, "\0", "\0");
 
     ciphertextlenmax = ciphertextlen + SM4_BLOCK_SIZE - 1;
@@ -2578,16 +2029,16 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
 
     cipherpartlen = ciphertextlen - SM4_IV_LENGTH;
     cipherpart = (char*)palloc(cipherpartlen + 1);
-    errorno = memcpy_s(cipherpart, cipherpartlen  + 1, ciphertext + SM4_IV_LENGTH, cipherpartlen);
+    errorno = memcpy_s(cipherpart, cipherpartlen + 1, ciphertext + SM4_IV_LENGTH, cipherpartlen);
     securec_check(errorno, "\0", "\0");
     errorno = memset_s(ciphertext, ciphertextlen, '\0', ciphertextlen);
     securec_check(errorno, "\0", "\0");
     OPENSSL_free(ciphertext);
     ciphertext = NULL;	
 
-    ret = sm4_ctr_dec_partial_mode(
-                cipherpart, cipherpartlen, encodetext, &encodetextlen, userkey, user_iv);
-    if (ret !=  0) {
+    ret = decrypt_partial_mode(
+        cipherpart, cipherpartlen, encodetext, &encodetextlen, userkey, userIv, TDE_ALGO_SM4_CTR);
+    if (ret !=  true) {
         errorno = memset_s(cipherpart, cipherpartlen + 1, '\0', cipherpartlen + 1);
         securec_check(errorno, "\0", "\0");
         pfree_ext(cipherpart);
@@ -2608,7 +2059,7 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
     *outtext = cstring_to_text((char*)encodetext);
     errorno = memset_s(encodetext, encodetextlen, '\0', encodetextlen);
     securec_check(errorno, "\0", "\0");
-   	pfree_ext(encodetext);
+    pfree_ext(encodetext);
     encodetext = NULL;
 
     return true;
@@ -2616,7 +2067,7 @@ bool gs_decrypt_sm4_function(FunctionCallInfo fcinfo, text** outtext)
 
 Datum gs_encrypt(PG_FUNCTION_ARGS)
 {
-    GS_UCHAR* encrypttype;
+    GS_UCHAR* encrypttype = NULL;
     text* outtext = NULL;
     bool status = false;
 
@@ -2638,7 +2089,6 @@ Datum gs_encrypt(PG_FUNCTION_ARGS)
     }
 
     encrypttype = (GS_UCHAR*)(text_to_cstring(PG_GETARG_TEXT_P(2)));
-
     if (strcmp((const char*)encrypttype, ENCRYPT_TYPE_SM4) == 0) {
         status = gs_encrypt_sm4_function(fcinfo, &outtext);
     } else if (strcmp((const char*)encrypttype, ENCRYPT_TYPE_AES128) == 0) {
@@ -2660,7 +2110,7 @@ Datum gs_encrypt(PG_FUNCTION_ARGS)
 
 Datum gs_decrypt(PG_FUNCTION_ARGS)
 {
-    GS_UCHAR* decrypttype;
+    GS_UCHAR* decrypttype = NULL;
     text* outtext = NULL;
     bool status = false;
     /* check input paramaters */
@@ -2669,7 +2119,7 @@ Datum gs_decrypt(PG_FUNCTION_ARGS)
         outtext = NULL;
         PG_RETURN_TEXT_P(outtext);
     }
-    
+
     if (PG_ARGISNULL(1)) {
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The decryption key can not be empty!")));
@@ -2711,14 +2161,13 @@ Datum gs_encrypt_aes128(PG_FUNCTION_ARGS)
         outtext = NULL;
         PG_RETURN_TEXT_P(outtext);
     }
-    
+
     if (PG_ARGISNULL(1)) {
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The encryption key can not be empty!")));
     }
-
-   status = gs_encrypt_aes128_function(fcinfo, &outtext);
-   if (!status) {
+    status = gs_encrypt_aes128_function(fcinfo, &outtext);
+    if (!status) {
         outtext = NULL;
     }
     PG_RETURN_TEXT_P(outtext);
@@ -2735,7 +2184,6 @@ Datum gs_decrypt_aes128(PG_FUNCTION_ARGS)
         outtext = NULL;
         PG_RETURN_TEXT_P(outtext);
     }
-    
     if (PG_ARGISNULL(1)) {
         ereport(ERROR,
             (errcode(ERRCODE_EXTERNAL_ROUTINE_INVOCATION_EXCEPTION), errmsg("The decryption key can not be empty!")));
@@ -2747,5 +2195,3 @@ Datum gs_decrypt_aes128(PG_FUNCTION_ARGS)
     }
     PG_RETURN_TEXT_P(outtext);
 }
-
-

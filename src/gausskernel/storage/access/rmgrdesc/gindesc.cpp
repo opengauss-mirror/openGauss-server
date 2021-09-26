@@ -21,7 +21,7 @@
 #ifdef FRONTEND
 #include "common/fe_memutils.h"
 #endif
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 static void desc_recompress_leaf(StringInfo buf, ginxlogRecompressDataLeaf *insertData)
 {

@@ -58,6 +58,7 @@ CachedColumns::~CachedColumns()
             }
         }
     }
+    
     libpq_free(m_columns);
 }
 

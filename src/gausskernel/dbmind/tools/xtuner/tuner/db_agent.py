@@ -50,7 +50,8 @@ def new_db_agent(db_info):
                     db_user_pwd=db_info['db_user_pwd'],
                     host=db_info['host'],
                     host_user=db_info['host_user'],
-                    host_user_pwd=db_info['host_user_pwd'])
+                    host_user_pwd=db_info['host_user_pwd'],
+                    ssh_port=db_info['ssh_port'])
 
 
 class DB_Agent:

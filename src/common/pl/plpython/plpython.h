@@ -76,7 +76,7 @@ typedef int Py_ssize_t;
  * supporting Python 2 and its usual strings, we provide a
  * compatibility layer for Python 3 that when asked to convert a C
  * string to a Python string it converts the C string from the
- * PostgreSQL server encoding to a Python Unicode object.
+ * openGauss server encoding to a Python Unicode object.
  */
 
 #if PY_VERSION_HEX < 0x02060000

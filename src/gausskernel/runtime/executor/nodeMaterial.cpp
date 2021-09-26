@@ -23,7 +23,7 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeMaterial.h"
+#include "executor/node/nodeMaterial.h"
 #include "miscadmin.h"
 #include "optimizer/streamplan.h"
 #include "pgstat.h"

@@ -43,7 +43,7 @@
 #include "parser/parser.h"
 #include "pgxc/groupmgr.h"
 #include "pgxc/pgxc.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -54,8 +54,8 @@
 #include "bulkload/dist_fdw.h"
 
 /* Sensitive options for user mapping, will be encrypted when saved to catalog. */
-const char* sensitiveOptionsArray[] = {"password"};
-const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
+const char* g_sensitiveOptionsArray[] = {"password"};
+const int g_sensitiveArrayLength = lengthof(g_sensitiveOptionsArray);
 
 /*
  * Convert a DefElem list to the text array format that is used in
@@ -831,7 +831,7 @@ void CreateForeignServer(CreateForeignServerStmt* stmt)
 #ifdef ENABLE_MOT
     /* Creating additional MOT server is disallowed here because of the following reasons:
      * 1. While using the FDW interface, MOT table is not really "foreign" but rather local. The original idea of FDW
-     *    that came with Postgres itself was only a set of interface and function calls to remote, and therefore there
+     *    that came with openGauss itself was only a set of interface and function calls to remote, and therefore there
      *    is nothing to drop locally. MOT table does have actually data to be dropped cascade whenever a dependent
      *    database is dropped. We could not simply just remove the entries in catalog.
      * 2. MOT engine down below does not have the mapping between table and database,
@@ -1157,7 +1157,7 @@ void CreateUserMapping(CreateUserMappingStmt* stmt)
     values[Anum_pg_user_mapping_umuser - 1] = ObjectIdGetDatum(useId);
     values[Anum_pg_user_mapping_umserver - 1] = ObjectIdGetDatum(srv->serverid);
 
-    EncryptGenericOptions(stmt->options, sensitiveOptionsArray, sensitiveArrayLength, false);
+    EncryptGenericOptions(stmt->options, g_sensitiveOptionsArray, g_sensitiveArrayLength, false);
 
     /* Add user options */
     useoptions =
@@ -1254,7 +1254,7 @@ void AlterUserMapping(AlterUserMappingStmt* stmt)
         if (isnull)
             datum = PointerGetDatum(NULL);
 
-        EncryptGenericOptions(stmt->options, sensitiveOptionsArray, sensitiveArrayLength, false);
+        EncryptGenericOptions(stmt->options, g_sensitiveOptionsArray, g_sensitiveArrayLength, false);
 
         /* Prepare the options array */
         datum = transformGenericOptions(UserMappingRelationId, datum, stmt->options, fdw->fdwvalidator);
@@ -1422,12 +1422,6 @@ void getErrorTableFilePath(char* buf, int len, Oid databaseid, Oid reid)
 #define OptInternalMask "internal_mask"
 
 #ifdef ENABLE_MOT
-extern List* ChooseIndexColumnNames(const List* indexElems);
-extern char* ChooseIndexName(const char* tabname, Oid namespaceId, const List* colnames,
-        const List* exclusionOpNames, bool primary, bool isconstraint, bool psort = false);
-extern void index_update_stats(Relation rel, bool hasindex, bool isprimary,
-        Oid reltoastidxid, Oid relcudescidx, double reltuples);
-
 void CreateForeignIndex(IndexStmt* stmt, Oid indexRelationId)
 {
     Relation ftrel, rel;
@@ -1445,12 +1439,12 @@ void CreateForeignIndex(IndexStmt* stmt, Oid indexRelationId)
 
     ftrel = heap_open(ForeignTableRelationId, RowExclusiveLock);
     indrel = heap_open(IndexRelationId, AccessShareLock);
-    rel = heap_openrv_extended(stmt->relation, (stmt->concurrent ? ShareUpdateExclusiveLock : ShareLock), false, true);
+    rel = HeapOpenrvExtended(stmt->relation, (stmt->concurrent ? ShareUpdateExclusiveLock : ShareLock), false, true);
 
     if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(rel))) {
         Oid relationId = RelationGetRelid(rel);
         ForeignTable* ftbl = GetForeignTable(relationId);
-        Oid namespaceId = RelationGetNamespace(rel);
+
         /*
          * For now the owner cannot be specified on create. Use effective user ID.
          */
@@ -1470,31 +1464,12 @@ void CreateForeignIndex(IndexStmt* stmt, Oid indexRelationId)
 
         FdwRoutine* fdwroutine = GetFdwRoutine(fdw->fdwhandler);
         if (fdwroutine->ValidateTableDef != NULL) {
-            char* indexRelationName;
-            List* indexColNames;
-            bool ixNameChanged = false;
             Oid prevIndxId = stmt->indexOid;
-
-            indexColNames = ChooseIndexColumnNames(stmt->indexParams);
-            indexRelationName = stmt->idxname;
-
-            if (indexRelationName == NULL) {
-                indexRelationName = ChooseIndexName(RelationGetRelationName(rel),
-                                                    namespaceId,
-                                                    indexColNames,
-                                                    stmt->excludeOpNames,
-                                                    stmt->primary,
-                                                    stmt->isconstraint);
-
-                stmt->idxname = indexRelationName;
-                ixNameChanged = true;
-            }
-
             stmt->relation->foreignOid = relationId;
             stmt->indexOid = indexRelationId;
+            AssertEreport(stmt->idxname != NULL, MOD_MOT, "Index name cannot be NULL in the stmt for foreign index");
+
             fdwroutine->ValidateTableDef((Node*)stmt);
-            if (ixNameChanged)
-                stmt->idxname = NULL;
 
             stmt->indexOid = prevIndxId;
             index_update_stats(rel, true, stmt->primary, InvalidOid, InvalidOid, -1);

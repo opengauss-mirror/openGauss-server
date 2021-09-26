@@ -151,7 +151,7 @@ static bool check_relation_privileges(Oid relOid, Bitmapset* selected, Bitmapset
     bool result = true;
 
     /*
-     * Hardwired Policies: SE-PostgreSQL enforces - clients cannot modify
+     * Hardwired Policies:  SE-PostgreSQL enforces - clients cannot modify
      * system catalogs using DMLs - clients cannot reference/modify toast
      * relations using DMLs
      */

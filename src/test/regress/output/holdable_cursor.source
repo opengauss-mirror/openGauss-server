@@ -158,9 +158,7 @@ i_product_b char(50)
 )with(orientation='column')
  ;
 copy hdfs_pro_cursor_002_tmp from '@abs_srcdir@/data/item1.data' DELIMITER as ',' NULL as '' ;
-set default_storage_nodegroup = gp_8;
 create table hdfs_pro_cursor_002_1 (like hdfs_pro_cursor_002_tmp);
-reset default_storage_nodegroup;
 create or replace function hdfs_fun_ref_cur_001_tmp()returns nvarchar2
 as $$
 declare

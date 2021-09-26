@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_PACKAGE">
+<refmeta>
+<refentrytitle>CREATE PACKAGE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE PACKAGE</refname>
+<refpurpose>create a package spec</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ OR REPLACE ] PACKAGE [ schema ] package_name
+    [ invoker_rights_clause ] { IS | AS } item_list_1 END package_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

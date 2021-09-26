@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -89,6 +89,7 @@ extern bool IsQueryNeedRetry(const char* sqlstate);
 extern void ResetQueryRetryController();
 extern bool QueryRetryController(const char* query);
 extern bool SendQuery(const char* query, bool is_print = true, bool print_error = true);
+extern bool MakeCopyWorker(const char* query, int nclients);
 
 extern bool is_superuser(void);
 extern bool standard_strings(void);
@@ -96,5 +97,6 @@ extern const char* session_username(void);
 
 extern void expand_tilde(char** filename);
 extern bool do_parallel_execution(int count, char** stmts);
+extern char* GetEnvStr(const char* env);
 
 #endif /* COMMON_H */

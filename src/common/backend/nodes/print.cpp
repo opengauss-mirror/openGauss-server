@@ -387,6 +387,9 @@ void print_rt(const List* rtable)
             case RTE_CTE:
                 printf("%d\t%s\t[cte]", i, rte->eref->aliasname);
                 break;
+            case RTE_RESULT:
+                printf("%d\t%s\t[result]", i, rte->eref->aliasname);
+                break;
             default:
                 printf("%d\t%s\t[unknown rtekind]", i, rte->eref->aliasname);
                 break;

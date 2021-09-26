@@ -1,0 +1,274 @@
+-- default roles
+SELECT oid, * FROM pg_authid WHERE rolname like 'gs_role_%' ORDER BY oid;
+\du gs_role_signal_backend
+
+-- prepare
+CREATE user test_user1 PASSWORD '1234567i*';
+CREATE user test_sysadmin SYSADMIN PASSWORD '1234567i*';
+CREATE user test_createrole CREATEROLE PASSWORD '1234567i*';
+CREATE user test_monadmin MONADMIN PASSWORD '1234567i*';
+CREATE user test_createdb CREATEDB PASSWORD '1234567i*';
+CREATE DATABASE test_base owner test_createdb;
+CREATE user test_persis PERSISTENCE PASSWORD '1234567i*';
+CREATE user test_opr OPRADMIN PASSWORD '1234567i*';
+CREATE user test_oprpersis OPRADMIN PERSISTENCE PASSWORD '1234567i*';
+CREATE user test_root CREATEROLE CREATEDB MONADMIN PASSWORD '1234567i*';
+GRANT gs_role_copy_files,gs_role_signal_backend,gs_role_tablespace,
+      gs_role_replication,gs_role_account_lock TO test_root WITH ADMIN OPTION;
+
+-- "gs_role_" prefix
+CREATE USER gs_ PASSWORD '1234567i*';
+CREATE USER role_gs_role_ PASSWORD '1234567i*';
+CREATE USER gs_role PASSWORD '1234567i*';
+DROP USER gs_, role_gs_role_, gs_role;
+
+CREATE USER gs_role_ PASSWORD '1234567i*'; -- failed
+CREATE USER gs_role_defaule_roles PASSWORD '1234567i*'; -- failed
+
+ALTER USER test_user1 RENAME TO gs_;
+ALTER USER gs_ RENAME TO role_gs_role_;
+
+ALTER USER role_gs_role_ RENAME TO gs_role_; -- failed
+ALTER USER role_gs_role_ RENAME TO gs_role_defaule_roles; -- failed
+ALTER USER role_gs_role_ RENAME TO test_user1;
+
+CREATE SCHEMA gs_defaule_roles;
+DROP SCHEMA gs_defaule_roles;
+
+CREATE SCHEMA gs_role_defaule_roles;
+DROP SCHEMA gs_role_defaule_roles;
+
+-- alter or drop default roles
+-- all failed
+ALTER USER gs_role_signal_backend PASSWORD '1234567i*8';
+ALTER USER gs_role_signal_backend SYSADMIN;
+ALTER USER gs_role_signal_backend ACCOUNT LOCK;
+
+ALTER USER gs_role_signal_backend RENAME TO test_user3;
+ALTER USER gs_role_signal_backend RENAME TO gs_role_test_user3;
+
+DROP ROLE gs_role_signal_backend;
+DROP USER gs_role_signal_backend;
+DROP USER test_user1,gs_role_signal_backend;
+DROP USER gs_role_signal_backend,test_user1;
+
+-- GRANT/REVOKE
+-- sysadmin
+SET ROLE test_sysadmin PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user1;
+REVOKE gs_role_signal_backend FROM test_user1;
+CREATE USER test_user2 PASSWORD '1234567i*' IN ROLE gs_role_signal_backend;
+DROP USER test_user2;
+
+-- createrole
+SET ROLE test_createrole PASSWORD '1234567i*';
+GRANT test_user1 TO gs_role_signal_backend;
+REVOKE test_user1 FROM gs_role_signal_backend;
+GRANT gs_role_signal_backend TO test_user1; -- failed
+CREATE user test_user2 PASSWORD '1234567i*' IN ROLE gs_role_signal_backend; -- failed
+
+-- root
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user1;
+REVOKE gs_role_signal_backend FROM test_user1;
+CREATE USER test_user2 PASSWORD '1234567i*' IN ROLE gs_role_signal_backend;
+REVOKE gs_role_signal_backend FROM test_user2;
+
+-- normal user
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT test_user2 TO gs_role_signal_backend; -- failed
+GRANT gs_role_signal_backend TO test_user2; -- failed
+
+RESET ROLE;
+GRANT gs_role_signal_backend TO test_user1 WITH ADMIN OPTION;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user2; -- success
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+REVOKE gs_role_signal_backend FROM test_user1; -- failed
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT gs_role_signal_backend TO test_user2 WITH ADMIN OPTION; -- success
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+REVOKE gs_role_signal_backend FROM test_user1,test_user2; -- success
+
+-- prepare
+RESET ROLE;
+GRANT test_user1 to test_user2;
+
+-- gs_role_copy_files
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_copy_server_files=on" >/dev/null 2>&1
+
+RESET ROLE;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+
+CREATE TABLE public.copy_role_tbl (fir int);
+INSERT INTO public.copy_role_tbl VALUES (1),(2);
+GRANT select,insert ON public.copy_role_tbl TO test_user1,test_user2;
+GRANT usage ON SCHEMA public TO test_user1,test_user2;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_copy_files TO test_user1;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+
+RESET ROLE;
+REVOKE gs_role_copy_files FROM test_user1;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+COPY public.copy_role_tbl TO '@abs_srcdir@/data/copy_tbl';
+COPY public.copy_role_tbl FROM '@abs_srcdir@/data/copy_tbl';
+
+\! rm -rf @abs_srcdir@/data/copy_tbl
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_copy_server_files=off" >/dev/null 2>&1
+
+-- gs_role_signal_backend
+
+-- gs_role_tablespace
+RESET ROLE;
+REVOKE usage ON SCHEMA public FROM test_user1,test_user2;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp1 LOCATION '@testtablespace@/tsp1';
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp2 LOCATION '@testtablespace@/tsp2';
+
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_tablespace TO test_user1;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp1 LOCATION '@testtablespace@/tsp1';
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp2 LOCATION '@testtablespace@/tsp2';
+
+RESET ROLE;
+REVOKE gs_role_tablespace FROM test_user1;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp1 LOCATION '@testtablespace@/tsp1';
+DROP TABLESPACE tsp2;
+DROP TABLESPACE tsp1; -- success
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE TABLESPACE tsp2 LOCATION '@testtablespace@/tsp2';
+DROP TABLESPACE tsp2;
+
+\! rm -rf @testtablespace@/tsp1
+\! rm -rf @testtablespace@/tsp2
+
+-- gs_role_replication
+RESET ROLE;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+SELECT kill_snapshot();
+
+SELECT pg_create_physical_replication_slot('privs_test_physlot', true);
+SELECT pg_create_logical_replication_slot('privs_test_slot', 'mppdb_decoding');
+
+SELECT pg_logical_slot_get_changes('privs_test_slot', NULL, NULL);
+SELECT pg_logical_slot_peek_changes('privs_test_slot', NULL, NULL);
+SELECT pg_logical_slot_get_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+SELECT pg_logical_slot_peek_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+
+SELECT pg_drop_replication_slot('privs_test_slot');
+
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_replication TO test_user1;
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+SELECT kill_snapshot();
+
+SELECT pg_create_physical_replication_slot('privs_test_physlot', true);
+SELECT pg_create_logical_replication_slot('privs_test_slot', 'mppdb_decoding');
+SELECT pg_create_physical_replication_slot_extern('uuid', false, 'obs.cnnorth-7.ulanqab.huawei.com;dyk;19D772JBCACXX3KWS51D;********;caoshufeng_uuid/dn1');
+
+SELECT pg_replication_slot_advance('privs_test_slot', NULL);
+
+SELECT pg_logical_slot_get_changes('privs_test_slot', NULL, NULL);
+SELECT pg_logical_slot_peek_changes('privs_test_slot', NULL, NULL);
+SELECT pg_logical_slot_get_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+SELECT pg_logical_slot_peek_binary_changes('privs_test_slot', NULL, NULL, 'force-binary', '0', 'skip-empty-xacts', '1');
+
+SELECT pg_drop_replication_slot('privs_test_slot');
+SELECT pg_drop_replication_slot('privs_test_physlot');
+
+RESET ROLE;
+REVOKE gs_role_replication FROM test_user1;
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+SELECT kill_snapshot();
+
+-- gs_role_account_lock
+RESET ROLE;
+SELECT * FROM pg_auth_members WHERE member != (SELECT oid FROM pg_roles WHERE rolname='test_root');
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT LOCK;
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT LOCK;
+
+SET ROLE test_root PASSWORD '1234567i*';
+GRANT gs_role_account_lock TO test_user1;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT UNLOCK;
+ALTER USER test_sysadmin ACCOUNT LOCK;
+ALTER USER test_createrole ACCOUNT LOCK;
+ALTER USER songrr ACCOUNT LOCK; -- failed
+ALTER USER test_persis ACCOUNT LOCK; -- failed
+ALTER USER test_opr ACCOUNT LOCK;
+ALTER USER test_oprpersis ACCOUNT LOCK; -- failed
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT UNLOCK;
+ALTER USER test_user2 ACCOUNT UNLOCK;
+ALTER USER test_sysadmin ACCOUNT UNLOCK;
+ALTER USER test_createrole ACCOUNT UNLOCK;
+ALTER USER songrr ACCOUNT UNLOCK; -- failed
+ALTER USER test_persis ACCOUNT UNLOCK; -- failed
+ALTER USER test_opr ACCOUNT UNLOCK;
+ALTER USER test_oprpersis ACCOUNT UNLOCK; -- failed
+
+RESET ROLE;
+REVOKE gs_role_account_lock FROM test_user1;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT LOCK;
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+ALTER USER test_user1 ACCOUNT LOCK;
+ALTER USER test_user2 ACCOUNT LOCK;
+
+-- clean
+RESET ROLE;
+DROP TABLE public.copy_role_tbl;
+DROP USER test_user1,test_user2,test_sysadmin,test_createrole;
+DROP USER test_root,test_persis,test_opr,test_oprpersis,test_monadmin;

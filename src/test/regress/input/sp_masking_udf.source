@@ -1,0 +1,219 @@
+create user udftest password 'udftest@123';
+create user p1 poladmin password 'udftest@123';
+set role udftest password 'udftest@123';
+create table users (pid int, Name text, CreditCard text, Email text, Telephone varchar2, Salary float);
+insert into users values (1,'Perx','6211-4554-0000-1324','Perx12px@huawei.com',15144213224,15000);
+\c
+-- check basic udf
+set role p1 password 'udftest@123';
+create or replace function msk_creditcard(col text) returns TEXT as $$
+declare
+    result TEXT;
+begin
+    result := overlay(col placing 'xxxx-xxxx' from 6);
+    return result;
+end;
+$$ language plpgsql;
+create or replace function msk_email(col text) returns TEXT as $$
+declare
+    result TEXT;
+begin
+    result := overlay(col placing 'xxxxxx' from 1);
+    return result;
+end;
+$$ language plpgsql;
+create or replace function msk_phone(col text) returns varchar2 as $$
+declare
+    result varchar2;
+begin
+    result := '11111111111';
+    return result;
+end;
+$$ language plpgsql;
+create or replace function msk_sal(col text) returns float as $$
+declare
+    result float;
+begin
+    result := 0;
+    return result;
+end;
+$$ language plpgsql;
+CREATE RESOURCE LABEL creditcardcol ADD COLUMN(udftest.users.Creditcard);
+CREATE MASKING POLICY pol_creditcard msk_creditcard ON LABEL(creditcardcol);
+CREATE RESOURCE LABEL emailcol ADD COLUMN(udftest.users.Email);
+CREATE MASKING POLICY pol_email msk_email ON LABEL(emailcol); 
+CREATE RESOURCE LABEL phonecol ADD COLUMN(udftest.users.Telephone);
+CREATE MASKING POLICY pol_phone msk_phone ON LABEL(phonecol);
+CREATE RESOURCE LABEL salcol ADD COLUMN(udftest.users.Salary);
+CREATE MASKING POLICY pol_sal msk_sal ON LABEL(salcol); 
+\c
+set role udftest password 'udftest@123';
+select * from users;
+\c
+--check function owner
+set role udftest password 'udftest@123';
+create or replace function msk_id(col int, numb int default 7) returns INTEGER as $$
+declare
+    result INTEGER;
+begin
+    result := col + numb;
+    return result;
+end;
+$$ language plpgsql;
+\c
+set role p1 password 'udftest@123';
+create resource label lb1 add column(udftest.users.pid);
+create masking policy msk1 msk_id(100) on label(lb1);
+drop masking policy msk1;
+drop resource label lb1;
+\c
+set role udftest password 'udftest@123';
+drop function msk_id;
+\c
+--check function return
+set role p1 password 'udftest@123';
+drop MASKING POLICY pol_creditcard;
+drop function msk_creditcard;
+create or replace function msk_creditcard(col text) returns int as $$
+declare
+    result int;
+begin
+    result := '11';
+    return result;
+end;
+$$ language plpgsql;
+CREATE MASKING POLICY pol_creditcard msk_creditcard ON LABEL(creditcardcol);
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+--check funcition input
+set role p1 password 'udftest@123';
+drop MASKING POLICY pol_creditcard;
+drop function msk_creditcard;
+create or replace function msk_creditcard(col int) returns text as $$
+declare
+    result text;
+begin
+    result := overlay(col placing 'xxxx-xxxx' from 6);
+    return result;
+end;
+$$ language plpgsql;
+CREATE MASKING POLICY pol_creditcard msk_creditcard ON LABEL(creditcardcol);
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+--check unsupport type
+set role udftest password 'udftest@123';
+CREATE TABLE ip (id int,ipv4 cidr);
+INSERT INTO ip VALUES(1, '192.168.100.128/25');
+\c
+set role p1 password 'udftest@123';
+create or replace function msk_ip(col cidr) returns cidr as $$
+declare
+    result cidr;
+begin
+    result := '192.168.1.1/8';
+    return result;
+end;
+$$ language plpgsql;
+create resource label lb4 add column(udftest.ip.ipv4);
+create masking policy msk4 msk_ip on label(lb4);
+drop resource label lb4;
+drop function msk_ip;
+\c
+set role udftest password 'udftest@123';
+drop table ip;
+\c
+--check alter/drop on UDF
+set role p1 password 'udftest@123';
+ALTER FUNCTION msk_creditcard(int) OWNER TO udftest;
+ALTER FUNCTION msk_creditcard(int) RENAME TO udftest;
+ALTER FUNCTION msk_creditcard(int) SET SCHEMA TO udftest;
+DROP FUNCTION msk_creditcard(int);
+--check revoke on UDF
+revoke all privileges on function msk_creditcard(int) from public;
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+--check java function as UDF
+CREATE FUNCTION java_upperstring(VARCHAR)
+RETURNS VARCHAR
+AS 'Example.upperString'
+LANGUAGE JAVA;
+set role p1 password 'udftest@123';
+CREATE RESOURCE LABEL namecol ADD COLUMN(udftest.users.Name);
+CREATE MASKING POLICY pol_name public.java_upperstring ON LABEL(namecol);
+drop RESOURCE LABEL namecol;
+\c
+--drop udf
+drop FUNCTION java_upperstring;
+drop masking policy pol_creditcard;
+drop masking policy pol_sal;
+drop masking policy pol_phone;
+drop masking policy pol_email;
+drop function p1.msk_sal;
+drop function p1.msk_phone;
+drop function p1.msk_email;
+drop RESOURCE LABEL creditcardcol;
+drop RESOURCE LABEL emailcol;
+drop RESOURCE LABEL phonecol;
+drop RESOURCE LABEL salcol;
+\c
+--check schema
+create user p2 poladmin password 'udftest@123';
+set role p2 password 'udftest@123';
+create or replace function msk_creditcard(col text) returns int as $$
+declare
+    result int;
+begin
+    result := '11';
+    return result;
+end;
+$$ language plpgsql;
+CREATE RESOURCE LABEL creditcardcol ADD COLUMN(udftest.users.Creditcard);
+CREATE MASKING POLICY pol_creditcard msk_creditcard ON LABEL(creditcardcol);
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+set role p2 password 'udftest@123';
+drop masking policy pol_creditcard;
+CREATE MASKING POLICY pol_creditcard p1.msk_creditcard ON LABEL(creditcardcol);
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+set role p2 password 'udftest@123';
+drop masking policy pol_creditcard;
+CREATE MASKING POLICY pol_creditcard p2.msk_creditcard ON LABEL(creditcardcol);
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+set role p2 password 'udftest@123';
+drop MASKING POLICY pol_creditcard;
+--check regexp
+CREATE MASKING POLICY pol_creditcard regexpmasking('[\d+]','*',2, 10) ON LABEL(creditcardcol);
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+set role p2 password 'udftest@123';
+drop MASKING POLICY pol_creditcard;
+CREATE MASKING POLICY pol_creditcard regexpmasking('[\d+]','*',2.1, 10) ON LABEL(creditcardcol);
+\c
+set role udftest password 'udftest@123';
+select CreditCard from users;
+\c
+--clean
+drop MASKING POLICY pol_creditcard;
+drop RESOURCE LABEL creditcardcol;
+drop function p2.msk_creditcard;
+drop function p1.msk_creditcard;
+drop table udftest.users;
+drop user p1;
+drop user p2;
+drop user udftest;

@@ -21,7 +21,7 @@
 #include "catalog/pg_type.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_proc.h"
-#include "executor/nodeRecursiveunion.h"
+#include "executor/node/nodeRecursiveunion.h"
 #include "foreign/foreign.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
@@ -2371,9 +2371,11 @@ static bool extract_query_dependencies_walker(Node* node, PlannerInfo* context)
                  * On transaction start, if this table has been altered. Plansource->is_valid will be set
                  * to false.
                  */
-                List* partitionOid = getPartitionObjectIdList(rte->relid, PART_OBJ_TYPE_TABLE_PARTITION);
-                if (partitionOid != NULL) {
-                    context->glob->relationOids = list_concat(context->glob->relationOids, partitionOid);
+                if (rte->ispartrel) {
+                    List* partitionOid = getPartitionObjectIdList(rte->relid, PART_OBJ_TYPE_TABLE_PARTITION);
+                    if (partitionOid != NULL) {
+                        context->glob->relationOids = list_concat(context->glob->relationOids, partitionOid);
+                    }
                 }
             }
         }

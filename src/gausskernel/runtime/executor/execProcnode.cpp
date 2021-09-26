@@ -79,43 +79,43 @@
 #include "knl/knl_variable.h"
 
 #include "executor/executor.h"
-#include "executor/nodeAgg.h"
-#include "executor/nodeAppend.h"
-#include "executor/nodeBitmapAnd.h"
-#include "executor/nodeBitmapHeapscan.h"
-#include "executor/nodeBitmapIndexscan.h"
-#include "executor/nodeBitmapOr.h"
-#include "executor/nodeCtescan.h"
-#include "executor/nodeExtensible.h"
-#include "executor/nodeForeignscan.h"
-#include "executor/nodeFunctionscan.h"
-#include "executor/nodeGroup.h"
-#include "executor/nodeHash.h"
-#include "executor/nodeHashjoin.h"
-#include "executor/nodeIndexonlyscan.h"
-#include "executor/nodeIndexscan.h"
-#include "executor/nodeLimit.h"
-#include "executor/nodeLockRows.h"
-#include "executor/nodeMaterial.h"
-#include "executor/nodeMergeAppend.h"
-#include "executor/nodeMergejoin.h"
-#include "executor/nodeModifyTable.h"
-#include "executor/nodeNestloop.h"
-#include "executor/nodePartIterator.h"
-#include "executor/nodeRecursiveunion.h"
-#include "executor/nodeResult.h"
-#include "executor/nodeSeqscan.h"
-#include "executor/nodeSetOp.h"
-#include "executor/nodeSort.h"
-#include "executor/nodeStub.h"
-#include "executor/nodeSubplan.h"
-#include "executor/nodeSubqueryscan.h"
-#include "executor/nodeTidscan.h"
-#include "executor/nodeUnique.h"
-#include "executor/nodeValuesscan.h"
-#include "executor/nodeWindowAgg.h"
-#include "executor/nodeWorktablescan.h"
-#include "executor/execStream.h"
+#include "executor/node/nodeAgg.h"
+#include "executor/node/nodeAppend.h"
+#include "executor/node/nodeBitmapAnd.h"
+#include "executor/node/nodeBitmapHeapscan.h"
+#include "executor/node/nodeBitmapIndexscan.h"
+#include "executor/node/nodeBitmapOr.h"
+#include "executor/node/nodeCtescan.h"
+#include "executor/node/nodeExtensible.h"
+#include "executor/node/nodeForeignscan.h"
+#include "executor/node/nodeFunctionscan.h"
+#include "executor/node/nodeGroup.h"
+#include "executor/node/nodeHash.h"
+#include "executor/node/nodeHashjoin.h"
+#include "executor/node/nodeIndexonlyscan.h"
+#include "executor/node/nodeIndexscan.h"
+#include "executor/node/nodeLimit.h"
+#include "executor/node/nodeLockRows.h"
+#include "executor/node/nodeMaterial.h"
+#include "executor/node/nodeMergeAppend.h"
+#include "executor/node/nodeMergejoin.h"
+#include "executor/node/nodeModifyTable.h"
+#include "executor/node/nodeNestloop.h"
+#include "executor/node/nodePartIterator.h"
+#include "executor/node/nodeRecursiveunion.h"
+#include "executor/node/nodeResult.h"
+#include "executor/node/nodeSeqscan.h"
+#include "executor/node/nodeSetOp.h"
+#include "executor/node/nodeSort.h"
+#include "executor/node/nodeStub.h"
+#include "executor/node/nodeSubplan.h"
+#include "executor/node/nodeSubqueryscan.h"
+#include "executor/node/nodeTidscan.h"
+#include "executor/node/nodeUnique.h"
+#include "executor/node/nodeValuesscan.h"
+#include "executor/node/nodeWindowAgg.h"
+#include "executor/node/nodeWorktablescan.h"
+#include "executor/exec/execStream.h"
 #include "optimizer/clauses.h"
 #include "optimizer/encoding.h"
 #include "optimizer/ml_model.h"
@@ -162,8 +162,8 @@
 #include "securec.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/executer_gstrace.h"
-#include "executor/nodeGD.h"
-#include "executor/nodeKMeans.h"
+#include "executor/node/nodeGD.h"
+#include "executor/node/nodeKMeans.h"
 
 #define NODENAMELEN 64
 
@@ -748,6 +748,226 @@ void ExecProcNodeInstr(PlanState* node, TupleTableSlot* result)
     if (TupIsNull(result))
         node->instrument->status = true;
 }
+
+typedef TupleTableSlot* (*ExecProcFuncType)(PlanState* node);
+
+static inline TupleTableSlot *DefaultExecProc(PlanState *node)
+{
+    ereport(ERROR,
+        (errmodule(MOD_EXECUTOR),
+            errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            errmsg("unrecognized node type: %d when executing executor node.", (int)nodeTag(node))));
+    return NULL;
+}
+
+static inline TupleTableSlot *ExecResultWrap(PlanState *node)
+{
+    return ExecResult((ResultState*)node);
+};
+
+static inline TupleTableSlot *ExecModifyTableWrap(PlanState *node)
+{
+    return ExecModifyTable((ModifyTableState*)node);
+};
+
+static inline TupleTableSlot *ExecAppendWrap(PlanState *node)
+{
+    return ExecAppend((AppendState*)node);
+};
+
+static inline TupleTableSlot *ExecPartIteratorWrap(PlanState *node)
+{
+    return ExecPartIterator((PartIteratorState*)node);
+};
+
+static inline TupleTableSlot *ExecMergeAppendWrap(PlanState *node)
+{
+    return ExecMergeAppend((MergeAppendState*)node);
+};
+
+static inline TupleTableSlot *ExecRecursiveUnionWrap(PlanState *node)
+{
+    return ExecRecursiveUnion((RecursiveUnionState*)node);
+};
+
+static inline TupleTableSlot *ExecSeqScanWrap(PlanState *node)
+{
+    return ExecSeqScan((SeqScanState *)node);
+};
+
+static inline TupleTableSlot *ExecIndexScanWrap(PlanState *node)
+{
+    return ExecIndexScan((IndexScanState *)node);
+};
+
+static inline TupleTableSlot *ExecIndexOnlyScanWrap(PlanState *node)
+{
+    return ExecIndexOnlyScan((IndexOnlyScanState *)node);
+};
+
+static inline TupleTableSlot *ExecBitmapHeapScanWrap(PlanState *node)
+{
+    return ExecBitmapHeapScan((BitmapHeapScanState *)node);
+};
+
+static inline TupleTableSlot *ExecTidScanWrap(PlanState *node)
+{
+    return ExecTidScan((TidScanState *)node);
+};
+
+static inline TupleTableSlot *ExecSubqueryScanWrap(PlanState *node)
+{
+    return ExecSubqueryScan((SubqueryScanState *)node);
+};
+
+static inline TupleTableSlot *ExecFunctionScanWrap(PlanState *node)
+{
+    return ExecFunctionScan((FunctionScanState *)node);
+};
+
+static inline TupleTableSlot *ExecValuesScanWrap(PlanState *node)
+{
+    return ExecValuesScan((ValuesScanState *)node);
+};
+
+static inline TupleTableSlot *ExecCteScanWrap(PlanState *node)
+{
+    return ExecCteScan((CteScanState *)node);
+};
+
+static inline TupleTableSlot *ExecWorkTableScanWrap(PlanState *node)
+{
+    return ExecWorkTableScan((WorkTableScanState *)node);
+};
+
+static inline TupleTableSlot *ExecForeignScanWrap(PlanState *node)
+{
+    return ExecForeignScan((ForeignScanState *)node);
+};
+
+static inline TupleTableSlot *ExecExtensiblePlanWrap(PlanState *node)
+{
+    return ExecExtensiblePlan((ExtensiblePlanState *)node);
+};
+
+static inline TupleTableSlot *ExecNestLoopWrap(PlanState *node)
+{
+    return ExecNestLoop((NestLoopState *)node);
+};
+
+static inline TupleTableSlot *ExecMergeJoinWrap(PlanState *node)
+{
+    return ExecMergeJoin((MergeJoinState *)node);
+};
+
+static inline TupleTableSlot *ExecHashJoinWrap(PlanState *node)
+{
+    return ExecHashJoin((HashJoinState *)node);
+};
+
+static inline TupleTableSlot *ExecMaterialWrap(PlanState *node)
+{
+    return ExecMaterial((MaterialState *)node);
+};
+
+static inline TupleTableSlot *ExecSortWrap(PlanState *node)
+{
+    return ExecSort((SortState *)node);
+};
+
+static inline TupleTableSlot *ExecGroupWrap(PlanState *node)
+{
+    return ExecGroup((GroupState *)node);
+};
+
+static inline TupleTableSlot *ExecAggWrap(PlanState *node)
+{
+    return ExecAgg((AggState *)node);
+};
+
+static inline TupleTableSlot *ExecWindowAggWrap(PlanState *node)
+{
+    return ExecWindowAgg((WindowAggState *)node);
+};
+
+static inline TupleTableSlot *ExecUniqueWrap(PlanState *node)
+{
+    return ExecUnique((UniqueState *)node);
+};
+
+static inline TupleTableSlot *ExecHashWrap(PlanState *node)
+{
+    return ExecHash();
+};
+
+static inline TupleTableSlot *ExecSetOpWrap(PlanState *node)
+{
+    return ExecSetOp((SetOpState *)node);
+};
+
+static TupleTableSlot *ExecLockRowsWrap(PlanState *node)
+{
+    return ExecLockRows((LockRowsState *)node);
+};
+
+static inline TupleTableSlot *ExecLimitWrap(PlanState *node)
+{
+    return ExecLimit((LimitState *)node);
+};
+
+static inline TupleTableSlot *ExecRemoteQueryWrap(PlanState *node)
+{
+    return ExecRemoteQuery((RemoteQueryState *)node);
+};
+
+static inline TupleTableSlot *ExecStreamWrap(PlanState *node)
+{
+    return ExecStream((StreamState *)node);
+};
+
+ExecProcFuncType g_execProcFuncTable[] = {
+    ExecResultWrap,
+    DefaultExecProc,
+    ExecModifyTableWrap,
+    ExecModifyTableWrap,
+    ExecAppendWrap,
+    ExecPartIteratorWrap,
+    ExecMergeAppendWrap,
+    ExecRecursiveUnionWrap,
+    DefaultExecProc,
+    DefaultExecProc,
+    DefaultExecProc,
+    ExecSeqScanWrap,
+    ExecIndexScanWrap,
+    ExecIndexOnlyScanWrap,
+    DefaultExecProc,
+    ExecBitmapHeapScanWrap,
+    ExecTidScanWrap,
+    ExecSubqueryScanWrap,
+    ExecFunctionScanWrap,
+    ExecValuesScanWrap,
+    ExecCteScanWrap,
+    ExecWorkTableScanWrap,
+    ExecForeignScanWrap,
+    ExecExtensiblePlanWrap,
+    DefaultExecProc,
+    ExecNestLoopWrap,
+    ExecMergeJoinWrap,
+    ExecHashJoinWrap,
+    ExecMaterialWrap,
+    ExecSortWrap,
+    ExecGroupWrap,
+    ExecAggWrap,
+    ExecWindowAggWrap,
+    ExecUniqueWrap,
+    ExecHashWrap,
+    ExecSetOpWrap,
+    ExecLockRowsWrap,
+    ExecLimitWrap,
+    ExecRemoteQueryWrap,
+    ExecStreamWrap
+};
+
 /* ----------------------------------------------------------------
  *		ExecProcNode
  *
@@ -780,7 +1000,12 @@ TupleTableSlot* ExecProcNode(PlanState* node)
     if (unlikely(planstate_need_stub(node))) {
         result = ExecProcNodeStub(node);
     } else {
-        result = ExecProcNodeByType(node);
+        int index = (int)(nodeTag(node))-T_ResultState;
+        if (likely(index <= 0 && index <= T_StreamState - T_ResultState)) {
+            result = g_execProcFuncTable[index](node);
+        } else {
+            result = ExecProcNodeByType(node);
+        }
     }
 
     if (node->instrument != NULL) {

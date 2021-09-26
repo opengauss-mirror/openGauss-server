@@ -1,10 +1,10 @@
 /* -------------------------------------------------------------------------
  *
  * fmgr.h
- *	  Definitions for the Postgres function manager and function-call
+ *	  Definitions for the openGauss function manager and function-call
  *	  interface.
  *
- * This file must be included by all Postgres modules that either define
+ * This file must be included by all openGauss modules that either define
  * or call fmgr-callable functions.
  *
  *
@@ -26,6 +26,7 @@
 #include "fmgr/fmgr_comp.h"
 #include "fmgr/fmgr_core.h"
 #include "lib/stringinfo.h"
+#include "access/tupdesc.h"
 
 #ifndef FRONTEND_PARSER
 
@@ -80,6 +81,7 @@ typedef struct FmgrInfo {
     MemoryContext fn_mcxt;    /* memory context to store fn_extra in */
     fmNodePtr fn_expr;        /* expression parse tree for call, or NULL */
     Oid fn_rettype;           // Oid of function return type
+    Oid fn_rettypemod;        /* Oid of the function returnt typmod */
     char fnName[NAMEDATALEN]; /* function name */
     char* fnLibPath;          /* library path for c-udf
                                * package.class.method(args) for java-udf */
@@ -371,9 +373,9 @@ typedef const Pg_finfo_record* (*PGFInfoFunction)(void);
  * We require dynamically-loaded modules to include the macro call
  *		PG_MODULE_MAGIC;
  * so that we can check for obvious incompatibility, such as being compiled
- * for a different major PostgreSQL version.
+ * for a different major openGauss version.
  *
- * To compile with versions of PostgreSQL that do not support this,
+ * To compile with versions of openGauss that do not support this,
  * you may put an #ifdef/#endif test around it.  Note that in a multiple-
  * source-file module, the macro call should only appear once.
  *

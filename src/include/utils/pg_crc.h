@@ -1,7 +1,7 @@
 /*
  * pg_crc.h
  *
- * PostgreSQL CRC support
+ * openGauss CRC support
  *
  * See Ross Williams' excellent introduction
  * A PAINLESS GUIDE TO CRC ERROR DETECTION ALGORITHMS, available from

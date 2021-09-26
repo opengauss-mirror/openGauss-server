@@ -3,7 +3,6 @@
 -- Test temp relations and indexes
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 -- test temp table/index masking
 CREATE TABLE temptest(col int);
 CREATE INDEX i_temptest ON temptest(col);
@@ -46,7 +45,6 @@ DROP TABLE temptest;
 CREATE TEMP TABLE temptest(col int);
 \c
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 SELECT * FROM temptest;
 ERROR:  relation "temptest" does not exist on datanode1
 LINE 1: SELECT * FROM temptest;
@@ -846,27 +844,3 @@ Drop table test_temp1, test_ordinary;
 Drop table test_temp1, test_temp2;
 ERROR:  table "test_temp1" does not exist
 Drop table temp_col1, temp_col2;
--- Test types in temp schema
-set search_path = pg_temp, public;
-create domain pg_temp.nonempty as text check (value <> '');
--- function-syntax invocation of types matches rules for functions
-select nonempty('');
-ERROR:  function nonempty(unknown) does not exist
-LINE 1: select nonempty('');
-               ^
-HINT:  No function matches the given name and argument types. You might need to add explicit type casts.
-CONTEXT:  referenced column: nonempty
-select pg_temp.nonempty('');
- nonempty 
-----------
- 
-(1 row)
-
--- other syntax matches rules for tables
-select ''::nonempty;
- nonempty 
-----------
- 
-(1 row)
-
-reset search_path;

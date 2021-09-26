@@ -2,7 +2,6 @@
 -- CREATE_VIEW3
 --
 -- Enforce use of COMMIT instead of 2PC for temporary objects
-SET enforce_two_phase_commit TO off;
 
 --test COMMENT ON view's column
 create table test_comment_normal_view_column_t(id1 int,id2 int);

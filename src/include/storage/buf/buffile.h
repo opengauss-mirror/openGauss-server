@@ -25,7 +25,7 @@
 
 #ifndef BUFFILE_H
 #define BUFFILE_H
-
+#include "storage/sharedfileset.h"
 /* BufFile is an opaque type whose details are not known outside buffile.c. */
 
 typedef struct BufFile BufFile;
@@ -41,5 +41,11 @@ extern size_t BufFileWrite(BufFile* file, void* ptr, size_t size);
 extern int BufFileSeek(BufFile* file, int fileno, off_t offset, int whence);
 extern void BufFileTell(BufFile* file, int* fileno, off_t* offset);
 extern int BufFileSeekBlock(BufFile* file, long blknum);
-
+extern int64 BufFileSize(BufFile *file);
+extern long BufFileAppend(BufFile *target, BufFile *source);
+extern BufFile *BufFileCreateShared(SharedFileSet *fileset, const char *name);
+extern void BufFileExportShared(BufFile *file);
+extern BufFile *BufFileOpenShared(SharedFileSet *fileset, const char *name);
+extern void BufFileDeleteShared(SharedFileSet *fileset, const char *name);
+extern long BufFileAppend(BufFile *target, BufFile *source);
 #endif /* BUFFILE_H */

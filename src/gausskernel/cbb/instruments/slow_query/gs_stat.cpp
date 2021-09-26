@@ -210,6 +210,7 @@ bool gs_stat_encap_status_info(PgBackendStatus* localentry, PgBackendStatus* bee
                 (char*)beentry->st_activity);
             securec_check(rc, "", "");
             localentry->st_block_sessionid = beentry->st_block_sessionid;
+            localentry->globalSessionId = beentry->globalSessionId;
         }
 
         pgstat_save_changecount_after(beentry, after_changecount);

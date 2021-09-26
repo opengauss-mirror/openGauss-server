@@ -245,7 +245,7 @@ function switchover_to_standby2() {
 }
 
 function switchover_to_standby3() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode3_standby
+  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode3_standby -f
   if [ $? -eq 0 ]; then
     echo "switchover to standby3 success!"
   else
@@ -255,7 +255,7 @@ function switchover_to_standby3() {
 }
 
 function switchover_to_standby4() {
-  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode4_standby
+  gs_ctl switchover -w -t $gsctl_wait_time -D $data_dir/datanode4_standby -f
   if [ $? -eq 0 ]; then
     echo "switchover to standby4 success!"
   else

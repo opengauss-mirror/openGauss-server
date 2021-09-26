@@ -24,18 +24,25 @@
  * ---------------------------------------------------------------------------------------
  */
 
-#ifndef SM4_H
-#define SM4_H
+#ifndef EVP_CIPHER_H
+#define EVP_CIPHER_H
 
-#include <stdlib.h>
+#define KEY_128BIT_LEN  16
+#define KEY_256BIT_LEN  32
 
-unsigned long sm4_ctr_enc_partial_mode(const char* plainText, const size_t plainLength, char* cipherText,
-    size_t* cipherLength, unsigned char* key, unsigned char* iv);
-unsigned long sm4_ctr_dec_partial_mode(const char* cipherText, const size_t cipherLength, char* plainText,
-    size_t* plainLength, unsigned char* key, unsigned char* iv);
-unsigned long aes_ctr_enc_partial_mode(const char* plainText, const size_t plainLength, char* cipherText,
-    size_t* cipherLength, unsigned char* key, unsigned char* iv);
-unsigned long aes_ctr_dec_partial_mode(const char* cipherText, const size_t cipherLength, char* plainText,
-    size_t* plainLength, unsigned char* key, unsigned char* iv);
+/* To maintain forward compatibility, the value of enum cannot be changed */
+typedef enum {
+    TDE_ALGO_NONE = 0,
+    TDE_ALGO_AES_128_CTR = 1,
+    TDE_ALGO_AES_128_GCM = 2,
+    TDE_ALGO_AES_256_CTR = 3,
+    TDE_ALGO_AES_256_GCM = 4,
+    TDE_ALGO_SM4_CTR = 5,
+} TdeAlgo;
 
-#endif /* SM4_H */
+bool encrypt_partial_mode(const char* plainText, const size_t plainLength, char* cipherText,
+    size_t* cipherLength, unsigned char* key, unsigned char* iv, TdeAlgo algo);
+bool decrypt_partial_mode(const char* cipherText, const size_t cipherLength, char* plainText,
+    size_t* plainLength, unsigned char* key, unsigned char* iv, TdeAlgo algo);
+
+#endif /* EVP_CIPHER_H */

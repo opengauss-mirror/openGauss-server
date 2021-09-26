@@ -23,8 +23,10 @@
 #include "catalog/objectaccess.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_object.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_encrypted_proc.h"
 #include "catalog/pg_proc_fn.h"
 #include "catalog/pg_type.h"
 #include "commands/defrem.h"
@@ -46,6 +48,7 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
+#include "utils/pl_package.h"
 #ifdef PGXC
 #include "pgxc/execRemote.h"
 #include "pgxc/pgxc.h"
@@ -64,6 +67,7 @@
 #include "postmaster/postmaster.h"
 #include "commands/dbcommands.h"
 #include "storage/lmgr.h"
+#include "libpq/md5.h"
 
 #define TEMPSEPARATOR '@'
 #define SEPARATOR '#'
@@ -304,9 +308,9 @@ static void send_library_other_node(char* absolutePath)
     /* transer file is not exixts, that be not clusters. */
     if (IS_SINGLE_NODE || !file_exists(transfer_path)) {
         /* single node mode don't need transfer.py. */
-        if (!IS_SINGLE_NODE)
+#ifdef ENABLE_MULTIPLE_NODES
             ereport(LOG, (errcode_for_file_access(), errmsg("File transfer.py does not exist.")));
-
+#endif
         copy_result = copy_library_file(absolutePath, temp_library_name);
         if (!copy_result) {
             ereport(ERROR, (errcode_for_file_access(), errmsg("Copy file \"%s\" failed: %m", absolutePath)));
@@ -319,7 +323,7 @@ static void send_library_other_node(char* absolutePath)
     StringInfoData strinfo;
     initStringInfo(&strinfo);
 
-    appendStringInfo(&strinfo, "python %s %d %s %s", transfer_path, SENDTOOTHERNODE, absolutePath, temp_library_name);
+    appendStringInfo(&strinfo, "%s %d %s %s", transfer_path, SENDTOOTHERNODE, absolutePath, temp_library_name);
 
     int rc = system(strinfo.data);
 
@@ -345,7 +349,7 @@ static void send_library_to_Backup(char* sourcePath)
     initStringInfo(&strinfo);
 
     appendStringInfo(&strinfo,
-        "python %s %d %s %s",
+        "%s %d %s %s",
         transfer_path,
         SENDTOBACKUP,
         sourcePath,
@@ -522,10 +526,11 @@ static char* getCFunProbin(const char* probin, Oid procNamespace, Oid proowner,
  * @in parameterTypes - Param types only in parameters
  * @in procNamespace - function's namespace oid
  * @in package - is a package function or not
+ * @in packageid - is package oid
  * @return - new function conflicts old functions or not
  */
 static bool checkPackageFunctionConflicts(
-    const char* procedureName, Datum allParameterTypes, oidvector* parameterTypes, Oid procNamespace, bool package)
+    const char* procedureName, Datum allParameterTypes, oidvector* parameterTypes, Oid procNamespace, bool package, Oid propackageid)
 {
     int inpara_count;
     int allpara_count = 0;
@@ -575,7 +580,10 @@ static bool checkPackageFunctionConflicts(
             /* compare function's namespace */
             if (pform->pronamespace != procNamespace)
                 continue;
-
+            Datum packageid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+            Oid packageid = ObjectIdGetDatum(packageid_datum);
+            if (packageid != propackageid) 
+                continue;
             Datum propackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
             bool ispackage = false;
             if (!isNull)
@@ -618,7 +626,7 @@ static bool checkPackageFunctionConflicts(
                 continue;
             }
 
-            proc_para_type = &pform->proargtypes;
+            proc_para_type = ProcedureGetArgTypes(proctup);
 
             /* old function in param type compare new function all param type */
             if (allpara_type != NULL) {
@@ -679,7 +687,6 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
 {
     Datum proargnames;
     bool isnull = false;
-
     if (!replace) {
         ereport(ERROR,
             (errcode(ERRCODE_DUPLICATE_FUNCTION),
@@ -706,13 +713,31 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("function \"%s\" is a masking function,it can not be changed", procedureName)));
     }
+    Oid origin_return_type = oldproc->prorettype;
     /* A db donot check function return type when replace */
     if (!isOraStyle) {
+        if(IsClientLogicType(oldproc->prorettype)) {
+            Oid functionId = HeapTupleGetOid(oldtup);
+            HeapTuple gs_oldtup = SearchSysCache1(GSCLPROCID, functionId);
+            bool isNull = false;
+            if (HeapTupleIsValid(gs_oldtup)) {
+                Datum gs_ret_orig =
+                    SysCacheGetAttr(GSCLPROCID, gs_oldtup, Anum_gs_encrypted_proc_prorettype_orig, &isNull);
+                if(!isNull) {
+                    origin_return_type = DatumGetObjectId(gs_ret_orig);
+                }
+                Relation gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
+                deleteDependencyRecordsFor(ClientLogicProcId, HeapTupleGetOid(gs_oldtup), true);
+                simple_heap_delete(gs_rel, &gs_oldtup->t_self);
+                heap_close(gs_rel, RowExclusiveLock);
+                ReleaseSysCache(gs_oldtup);
+            }
+        }
         /*
          * Not okay to change the return type of the existing proc, since
          * existing rules, views, etc may depend on the return type.
          */
-        if (returnType != oldproc->prorettype || returnsSet != oldproc->proretset) {
+        if (returnType != origin_return_type || returnsSet != oldproc->proretset) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                     errmsg("cannot change return type of existing function"),
@@ -728,7 +753,13 @@ static void checkFunctionConflicts(HeapTuple oldtup, const char* procedureName, 
             TupleDesc newdesc;
 
             olddesc = build_function_result_tupdesc_t(oldtup);
-            newdesc = build_function_result_tupdesc_d(allParameterTypes, parameterModes, parameterNames);
+            /*
+             * the func oid is used for retrieving the relevant records from gs_cl_proc and using the data types listed
+             * there. it's only in use if any of the data types in pg_proc is a bytea_cl data type
+             */
+            Datum funcid = ObjectIdGetDatum(HeapTupleGetOid(oldtup));
+            /* get tuple descriptor */
+            newdesc = build_function_result_tupdesc_d(allParameterTypes, parameterModes, parameterNames, funcid);
             if (olddesc == NULL && newdesc == NULL)
                 /* ok, both are runtime-defined RECORDs */;
             else if (olddesc == NULL || newdesc == NULL || !equalTupleDescs(olddesc, newdesc)) {
@@ -924,12 +955,12 @@ static bool user_define_func_check(Oid languageId, const char* probin, char** ab
  * not "ArrayType *", to avoid importing array.h into pg_proc_fn.h.
  * ----------------------------------------------------------------
  */
-Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyle, bool replace, bool returnsSet,
+Oid ProcedureCreate(const char* procedureName, Oid procNamespace, Oid propackageid, bool isOraStyle, bool replace, bool returnsSet,
     Oid returnType, Oid proowner, Oid languageObjectId, Oid languageValidator, const char* prosrc, const char* probin,
     bool isAgg, bool isWindowFunc, bool security_definer, bool isLeakProof, bool isStrict, char volatility,
     oidvector* parameterTypes, Datum allParameterTypes, Datum parameterModes, Datum parameterNames,
     List* parameterDefaults, Datum proconfig, float4 procost, float4 prorows, int2vector* prodefaultargpos, bool fenced,
-    bool shippable, bool package, bool proIsProcedure)
+    bool shippable, bool package, bool proIsProcedure, const char *proargsrc, bool isPrivate)
 {
     Oid retval;
     int parameterCount;
@@ -962,7 +993,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     const char* filename = NULL;
     char* libPath = NULL;
     char* final_file_name = NULL;
-
+    List* name = NULL;
     /* sanity checks */
     Assert(PointerIsValid(prosrc));
 
@@ -1184,7 +1215,26 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     values[Anum_pg_proc_pronargs - 1] = UInt16GetDatum(parameterCount);
     values[Anum_pg_proc_pronargdefaults - 1] = UInt16GetDatum(list_length(parameterDefaults));
     values[Anum_pg_proc_prorettype - 1] = ObjectIdGetDatum(returnType);
-    values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(parameterTypes);
+    if (parameterCount <= FUNC_MAX_ARGS_INROW) {
+        nulls[Anum_pg_proc_proargtypesext - 1] = true;
+        values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(parameterTypes);
+    } else {
+        char hex[MD5_HASH_LEN + 1];
+        if (!pg_md5_hash((void*)parameterTypes->values, parameterTypes->dim1 * sizeof(Oid), hex)) {
+            ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+        }
+
+        /* Build a dummy oidvector using the hash value and use it as proargtypes field value. */
+        oidvector* dummy = buildoidvector((Oid*)hex, MD5_HASH_LEN / sizeof(Oid));
+        values[Anum_pg_proc_proargtypes - 1] = PointerGetDatum(dummy);
+        values[Anum_pg_proc_proargtypesext - 1] = PointerGetDatum(parameterTypes);
+    }
+    values[Anum_pg_proc_proisprivate - 1] = BoolGetDatum(isPrivate ? true : false);
+    if (OidIsValid(propackageid)) {
+        values[Anum_pg_proc_packageid - 1] = ObjectIdGetDatum(propackageid);
+    } else {
+        values[Anum_pg_proc_packageid - 1] = ObjectIdGetDatum(InvalidOid);
+    }
     if (allParameterTypes != PointerGetDatum(NULL))
         values[Anum_pg_proc_proallargtypes - 1] = allParameterTypes;
     else
@@ -1199,10 +1249,17 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
         nulls[Anum_pg_proc_proargnames - 1] = true;
     if (parameterDefaults != NIL) {
         values[Anum_pg_proc_proargdefaults - 1] = CStringGetTextDatum(nodeToString(parameterDefaults));
-        values[Anum_pg_proc_prodefaultargpos - 1] = PointerGetDatum(prodefaultargpos);
+        if (parameterCount <= FUNC_MAX_ARGS_INROW) {
+            values[Anum_pg_proc_prodefaultargpos - 1] = PointerGetDatum(prodefaultargpos);
+            nulls[Anum_pg_proc_prodefaultargposext - 1] = true;
+        } else {
+            values[Anum_pg_proc_prodefaultargposext - 1] = PointerGetDatum(prodefaultargpos);
+            nulls[Anum_pg_proc_prodefaultargpos - 1] = true;
+        }
     } else {
         nulls[Anum_pg_proc_proargdefaults - 1] = true;
         nulls[Anum_pg_proc_prodefaultargpos - 1] = true;
+        nulls[Anum_pg_proc_prodefaultargposext - 1] = true;
     }
 
     values[Anum_pg_proc_prosrc - 1] = CStringGetTextDatum(prosrc);
@@ -1210,6 +1267,19 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     values[Anum_pg_proc_shippable - 1] = BoolGetDatum(shippable);
     values[Anum_pg_proc_package - 1] = BoolGetDatum(package);
     values[Anum_pg_proc_prokind - 1] = CharGetDatum(proIsProcedure ? PROKIND_PROCEDURE : PROKIND_FUNCTION);
+
+    if (proargsrc != NULL) {
+        values[Anum_pg_proc_proargsrc - 1] = CStringGetTextDatum(proargsrc);
+    } else {
+        nulls[Anum_pg_proc_proargsrc - 1] = true;
+    }
+
+    if (OidIsValid(propackageid)) {
+        values[Anum_pg_proc_package - 1] = true;
+        package = true;
+    } else {
+        values[Anum_pg_proc_package - 1] = BoolGetDatum(package);
+    }
 
     if (probin != NULL) {
         /* Check user defined function. */
@@ -1238,7 +1308,16 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     tupDesc = RelationGetDescr(rel);
 
     /* A db do not overload a function by arguments.*/
+    NameData* pkgname = NULL;
     if (isOraStyle && !package) {
+        if (OidIsValid(propackageid)) {
+            pkgname = GetPackageName(propackageid);
+        }
+        if (pkgname == NULL) { 
+            name = list_make2(makeString(get_namespace_name(procNamespace)), makeString(pstrdup(procedureName)));
+        } else {
+            name = list_make3(makeString(get_namespace_name(procNamespace)), makeString(pstrdup(pkgname->data)), makeString(pstrdup(procedureName)));
+        }
         List* name = list_make2(makeString(get_namespace_name(procNamespace)), makeString(pstrdup(procedureName)));
 
         FuncCandidateList listfunc = FuncnameGetCandidates(name, -1, NULL, false, false, true);
@@ -1258,14 +1337,37 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
         /* Check for pre-existing definition */
         oldtup = SearchSysCache3(PROCNAMEARGSNSP,
             PointerGetDatum(procedureName),
-            PointerGetDatum(parameterTypes),
+            values[Anum_pg_proc_proargtypes - 1],
             ObjectIdGetDatum(procNamespace));
     }
 
     if (HeapTupleIsValid(oldtup)) {
         /* There is one; okay to replace it? */
-        Form_pg_proc oldproc = (Form_pg_proc)GETSTRUCT(oldtup);
-
+        bool isNull = false;
+        Datum packageOidDatum = SysCacheGetAttr(PROCOID, oldtup, Anum_pg_proc_packageid, &isNull);
+        Oid oldPkgOid = DatumGetObjectId(packageOidDatum);
+        if (!isNull) {
+            if (OidIsValid(oldPkgOid)) {
+                if (oldPkgOid != propackageid) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Due to upgrade mode,"
+                                   "Do not allow different package have same function name with same parameter,"
+                                   "please drop package by oid %d first", oldPkgOid)));
+                }
+            } 
+            if (OidIsValid(propackageid) && !OidIsValid(oldPkgOid)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Do not allow have same function name with same parameter in this version,"
+                                   "please drop function first.")));               
+            } else if (!OidIsValid(propackageid) && OidIsValid(oldPkgOid)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Do not allow have same function name with same parameter in this version,"
+                                   "please drop package by oid %d first.", oldPkgOid)));            
+            }
+        }
         checkFunctionConflicts(oldtup,
             procedureName,
             proowner,
@@ -1279,7 +1381,6 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
             isAgg,
             isWindowFunc);
 
-        bool isNull = false;
         Datum ispackage = SysCacheGetAttr(PROCOID, oldtup, Anum_pg_proc_package, &isNull);
         if (!isNull && DatumGetBool(ispackage) != package) {
             ReleaseSysCache(oldtup);
@@ -1289,6 +1390,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
         }
 
         /* For replace use-define C function, Here we need delete it's library when commit. */
+        Form_pg_proc oldproc = (Form_pg_proc)GETSTRUCT(oldtup);
         if (oldproc->prolang == ClanguageId) {
             if (PrepareCFunctionLibrary(oldtup)) {
                 Oid functionId = HeapTupleGetOid(oldtup);
@@ -1316,7 +1418,7 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     } else {
         /* checking for package function */
         bool conflicts =
-            checkPackageFunctionConflicts(procedureName, allParameterTypes, parameterTypes, procNamespace, package);
+            checkPackageFunctionConflicts(procedureName, allParameterTypes, parameterTypes, procNamespace, package , propackageid);
         if (conflicts) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1396,6 +1498,14 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
             recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
         }
 
+        /* dependency on packages */
+        if (propackageid != InvalidOid) {
+            referenced.classId = PackageRelationId;
+            referenced.objectId = propackageid;
+            referenced.objectSubId = 0;
+            recordDependencyOn(&myself, &referenced, DEPENDENCY_NORMAL);
+        }
+
         /* dependency on parameter default expressions */
         if (parameterDefaults != NULL)
             recordDependencyOnExpr(&myself, (Node*)parameterDefaults, NIL, DEPENDENCY_NORMAL);
@@ -1427,7 +1537,8 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
     /* Recode the procedure create time. */
     if (OidIsValid(retval)) {
         if (!is_update) {
-            CreatePgObject(retval, OBJECT_TYPE_PROC, proowner, true, true);
+            PgObjectOption objectOpt = {true, true, false, false};
+            CreatePgObject(retval, OBJECT_TYPE_PROC, proowner, objectOpt);
         } else {
             UpdatePgObjectMtime(retval, OBJECT_TYPE_PROC);
         }
@@ -1472,12 +1583,14 @@ Oid ProcedureCreate(const char* procedureName, Oid procNamespace, bool isOraStyl
         } else
             save_nestlevel = 0; /* keep compiler quiet */
 
-        OidFunctionCall1(languageValidator, ObjectIdGetDatum(retval));
+        OidFunctionCall3(languageValidator, ObjectIdGetDatum(retval), BoolGetDatum(isPrivate), BoolGetDatum(replace));
 
         if (set_items != NULL)
             AtEOXact_GUC(true, save_nestlevel);
     }
-    libraryLock.unLock();
+    if (user_defined_c_fun) {
+        libraryLock.unLock();
+    }
 
     pfree_ext(final_file_name);
     return retval;
@@ -1578,6 +1691,64 @@ Datum fmgr_c_validator(PG_FUNCTION_ARGS)
 }
 
 /*
+ * @Description:  replace type to managed column parameters
+ * @param[IN] pstate - parce state
+ * @param[IN] left node
+ * @param[IN] right node
+ * param[IN] ltypeid: left node type id
+ * param[IN] rtypeid : right node type id
+ * @return: void
+ */
+Node *sql_create_proc_operator_ref(ParseState *pstate, Node *left, Node *right, Oid *ltypeid, Oid *rtypeid)
+{
+    Var *var = NULL;
+    Oid *type = NULL;
+    int param_no = -1;
+
+    /*
+        we only support the case where one of the sides (left or right) is the column(Var)
+        and the other side is the "value"(Param)
+    */
+    if (left && IsA(left, Var)) {
+        var = (Var *)left;
+    } else if (right && IsA(right, Var)) {
+        var = (Var *)right;
+    }
+    if (left && IsA(left, Param)) {
+        type = ltypeid;
+        param_no = ((Param *)left)->paramid - 1;
+    } else if (right && IsA(right, Param)) {
+        type = rtypeid;
+        param_no = ((Param *)right)->paramid - 1;
+    }
+    if (var && type && param_no >= 0) {
+        /*
+         * only if the original type of the column equals to the type of the "value"(Param)
+         * we need to support type casting because the type may be downgraded (for example from double to int and
+         * it will be truncated)
+         */
+        if (var->vartypmod == (int)*type) {
+            /* update the parameter data type to the column data type */
+            *type = var->vartype;
+            /* update the data types in the parser info structure */
+            sql_fn_parser_replace_param_type(pstate, param_no, var);
+        }
+    }
+    return NULL;
+}
+
+/*
+ * Parser setup hook for parsing a Create FunctionSQL function body.
+ */
+void sql_create_proc_parser_setup(struct ParseState *p_state, SQLFunctionParseInfoPtr p_info)
+{
+    sql_fn_parser_setup(p_state, p_info);
+    p_state->p_create_proc_operator_hook = sql_create_proc_operator_ref;
+    p_state->p_create_proc_insert_hook = sql_fn_parser_replace_param_type_for_insert;
+    p_state->p_cl_hook_state = p_info;
+}
+
+/*
  * Validator for SQL language functions
  *
  * Parse it here in order to be sure that it contains no syntax errors.
@@ -1598,6 +1769,15 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
     bool haspolyarg = false;
     int i;
 
+    bool replace = false;
+    /*
+     * 3 means the number of arguments of function fmgr_sql_validator, while 'is_place' is the third one,
+     * and 2 is the postion of 'is_place' in PG_FUNCTION_ARGS
+     */
+    if (PG_NARGS() >= 3) {
+        replace = PG_GETARG_BOOL(2);
+    }
+
     if (!CheckFunctionValidatorAccess(fcinfo->flinfo->fn_oid, funcoid))
         PG_RETURN_VOID();
 
@@ -1613,18 +1793,20 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
             (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                 errmsg("SQL functions cannot return type %s", format_type_be(proc->prorettype))));
 
+    oidvector* proargs = ProcedureGetArgTypes(tuple);
+
     /* Disallow pseudotypes in arguments */
     /* except for polymorphic */
     haspolyarg = false;
     for (i = 0; i < proc->pronargs; i++) {
-        if (get_typtype(proc->proargtypes.values[i]) == TYPTYPE_PSEUDO) {
-            if (IsPolymorphicType(proc->proargtypes.values[i]))
+        if (get_typtype(proargs->values[i]) == TYPTYPE_PSEUDO) {
+            if (IsPolymorphicType(proargs->values[i]))
                 haspolyarg = true;
             else
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_FUNCTION_DEFINITION),
                         errmsg("SQL functions cannot have arguments of type %s",
-                            format_type_be(proc->proargtypes.values[i]))));
+                            format_type_be(proargs->values[i]))));
         }
     }
 
@@ -1681,10 +1863,14 @@ Datum fmgr_sql_validator(PG_FUNCTION_ARGS)
                             errmsg("In XC, SQL functions cannot contain utility statements")));
 #endif
                 u_sess->catalog_cxt.Parse_sql_language = true;
-                querytree_sublist =
-                    pg_analyze_and_rewrite_params(parsetree, prosrc, (ParserSetupHook)sql_fn_parser_setup, pinfo);
+                querytree_sublist = pg_analyze_and_rewrite_params(parsetree, prosrc,
+                    (ParserSetupHook)sql_create_proc_parser_setup, pinfo);
+                if (sql_fn_cl_rewrite_params(funcoid, pinfo, replace)) {
+                    /* function with the same parameres already exists */
+                    ereport(ERROR, (errmodule(MOD_FUNCTION), errcode(ERRCODE_DUPLICATE_FUNCTION),
+                            errmsg("function \"%s\" already exists with same argument types", NameStr(proc->proname))));
+                }
                 u_sess->catalog_cxt.Parse_sql_language = false;
-
 #ifdef PGXC
                 /* Check if the list of queries contains temporary objects */
                 if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
@@ -1972,4 +2158,181 @@ void check_file_path(char* absolutePath)
                     errmsg("File path can not include character '%c'", absolutePath[i])));
         }
     }
+}
+
+/*
+ * @Description:  replace type to managed column parameters
+ * @param[IN] pstate - parce state
+ * @param[IN] left node
+ * @param[IN] right node
+ * param[IN] ltypeid: left node type id
+ * param[IN] rtypeid : right node type id
+ * @return: void
+ */
+Node *plpgsql_create_proc_operator_ref(ParseState *pstate, Node *left, Node *right, Oid *ltypeid, Oid *rtypeid)
+{
+    Var *var = NULL;
+    Oid *type = NULL;
+    int param_no = 0;
+    int real_param_no = -1;
+    if (IsA(left, Var)) {
+        var = (Var *)left;
+    } else if (IsA(right, Var)) {
+        var = (Var *)right;
+    }
+    if (IsA(left, Param)) {
+        type = ltypeid;
+        param_no = ((Param *)left)->paramid;
+    } else if (IsA(right, Param)) {
+        type = rtypeid;
+        param_no = ((Param *)right)->paramid;
+    }
+    if (var && type && param_no > 0) {
+        if (var->vartypmod == (int)*type) {
+            *type = var->vartype;
+            /*
+             * in plpgsql input parameter may be placed anywhere, so count param_no as
+             * input param number
+             * No need to verify 1-st parameter - it cannot be changed
+             */
+            if (param_no > 1) {
+                PLpgSQL_expr *expr = (PLpgSQL_expr *)pstate->p_ref_hook_state;
+                HeapTuple tuple = SearchSysCache1(PROCOID, ObjectIdGetDatum(expr->func->fn_oid));
+                if (!HeapTupleIsValid(tuple)) {
+                    return NULL;
+                }
+                char *argmodes = NULL;
+                bool isNull = false;
+                Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
+                if (!isNull) {
+                    ArrayType *arr = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
+                    if (arr) {
+                        int n_modes = ARR_DIMS(arr)[0];
+                        argmodes = (char *)ARR_DATA_PTR(arr);
+                        if (param_no > n_modes) {
+                            /* prarmeter is plpgsql valiable - nothing to do */
+                            return NULL;
+                        }
+                        /* just verify than used input parameter */
+                        Assert(argmodes[param_no - 1] == PROARGMODE_IN ||
+                            argmodes[param_no - 1] == PROARGMODE_INOUT ||
+                            argmodes[param_no - 1] == PROARGMODE_VARIADIC);
+                        int i_max = (param_no < n_modes) ? param_no : n_modes;
+                        for (int i = 0; i < i_max; i++) {
+                            if (argmodes[i] == PROARGMODE_IN || argmodes[i] == PROARGMODE_INOUT ||
+                                argmodes[i] == PROARGMODE_VARIADIC) {
+                                real_param_no++;
+                            }
+                        }
+                    }
+                }
+                ReleaseSysCache(tuple);
+            }
+            if (real_param_no < 0) {
+                real_param_no = param_no - 1;
+            }
+            /* keep info */
+            sql_fn_parser_replace_param_type(pstate, real_param_no, var);
+        }
+    }
+    return NULL;
+}
+
+/*
+ * judage the two arglis is same or not
+ */
+bool isSameArgList(List* argList1, List* argList2) 
+{
+    ListCell* cell =  NULL;
+    int length1 = list_length(argList1);
+    int length2 = list_length(argList2);
+    
+    if (length1 != length2) {
+        return false;
+    }    
+    FunctionParameter* arr1[length1];
+    FunctionParameter* arr2[length2];
+    int length = 0; 
+    foreach(cell, argList1) {
+        arr1[length] = (FunctionParameter*)lfirst(cell);
+        length = length + 1; 
+    }    
+    length = 0; 
+    foreach(cell, argList2) {
+        arr2[length] = (FunctionParameter*)lfirst(cell);
+        length = length + 1; 
+    }    
+    for (int i = 0; i < length1; i++) {
+        FunctionParameter* fp1 = arr1[i];
+        FunctionParameter* fp2 = arr2[i];
+        TypeName* t1 = fp1->argType;
+        TypeName* t2 = fp2->argType;
+        Oid toid1;
+        Oid toid2;
+        Type typtup1;
+        Type typtup2;
+        typtup1 = LookupTypeName(NULL, t1, NULL);
+        typtup2 = LookupTypeName(NULL, t2, NULL);
+        if (HeapTupleIsValid(typtup1)) {
+            toid1 = typeTypeId(typtup1);
+            ReleaseSysCache(typtup1);
+        } else {
+            toid1 = findPackageParameter(strVal(linitial(t1->names)));
+            if (!OidIsValid(toid1)) {
+                ereport(ERROR,
+                    (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("type is not exists  %s.", fp1->name),
+                        errdetail("CommandType: %s", fp1->name),
+                        errcause("System error."),
+                        erraction("Contact Huawei Engineer.")));
+            }
+        }
+        if (HeapTupleIsValid(typtup2)) {
+            toid2 = typeTypeId(typtup2);
+            ReleaseSysCache(typtup2);
+        } else {
+            toid2 = findPackageParameter(strVal(linitial(t2->names)));
+            if (!OidIsValid(toid2)) {
+                ereport(ERROR,
+                    (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("type is not exists  %s.", fp2->name),
+                        errdetail("CommandType: %s", fp2->name),
+                        errcause("System error."),
+                        erraction("Contact Huawei Engineer.")));
+            }
+        }
+        if (toid1 != toid2 || fp1->mode != fp2->mode) {
+            return false;
+        } 
+    }    
+    return true;
+}
+
+char* getFuncName(List* funcNameList) {
+    char* schemaname = NULL;
+    char* pkgname = NULL;
+    char* funcname = NULL;
+    DeconstructQualifiedName(funcNameList, &schemaname, &funcname, &pkgname);
+    return funcname;
+}
+
+oidvector* ProcedureGetArgTypes(HeapTuple tuple)
+{
+    oidvector* proargs;
+    bool isNull = false;
+    Form_pg_proc procForm = (Form_pg_proc)GETSTRUCT(tuple);
+    if (procForm->pronargs <= FUNC_MAX_ARGS_INROW) {
+        proargs = &procForm->proargtypes;
+    } else {
+        Datum proargtypes = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_proargtypesext, &isNull);
+        if (isNull) {
+            ereport(ERROR,
+                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                    errmsg("proargtypesext cannot be NULL for functions having more than %u parameters, foid %u",
+                        FUNC_MAX_ARGS_INROW,
+                        HeapTupleGetOid(tuple))));
+        }
+        proargs = (oidvector *)PG_DETOAST_DATUM(proargtypes);
+    }
+    return proargs;
 }

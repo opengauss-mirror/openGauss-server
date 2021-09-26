@@ -30,10 +30,10 @@ $(SUBDIRS:%=%-recursive): fmgroids.h
 # see explanation in ../parser/Makefile
 fmgroids.h: fmgrtab.cpp
 ifeq ($(enable_multiple_nodes), yes)
-  fmgrtab.cpp: Gen_fmgrtab.pl  $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/src/distribute/kernel/catalog/distribute_builtin_funcs.ini
-	  $(PERL)  $< $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/src/distribute/kernel/catalog/distribute_builtin_funcs.ini
-  pg_builtin_proc.h: Gen_fmgrtab.pl  $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/src/distribute/kernel/catalog/distribute_builtin_funcs.ini
-	  $(PERL)  $< $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/src/distribute/kernel/catalog/distribute_builtin_funcs.ini
+  fmgrtab.cpp: Gen_fmgrtab.pl  $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/../distribute/kernel/catalog/distribute_builtin_funcs.ini
+	  $(PERL)  $< $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/../distribute/kernel/catalog/distribute_builtin_funcs.ini
+  pg_builtin_proc.h: Gen_fmgrtab.pl  $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/../distribute/kernel/catalog/distribute_builtin_funcs.ini
+	  $(PERL)  $< $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini $(top_srcdir)/../distribute/kernel/catalog/distribute_builtin_funcs.ini
 else
   fmgrtab.cpp: Gen_fmgrtab.pl  $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini
 	  $(PERL)  $< $(top_srcdir)/src/common/backend/catalog/builtin_funcs.ini

@@ -47,7 +47,7 @@ typedef struct RemoteCopyData {
 /*
  * List of all the options used for query deparse step
  * As CopyStateData stays private in copy.c and in order not to
- * make Postgres-XC code too much intrusive in PostgreSQL code,
+ * make openGauss code too much intrusive in PostgreSQL code,
  * this intermediate structure is used primarily to generate remote
  * COPY queries based on deparsed options.
  */
@@ -72,6 +72,7 @@ typedef struct RemoteCopyOptions {
     char* rco_smalldatetime_format;    /* customed smalldatetime format */
     bool rco_compatible_illegal_chars; /* compatible illegal chars conversion flag */
     bool rco_fill_missing_fields;      /* fill missing fields */
+    const char *transform_query_string;      /* source sql string for copy */
 } RemoteCopyOptions;
 
 extern void RemoteCopy_BuildStatement(

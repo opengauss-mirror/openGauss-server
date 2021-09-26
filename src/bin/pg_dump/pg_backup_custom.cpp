@@ -831,6 +831,13 @@ static size_t _CustomWriteFunc(ArchiveHandle* AH, const char* buf, size_t len)
     return _WriteBuf(AH, buf, len);
 }
 
+#ifdef ENABLE_UT
+size_t uttest_CustomWriteFunc(ArchiveHandle* AH, const char* buf, size_t len)
+{
+    return _CustomWriteFunc(AH, buf, len);
+}
+#endif
+
 /*
  * Callback function for ReadDataFromArchive. To keep things simple, we
  * always read one compressed block at a time.

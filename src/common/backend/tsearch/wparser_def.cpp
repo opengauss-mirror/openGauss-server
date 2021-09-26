@@ -975,7 +975,7 @@ static int p_isspecial(TParser* prs)
      * Unicode Characters in the 'Mark, Spacing Combining' Category That
      * characters are not alpha although they are not breakers of word too.
      * Check that only in utf encoding, because other encodings aren't
-     * supported by postgres or even exists.
+     * supported by openGauss or even exists.
      */
     if (GetDatabaseEncoding() == PG_UTF8 && prs->usewide) {
         const pg_wchar *StopLow = strange_letter;

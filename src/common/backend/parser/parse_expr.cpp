@@ -451,7 +451,7 @@ static Node* replaceExprAliasIfNecessary(ParseState* pstate, char* colname, Colu
                         errmsg("Alias \"%s\" reference with window function included is not supported.", colname),
                         parser_errposition(pstate, cref->location)));
 #ifndef ENABLE_MULTIPLE_NODES
-            } else if (contain_rownum_expr((Node*)tle->expr)) {
+            } else if (ContainRownumExpr((Node*)tle->expr)) {
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_COLUMN),
                      errmsg("Alias \"%s\" reference with ROWNUM included is invalid.", colname),

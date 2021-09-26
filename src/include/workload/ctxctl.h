@@ -111,10 +111,10 @@
         }                                                                                                              \
     } while (0)
 
-#define securec_check_ssval(errno, express, elevel)                                                                \
+#define securec_check_ssval(errno, express, elevel)                                                      \
     do {                                                                                                           \
         errno_t resno = errno;                                                                                     \
-        if (resno == -1) {                                                                                         \
+        if (resno == -1) {                                                                                   \
             express;                                                                                               \
             elog(elevel,                                                                                           \
                 "%s : %d : The destination buffer or format is a NULL pointer or the invalid parameter handle is " \

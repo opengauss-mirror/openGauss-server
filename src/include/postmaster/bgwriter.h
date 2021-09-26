@@ -16,7 +16,8 @@
 #define _BGWRITER_H
 
 #include "storage/buf/block.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
+#include "storage/smgr/knl_usync.h"
 #include "postmaster/pagewriter.h"
 
 typedef struct CkptSortItem CkptSortItem;
@@ -41,7 +42,7 @@ extern void CheckpointerMain(void);
 extern void RequestCheckpoint(int flags);
 extern void CheckpointWriteDelay(int flags, double progress);
 
-extern bool ForwardFsyncRequest(const RelFileNode rnode, ForkNumber forknum, BlockNumber segno);
+extern bool ForwardSyncRequest(const FileTag *ftag, SyncRequestType type);
 extern void AbsorbFsyncRequests(void);
 
 extern Size CheckpointerShmemSize(void);
@@ -56,10 +57,13 @@ extern const incre_ckpt_view_col g_bgwriter_view_col[INCRE_CKPT_BGWRITER_VIEW_CO
 extern void candidate_buf_init(void);
 extern void incre_ckpt_bgwriter_cxt_init();
 extern void incre_ckpt_background_writer_main(void);
+extern void invalid_buffer_bgwriter_main();
 extern void ckpt_shutdown_bgwriter();
 extern int get_bgwriter_thread_id(void);
 extern bool candidate_buf_pop(int *bufId, int threadId);
-extern uint32 get_curr_candidate_nums(void);
+extern uint32 get_curr_candidate_nums(bool segment);
+extern HTAB* relfilenode_hashtbl_create(const char* name, bool use_heap_mem);
+
 
 typedef struct BgWriterProc {
     PGPROC *proc;
@@ -75,5 +79,11 @@ typedef struct BgWriterProc {
     volatile uint32 thread_last_flush;
     int32 next_scan_loc;
 } BgWriterProc;
+
+typedef struct DelFileTag {
+    RelFileNode rnode;
+    int32 maxSegNo;
+} DelFileTag;
+
 #endif /* _BGWRITER_H */
 

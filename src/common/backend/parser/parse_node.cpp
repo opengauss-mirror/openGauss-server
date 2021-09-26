@@ -66,6 +66,9 @@ ParseState* make_parsestate(ParseState* parentParseState)
         pstate->p_paramref_hook = parentParseState->p_paramref_hook;
         pstate->p_coerce_param_hook = parentParseState->p_coerce_param_hook;
         pstate->p_ref_hook_state = parentParseState->p_ref_hook_state;
+        pstate->p_create_proc_operator_hook = parentParseState->p_create_proc_operator_hook;
+        pstate->p_create_proc_insert_hook = parentParseState->p_create_proc_insert_hook;
+        pstate->p_cl_hook_state = parentParseState->p_cl_hook_state;
     }
 
     return pstate;

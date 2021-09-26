@@ -38,6 +38,8 @@ typedef enum class CmkAlgorithm {
     INVALID_ALGORITHM,
     RSA_2048,
     AES_256_CBC,
+    SM2,
+    SM4
 } CmkAlgorithm;
 
 typedef enum class EncryptionType {
@@ -50,18 +52,9 @@ typedef enum class EncryptionType {
 typedef enum ColumnEncryptionAlgorithm {
     INVALID_ALGORITHM,
     AEAD_AES_256_CBC_HMAC_SHA256,
-    AEAD_AES_128_CBC_HMAC_SHA256
+    AEAD_AES_128_CBC_HMAC_SHA256,
+    SM4_SM3
 } ColumnEncryptionAlgorithm;
-
-#if ((!defined(ENABLE_MULTIPLE_NODES)) && (!defined(ENABLE_PRIVATEGAUSS)))
-const int MAX_KEY_PATH_VALUE_LEN = 64;
-
-typedef enum {
-    CE_IGNORE,
-    CE_CREATE_CMK,
-    CE_DROP_CMK,
-} CEQueryType;
-#endif
 
 inline ColumnEncryptionAlgorithm get_cek_algorithm_from_string(const char *alg)
 {
@@ -72,6 +65,8 @@ inline ColumnEncryptionAlgorithm get_cek_algorithm_from_string(const char *alg)
         return ColumnEncryptionAlgorithm::AEAD_AES_256_CBC_HMAC_SHA256;
     } else if (strcasecmp(alg, "AEAD_AES_128_CBC_HMAC_SHA256") == 0) {
         return ColumnEncryptionAlgorithm::AEAD_AES_128_CBC_HMAC_SHA256;
+    } else if (strcasecmp(alg, "SM4_SM3") == 0) {
+        return ColumnEncryptionAlgorithm::SM4_SM3;
     }
     return ColumnEncryptionAlgorithm::INVALID_ALGORITHM;
 }
@@ -98,15 +93,17 @@ inline CmkAlgorithm get_algorithm_from_string(const char *algorithm)
     if (algorithm == NULL || strlen(algorithm) == 0) {
         return CmkAlgorithm::INVALID_ALGORITHM;
     }
-#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+
     if (strcasecmp(algorithm, "AES_256_CBC") == 0) {
         return CmkAlgorithm::AES_256_CBC;
-    }
-#else
-    if (strcasecmp(algorithm, "RSA_2048") == 0) {
+    } else if (strcasecmp(algorithm, "SM4") == 0) {
+        return CmkAlgorithm::SM4;
+    } else if (strcasecmp(algorithm, "RSA_2048") == 0) {
         return CmkAlgorithm::RSA_2048;
+    } else if (strcasecmp(algorithm, "SM2") == 0) {
+        return CmkAlgorithm::SM2;
     }
-#endif
+    
     return CmkAlgorithm::INVALID_ALGORITHM;
 }
 

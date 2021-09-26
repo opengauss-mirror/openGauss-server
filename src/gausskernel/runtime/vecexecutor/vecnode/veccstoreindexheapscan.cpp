@@ -33,7 +33,7 @@
 #include "knl/knl_variable.h"
 #include "access/relscan.h"
 #include "access/cstore_am.h"
-#include "executor/execdebug.h"
+#include "executor/exec/execdebug.h"
 #include "vecexecutor/vecexecutor.h"
 #include "vecexecutor/vecnodecstoreindexscan.h"
 #include "vecexecutor/vecnodecstoreindexheapscan.h"

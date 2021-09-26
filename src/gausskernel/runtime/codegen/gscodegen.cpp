@@ -323,8 +323,18 @@ void GsCodeGen::loadIRFile()
     StringInfo filename = makeStringInfo();
     exec_path = gs_getenv_r("GAUSSHOME");
     if (NULL != exec_path && strcmp(exec_path, "\0") != 0) {
-        appendStringInfo(filename, "%s/share/llvmir/GaussDB_expr.ir", exec_path);
-        check_backend_env(exec_path);
+        char* exec_path_r = realpath(exec_path, NULL);
+        if (exec_path_r) {
+            appendStringInfo(filename, "%s/share/llvmir/GaussDB_expr.ir", exec_path_r);
+            check_backend_env(exec_path);
+            free(exec_path_r);
+        } else {
+            ereport(ERROR,
+                    (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
+                     errmodule(MOD_LLVM),
+                     errmsg("Got illegal enviroment parameter $GAUSSHOME, please set $GAUSSHOME as your "
+                            "installation directory!")));
+        }
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
@@ -527,6 +537,15 @@ PointerType* GsCodeGen::getPtrType(const char* name)
     Type* type = getType(name);
 
     return PointerType::get(type, 0);
+}
+
+PointerType* GsCodeGen::getPtrPtrType(const char* name)
+{
+    Assert(NULL != name);
+    Type* type = getType(name);
+    Type* typePtr = PointerType::get(type, 0);
+
+    return PointerType::get(typePtr, 0);
 }
 
 llvm::Value* GsCodeGen::CastPtrToLlvmPtr(Type* type, const void* ptr)

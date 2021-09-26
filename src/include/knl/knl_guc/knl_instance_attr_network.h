@@ -39,6 +39,7 @@
 #define SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_NETWORK_H_
 
 #include "knl/knl_guc/knl_guc_common.h"
+#include "libcomm/libcomm.h"
 
 typedef struct knl_instance_attr_network {
     bool PoolerStatelessReuse;
@@ -64,6 +65,14 @@ typedef struct knl_instance_attr_network {
     char* UnixSocketDir;
     char* ListenAddresses;
     char* tcp_link_addr;
+    bool comm_enable_SSL;
+    LibCommConn ** comm_ctrl_channel_conn;
+    LibCommConn ** comm_data_channel_conn;
+#ifdef USE_SSL
+    bool ssl_initialized;
+    SSL_CTX* SSL_server_context;
+    GS_UCHAR* server_key;
+#endif
 } knl_instance_attr_network;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_NETWORK_H_ */

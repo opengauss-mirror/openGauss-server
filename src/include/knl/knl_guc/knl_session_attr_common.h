@@ -81,6 +81,7 @@ typedef struct knl_session_attr_common {
     int max_query_retry_times;
     int StatementTimeout;
     int SessionTimeout;
+    int SessionTimeoutCount;
     int pgstat_collect_thread_status_interval;
     int extra_float_digits;
     int effective_io_concurrency;
@@ -141,6 +142,7 @@ typedef struct knl_session_attr_common {
     struct tagGtmHostIP* GtmHostArray[MAX_GTM_HOST_NUM];
     int GtmHostIPNumArray[MAX_GTM_HOST_NUM];
     char* test_param_str;
+    char* seg_test_param_str;
     char* application_name;
     char* analysis_options;
     int bytea_output;
@@ -165,10 +167,14 @@ typedef struct knl_session_attr_common {
     bool assert_enabled;
     int AlarmReportInterval;
     int xmloption;
-    bool enable_ts_compaction;    
+    bool enable_ts_compaction;
+    bool enable_ts_kvmerge;
+    bool enable_ts_outorder;    
     bool ts_adaptive_threads;
     char* ts_compaction_strategy;
     int ts_consumer_workers;
+    int ts_cudesc_threshold;
+    int ts_valid_partition;
 
     /* instrumentation guc parameters */
     int instr_unique_sql_count;
@@ -207,7 +213,10 @@ typedef struct knl_session_attr_common {
 
     char* router_att;
     bool enable_router;
+    int backend_version;
+
     int gpc_clean_timeout;
+    char* node_name;
     uint32 extension_session_vars_array_size;
     void** extension_session_vars_array;
 } knl_session_attr_common;

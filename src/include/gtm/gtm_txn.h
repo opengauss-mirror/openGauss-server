@@ -171,7 +171,7 @@ struct MemReservation {
     bool is_invalid;
 };
 
-/* By default a GID length is limited to 256 bits in PostgreSQL */
+/* By default a GID length is limited to 256 bits in openGauss */
 #define GTM_MAX_GID_LEN 256
 #define GTM_CheckTransactionHandle(x) ((x) >= 0 && (x) < gtm_max_trans)
 #define GTM_IsTransSerializable(x) ((x)->gti_isolevel == GTM_ISOLATION_SERIALIZABLE)

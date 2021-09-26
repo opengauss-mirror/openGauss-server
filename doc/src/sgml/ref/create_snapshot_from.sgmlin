@@ -1,0 +1,25 @@
+<refentry id="SQL-CREATE_SNAPSHOT_FROM">
+<refmeta>
+<refentrytitle>CREATE SNAPSHOT FROM</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE SNAPSHOT FROM</refname>
+<refpurpose>create a snapshot revision from an existing snapshot</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE SNAPSHOT <qualified_name> [@ <version | ident | sconst>]
+    FROM @ <version | ident | sconst>
+    [COMMENT IS <sconst>}
+        USING (
+        { INSERT [INTO SNAPSHOT] …
+          | UPDATE [SNAPSHOT] [AS <alias>] SET … [FROM …] [WHERE …]
+          | DELETE [FROM SNAPSHOT] [AS <alias>] [USING …] [WHERE …]
+          | ALTER [SNAPSHOT] { ADD … | DROP … } [, …]
+      } [; …]
+    );
+</synopsis>
+</refsynopsisdiv>
+</refentry>

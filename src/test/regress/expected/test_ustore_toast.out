@@ -1,0 +1,156 @@
+create table toasttest (col1 int4, col2 int4 NOT NULL, col3 text default 'testing') with (storage_type=USTORE);
+begin;
+insert into toasttest values(30, 50, repeat('x', 10000));
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+   30 |   50 |  10000
+(1 row)
+
+rollback;
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+(0 rows)
+
+insert into toasttest values(30, 50, repeat('x', 10000));
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+   30 |   50 |  10000
+(1 row)
+
+-- test update
+begin;
+update toasttest set col3 = col3 || col3;
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+   30 |   50 |  20000
+(1 row)
+
+rollback;
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+   30 |   50 |  10000
+(1 row)
+
+update toasttest set col3 = col3 || '123';
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+   30 |   50 |  10003
+(1 row)
+
+-- test delete
+begin;
+delete from toasttest where col1 = 30;
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+(0 rows)
+
+rollback;
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+   30 |   50 |  10003
+(1 row)
+
+delete from toasttest where col1 = 30;
+select col1, col2,  length(col3) from toasttest;
+ col1 | col2 | length 
+------+------+--------
+(0 rows)
+
+drop table toasttest;
+create table toasttest (col1 int4, col2 int4 NOT NULL, col3 text default 'testing', col4 text) with (storage_type=USTORE);
+-- test insert
+-- insert short row
+insert into toasttest values(30, 50, repeat('x', 10), 'XXXXX');
+select col1, col2, length(col3), col4 from toasttest;
+ col1 | col2 | length | col4  
+------+------+--------+-------
+   30 |   50 |     10 | XXXXX
+(1 row)
+
+-- insert toast row
+insert into toasttest values(40, 60, repeat('y', 10000), 'ZZZZZZZZZZ');
+select col1, col2, length(col3), col4 from toasttest where col1 = 40;
+ col1 | col2 | length |    col4    
+------+------+--------+------------
+   40 |   60 |  10000 | ZZZZZZZZZZ
+(1 row)
+
+-- test update
+-- update short row to toast row
+update toasttest set col3 = repeat('x', 10000) where col1 = 30;
+select col1, col2, length(col3), col4 from toasttest where col1 = 30;
+ col1 | col2 | length | col4  
+------+------+--------+-------
+   30 |   50 |  10000 | XXXXX
+(1 row)
+
+-- update toast row
+update toasttest set col3 = col3 ||col3 where col1 = 40;
+select col1, col2, length(col3), col4 from toasttest where col1 = 40;
+ col1 | col2 | length |    col4    
+------+------+--------+------------
+   40 |   60 |  20000 | ZZZZZZZZZZ
+(1 row)
+
+update toasttest set col4 = repeat('z', 10000) where col1 = 40;
+select col1, col2, length(col3), length(col4) from toasttest where col1 = 40;
+ col1 | col2 | length | length 
+------+------+--------+--------
+   40 |   60 |  20000 |  10000
+(1 row)
+
+update toasttest set col4 = col4 || '123' where col1 = 40;
+select col1, col2, length(col3), length(col4) from toasttest where col1 = 40;
+ col1 | col2 | length | length 
+------+------+--------+--------
+   40 |   60 |  20000 |  10003
+(1 row)
+
+-- insert toast row with 2 long fields
+insert into toasttest values(70, 80, repeat('a', 10000), repeat('B', 10000));
+select col1, col2, length(col3), length(col4) from toasttest where col1 = 70;
+ col1 | col2 | length | length 
+------+------+--------+--------
+   70 |   80 |  10000 |  10000
+(1 row)
+
+-- test delete
+delete from toasttest where col1 = 30;
+select col1, col2,  length(col3), length(col4) from toasttest order by col1;
+ col1 | col2 | length | length 
+------+------+--------+--------
+   40 |   60 |  20000 |  10003
+   70 |   80 |  10000 |  10000
+(2 rows)
+
+insert into toasttest values(90, 100, 'cccccccccc', repeat('D', 10000));
+select col1, col2, length(col3), length(col4) from toasttest where col1 = 90;
+ col1 | col2 | length | length 
+------+------+--------+--------
+   90 |  100 |     10 |  10000
+(1 row)
+
+delete from toasttest where col1 = 40;
+select col1, col2,  length(col3), length(col4) from toasttest order by col1;
+ col1 | col2 | length | length 
+------+------+--------+--------
+   70 |   80 |  10000 |  10000
+   90 |  100 |     10 |  10000
+(2 rows)
+
+delete from toasttest where col1 = 70;
+select col1, col2,  length(col3), length(col4) from toasttest order by col1;
+ col1 | col2 | length | length 
+------+------+--------+--------
+   90 |  100 |     10 |  10000
+(1 row)
+
+drop table toasttest;

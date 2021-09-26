@@ -13,6 +13,8 @@ partition by range(birthday) interval ('1 month') (
   partition p2 values less than('2000-02-01 00:00:00')
 );
 
+create index index_part_auto on t_part_auto(id) local (PARTITION idx_p1 ,PARTITION idx_p2);
+
 declare
   v_sql varchar;
   v_name varchar;
@@ -69,6 +71,8 @@ interval ('1 month') store in(interval_tsp1, interval_tsp2, interval_tsp3)
   partition p2 values less than('2000-02-01 00:00:00')
 );
 
+create index index_part_auto on t_part_auto(id) local (PARTITION idx_p1 ,PARTITION idx_p2);
+
 declare
   v_sql varchar;
   v_name varchar;
@@ -106,6 +110,51 @@ drop table t_part_auto;
 drop tablespace interval_tsp1;
 drop tablespace interval_tsp2;
 drop tablespace interval_tsp3;
+
+drop table if exists sales;
+
+CREATE TABLE sales
+(prod_id NUMBER(6),
+ cust_id NUMBER,
+ time_id DATE,
+ channel_id CHAR(1),
+ promo_id NUMBER(6),
+ quantity_sold NUMBER(3),
+ amount_sold NUMBER(10,2)
+)
+PARTITION BY RANGE( time_id) INTERVAL('1 day')
+(
+ partition p1 VALUES LESS THAN ('2019-02-01 00:00:00'),
+ partition p2 VALUES LESS THAN ('2019-02-02 00:00:00')
+);
+
+create index index_sales on sales(prod_id) local (PARTITION idx_p1 ,PARTITION idx_p2);
+
+-- 数据插入分区p1
+INSERT INTO sales VALUES(1, 12, '2019-01-10 00:00:00', 'a', 1, 1, 1);
+-- 数据插入分区p2
+INSERT INTO sales VALUES(1, 12, '2019-02-01 00:00:00', 'a', 1, 1, 1);
+
+INSERT INTO sales VALUES(1, 12, '2019-02-05 00:00:00', 'a', 1, 1, 1);
+-- 插入数据没有匹配的分区，新创建一个分区，并将数据插入该分区
+-- 新分区的范围为 '2019-02-03 00:00:00' <= time_id < '2019-02-04 00:00:00'
+INSERT INTO sales VALUES(1, 12, '2019-02-03 00:00:00', 'a', 1, 1, 1);
+
+\d sales
+
+-- only dump schema data
+\! @abs_bindir@/gs_dump interval_db -p @portstring@ -s -t sales -f @abs_bindir@/backup.sql
+
+drop table sales;
+
+-- restore data
+\! @abs_bindir@/gsql -p @portstring@ -d interval_db -f @abs_bindir@/backup.sql
+
+\d sales
+
+select count(1) from sales;
+
+drop table sales;
 
 \c regression 
 drop database interval_db;

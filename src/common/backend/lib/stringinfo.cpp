@@ -36,6 +36,15 @@ StringInfo makeStringInfo(void)
     return res;
 }
 
+/* destroy a 'StringInfoData', use this function when call makeStringInfo */
+void DestroyStringInfo(StringInfo str)
+{
+    if (str != NULL) {
+        pfree_ext(str->data);
+        pfree_ext(str);
+    }
+}
+
 /*
  * initStringInfo
  *
@@ -49,6 +58,14 @@ void initStringInfo(StringInfo str)
     str->data = (char*)palloc(size);
     str->maxlen = size;
     resetStringInfo(str);
+}
+
+/* free a 'StringInfoData', use this function when call initStringInfo */
+void FreeStringInfo(StringInfo str)
+{
+    if (str != NULL) {
+        pfree_ext(str->data);
+    }
 }
 
 /*

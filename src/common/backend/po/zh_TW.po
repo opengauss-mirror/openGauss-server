@@ -14932,8 +14932,8 @@ msgstr "無法載入 pg_hba.conf"
 # postmaster/postmaster.c:599
 #: postmaster/postmaster.c:1144
 #, c-format
-msgid "%s: could not locate matching postgres executable"
-msgstr "%s: 找不到符合的postgres執行檔"
+msgid "%s: could not locate matching openGauss executable"
+msgstr "%s: 找不到符合的openGauss執行檔"
 
 #: postmaster/postmaster.c:1167
 #: utils/misc/tzparser.c:325
@@ -15057,7 +15057,7 @@ msgstr "無效的啟動封包配置: 預期結束字元為最後一個位元組"
 
 # postmaster/postmaster.c:1442
 #: postmaster/postmaster.c:1789
-msgid "no PostgreSQL user name specified in startup packet"
+msgid "no openGauss user name specified in startup packet"
 msgstr "起始封包中未指定PostgreSQL使用者"
 
 # postmaster/postmaster.c:1495

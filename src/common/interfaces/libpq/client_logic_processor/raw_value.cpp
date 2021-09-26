@@ -31,11 +31,6 @@
 #include "client_logic_fmt/gs_fmt.h"
 #include "client_logic_cache/icached_column.h"
 
-#define RETURN_IF(errorOK)      \
-    if (errorOK == NULL) {      \
-        return false;           \
-    }
-
 extern unsigned char *PQescapeByteaConn1(PGconn *conn, const unsigned char *from, size_t from_length, size_t *to_length,
     bool add_quotes);
 
@@ -108,7 +103,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
             allocated = true;
         }
 
-        binary = Format::text_to_binary(text_value, cached_column->get_origdatatype_oid(), 0,
+        binary = Format::text_to_binary((const PGconn*)m_conn, text_value, cached_column->get_origdatatype_oid(), 0,
             cached_column->get_origdatatype_mod(), &binary_size, err_msg);
         if (allocated) {
             free(text_value);
@@ -150,7 +145,7 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
         HooksManager::get_estimated_processed_data_size(cached_column->get_column_hook_executors(), binary_size) +
         sizeof(Oid),
         sizeof(unsigned char));
-    RETURN_IF(m_processed_data);
+    RETURN_IF(m_processed_data == NULL, false);
     int processed_size = HooksManager::process_data(cached_column, cached_column->get_column_hook_executors(), binary,
         binary_size, m_processed_data);
     if (processed_size <= 0) {

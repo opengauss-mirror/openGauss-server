@@ -69,6 +69,16 @@ typedef struct CheckPointPlus
     /* you can add more attributes here */
 } CheckPointPlus;
 
+typedef struct CheckPointUndo
+{
+    CheckPoint ori_checkpoint;
+    CommitSeqNo next_csn;
+    uint64 length;
+    TransactionId recent_global_xmin;
+    uint64 oldestXidInUndo;
+    /* you can add more attributes here */
+} CheckPointUndo;
+
 typedef struct CheckPointOld {
     XLogRecPtrOld      redo;            /* next RecPtr available when we began to
                                          * create CheckPoint (i.e. REDO start point) */

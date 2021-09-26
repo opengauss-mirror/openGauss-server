@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------------
  *
  * resowner.c
- *	  POSTGRES resource owner management code.
+ *	  openGauss resource owner management code.
  *
  * Query-lifespan resources are tracked by associating them with
  * ResourceOwner objects.  This provides a simple mechanism for ensuring
@@ -22,8 +22,11 @@
 #include "knl/knl_variable.h"
 
 #include "access/hash.h"
+#include "access/ustore/knl_uundovec.h"
+#include "access/ustore/undo/knl_uundoapi.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
+#include "storage/smgr/segment.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
@@ -31,6 +34,7 @@
 #include "storage/cucache_mgr.h"
 #include "executor/executor.h"
 #include "catalog/pg_hashbucket_fn.h"
+
 /*
  * ResourceOwner objects look like this
  */
@@ -115,6 +119,8 @@ typedef struct ResourceOwnerData {
     int nglobalMemContext;
     MemoryContext* globalMemContexts;
     int maxGlobalMemContexts;
+
+    MemoryContext memCxt;
 } ResourceOwnerData;
 
 THR_LOCAL ResourceOwner IsolatedResourceOwner = NULL;
@@ -153,13 +159,13 @@ extern void ReleaseMetaBlock(CacheSlotId_t slot);
  * All ResourceOwner objects are kept in t_thrd.top_mem_cxt, since they should
  * only be freed explicitly.
  */
-ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, MemoryGroupType memGroup)
+ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, MemoryContext memCxt)
 {
     ResourceOwner owner;
 
-    owner = (ResourceOwner)MemoryContextAllocZero(
-        THREAD_GET_MEM_CXT_GROUP(memGroup), sizeof(ResourceOwnerData));
+    owner = (ResourceOwner)MemoryContextAllocZero(memCxt, sizeof(ResourceOwnerData));
     owner->name = name;
+    owner->memCxt = memCxt;
 
     if (parent) {
         owner->parent = parent;
@@ -226,8 +232,9 @@ static void ResourceOwnerReleaseInternal(
     ResourceReleaseCallbackItem* item = NULL;
 
     /* Recurse to handle descendants */
-    for (child = owner->firstchild; child != NULL; child = child->nextchild)
+    for (child = owner->firstchild; child != NULL; child = child->nextchild) {
         ResourceOwnerReleaseInternal(child, phase, isCommit, isTopLevel);
+    }
 
     /*
      * Make CurrentResourceOwner point to me, so that ReleaseBuffer etc don't
@@ -238,6 +245,14 @@ static void ResourceOwnerReleaseInternal(
     t_thrd.utils_cxt.CurrentResourceOwner = owner;
 
     if (phase == RESOURCE_RELEASE_BEFORE_LOCKS) {
+        if (owner == t_thrd.utils_cxt.TopTransactionResourceOwner) {
+            if (u_sess->ustore_cxt.urecvec) {
+                u_sess->ustore_cxt.urecvec->Reset(false);
+            }
+            ReleaseUndoBuffers();
+            undo::ReleaseSlotBuffer();
+        }
+
         /*
          * Release buffer pins.  Note that ReleaseBuffer will remove the
          * buffer entry from my list, so I just have to iterate till there are
@@ -321,7 +336,8 @@ static void ResourceOwnerReleaseInternal(
              * the top of the recursion.
              */
             if (owner == t_thrd.utils_cxt.TopTransactionResourceOwner) {
-                ProcReleaseLocks(isCommit);
+                if (!CanPerformUndoActions())
+                    ProcReleaseLocks(isCommit);
                 ReleasePredicateLocks(isCommit);
             }
         } else {
@@ -333,7 +349,7 @@ static void ResourceOwnerReleaseInternal(
             Assert(owner->parent != NULL);
             if (isCommit)
                 LockReassignCurrentOwner();
-            else
+            else if (!CanPerformUndoActions())
                 LockReleaseCurrentOwner();
         }
     } else if (phase == RESOURCE_RELEASE_AFTER_LOCKS) {
@@ -609,8 +625,7 @@ void ResourceOwnerEnlargeBuffers(ResourceOwner owner)
 
     if (owner->buffers == NULL) {
         newmax = 16;
-        owner->buffers = (Buffer*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(Buffer));
+        owner->buffers = (Buffer*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(Buffer));
         owner->maxbuffers = newmax;
     } else {
         newmax = owner->maxbuffers * 2;
@@ -638,8 +653,7 @@ void ResourceOwnerEnlargeDataCacheSlot(ResourceOwner owner)
 
     if (owner->dataCacheSlots == NULL) {
         newmax = 16;
-        owner->dataCacheSlots = (CacheSlotId_t*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(CacheSlotId_t));
+        owner->dataCacheSlots = (CacheSlotId_t*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(CacheSlotId_t));
         owner->maxDataCacheSlots = newmax;
     } else {
         newmax = owner->maxDataCacheSlots * 2;
@@ -661,7 +675,7 @@ void ResourceOwnerEnlargeMetaCacheSlot(ResourceOwner owner)
     if (owner->metaCacheSlots == NULL) {
         newmax = 16;
         owner->metaCacheSlots = (CacheSlotId_t*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(CacheSlotId_t));
+            owner->memCxt, newmax * sizeof(CacheSlotId_t));
         owner->maxMetaCacheSlots = newmax;
     } else {
         newmax = owner->maxMetaCacheSlots * 2;
@@ -832,8 +846,7 @@ void ResourceOwnerEnlargeCatCacheRefs(ResourceOwner owner)
 
     if (owner->catrefs == NULL) {
         newmax = 16;
-        owner->catrefs = (HeapTuple*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(HeapTuple));
+        owner->catrefs = (HeapTuple*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(HeapTuple));
         owner->maxcatrefs = newmax;
     } else {
         newmax = owner->maxcatrefs * 2;
@@ -894,8 +907,7 @@ void ResourceOwnerEnlargeCatCacheListRefs(ResourceOwner owner)
 
     if (owner->catlistrefs == NULL) {
         newmax = 16;
-        owner->catlistrefs = (CatCList**)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(CatCList*));
+        owner->catlistrefs = (CatCList**)MemoryContextAlloc(owner->memCxt, newmax * sizeof(CatCList*));
         owner->maxcatlistrefs = newmax;
     } else {
         newmax = owner->maxcatlistrefs * 2;
@@ -956,8 +968,7 @@ void ResourceOwnerEnlargeRelationRefs(ResourceOwner owner)
 
     if (owner->relrefs == NULL) {
         newmax = 16;
-        owner->relrefs = (Relation*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(Relation));
+        owner->relrefs = (Relation*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(Relation));
         owner->maxrelrefs = newmax;
     } else {
         newmax = owner->maxrelrefs * 2;
@@ -1030,8 +1041,7 @@ void ResourceOwnerEnlargePartitionRefs(ResourceOwner owner)
 
     if (owner->partrefs == NULL) {
         newmax = 16;
-        owner->partrefs = (Partition*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(Partition));
+        owner->partrefs = (Partition*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(Partition));
         owner->maxpartrefs = newmax;
     } else {
         newmax = owner->maxpartrefs * 2;
@@ -1115,8 +1125,7 @@ void ResourceOwnerEnlargeFakepartRefs(ResourceOwner owner)
 
     if (owner->fakepartrefs == NULL) {
         newmax = 512;
-        owner->fakepartrefs = (Partition*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(Partition));
+        owner->fakepartrefs = (Partition*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(Partition));
         owner->maxfakepartrefs = newmax;
     } else {
         newmax = owner->maxfakepartrefs * 2;
@@ -1193,8 +1202,7 @@ void ResourceOwnerEnlargePlanCacheRefs(ResourceOwner owner)
 
     if (owner->planrefs == NULL) {
         newmax = 16;
-        owner->planrefs = (CachedPlan**)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(CachedPlan*));
+        owner->planrefs = (CachedPlan**)MemoryContextAlloc(owner->memCxt, newmax * sizeof(CachedPlan*));
         owner->maxplanrefs = newmax;
     } else {
         newmax = owner->maxplanrefs * 2;
@@ -1263,8 +1271,7 @@ void ResourceOwnerEnlargeTupleDescs(ResourceOwner owner)
 
     if (owner->tupdescs == NULL) {
         newmax = 16;
-        owner->tupdescs = (TupleDesc*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(TupleDesc));
+        owner->tupdescs = (TupleDesc*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(TupleDesc));
         owner->maxtupdescs = newmax;
     } else {
         newmax = owner->maxtupdescs * 2;
@@ -1336,8 +1343,7 @@ void ResourceOwnerEnlargeSnapshots(ResourceOwner owner)
 
     if (owner->snapshots == NULL) {
         newmax = 16;
-        owner->snapshots = (Snapshot*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(Snapshot));
+        owner->snapshots = (Snapshot*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(Snapshot));
         owner->maxsnapshots = newmax;
     } else {
         newmax = owner->maxsnapshots * 2;
@@ -1452,8 +1458,7 @@ void ResourceOwnerEnlargeFiles(ResourceOwner owner)
 
     if (owner->files == NULL) {
         newmax = 16;
-        owner->files = (File*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(File));
+        owner->files = (File*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(File));
         owner->maxfiles = newmax;
     } else {
         newmax = owner->maxfiles * 2;
@@ -1521,8 +1526,7 @@ void ResourceOwnerEnlargePthreadMutex(ResourceOwner owner)
 
     if (owner->pThdMutexs == NULL) {
         newmax = 16;
-        owner->pThdMutexs = (pthread_mutex_t**)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(pthread_mutex_t*));
+        owner->pThdMutexs = (pthread_mutex_t**)MemoryContextAlloc(owner->memCxt, newmax * sizeof(pthread_mutex_t*));
         owner->maxPThdMutexs = newmax;
     } else {
         newmax = owner->maxPThdMutexs * 2;
@@ -1617,8 +1621,7 @@ void ResourceOwnerEnlargePartitionMapRefs(ResourceOwner owner)
 
     if (owner->partmaprefs == NULL) {
         newmax = 16;
-        owner->partmaprefs = (PartitionMap**)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), newmax * sizeof(PartitionMap*));
+        owner->partmaprefs = (PartitionMap**)MemoryContextAlloc(owner->memCxt, newmax * sizeof(PartitionMap*));
         owner->maxpartmaprefs = newmax;
     } else {
         newmax = owner->maxpartmaprefs * 2;
@@ -1698,8 +1701,7 @@ void ResourceOwnerEnlargeGMemContext(ResourceOwner owner)
 
     if (owner->globalMemContexts == NULL) {
         newmax = 2;
-        owner->globalMemContexts = (MemoryContext*)MemoryContextAlloc(
-            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), newmax * sizeof(MemoryContext));
+        owner->globalMemContexts = (MemoryContext*)MemoryContextAlloc(owner->memCxt, newmax * sizeof(MemoryContext));
     } else {
         newmax = owner->maxGlobalMemContexts * 2;
         owner->globalMemContexts = (MemoryContext*)repalloc(owner->globalMemContexts, newmax * sizeof(MemoryContext));

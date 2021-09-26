@@ -27,6 +27,7 @@
 #include "pgxc/pgxc.h"
 #include "pgxc/pgxcnode.h"
 #include "pgxc/nodemgr.h"
+#include "pgxc/poolutils.h"
 #include "executor/spi.h"
 #include "tcop/utility.h"
 #endif
@@ -36,6 +37,7 @@
 #include "access/heapam.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "pgstat.h"
 
 #define NUM_LOCKTAG_ID 17
 /* This must match enum LockTagType! */
@@ -50,7 +52,9 @@ const char* const LockTagTypeNames[] = {"relation",
     "object",
     "cstore_freespace",
     "userlock",
-    "advisory"};
+    "advisory",
+    "filenode",
+    "subtransactionid"};
 
 /* This must match enum PredicateLockTargetType (predicate_internals.h) */
 static const char* const PredicateLockTagTypeNames[] = {"relation", "page", "tuple"};
@@ -74,9 +78,8 @@ typedef enum { WAIT, DONT_WAIT } TryType;
 static bool pgxc_advisory_lock(int64 key64, int32 key1, int32 key2, bool iskeybig, LOCKMODE lockmode,
     LockLevel locklevel, TryType locktry, Name databaseName = NULL);
 #endif
-
 /* Number of columns in pg_locks output */
-#define NUM_LOCK_STATUS_COLUMNS 18
+#define NUM_LOCK_STATUS_COLUMNS 19
 
 /*
  * VXIDGetDatum - Construct a text representation of a VXID
@@ -192,6 +195,7 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber)16, "granted", BOOLOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)17, "fastpath", BOOLOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber)18, "locktag", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)19, "global_sessionid", TEXTOID, -1, 0);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
@@ -299,6 +303,18 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
                 nulls[9] = true;
                 nulls[10] = true;
                 break;
+            case LOCKTAG_RELFILENODE:
+                values[1] = ObjectIdGetDatum(instance->locktag.locktag_field1);
+                values[2] = ObjectIdGetDatum(instance->locktag.locktag_field2);
+                values[3] = ObjectIdGetDatum(instance->locktag.locktag_field3);
+                nulls[4] = true;
+                nulls[5] = true;
+                nulls[6] = true;
+                nulls[7] = true;
+                nulls[8] = true;
+                nulls[9] = true;
+                nulls[10] = true;
+                break;
             case LOCKTAG_RELATION_EXTEND:
                 values[1] = ObjectIdGetDatum(instance->locktag.locktag_field1);
                 values[2] = ObjectIdGetDatum(instance->locktag.locktag_field2);
@@ -392,6 +408,9 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
         values[15] = BoolGetDatum(granted);
         values[16] = BoolGetDatum(instance->fastpath);
         GetLocktagInfo(instance, values);
+        char* gId = GetGlobalSessionStr(instance->globalSessionId);
+        values[18] = CStringGetTextDatum(gId);
+        pfree(gId);
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
         SRF_RETURN_NEXT(funcctx, result);
@@ -466,6 +485,7 @@ Datum pg_lock_status(PG_FUNCTION_ARGS)
         blocklocktag = LockPredTagToString(predTag);
         values[NUM_LOCKTAG_ID] = CStringGetTextDatum(blocklocktag);
         pfree_ext(blocklocktag);
+        nulls[18] = true;
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         result = HeapTupleGetDatum(tuple);
         SRF_RETURN_NEXT(funcctx, result);
@@ -614,6 +634,16 @@ static bool pgxc_advisory_lock(int64 key64, int32 key1, int32 key2, bool iskeybi
     else
         SET_LOCKTAG_INT32_DB(locktag, databaseOid, key1, key2);
 
+    /*
+     * Before get cn/dn oids, we should refresh NumCoords/NumDataNodes and co_handles/dn_handles in u_sess in case of
+     * can not process SIGUSR1 of "pgxc_pool_reload" command immediately.
+     */
+#ifdef ENABLE_MULTIPLE_NODES
+        if (u_sess->sig_cxt.got_PoolReload) {
+            processPoolerReload();
+            u_sess->sig_cxt.got_PoolReload = false;
+        }
+#endif
     PgxcNodeGetOids(&coOids, &dnOids, &numcoords, &numdnodes, false);
 
     /* Skip everything XC specific if there's only one Coordinator running */

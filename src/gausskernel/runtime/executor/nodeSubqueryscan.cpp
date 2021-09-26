@@ -27,8 +27,8 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "executor/execdebug.h"
-#include "executor/nodeSubqueryscan.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeSubqueryscan.h"
 
 static TupleTableSlot* SubqueryNext(SubqueryScanState* node);
 

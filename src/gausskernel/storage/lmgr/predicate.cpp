@@ -193,6 +193,7 @@
 #include "access/twophase_rmgr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "access/ustore/knl_uvisibility.h"
 #include "miscadmin.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/predicate.h"
@@ -242,7 +243,8 @@
 
 #define NPREDICATELOCKTARGETENTS()                                      \
     mul_size(g_instance.attr.attr_storage.max_predicate_locks_per_xact, \
-             add_size(g_instance.shmem_cxt.MaxBackends, g_instance.attr.attr_storage.max_prepared_xacts))
+             add_size(g_instance.shmem_cxt.MaxBackends,                 \
+             g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS))
 
 #ifdef USE_ASSERT_CHECKING
     #define SxactIsOnFinishedList(sxact) (!SHMQueueIsDetached(&((sxact)->finishedLink)))
@@ -371,7 +373,6 @@ static void DropAllPredicateLocksFromTable(Relation relation, bool transfer);
 static void SetNewSxactGlobalXmin(void);
 static void ClearOldPredicateLocks(void);
 static void ReleaseOneSerializableXact(SERIALIZABLEXACT *sxact, bool partial, bool summarize);
-static bool XidIsConcurrent(TransactionId xid);
 static void CheckTargetForConflictsIn(PREDICATELOCKTARGETTAG *targettag);
 static void FlagRWConflict(SERIALIZABLEXACT *reader, SERIALIZABLEXACT *writer);
 static void OnConflict_CheckForSerializationFailure(const SERIALIZABLEXACT *reader, SERIALIZABLEXACT *writer);
@@ -907,6 +908,12 @@ void CheckPointPredicate(void)
     g_instance.ckpt_cxt_ctl->ckpt_predicate_flush_num += flush_num;
 }
 
+bool
+IsSerializableXact()
+{
+        return (t_thrd.xact_cxt.MySerializableXact != InvalidSerializableXact);
+}
+
 /*
  * InitPredicateLocks -- Initialize the predicate locking data structures.
  *
@@ -976,7 +983,8 @@ void InitPredicateLocks(void)
      * Compute size for serializable transaction hashtable. Note these
      * calculations must agree with PredicateLockShmemSize!
      */
-    max_table_size = ((long)g_instance.shmem_cxt.MaxBackends + g_instance.attr.attr_storage.max_prepared_xacts);
+    max_table_size = ((long)g_instance.shmem_cxt.MaxBackends +
+        g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS);
 
     /*
      * Allocate a list to hold information on transactions participating in
@@ -1125,7 +1133,8 @@ Size PredicateLockShmemSize(void)
     size = add_size(size, size / 10);
 
     /* transaction list */
-    max_table_size = (long)g_instance.shmem_cxt.MaxBackends + g_instance.attr.attr_storage.max_prepared_xacts;
+    max_table_size = (long)g_instance.shmem_cxt.MaxBackends +
+        g_instance.attr.attr_storage.max_prepared_xacts * NUM_TWOPHASE_PARTITIONS;
     max_table_size *= 10;
     size = add_size(size, PredXactListDataSize);
     size = add_size(size, mul_size((Size)max_table_size, PredXactListElementDataSize));
@@ -1541,7 +1550,8 @@ static Snapshot GetSerializableTransactionSnapshotInt(Snapshot snapshot, Transac
     } else {
         ++(t_thrd.shemem_ptr_cxt.PredXact->WritableSxactCount);
         Assert(t_thrd.shemem_ptr_cxt.PredXact->WritableSxactCount <=
-               (g_instance.shmem_cxt.MaxBackends + g_instance.attr.attr_storage.max_prepared_xacts));
+               (g_instance.shmem_cxt.MaxBackends +
+               NUM_TWOPHASE_PARTITIONS * g_instance.attr.attr_storage.max_prepared_xacts));
     }
 
     t_thrd.xact_cxt.MySerializableXact = sxact;
@@ -2132,6 +2142,54 @@ void PredicateLockPage(Relation relation, BlockNumber blkno, Snapshot snapshot)
     SET_PREDICATELOCKTARGETTAG_PAGE(tag, relation->rd_node.dbNode, relation->rd_id, blkno);
     PredicateLockAcquire(&tag);
 }
+
+/*
+ * PredicateLockTuple
+ *
+ * Gets a predicate lock at the tuple level.
+ * Skip if not in full serializable transaction isolation level.
+ * Skip if this is a temporary table.
+ */
+void PredicateLockTid(Relation relation, ItemPointer tid, Snapshot snapshot, TransactionId targetxmin)
+{
+    PREDICATELOCKTARGETTAG tag;
+
+    if (!SerializationNeededForRead(relation, snapshot))
+        return;
+
+    /*
+     * If it's a heap tuple, return if this xact wrote it.
+     */
+    if (relation->rd_index == NULL) {
+        TransactionId myxid;
+
+        myxid = GetTopTransactionIdIfAny();
+        if (TransactionIdIsValid(myxid)) {
+            if (TransactionIdFollowsOrEquals(targetxmin, u_sess->utils_cxt.TransactionXmin)) {
+                TransactionId xid = SubTransGetTopmostTransaction(targetxmin);
+                if (TransactionIdEquals(xid, myxid)) {
+                    /* We wrote it; we already have a write lock. */
+                    return;
+                }
+            }
+        }
+    }
+
+    /*
+     * Do quick-but-not-definitive test for a relation lock first.  This will
+     * never cause a return when the relation is *not* locked, but will
+     * occasionally let the check continue when there really *is* a relation
+     * level lock.
+     */
+    SET_PREDICATELOCKTARGETTAG_RELATION(tag, relation->rd_node.dbNode, relation->rd_id);
+    if (PredicateLockExists(&tag))
+        return;
+
+    SET_PREDICATELOCKTARGETTAG_TUPLE(tag, relation->rd_node.dbNode, relation->rd_id, ItemPointerGetBlockNumber(tid),
+        ItemPointerGetOffsetNumber(tid), InvalidTransactionId);
+    PredicateLockAcquire(&tag);
+}
+
 
 /*
  *		PredicateLockTuple
@@ -3321,7 +3379,7 @@ static void ReleaseOneSerializableXact(SERIALIZABLEXACT *sxact, bool partial, bo
  * that to this function to save the overhead of checking the snapshot's
  * subxip array.
  */
-static bool XidIsConcurrent(TransactionId xid)
+bool XidIsConcurrent(TransactionId xid)
 {
     Snapshot snap;
 
@@ -3355,13 +3413,14 @@ static bool XidIsConcurrent(TransactionId xid)
  * buffer, because this function might set hint bits on the tuple. There is
  * currently no known reason to call this function from an index AM.
  */
-void CheckForSerializableConflictOut(bool visible, Relation relation, HeapTuple tuple, Buffer buffer, Snapshot snapshot)
+void CheckForSerializableConflictOut(bool visible, Relation relation, void* stup, Buffer buffer, Snapshot snapshot)
 {
     TransactionId xid;
     SERIALIZABLEXIDTAG sxidtag;
     SERIALIZABLEXID *sxid = NULL;
     SERIALIZABLEXACT *sxact = NULL;
     HTSV_Result htsvResult;
+    HeapTuple tuple;
 
     if (!SerializationNeededForRead(relation, snapshot))
         return;
@@ -3369,15 +3428,16 @@ void CheckForSerializableConflictOut(bool visible, Relation relation, HeapTuple 
     /* Check if someone else has already decided that we need to die */
     if (SxactIsDoomed(t_thrd.xact_cxt.MySerializableXact)) {
         ereport(ERROR, (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
-                        errmsg("could not serialize access due to read/write dependencies among transactions"),
-                        errdetail_internal(
-                            "Reason code: Canceled on identification as a pivot, during conflict out checking."),
-                        errhint("The transaction might succeed if retried.")));
+            errmsg("could not serialize access due to read/write dependencies among transactions"),
+            errdetail_internal("Reason code: Canceled on identification as a pivot, during conflict out checking."),
+            errhint("The transaction might succeed if retried.")));
     }
 
-    if (u_sess->attr.attr_storage.enable_debug_vacuum)
-        t_thrd.utils_cxt.pRelatedRel = relation;
-
+    if (RelationIsUstoreFormat(relation)) {
+        if (!UHeapTupleHasSerializableConflictOut(visible, relation, (ItemPointer)stup, buffer, &xid))
+            return;
+    } else {
+        tuple = (HeapTuple) stup;
     /*
      * Check to see whether the tuple has been written to by a concurrent
      * transaction, either to create it not visible to us, or to delete it
@@ -3438,6 +3498,10 @@ void CheckForSerializableConflictOut(bool visible, Relation relation, HeapTuple 
         return;
     if (TransactionIdEquals(xid, GetTopTransactionIdIfAny()))
         return;
+    }
+
+        if (u_sess->attr.attr_storage.enable_debug_vacuum)
+            t_thrd.utils_cxt.pRelatedRel = relation;
 
     /*
      * Find sxact or summarized info for the top level xid.
@@ -4265,7 +4329,8 @@ void predicatelock_twophase_recover(TransactionId xid, uint16 info, void *recdat
         if (!SxactIsReadOnly(sxact)) {
             ++(t_thrd.shemem_ptr_cxt.PredXact->WritableSxactCount);
             Assert(t_thrd.shemem_ptr_cxt.PredXact->WritableSxactCount <=
-                   (g_instance.shmem_cxt.MaxBackends + g_instance.attr.attr_storage.max_prepared_xacts));
+                   (g_instance.shmem_cxt.MaxBackends +
+                   NUM_TWOPHASE_PARTITIONS * g_instance.attr.attr_storage.max_prepared_xacts));
         }
 
         /*

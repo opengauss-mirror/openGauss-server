@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  *
- * hypopg_index.h: Implementation of hypothetical indexes for PostgreSQL
+ * hypopg_index.h: Implementation of hypothetical indexes for openGauss
  *
  * This file contains all includes for the internal code related to
  * hypothetical indexes support.

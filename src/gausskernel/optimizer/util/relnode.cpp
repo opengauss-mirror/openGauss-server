@@ -163,6 +163,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     AssertEreport(rte != NULL, MOD_OPT, "Unexpected NULL pointer for rte.");
 
     rel = makeNode(RelOptInfo);
+    rel->is_ustore = rte->is_ustore;
     rel->reloptkind = reloptkind;
     rel->relids = bms_make_singleton(relid);
     rel->isPartitionedTable = rte->ispartrel;
@@ -176,6 +177,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->base_rel = NULL;
     rel->pathlist = NIL;
     rel->ppilist = NIL;
+    rel->cheapest_gather_path = NULL;
     rel->cheapest_startup_path = NULL;
     rel->cheapest_total_path = NIL;
     rel->cheapest_unique_path = NULL;
@@ -292,6 +294,13 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
             rel->attr_needed = (Relids*)palloc0((rel->max_attr - rel->min_attr + 1) * sizeof(Relids));
             rel->attr_widths = (int32*)palloc0((rel->max_attr - rel->min_attr + 1) * sizeof(int32));
             rel->orientation = rte->orientation;
+            break;
+        case RTE_RESULT:
+            /* RTE_RESULT has no columns, nor could it have whole-row Var */
+            rel->min_attr = 0;
+            rel->max_attr = -1;
+            rel->attr_needed = NULL;
+            rel->attr_widths = NULL;
             break;
         default:
             ereport(ERROR,
@@ -581,6 +590,7 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->reltargetlist = NIL;
     joinrel->pathlist = NIL;
     joinrel->ppilist = NIL;
+    joinrel->cheapest_gather_path = NULL;
     joinrel->cheapest_startup_path = NULL;
     joinrel->cheapest_total_path = NIL;
     joinrel->cheapest_unique_path = NULL;

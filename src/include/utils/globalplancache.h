@@ -46,7 +46,8 @@ public:
     
     /* global plan cache htab control */
     void Init();
-    CachedPlanSource* Fetch(const char *query_string, uint32 query_len, int num_params, SPISign* spi_sign_ptr);
+    CachedPlanSource* Fetch(const char *query_string, uint32 query_len, int num_params,
+                            Oid* paramTypes, SPISign* spi_sign_ptr);
     void DropInvalid();
     void AddInvalidList(CachedPlanSource* plansource);
     void RemoveEntry(uint32 htblIdx, GPCEntry *entry);

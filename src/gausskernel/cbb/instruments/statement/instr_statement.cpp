@@ -284,7 +284,7 @@ static void set_stmt_basic_info(const knl_u_statement_context* statementCxt, Sta
     SET_TEXT_VALUES(statementInfo->query, (*i)++);
     values[(*i)++] = TimestampTzGetDatum(statementInfo->start_time);
     values[(*i)++] = TimestampTzGetDatum(statementInfo->finish_time);
-    values[(*i)++] = Int32GetDatum(statementInfo->slow_query_threshold);
+    values[(*i)++] = Int64GetDatum(statementInfo->slow_query_threshold);
     values[(*i)++] = Int64GetDatum(statementInfo->txn_id);
     values[(*i)++] = Int64GetDatum(statementInfo->tid);
     values[(*i)++] = Int64GetDatum(statementCxt->session_id);
@@ -372,7 +372,6 @@ static HeapTuple GetStatementTuple(Relation rel, StatementStatContext* statement
     values[i++] = BoolGetDatum(
         (statementInfo->finish_time - statementInfo->start_time >= statementInfo->slow_query_threshold &&
         statementInfo->slow_query_threshold >= 0) ? true : false);
-        
     return heap_form_tuple(RelationGetDescr(rel), values, nulls);
 }
 
@@ -657,7 +656,8 @@ NON_EXEC_STATIC void StatementFlushMain()
     init_ps_display("statement flush process", "", "", "");
     SetThrdCxt();
     /* Create a resource owner to keep track of our resources. */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Statement Flush", MEMORY_CONTEXT_DFX);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Statement Flush",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
     u_sess->proc_cxt.MyProcPort->SessionStartTime = GetCurrentTimestamp();
     Reset_Pseudo_CurrentUserId();
 
@@ -732,7 +732,8 @@ NON_EXEC_STATIC void CleanStatementMain()
     init_ps_display("clean statement process", "", "", "");
     SetThrdCxt();
     /* Create a resource owner to keep track of our resources. */
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "clean Statement", MEMORY_CONTEXT_DFX);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "clean Statement",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
     u_sess->proc_cxt.MyProcPort->SessionStartTime = GetCurrentTimestamp();
     Reset_Pseudo_CurrentUserId();
 
@@ -975,7 +976,7 @@ static void statement_detail_info_record(StatementStatContext *ssctx, const char
     }
 }
 
-void update_stmt_lock_cnt(StatementStatContext *ssctx, StmtDetailType type, int lockmode)
+static void update_stmt_lock_cnt(StatementStatContext *ssctx, StmtDetailType type, int lockmode)
 {
     switch (type) {
         case LOCK_START:
@@ -1395,7 +1396,8 @@ void instr_stmt_report_basic_info()
     if (to_update_db_name || to_update_user_name || to_update_client_addr) {
         ResourceOwner old_cur_owner = t_thrd.utils_cxt.CurrentResourceOwner;
         MemoryContext old_ctx = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Full/Slow SQL", MEMORY_CONTEXT_DFX);
+        t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "Full/Slow SQL",
+            THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
         (void)MemoryContextSwitchTo(old_ctx);
 
         old_ctx = MemoryContextSwitchTo(u_sess->statement_cxt.stmt_stat_cxt);
@@ -1529,7 +1531,8 @@ void instr_stmt_report_stat_at_handle_commit()
     CURRENT_STMT_METRIC_HANDLE->application_name = pstrdup(u_sess->attr.attr_common.application_name);
 
     /* unit: microseconds */
-    CURRENT_STMT_METRIC_HANDLE->slow_query_threshold = u_sess->attr.attr_storage.log_min_duration_statement * 1000;
+    CURRENT_STMT_METRIC_HANDLE->slow_query_threshold =
+        (int64)u_sess->attr.attr_storage.log_min_duration_statement * 1000;
 
     CURRENT_STMT_METRIC_HANDLE->tid = t_thrd.proc_cxt.MyProcPid;
 
@@ -1614,6 +1617,12 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
     if (queryDesc == NULL || ssctx == NULL || ssctx->level <= STMT_TRACK_L0
         || ssctx->level > STMT_TRACK_L2 || ssctx->plan_size != 0) {
+        return;
+    }
+    /* when getting plan directly from CN, the plan is partial, deparse plan will be failed,
+     * it's reasonable, as CN has the full plan.
+     */
+    if (u_sess->exec_cxt.under_stream_runtime && IS_PGXC_DATANODE) {
         return;
     }
 

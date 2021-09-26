@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *

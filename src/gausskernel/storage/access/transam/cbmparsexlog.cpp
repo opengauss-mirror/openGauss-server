@@ -27,9 +27,11 @@
 #include "knl/knl_variable.h"
 
 #include "access/cbmparsexlog.h"
+#include "access/ustore/undo/knl_uundoapi.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
+#include "access/xlogproc.h"
 #include "access/xlogreader.h"
 #include "access/visibilitymap.h"
 #include "catalog/pg_control.h"
@@ -41,7 +43,7 @@
 #include "port.h"
 #include "postmaster/cbmwriter.h"
 #include "storage/copydir.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/freespace.h"
 #include "storage/lock/lwlock.h"
 #include "storage/proc.h"
@@ -85,6 +87,7 @@ static HTAB *CBMPageHashInitialize(MemoryContext memoryContext);
 static bool ParseXlogIntoCBMPages(TimeLineID timeLine, bool isRecEnd);
 static int CBMXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, XLogRecPtr targetRecPtr,
                            char *readBuf, TimeLineID *pageTLI);
+
 static void TrackChangeBlock(XLogReaderState *record);
 static void TrackRelPageModification(XLogReaderState *record);
 static void TrackCuBlockModification(XLogReaderState *record);
@@ -95,9 +98,19 @@ static void TrackVMPageModification(XLogReaderState *record);
 static void TrackDbStorageChange(XLogReaderState *record);
 static void TrackTblspcStorageChange(XLogReaderState *record);
 static void TrackRelmapChange(XLogReaderState *record);
+static void TrackSegmentPageChange(XLogReaderState *record);
+static void TrackUheapInsert(XLogReaderState *record);
+static void TrackUheapDelete(XLogReaderState *record);
+static void TrackUheapUpdate(XLogReaderState *record);
+static void TrackUheapMultiInsert(XLogReaderState *record);
+static void TrackUndoPageModification(XLogReaderState *record);
+static void TrackUndoStorageModification(XLogReaderState *record);
+static void TrackTransSlotModification(XLogReaderState *record);
+
 static void RegisterBlockChange(const RelFileNode &rNode, ForkNumber forkNum, BlockNumber blkNo);
 static void RegisterBlockChangeExtended(const RelFileNode &rNode, ForkNumber forkNum, BlockNumber blkNo, uint8 pageType,
                                         BlockNumber truncBlkNo);
+
 static void CBMPageEtySetBitmap(CbmHashEntry *cbmPageEntry, BlockNumber blkNo, uint8 pageType, BlockNumber truncBlkNo);
 static void CBMPageSetBitmap(char *page, BlockNumber blkNo, uint8 pageType, BlockNumber truncBlkNo);
 static void CreateNewCBMPageAndInsert(CbmHashEntry *cbmPageEntry, BlockNumber blkNo, uint8 pageType,
@@ -132,6 +145,8 @@ static void CBMHashRemoveTblspc(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash,
 static void CBMPageEtyRemove(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, bool isCBMWriter, bool removeEntry);
 static void CBMPageEtyRemoveRestFork(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, bool isCBMWriter);
 static void CBMPageEtyTruncate(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, BlockNumber truncBlkNo,
+                               bool isCBMWriter);
+static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, BlockNumber truncBlkNo,
                                bool isCBMWriter);
 static void CBMPageEtyMergePage(CbmHashEntry *cbmPageEntry, const char *page);
 static void CBMPageMergeBitmap(char *cbmHashPage, const char *newPage);
@@ -521,6 +536,14 @@ static void InitCBMStartFileAndTrack(bool fromScratch, XLogRecPtr trackStartLSN,
 
     t_thrd.cbm_cxt.XlogCbmSys->outSeqNum = fromScratch ? 1 : (switchFile ? (lastfileSeqNum + 1) : lastfileSeqNum);
     t_thrd.cbm_cxt.XlogCbmSys->startLSN = t_thrd.cbm_cxt.XlogCbmSys->endLSN = trackStartLSN;
+
+    /*
+     * Initialize lastest completed cbm lsn to newly-decided start lsn, so that any later cbm track
+     * request less than this lsn could be ignored silently.
+     * We do not use lock to protest latestCompTargetLSN, though startup thread also calls CBMTrackInit,
+     * because at that point, pm state is still at pm_startup and cbm writer thread has not been started.
+     */
+    SetLatestCompTargetLSN(t_thrd.cbm_cxt.XlogCbmSys->startLSN);
 
     if (!fromScratch) {
         rc = snprintf_s(lastfilePath, MAXPGPATH, MAXPGPATH - 1, "%s%s", t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome,
@@ -966,26 +989,70 @@ static void TrackChangeBlock(XLogReaderState *record)
         TrackCuBlockModification(record);
     }
 
-    /* following xlog record rm catagories do not have block ref */
-    if (XLogRecGetRmid(record) == RM_XACT_ID) {
-        Assert(!XLogRecHasAnyBlockRefs(record));
-        TrackRelStorageDrop(record);
-    } else if (XLogRecGetRmid(record) == RM_SMGR_ID) {
-        Assert(!XLogRecHasAnyBlockRefs(record));
-        uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-        if (info == XLOG_SMGR_CREATE)
-            TrackRelStorageCreate(record);
-        else if (info == XLOG_SMGR_TRUNCATE)
-            TrackRelStorageTruncate(record);
-    } else if (XLogRecGetRmid(record) == RM_DBASE_ID) {
-        Assert(!XLogRecHasAnyBlockRefs(record));
-        TrackDbStorageChange(record);
-    } else if (XLogRecGetRmid(record) == RM_TBLSPC_ID) {
-        Assert(!XLogRecHasAnyBlockRefs(record));
-        TrackTblspcStorageChange(record);
-    } else if (XLogRecGetRmid(record) == RM_RELMAP_ID) {
-        Assert(!XLogRecHasAnyBlockRefs(record));
-        TrackRelmapChange(record);
+    /*
+     * Following xlog record rm catagories do not have block ref.
+     * Later we can also add cbm track functions in rmgrlist for each rmgr.
+     */
+    switch (XLogRecGetRmid(record)){
+        case RM_XACT_ID: {
+            Assert(!XLogRecHasAnyBlockRefs(record));
+            TrackRelStorageDrop(record);
+            break;
+        }
+
+        case RM_SMGR_ID: {
+            Assert(!XLogRecHasAnyBlockRefs(record));
+            uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+            if (info == XLOG_SMGR_CREATE)
+                TrackRelStorageCreate(record);
+            else if (info == XLOG_SMGR_TRUNCATE)
+                TrackRelStorageTruncate(record);
+            break;
+        }
+
+        case RM_DBASE_ID: {
+            Assert(!XLogRecHasAnyBlockRefs(record));
+            TrackDbStorageChange(record);
+            break;
+        }
+
+        case RM_TBLSPC_ID: {
+            Assert(!XLogRecHasAnyBlockRefs(record));
+            TrackTblspcStorageChange(record);
+            break;
+        }
+
+        case RM_RELMAP_ID: {
+            Assert(!XLogRecHasAnyBlockRefs(record));
+            TrackRelmapChange(record);
+            break;
+        }
+
+        case RM_SEGPAGE_ID: {
+            TrackSegmentPageChange(record);
+            break;
+        }
+
+        case RM_UHEAP_ID: {
+            TrackUndoPageModification(record);
+            break;
+        }
+
+        case RM_UNDOLOG_ID: {
+            Assert(!XLogRecHasAnyBlockRefs(record));
+            TrackUndoStorageModification(record);
+            break;
+        }
+
+        case RM_UNDOACTION_ID: {
+            Assert(!XLogRecHasAnyBlockRefs(record));
+            TrackTransSlotModification(record);
+            break;
+        }
+
+        /* other xlog record types are tracked by block refs within records */
+        default:
+            break;
     }
 
     /* clean of vm bit needs to be tracked seperately */
@@ -1003,6 +1070,18 @@ static void TrackRelPageModification(XLogReaderState *record)
     for (block_id = 0; block_id <= record->max_block_id; block_id++) {
         if (!XLogRecGetBlockTag(record, block_id, &rNode, &forkNum, &blkNo))
             continue;
+
+        if (XLOG_NEED_PHYSICAL_LOCATION(rNode)) {
+            SegmentCheck(forkNum >= 0);
+            /* Logic location: relNode & blockno is changed */
+            uint8 segfileno;
+            BlockNumber segblock;
+            XLogRecGetPhysicalBlock(record, block_id, &segfileno, &segblock);
+
+            rNode.relNode = segfileno;
+            rNode.bucketNode = SegmentBktId;
+            blkNo = segblock;
+        }
         /*
          * At present, we do not record page modification information for dfs relations.
          */
@@ -1017,6 +1096,24 @@ static void TrackRelPageModification(XLogReaderState *record)
                                 rNode.relNode, forkNum, blkNo)));
 
         RegisterBlockChange(rNode, forkNum, blkNo);
+    }
+}
+
+static void TrackSegmentPageChange(XLogReaderState *record)
+{
+    /* 
+     * We only needs to consider XLOG_SEG_CREATE_EXTENT_GROUP, which creates the segment file.
+     * Other segment-page meta-data modifications are recorded in "TrackRelPageModification"
+     */
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    if (info == XLOG_SEG_CREATE_EXTENT_GROUP) {
+        char *data = XLogRecGetData(record);
+        RelFileNode *rnode = (RelFileNode *)data;
+        ForkNumber *forknum = (ForkNumber *)(data + sizeof(RelFileNode));
+        
+        RegisterBlockChangeExtended(*rnode, *forknum, InvalidBlockNumber, PAGETYPE_CREATE, InvalidBlockNumber);
+        /* Modify map head */
+        RegisterBlockChange(*rnode, *forknum, DF_MAP_HEAD_PAGE);
     }
 }
 
@@ -1052,7 +1149,7 @@ static void TrackRelStorageDrop(XLogReaderState *record)
 
         nrels = xlrec->nrels;
         xnodes = xlrec->xnodes;
-    } else if (info == XLOG_XACT_ABORT) {
+    } else if (info == XLOG_XACT_ABORT || info == XLOG_XACT_ABORT_WITH_XID) {
         xl_xact_abort *xlrec = (xl_xact_abort *)XLogRecGetData(record);
 
         nrels = xlrec->nrels;
@@ -1075,6 +1172,10 @@ static void TrackRelStorageDrop(XLogReaderState *record)
 
         ColFileNodeCopy(&colFileNodeData, colFileNodeRel);
 
+        /* Logic relfilenode delete is ignored */
+        if (IsSegmentFileNode(colFileNodeData.filenode)) {
+            continue;
+        }
         /*
          * At present, we do not record relation drop on hdfs storage.
          */
@@ -1105,6 +1206,10 @@ static void TrackRelStorageCreate(XLogReaderState *record)
     RelFileNode rnode;
     RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
 
+    /* Logic relfilenode create is ignored */
+    if (IsSegmentFileNode(rnode)) {
+        return;
+    }
     RegisterBlockChangeExtended(rnode, xlrec->forkNum, InvalidBlockNumber, PAGETYPE_CREATE, InvalidBlockNumber);
 }
 
@@ -1115,6 +1220,11 @@ static void TrackRelStorageTruncate(XLogReaderState *record)
     RelFileNode rnode;
     RelFileNodeCopy(rnode, xlrec->rnode, XLogRecGetBucketId(record));
 
+    /* Logic relfilenode create is ignored */
+    if (IsSegmentFileNode(rnode)) {
+        return;
+    }
+    
     mainTruncBlkNo = xlrec->blkno;
     RegisterBlockChangeExtended(rnode, MAIN_FORKNUM, InvalidBlockNumber, PAGETYPE_TRUNCATE, mainTruncBlkNo);
 
@@ -1125,15 +1235,43 @@ static void TrackRelStorageTruncate(XLogReaderState *record)
     RegisterBlockChangeExtended(rnode, VISIBILITYMAP_FORKNUM, InvalidBlockNumber, PAGETYPE_TRUNCATE, vmTruncBlkNo);
 }
 
+static void TrackSegmentVMPageModification(XLogReaderState *record, int blockId)
+{
+    RelFileNode rNode = InvalidRelFileNode;
+    uint8 vmFile;
+    BlockNumber vmBlkNo;
+    bool has_vm_loc = false;
+    XLogRecGetBlockTag(record, blockId, &rNode, NULL, NULL);
+    XLogRecGetVMPhysicalBlock(record, blockId, &vmFile, &vmBlkNo, &has_vm_loc);
+
+    Assert(OidIsValid(rNode.relNode));
+    Assert(has_vm_loc);
+    rNode.relNode = vmFile;
+    rNode.bucketNode = SegmentBktId;
+    RegisterBlockChange(rNode, VISIBILITYMAP_FORKNUM, vmBlkNo);
+}
+
+static void RegisterVMPageModification(XLogReaderState *record, int blockId)
+{
+    BlockNumber blkNo = InvalidBlockNumber;
+    RelFileNode rNode = InvalidRelFileNode;
+
+    XLogRecGetBlockTag(record, blockId, &rNode, NULL, &blkNo);
+
+    if (IsSegmentFileNode(rNode)) {
+        TrackSegmentVMPageModification(record, blockId);
+    } else {
+        BlockNumber vmBlkNo = HEAPBLK_TO_MAPBLOCK(blkNo);
+        RegisterBlockChange(rNode, VISIBILITYMAP_FORKNUM, vmBlkNo);
+    }
+}
+
 static void TrackVMPageModification(XLogReaderState *record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-    BlockNumber heapBlkNo1 = InvalidBlockNumber;
-    BlockNumber heapBlkNo2 = InvalidBlockNumber;
-    BlockNumber vmBlkNo = InvalidBlockNumber;
-    RelFileNode rNode = InvalidRelFileNode;
     bool isinit = ((XLogRecGetInfo(record) & XLOG_HEAP_INIT_PAGE) != 0);
     Pointer rec_data = (Pointer)XLogRecGetData(record);
+    BlockNumber oldblk;
 
     if (XLogRecGetRmid(record) == RM_HEAP_ID) {
         switch (info & XLOG_HEAP_OPMASK) {
@@ -1143,7 +1281,7 @@ static void TrackVMPageModification(XLogReaderState *record)
                 xl_heap_insert *xlrec = (xl_heap_insert *)rec_data;
 
                 if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
-                    (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo1);
+                    RegisterVMPageModification(record, HEAP_INSERT_ORIG_BLOCK_NUM);
 
                 break;
             }
@@ -1151,20 +1289,23 @@ static void TrackVMPageModification(XLogReaderState *record)
                 xl_heap_delete *xlrec = (xl_heap_delete *)rec_data;
 
                 if (xlrec->flags & XLH_DELETE_ALL_VISIBLE_CLEARED)
-                    (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo1);
+                    RegisterVMPageModification(record, HEAP_DELETE_ORIG_BLOCK_NUM);
 
                 break;
             }
+            case XLOG_HEAP_HOT_UPDATE:
             case XLOG_HEAP_UPDATE: {
                 if (isinit)
                     rec_data += sizeof(TransactionId);
                 xl_heap_update *xlrec = (xl_heap_update *)rec_data;
 
-                if (xlrec->flags & XLH_UPDATE_OLD_ALL_VISIBLE_CLEARED)
-                    (void)XLogRecGetBlockTag(record, 1, &rNode, NULL, &heapBlkNo1);
+                /* heapBlkNo1 is always block#0 heapBlkNo2 is always block#1 */
+                if ((xlrec->flags & XLH_UPDATE_OLD_ALL_VISIBLE_CLEARED) &&
+                    XLogRecGetBlockTag(record, HEAP_UPDATE_OLD_BLOCK_NUM, NULL, NULL, &oldblk))
+                    RegisterVMPageModification(record, HEAP_UPDATE_OLD_BLOCK_NUM);
 
                 if (xlrec->flags & XLH_UPDATE_NEW_ALL_VISIBLE_CLEARED)
-                    (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo2);
+                    RegisterVMPageModification(record, HEAP_UPDATE_NEW_BLOCK_NUM);
 
                 break;
             }
@@ -1178,26 +1319,18 @@ static void TrackVMPageModification(XLogReaderState *record)
             xl_heap_multi_insert *xlrec = (xl_heap_multi_insert *)rec_data;
 
             if (xlrec->flags & XLH_INSERT_ALL_VISIBLE_CLEARED)
-                (void)XLogRecGetBlockTag(record, 0, &rNode, NULL, &heapBlkNo1);
+                RegisterVMPageModification(record, HEAP_MULTI_INSERT_ORIG_BLOCK_NUM);
         }
     } else
         return;
-
-    if (BlockNumberIsValid(heapBlkNo1)) {
-        Assert(!RelFileNodeEquals(rNode, InvalidRelFileNode));
-        vmBlkNo = HEAPBLK_TO_MAPBLOCK(heapBlkNo1);
-        RegisterBlockChange(rNode, VISIBILITYMAP_FORKNUM, vmBlkNo);
-    }
-
-    if (BlockNumberIsValid(heapBlkNo2) && (heapBlkNo1 != heapBlkNo2)) {
-        Assert(!RelFileNodeEquals(rNode, InvalidRelFileNode));
-        vmBlkNo = HEAPBLK_TO_MAPBLOCK(heapBlkNo2);
-        RegisterBlockChange(rNode, VISIBILITYMAP_FORKNUM, vmBlkNo);
-    }
 }
 
 static void TrackDbStorageChange(XLogReaderState *record)
 {
+    /*
+     * segment-page storage does not change the database directory. Thus it behaves the same
+     * as heap-disk storage.
+     */
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     RelFileNode rNode = InvalidRelFileNode;
 
@@ -1257,20 +1390,348 @@ static void TrackRelmapChange(XLogReaderState *record)
     }
 }
 
+static void skipUndoRecBody(char **currLogPtr, XlUndoHeader *xlundohdr)
+{
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
+        *currLogPtr += sizeof(bool);
+    }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
+        *currLogPtr += sizeof(UndoRecPtr);
+    }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_PREV_URP) != 0) {
+        *currLogPtr += sizeof(UndoRecPtr);
+    }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_PARTITION_OID) != 0) {
+        *currLogPtr += sizeof(Oid);
+    }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0) {
+        *currLogPtr += sizeof(TransactionId);
+    }
+}
+
+static void TrackUheapInsert(XLogReaderState *record)
+{
+    undo::XlogUndoMeta *undometa;
+    BlockNumber undoStartBlk;
+    UndoSlotPtr slotPtr;
+    RelFileNode rnode;
+    XlUHeapInsert *xlrec = (XlUHeapInsert *)XLogRecGetData(record);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapInsert);
+    char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
+
+    skipUndoRecBody(&currLogPtr, xlundohdr);
+    undometa = (undo::XlogUndoMeta *)((char *)currLogPtr);
+
+    /*
+     * Register undo page modification.
+     * We do not bother parsing whole undo record size. Instead, we register
+     * all possible modified undo pages starting from xlundohdr->urecptr.
+     */
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, xlundohdr->urecptr, UNDO_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(xlundohdr->urecptr);
+    for (int i = 0; i < MAX_BUFFER_PER_UNDO; i++) {
+        RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk + i);
+    }
+
+    /* Register transaction slot page modification. */
+    slotPtr = MAKE_UNDO_PTR(UNDO_PTR_GET_ZONE_ID(xlundohdr->urecptr), undometa->slotPtr);
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slotPtr, UNDO_SLOT_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(slotPtr);
+    RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk);
+}
+
+static void TrackUheapDelete(XLogReaderState *record)
+{
+    undo::XlogUndoMeta *undometa;
+    BlockNumber undoStartBlk;
+    UndoSlotPtr slotPtr;
+    RelFileNode rnode;
+    XlUHeapDelete *xlrec = (XlUHeapDelete *)XLogRecGetData(record);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapDelete);
+    char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
+
+    skipUndoRecBody(&currLogPtr, xlundohdr);
+    undometa = (undo::XlogUndoMeta *)((char *)currLogPtr);
+
+    /*
+     * Register undo page modification.
+     * We do not bother parsing whole undo record size. Instead, we register
+     * all possible modified undo pages starting from xlundohdr->urecptr.
+     */
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, xlundohdr->urecptr, UNDO_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(xlundohdr->urecptr);
+    for (int i = 0; i < MAX_BUFFER_PER_UNDO; i++) {
+        RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk + i);
+    }
+
+    /* Register transaction slot page modification. */
+    slotPtr = MAKE_UNDO_PTR(UNDO_PTR_GET_ZONE_ID(xlundohdr->urecptr), undometa->slotPtr);
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slotPtr, UNDO_SLOT_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(slotPtr);
+    RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk);
+}
+
+
+static void TrackUheapUpdate(XLogReaderState *record)
+{
+    undo::XlogUndoMeta *undometa;
+    BlockNumber undoStartBlk;
+    UndoSlotPtr slotPtr;
+    RelFileNode rnode;
+    XlUHeapUpdate *xlrec = (XlUHeapUpdate *)XLogRecGetData(record);
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)xlrec + SizeOfUHeapUpdate);
+    char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
+
+    skipUndoRecBody(&currLogPtr, xlundohdr);
+
+    /*
+     * Register undo page modification.
+     * We do not bother parsing whole undo record size. Instead, we register
+     * all possible modified undo pages starting from xlundohdr->urecptr.
+     */
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, xlundohdr->urecptr, UNDO_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(xlundohdr->urecptr);
+    for (int i = 0; i < MAX_BUFFER_PER_UNDO; i++) {
+        RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk + i);
+    }
+
+    if (xlrec->flags & XLZ_NON_INPLACE_UPDATE) {
+        XlUndoHeader *xlnewundohdr = (XlUndoHeader *)currLogPtr;
+        currLogPtr += SizeOfXLUndoHeader;
+        skipUndoRecBody(&currLogPtr, xlnewundohdr);
+
+        /* Register undo page modification for non-inplace update. */
+        UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, xlnewundohdr->urecptr, UNDO_DB_OID);
+        undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(xlnewundohdr->urecptr);
+        for (int i = 0; i < MAX_BUFFER_PER_UNDO; i++) {
+            RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk + i);
+        }
+    }
+
+    undometa = (undo::XlogUndoMeta *)((char *)currLogPtr);
+
+    /* Register transaction slot page modification. */
+    slotPtr = MAKE_UNDO_PTR(UNDO_PTR_GET_ZONE_ID(xlundohdr->urecptr), undometa->slotPtr);
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slotPtr, UNDO_SLOT_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(slotPtr);
+    RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk);
+}
+
+static void TrackUheapMultiInsert(XLogReaderState *record)
+{
+    undo::XlogUndoMeta *undometa;
+    BlockNumber undoStartBlk;
+    UndoSlotPtr slotPtr;
+    RelFileNode rnode;
+    int nranges;
+    UndoRecPtr *urpvec = NULL;
+    bool isinit = (XLogRecGetInfo(record) & XLOG_UHEAP_INIT_PAGE) != 0;
+    XlUndoHeader *xlundohdr = (XlUndoHeader *)XLogRecGetData(record);
+    char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
+
+    skipUndoRecBody(&currLogPtr, xlundohdr);
+    currLogPtr += sizeof(UndoRecPtr);
+    undometa = (undo::XlogUndoMeta *)((char *)currLogPtr);
+    currLogPtr += undometa->Size();;
+
+    if (isinit) {
+        currLogPtr += sizeof(TransactionId);
+        currLogPtr += sizeof(uint16);
+    }
+
+    currLogPtr += SizeOfUHeapMultiInsert;
+    nranges = *(int *)currLogPtr;
+    currLogPtr += sizeof(int);
+    urpvec = (UndoRecPtr *)currLogPtr;
+
+    /*
+     * Register undo page modification.
+     * We do not bother parsing whole undo record size. Instead, we register
+     * all possible modified undo pages starting from xlundohdr->urecptr.
+     */
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, xlundohdr->urecptr, UNDO_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(xlundohdr->urecptr);
+    for (int i = 0; i < MAX_BUFFER_PER_UNDO; i++) {
+        RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk + i);
+    }
+
+    /* Register undo page modification for each undo record in heap multi insert */
+    for (int i = 0; i < nranges; i++) {
+        UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, urpvec[i], UNDO_DB_OID);
+        undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(urpvec[i]);
+        for (int j = 0; j < MAX_BUFFER_PER_UNDO; j++) {
+            RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk + j);
+        }
+    }
+
+    /* Register transaction slot page modification. */
+    slotPtr = MAKE_UNDO_PTR(UNDO_PTR_GET_ZONE_ID(xlundohdr->urecptr), undometa->slotPtr);
+    UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slotPtr, UNDO_SLOT_DB_OID);
+    undoStartBlk = UNDO_PTR_GET_BLOCK_NUM(slotPtr);
+    RegisterBlockChange(rnode, UNDO_FORKNUM, undoStartBlk);
+}
+
+/*
+ * TrackUndoModification only tracks undo page modification.
+ * Uheap page modification is tracked by parsing referenced blocks in the xlog record.
+ */
+static void TrackUndoPageModification(XLogReaderState *record)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+
+    switch (info & XLOG_UHEAP_OPMASK) {
+        case XLOG_UHEAP_INSERT:
+            TrackUheapInsert(record);
+            break;
+        case XLOG_UHEAP_DELETE:
+            TrackUheapDelete(record);
+            break;
+        case XLOG_UHEAP_UPDATE:
+            TrackUheapUpdate(record);
+            break;
+        case XLOG_UHEAP_MULTI_INSERT:
+            TrackUheapMultiInsert(record);
+            break;
+        /* other undo xlog record types are tracked by block refs within records */
+        case XLOG_UHEAP_FREEZE_TD_SLOT:
+        case XLOG_UHEAP_INVALID_TD_SLOT:
+        case XLOG_UHEAP_CLEAN:
+            break;
+        default:
+            ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("UHeapRedo: unknown op code %u", (uint8)info)));
+    }
+}
+
+
+static void TrackUndoStorageModification(XLogReaderState *record)
+{
+    Assert(record != NULL);
+
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    void *xlrec = (void *)XLogRecGetData(record);
+    bool extend = false;
+    bool undoFile = true;
+    UndoRecPtr begUrp = INVALID_UNDO_REC_PTR;
+    UndoRecPtr endUrp = INVALID_UNDO_REC_PTR;
+    BlockNumber begBlk;
+    BlockNumber endBlk;
+    RelFileNode rnode;
+
+    switch (info) {
+        case XLOG_UNDO_UNLINK:
+            extend = false;
+            undoFile = true;
+            endUrp = ((undo::XlogUndoUnlink *)xlrec)->head;
+            break;
+        case XLOG_UNDO_EXTEND:
+            extend = true;
+            undoFile = true;
+            begUrp = ((undo::XlogUndoExtend *)xlrec)->prevtail;
+            endUrp = ((undo::XlogUndoExtend *)xlrec)->tail;
+            break;
+        case XLOG_UNDO_CLEAN:
+            extend = false;
+            undoFile = true;
+            /* always clean the last undo seg, see CleanUndoSpace */
+            endUrp = ((undo::XlogUndoClean *)xlrec)->tail + UNDO_LOG_SEGMENT_SIZE;
+            break;
+        case XLOG_SLOT_CLEAN:
+            extend = false;
+            undoFile = false;
+            /* always clean the last undo seg, see CleanSlotSpace */
+            endUrp = ((undo::XlogUndoClean *)xlrec)->tail + UNDO_META_SEGMENT_SIZE;
+            break;
+        case XLOG_SLOT_UNLINK:
+            extend = false;
+            undoFile = false;
+            endUrp = ((undo::XlogUndoUnlink *)xlrec)->head;
+            break;
+        case XLOG_SLOT_EXTEND:
+            extend = true;
+            undoFile = false;
+            begUrp = ((undo::XlogUndoExtend *)xlrec)->prevtail;
+            endUrp = ((undo::XlogUndoExtend *)xlrec)->tail;
+            break;
+        /* undo discard only modifies undo meta */
+        case XLOG_UNDO_DISCARD:
+            return;
+        default:
+            ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("UndoLog: unknown op code %u", (uint8)info)));
+            return;
+    }
+
+    if (extend) {
+        UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, begUrp, undoFile ? UNDO_DB_OID : UNDO_SLOT_DB_OID);
+        begBlk = UNDO_PTR_GET_BLOCK_NUM(begUrp);
+        endBlk = UNDO_PTR_GET_BLOCK_NUM(endUrp);
+
+        /* blocks before new tail were extended */
+        while (begBlk < endBlk) {
+            RegisterBlockChange(rnode, UNDO_FORKNUM, begBlk);
+            begBlk++;
+        }
+    } else {
+        UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, endUrp, undoFile ? UNDO_DB_OID : UNDO_SLOT_DB_OID);
+        endBlk = UNDO_PTR_GET_BLOCK_NUM(endUrp);
+
+        /* blocks(seg) before new head(seg) were recycled */
+        RegisterBlockChangeExtended(rnode, UNDO_FORKNUM, InvalidBlockNumber, PAGETYPE_TRUNCATE, endBlk);
+    }
+}
+
+static void TrackTransSlotModification(XLogReaderState *record)
+{
+    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    UndoSlotPtr slotPtr;
+    RelFileNode rnode;
+    BlockNumber blk;
+
+    switch (info) {
+        case XLOG_ROLLBACK_FINISH:
+            slotPtr = ((undo::XlogRollbackFinish *)XLogRecGetData(record))->slotPtr;
+            blk = UNDO_PTR_GET_BLOCK_NUM(slotPtr);
+            UNDO_PTR_ASSIGN_REL_FILE_NODE(rnode, slotPtr, UNDO_SLOT_DB_OID);
+            RegisterBlockChange(rnode, UNDO_FORKNUM, blk);
+            break;
+        default:
+            elog(WARNING, "UndoXlogRollbackFinishRedo: unknown op code %u", info);
+    }
+}
+
 static void RegisterBlockChange(const RelFileNode &rNode, ForkNumber forkNum, BlockNumber blkNo)
 {
-    RegisterBlockChangeExtended(rNode, forkNum, blkNo, PAGETYPE_MODIFY, InvalidBlockNumber);
+    if (IsSegmentFileNode(rNode)) {
+        Assert(IsSegmentPhysicalRelNode(rNode));
+        RegisterBlockChangeExtended(rNode, forkNum, blkNo, PAGETYPE_MODIFY, InvalidBlockNumber);
+        /*
+         * Segment-page files are extended with 128MB granularity. But CBM does not track
+         * ftruncate information. Thus, we need CBM records the last block in this 128MB,
+         * to ensure the segment-page file is always 128MB aligned after restore.
+         */
+        RegisterBlockChangeExtended(rNode, forkNum, CM_ALIGN_ANY(blkNo, DF_FILE_EXTEND_STEP_BLOCKS) - 1,
+                                    PAGETYPE_MODIFY, InvalidBlockNumber);
+    } else {
+        RegisterBlockChangeExtended(rNode, forkNum, blkNo, PAGETYPE_MODIFY, InvalidBlockNumber);
+    }
 }
 
 static void RegisterBlockChangeExtended(const RelFileNode &rNode, ForkNumber forkNum, BlockNumber blkNo, uint8 pageType,
                                         BlockNumber truncBlkNo)
 {
     Assert((BlockNumberIsValid(blkNo) && pageType == PAGETYPE_MODIFY) ||
-           (!BlockNumberIsValid(blkNo) &&
-            (pageType == PAGETYPE_DROP || pageType == PAGETYPE_TRUNCATE || pageType == PAGETYPE_CREATE)));
+        (!BlockNumberIsValid(blkNo) &&
+        (pageType == PAGETYPE_DROP || pageType == PAGETYPE_TRUNCATE || pageType == PAGETYPE_CREATE)));
 
     Assert((BlockNumberIsValid(truncBlkNo) && pageType == PAGETYPE_TRUNCATE) ||
-           (!BlockNumberIsValid(truncBlkNo) && pageType != PAGETYPE_TRUNCATE));
+        (!BlockNumberIsValid(truncBlkNo) && pageType != PAGETYPE_TRUNCATE));
+
+    Assert(!RelFileNodeEquals(rNode, InvalidRelFileNode));
 
     CBMPageTag cbmPageTag;
     CbmHashEntry *cbmPageEntry = NULL;
@@ -1280,11 +1741,16 @@ static void RegisterBlockChangeExtended(const RelFileNode &rNode, ForkNumber for
 
     if (pageType == PAGETYPE_DROP) {
         CBMHashRemove(cbmPageTag, t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, true);
-    } else if (pageType == PAGETYPE_TRUNCATE && (forkNum == MAIN_FORKNUM || forkNum == VISIBILITYMAP_FORKNUM) &&
-               rNode.relNode != InvalidOid) {
+    } else if (pageType == PAGETYPE_TRUNCATE &&
+        (((forkNum == MAIN_FORKNUM || forkNum == VISIBILITYMAP_FORKNUM) && rNode.relNode != InvalidOid) ||
+        (forkNum == UNDO_FORKNUM && IS_UNDO_RELFILENODE(rNode)))) {
         Assert(BlockNumberIsValid(truncBlkNo));
 
-        CBMPageEtyTruncate(cbmPageTag, t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, truncBlkNo, true);
+        if (IS_UNDO_RELFILENODE(rNode)) {
+            CBMPageEtyTruncateBefore(cbmPageTag, t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, truncBlkNo, true);
+        } else {
+            CBMPageEtyTruncate(cbmPageTag, t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, truncBlkNo, true);
+        }
     }
 
     cbmPageEntry = (CbmHashEntry *)hash_search(t_thrd.cbm_cxt.XlogCbmSys->cbmPageHash, (void *)&cbmPageTag, HASH_ENTER,
@@ -1632,14 +2098,13 @@ static CbmFileName **GetAndValidateCBMFileArray(XLogRecPtr startLSN, XLogRecPtr 
 
 static CbmFileName **GetCBMFileArray(XLogRecPtr startLSN, XLogRecPtr endLSN, int *fileNum, bool missingOk)
 {
-    DIR *cbmdir = NULL;
     struct dirent *cbmde = NULL;
     Dllist *cbmSegPageList = NULL;
     int cbmFileNum = 0;
     Dlelem *elt = NULL;
     CbmFileName **cbmFileNameArray = NULL;
-
-    cbmdir = AllocateDir(t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome);
+    DIR *cbmdir = AllocateDir(t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome);
+    
     if (cbmdir == NULL) {
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not open CBM file directory \"%s\": %m",
                                                           t_thrd.cbm_cxt.XlogCbmSys->cbmFileHome)));
@@ -2011,11 +2476,14 @@ static void MergeCBMPageIntoHash(const char *page, HTAB *cbmPageHash)
         Assert(!BlockNumberIsValid(cbmPageHeader->firstBlkNo));
         Assert(BlockNumberIsValid(cbmPageHeader->truncBlkNo));
         Assert(cbmPageHeader->forkNum == MAIN_FORKNUM || cbmPageHeader->forkNum == FSM_FORKNUM ||
-               cbmPageHeader->forkNum == VISIBILITYMAP_FORKNUM);
+               cbmPageHeader->forkNum == VISIBILITYMAP_FORKNUM || cbmPageHeader->forkNum == UNDO_FORKNUM);
 
-        if ((cbmPageHeader->forkNum == MAIN_FORKNUM || cbmPageHeader->forkNum == VISIBILITYMAP_FORKNUM) &&
-            cbmPageHeader->rNode.relNode != InvalidOid)
+        if (IS_UNDO_RELFILENODE(cbmPageHeader->rNode)) {
+            CBMPageEtyTruncateBefore(cbmPageTag, cbmPageHash, cbmPageHeader->truncBlkNo, false);
+        } else if ((cbmPageHeader->forkNum == MAIN_FORKNUM || cbmPageHeader->forkNum == VISIBILITYMAP_FORKNUM) &&
+            cbmPageHeader->rNode.relNode != InvalidOid) {
             CBMPageEtyTruncate(cbmPageTag, cbmPageHash, cbmPageHeader->truncBlkNo, false);
+        }
     }
 
     cbmPageEntry = (CbmHashEntry *)hash_search(cbmPageHash, (void *)&cbmPageTag, HASH_ENTER, &found);
@@ -2145,6 +2613,7 @@ static void CBMPageEtyRemoveRestFork(const CBMPageTag &cbmPageTag, HTAB *cbmPage
     }
 }
 
+/* remove all cbm pages and clear all bits after (truncBlkNo - 1) */
 static void CBMPageEtyTruncate(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, BlockNumber truncBlkNo,
                                bool isCBMWriter)
 {
@@ -2167,11 +2636,8 @@ static void CBMPageEtyTruncate(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, 
     BlockNumber resPageFirstBlkNo;
     StringInfo log = makeStringInfo();
 
-    appendStringInfo(log,
-                     "truncate cbm pages of rel %u/%u/%u forknum %d "
-                     "to %u blocks",
-                     cbmPageTag.rNode.spcNode, cbmPageTag.rNode.dbNode, cbmPageTag.rNode.relNode, cbmPageTag.forkNum,
-                     truncBlkNo);
+    appendStringInfo(log, "truncate cbm pages of rel %u/%u/%u forknum %d to %u blocks",
+        cbmPageTag.rNode.spcNode, cbmPageTag.rNode.dbNode, cbmPageTag.rNode.relNode, cbmPageTag.forkNum, truncBlkNo);
 
     resPageFirstBlkNo = (truncBlkNo == 0 ? InvalidBlockNumber : BLKNO_TO_CBM_PAGEFIRSTBOCK(truncBlkNo - 1));
 
@@ -2220,8 +2686,118 @@ static void CBMPageEtyTruncate(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, 
                     }
                 }
 
+                appendStringInfo(log, " truncate %s page with first blocknum %u", needReserve ? "partial" : "whole",
+                                 cbmPageHeader->firstBlkNo);
+
                 if (needReserve) {
                     for (blkNo = truncBlkNo; blkNo < (cbmPageHeader->firstBlkNo + CBM_BLOCKS_PER_PAGE); blkNo++) {
+                        mapByte = BLKNO_TO_CBMBYTEOFPAGE(blkNo);
+                        mapBit = BLKNO_TO_CBMBITOFBYTE(blkNo);
+
+                        CLEAR_CBM_PAGE_BITMAP(bitMap[mapByte], mapBit);
+                    }
+                } else {
+                    DLRemove(eltPagelist);
+                    cbmPageEntry->pageNum--;
+
+                    if (isCBMWriter) {
+                        t_thrd.cbm_cxt.XlogCbmSys->totalPageNum--;
+                        DLAddTail(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList, eltPagelist);
+                    } else {
+                        pfree(DLE_VAL(eltPagelist));
+                        DLFreeElem(eltPagelist);
+                    }
+                }
+            }
+        }
+    }
+
+    ereport(DEBUG1, (errmsg("Truncate CBM hash entry: %s", log->data)));
+
+    pfree(log->data);
+    pfree(log);
+}
+
+/* remove all cbm pages and clear all bits before truncBlkNo */
+static void CBMPageEtyTruncateBefore(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, BlockNumber truncBlkNo,
+                               bool isCBMWriter)
+{
+    CbmHashEntry *cbmPageEntry = NULL;
+    CbmPageHeader *cbmPageHeader = NULL;
+    Dlelem *eltCbmSegPageList = NULL;
+    Dlelem *eltPagelist = NULL;
+    Dlelem *neltCbmSegPageList = NULL;
+    Dlelem *neltPagelist = NULL;
+    CbmSegPageList *cbmSegPageList = NULL;
+    bool found = true;
+
+    if (truncBlkNo == 0) {
+        Assert(0);
+        return;
+    }
+
+    cbmPageEntry = (CbmHashEntry *)hash_search(cbmPageHash, (void *)&cbmPageTag, HASH_FIND, &found);
+    if (!found) {
+        return;
+    }
+
+    Assert(cbmPageEntry != NULL);
+
+    BlockNumber resPageFirstBlkNo;
+    StringInfo log = makeStringInfo();
+
+    appendStringInfo(log, "truncate cbm pages of rel %u/%u/%u forknum %d before %u blocks",
+        cbmPageTag.rNode.spcNode, cbmPageTag.rNode.dbNode, cbmPageTag.rNode.relNode, cbmPageTag.forkNum, truncBlkNo);
+
+    resPageFirstBlkNo = BLKNO_TO_CBM_PAGEFIRSTBOCK(truncBlkNo);
+
+    for (eltCbmSegPageList = DLGetHead(&cbmPageEntry->cbmSegPageList); eltCbmSegPageList;
+         eltCbmSegPageList = neltCbmSegPageList) {
+        /* we donot remove the level 1 dllist at this scene */
+        neltCbmSegPageList = DLGetSucc(eltCbmSegPageList);
+
+        cbmSegPageList = (CbmSegPageList *)DLE_VAL(eltCbmSegPageList);
+        for (eltPagelist = DLGetHead(&cbmSegPageList->pageDllist); eltPagelist; eltPagelist = neltPagelist) {
+            neltPagelist = DLGetSucc(eltPagelist);
+            cbmPageHeader = (CbmPageHeader *)DLE_VAL(eltPagelist);
+
+            if (!BlockNumberIsValid(cbmPageHeader->firstBlkNo)) {
+                continue;
+            }
+
+            if (CBM_BLOCKNO_CMP(cbmPageHeader->firstBlkNo, resPageFirstBlkNo) > 0) {
+                continue;
+            } else if (CBM_BLOCKNO_CMP(cbmPageHeader->firstBlkNo, resPageFirstBlkNo) < 0) {
+                appendStringInfo(log, " truncate whole page with first blocknum %u", cbmPageHeader->firstBlkNo);
+
+                DLRemove(eltPagelist);
+                cbmPageEntry->pageNum--;
+
+                if (isCBMWriter) {
+                    t_thrd.cbm_cxt.XlogCbmSys->totalPageNum--;
+                    DLAddTail(&t_thrd.cbm_cxt.XlogCbmSys->pageFreeList, eltPagelist);
+                } else {
+                    pfree(DLE_VAL(eltPagelist));
+                    DLFreeElem(eltPagelist);
+                }
+            } else {
+                bool needReserve = false;
+                BlockNumber blkNo;
+                unsigned char *bitMap = (unsigned char *)cbmPageHeader + MAXALIGN(sizeof(CbmPageHeader));
+                uint32 mapByte, mapBit;
+
+                for (blkNo = truncBlkNo; blkNo < (cbmPageHeader->firstBlkNo + CBM_BLOCKS_PER_PAGE); blkNo++) {
+                    mapByte = BLKNO_TO_CBMBYTEOFPAGE(blkNo);
+                    mapBit = BLKNO_TO_CBMBITOFBYTE(blkNo);
+
+                    if (bitMap[mapByte] & (1U << mapBit)) {
+                        needReserve = true;
+                        break;
+                    }
+                }
+
+                if (needReserve) {
+                    for (blkNo = cbmPageHeader->firstBlkNo; blkNo < truncBlkNo; blkNo++) {
                         mapByte = BLKNO_TO_CBMBYTEOFPAGE(blkNo);
                         mapBit = BLKNO_TO_CBMBITOFBYTE(blkNo);
 
@@ -2251,6 +2827,7 @@ static void CBMPageEtyTruncate(const CBMPageTag &cbmPageTag, HTAB *cbmPageHash, 
     pfree(log->data);
     pfree(log);
 }
+
 
 static void CBMPageEtyMergePage(CbmHashEntry *cbmPageEntry, const char *page)
 {

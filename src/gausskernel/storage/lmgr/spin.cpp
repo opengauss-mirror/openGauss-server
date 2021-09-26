@@ -57,7 +57,7 @@ int SpinlockSemas(void)
      * keep the knowledge here.
      */
     nsemas = NumLWLocks();                                      /* one for each lwlock */
-    nsemas += g_instance.attr.attr_storage.NBuffers;            /* one for each buffer header */
+    nsemas += TOTAL_BUFFER_NUM;            /* one for each buffer header */
     nsemas += 2 * g_instance.attr.attr_storage.max_wal_senders; /* one for each wal and data sender process */
     nsemas += 30;                                               /* plus a bunch for other small-scale use */
 

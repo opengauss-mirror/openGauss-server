@@ -167,7 +167,7 @@ typedef unsigned int pg_wchar;
 /*  FREE				0xff	free (unused) */
 
 /*
- * PostgreSQL encoding identifiers
+ * openGauss encoding identifiers
  *
  * WARNING: the order of this enum must be same as order of entries
  *			in the pg_enc2name_tbl[] array (in mb/encnames.c), and

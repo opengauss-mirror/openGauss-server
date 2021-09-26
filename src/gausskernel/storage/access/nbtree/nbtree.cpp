@@ -2,7 +2,7 @@
  *
  * nbtree.cpp
  *	  Implementation of Lehman and Yao's btree management algorithm for
- *	  Postgres.
+ *	  openGauss.
  *
  * NOTES
  *	  This file contains only the public interface routines.
@@ -28,7 +28,7 @@
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "tcop/tcopprot.h"
 #include "utils/aiomem.h"
 #include "utils/memutils.h"
@@ -49,13 +49,12 @@ typedef struct {
     MemoryContext pagedelcontext;
 } BTVacState;
 
-static void btbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
-                            void *state);
 static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, IndexBulkDeleteCallback callback,
                          void *callback_state, BTCycleId cycleid);
 static void btvacuumpage(BTVacState *vstate, BlockNumber blkno, BlockNumber orig_blkno);
 
 static IndexTuple btgetindextuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset);
+
 /*
  *	btbuild() -- build a new btree index.
  */
@@ -67,6 +66,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
     IndexBuildResult *result = NULL;
     double reltuples = 0;
     BTBuildState buildstate;
+    double* allPartTuples = NULL;
 
     buildstate.isUnique = indexInfo->ii_Unique;
     buildstate.haveDead = false;
@@ -74,6 +74,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
     buildstate.spool = NULL;
     buildstate.spool2 = NULL;
     buildstate.indtuples = 0;
+    buildstate.btleader = NULL;
 
 #ifdef BTREE_BUILD_STATS
     if (u_sess->attr.attr_resource.log_btree_build_stats) {
@@ -88,28 +89,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
                         errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
     }
 
-    // If building a unique index, put dead tuples in a second spool to keep
-    // them out of the uniqueness check.
-    if (indexInfo->ii_Unique) {
-        buildstate.spool2 = _bt_spoolinit(index, false, true, &indexInfo->ii_desc);
-    }
-
-    buildstate.spool = _bt_spoolinit(index, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
-
-    /* do the heap scan */
-    double* allPartTuples = NULL;
-    if (RelationIsGlobalIndex(index)) {
-        allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, btbuildCallback, (void*)&buildstate);
-    } else {
-        reltuples = tableam_index_build_scan(heap, index, indexInfo, true, btbuildCallback, (void*)&buildstate);
-    }
-
-    /* okay, all heap tuples are indexed */
-    if (buildstate.spool2 && !buildstate.haveDead) {
-        /* spool2 turns out to be unnecessary */
-        _bt_spooldestroy(buildstate.spool2);
-        buildstate.spool2 = NULL;
-    }
+    reltuples = _bt_spools_heapscan(heap, index, &buildstate, indexInfo, &allPartTuples);
 
     /*
      * Finish the build by (1) completing the sort of the spool file, (2)
@@ -121,6 +101,9 @@ Datum btbuild(PG_FUNCTION_ARGS)
     if (buildstate.spool2) {
         _bt_spooldestroy(buildstate.spool2);
     }
+    if (buildstate.btleader) {
+        _bt_end_parallel();
+    }
 
 #ifdef BTREE_BUILD_STATS
     if (u_sess->attr.attr_resource.log_btree_build_stats) {
@@ -131,7 +114,6 @@ Datum btbuild(PG_FUNCTION_ARGS)
 
     // Return statistics
     result = (IndexBuildResult *)palloc(sizeof(IndexBuildResult));
-
     result->heap_tuples = reltuples;
     result->index_tuples = buildstate.indtuples;
     result->all_part_tuples = allPartTuples;
@@ -142,7 +124,7 @@ Datum btbuild(PG_FUNCTION_ARGS)
 /*
  * Per-tuple callback from IndexBuildHeapScan
  */
-static void btbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
+void btbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
                             void *state)
 {
     BTBuildState *buildstate = (BTBuildState *)state;
@@ -303,7 +285,8 @@ Datum btgetbitmap(PG_FUNCTION_ARGS)
             /* Save tuple ID, and continue scanning */
             heapTid = &scan->xs_ctup.t_self;
             Oid currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
-            tbm_add_tuples(tbm, heapTid, 1, false, currPartOid);
+            int2 bucketid = so->currPos.items[so->currPos.itemIndex].bucketid;
+            tbm_add_tuples(tbm, heapTid, 1, false, currPartOid, bucketid);
             ntids++;
 
             for (;;) {
@@ -321,7 +304,8 @@ Datum btgetbitmap(PG_FUNCTION_ARGS)
                 /* Save tuple ID, and continue scanning */
                 heapTid = &so->currPos.items[so->currPos.itemIndex].heapTid;
                 currPartOid = so->currPos.items[so->currPos.itemIndex].partitionOid;
-                tbm_add_tuples(tbm, heapTid, 1, false, currPartOid);
+                bucketid = so->currPos.items[so->currPos.itemIndex].bucketid;
+                tbm_add_tuples(tbm, heapTid, 1, false, currPartOid, bucketid);
                 ntids++;
             }
         }
@@ -433,6 +417,12 @@ Datum btbeginscan(PG_FUNCTION_ARGS)
     so->currTuples = so->markTuples = NULL;
     so->currPos.nextTupleOffset = 0;
     so->markPos.nextTupleOffset = 0;
+
+    /* used only in ubtree */
+    so->lastSelfModifiedItup = NULL;
+    so->lastSelfModifiedItupBufferSize = 0;
+    so->indexInfo = NULL;
+    so->fakeEstate = NULL;
 
     scan->xs_itupdesc = RelationGetDescr(rel);
     scan->opaque = so;
@@ -815,6 +805,7 @@ static void btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats, In
          * overkill, but for consistency do that anyway.
          */
         buf = ReadBufferExtended(rel, MAIN_FORKNUM, vstate.lastBlockLocked, RBM_NORMAL, info->strategy);
+        _bt_checkbuffer_valid(rel, buf);
         LockBufferForCleanup(buf);
         _bt_checkpage(rel, buf);
         _bt_delitems_vacuum(rel, buf, NULL, 0, vstate.lastBlockVacuumed);
@@ -866,6 +857,7 @@ restart:
      * buffer access strategy.
      */
     buf = ReadBufferExtended(rel, MAIN_FORKNUM, blkno, RBM_NORMAL, info->strategy);
+    _bt_checkbuffer_valid(rel, buf);
     LockBuffer(buf, BT_READ);
     page = BufferGetPage(buf);
     opaque = (BTPageOpaqueInternal)PageGetSpecialPointer(page);
@@ -940,8 +932,6 @@ restart:
         minoff = P_FIRSTDATAKEY(opaque);
         maxoff = PageGetMaxOffsetNumber(page);
         if (callback) {
-            AttrNumber partitionOidAttr = IndexRelationGetNumberOfAttributes(rel);
-            TupleDesc tupdesc = RelationGetDescr(rel);
             for (offnum = minoff; offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
                 IndexTuple itup = (IndexTuple)PageGetItem(page, PageGetItemId(page, offnum));
                 ItemPointer htup = &(itup->t_tid);
@@ -968,12 +958,14 @@ restart:
                  * killed.
                  */
                 Oid partOid = InvalidOid;
+                int2 bktId = InvalidBktId;
                 if (RelationIsGlobalIndex(rel)) {
-                    bool isnull = false;
-                    partOid = DatumGetUInt32(index_getattr(itup, partitionOidAttr, tupdesc, &isnull));
-                    Assert(!isnull);
+                    partOid = index_getattr_tableoid(rel, itup);
                 }
-                if (callback(htup, callback_state, partOid)) {
+                if (RelationIsCrossBucketIndex(rel)) {
+                    bktId = index_getattr_bucketid(rel, itup);
+                }
+                if (callback(htup, callback_state, partOid, bktId)) {
                     deletable[ndeletable++] = offnum;
                 }
             }
@@ -1095,7 +1087,7 @@ Datum btmerge(PG_FUNCTION_ARGS)
     IndexScanDesc srcIdxRelScan = NULL;
     BTOrderedIndexListElement *ele = NULL;
     TupleDesc tupdes = RelationGetDescr(dstIdxRel);
-    int keysz = RelationGetNumberOfAttributes(dstIdxRel);
+    int keysz = IndexRelationGetNumberOfKeyAttributes(dstIdxRel);
     ScanKey indexScanKey = _bt_mkscankey_nodata(dstIdxRel);
     BTWriteState wstate;
     BTPageState *state = NULL;
@@ -1201,18 +1193,22 @@ Datum btmerge(PG_FUNCTION_ARGS)
 
 static IndexTuple btgetindextuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset)
 {
-    bool found = _bt_gettuple_internal(scan, dir);
-    /* Reset kill flag immediately for safety */
-    scan->kill_prior_tuple = false;
-
-    /* If we're out of index entries, we're done */
-    if (!found) {
-        /* ... but first, release any held pin on a heap page */
-        if (BufferIsValid(scan->xs_cbuf)) {
-            ReleaseBuffer(scan->xs_cbuf);
-            scan->xs_cbuf = InvalidBuffer;
+    while (true) {
+        bool found = _bt_gettuple_internal(scan, dir);
+        /* Reset kill flag immediately for safety */
+        scan->kill_prior_tuple = false;
+        /* If we're out of index entries, we're done */
+        if (!found) {
+            /* ... but first, release any held pin on a heap page */
+            if (BufferIsValid(scan->xs_cbuf)) {
+                ReleaseBuffer(scan->xs_cbuf);
+                scan->xs_cbuf = InvalidBuffer;
+            }
+            return NULL;
         }
-        return NULL;
+        if (!scan->xs_want_bucketid || scan->xs_cbi_scan->mergingBktId == scan->xs_cbi_scan->bucketid) {
+            break;
+        }
     }
 
     /* Return the index tuple we found. */

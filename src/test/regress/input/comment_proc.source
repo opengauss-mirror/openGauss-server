@@ -1,0 +1,981 @@
+drop database if exists test_comment;
+create database test_comment;
+\c test_comment
+
+-- create schema
+CREATE SCHEMA test_comment;
+SET search_path to test_comment;
+
+create function fi_random_str(length INTEGER) returns character varying
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    result varchar(500);
+BEGIN
+    SELECT array_to_string(ARRAY(SELECT chr((65 + round(random() * 25)) :: integer)
+    FROM generate_series(1,length)), '') INTO result;
+    return result;
+END
+$$;
+
+\sf fi_random_str
+\sf+ fi_random_str
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst1
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst1
+\sf+ comment_tst1
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst2()
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst2
+\sf+ comment_tst2
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst3( )
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst3
+\sf+ comment_tst3
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst4(/* a comment */)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst4
+\sf+ comment_tst4
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst5(/* a comment */
+)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst5
+\sf+ comment_tst5
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst6(
+/* a comment */)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst6
+\sf+ comment_tst6
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst7(
+/* a comment */)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst7
+\sf+ comment_tst7
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst8(--a comment 
+)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst8
+\sf+ comment_tst8
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst9(
+--a comment 
+)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_',v1; -- line comment in body
+END;
+/
+
+\sf comment_tst9
+\sf+ comment_tst9
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst10(a INTEGER)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%',v1,a; -- line comment in body
+END;
+/
+
+\sf comment_tst10
+\sf+ comment_tst10
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst11(a INTEGER -- param a single line comment
+)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%',v1,a; -- line comment in body
+END;
+/
+
+\sf comment_tst11
+\sf+ comment_tst11
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst12(a INTEGER /* param a C comment */)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%',v1,a; -- line comment in body
+END;
+/
+
+\sf comment_tst12
+\sf+ comment_tst12
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst13(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c; -- line comment in body
+END;
+/
+
+\sf comment_tst13
+\sf+ comment_tst13
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst14(a INTEGER, -- param a single line comment 
+b INTEGER, /* param a C comment */
+c INTEGER -- last param c C comment
+)
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c; -- line comment in body
+END;
+/
+
+\sf comment_tst14
+\sf+ comment_tst14
+
+/* The PL/SQL source comments before define. */
+CREATE /* xx */ OR /* xx */ REPLACE /* xx */ PROCEDURE /* xx */ comment_tst15 /* xx */ (a INTEGER, -- param a single line comment 
+b INTEGER, /* param a C comment */
+c INTEGER -- last param c C comment
+)
+/* xx */ 
+AS
+--header comments
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c; -- line comment in body
+END;
+/
+
+\sf comment_tst15
+\sf+ comment_tst15
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst16(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+--header comments 1
+--header comments 2
+--header comments 3
+/* 1 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c; -- line comment in body
+END;
+/
+
+\sf comment_tst16
+\sf+ comment_tst16
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst17(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+/* 1 mult-lines
+   comments */
+--header comments 1
+--header comments 2
+--header comments 3
+/* 2 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c; -- line comment in body
+END;
+/
+
+\sf comment_tst17
+\sf+ comment_tst17
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst18(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+/* 1 mult-lines
+   comments */
+/* 2 mult-lines
+   comments */
+/* 3 mult-lines
+   comments */
+--header comments 1
+--header comments 2
+--header comments 3
+/* 4 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c; -- line comment in body
+END;
+/
+
+\sf comment_tst18
+\sf+ comment_tst18
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst19(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+/* 1 mult-lines
+   comments */
+--header comments 1
+--header comments 2
+--header comments 3
+/* 2 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c;
+END;
+/
+
+\sf comment_tst19
+\sf+ comment_tst19
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst20(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+/* 1 mult-lines
+   comments */
+--header comments 1
+--header comments 2
+--header comments 3
+/* 2 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c;
+END; -- body end
+/
+
+\sf comment_tst20
+\sf+ comment_tst20
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst21(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+/* 1 mult-lines
+   comments */
+--header comments 1
+--header comments 2
+--header comments 3
+/* 2 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+begin
+RAISE NOTICE 'inner Emp Id: %_%_%_%',v1,a,b,c;/* inner comment */
+end; 
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c;
+END;
+/
+
+\sf comment_tst21
+\sf+ comment_tst21
+
+/* The PL/SQL source comments before define. */
+CREATE OR REPLACE PROCEDURE comment_tst22(a INTEGER, /* param a C comment */ b INTEGER, -- param b single line comment
+c INTEGER /* last param c C comment */
+)
+AS
+/* 1 mult-lines
+   comments */
+--header comments 1
+--header comments 2
+--header comments 3
+/* 2 mult-lines
+   comments */
+   v1 INTEGER := 0; --declare comments
+  /* 2 mult-lines
+   comments */ 
+  --declare comments
+BEGIN
+begin
+RAISE NOTICE 'inner Emp Id: %_%_%_%',v1,a,b,c;
+end; /* inner comment */
+/* C style in pl/sql source */
+RAISE NOTICE 'Emp Id: %_%_%_%',v1,a,b,c;
+END;
+/
+
+\sf comment_tst22
+\sf+ comment_tst22
+
+CREATE OR REPLACE FUNCTION first_day_month_func_001  RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_001
+\sf+ first_day_month_func_001
+
+CREATE OR REPLACE FUNCTION first_day_month_func_002() RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_002
+\sf+ first_day_month_func_002
+
+CREATE OR REPLACE FUNCTION first_day_month_func_003(  ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_003
+\sf+ first_day_month_func_003
+
+CREATE OR REPLACE FUNCTION first_day_month_func_004( /* function null param */ ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_004
+\sf+ first_day_month_func_004
+
+CREATE OR REPLACE FUNCTION first_day_month_func_005( /* function null param */
+ ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_005
+\sf+ first_day_month_func_005
+
+CREATE OR REPLACE FUNCTION first_day_month_func_006( 
+/* function null param */ ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_006
+\sf+ first_day_month_func_006
+
+CREATE OR REPLACE FUNCTION first_day_month_func_007( 
+/* function null param */
+  ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_007
+\sf+ first_day_month_func_007
+
+CREATE OR REPLACE FUNCTION first_day_month_func_008(  -- function null param , single line comment
+  ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_008
+\sf+ first_day_month_func_008
+
+CREATE OR REPLACE FUNCTION first_day_month_func_009(  
+-- function null param , single line comment
+  ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_009
+\sf+ first_day_month_func_009
+
+CREATE OR REPLACE FUNCTION first_day_month_func_010( i_date date ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_010
+\sf+ first_day_month_func_010
+
+CREATE OR REPLACE FUNCTION first_day_month_func_011( i_date date   -- param a single line comment
+ ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_011
+\sf+ first_day_month_func_011
+
+CREATE OR REPLACE FUNCTION first_day_month_func_012( i_date date   /* param a C comment */   ) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  i_date date := now();
+  msg VARCHAR2 := 'default msg';
+  lb_date VARCHAR2(16);
+BEGIN
+  lb_date := TO_CHAR(i_date, 'yyyymmdd');
+  RAISE NOTICE '%_%',msg,lb_date;
+
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_012
+\sf+ first_day_month_func_012
+
+CREATE OR REPLACE FUNCTION first_day_month_func_013(i_date IN DATE, /*para1 comments*/msg VARCHAR2, -- param2 comments
+msg1 VARCHAR2 /*param3 comments*/
+) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_013
+\sf+ first_day_month_func_013
+
+CREATE OR REPLACE FUNCTION first_day_month_func_014(i_date IN DATE, -- para1 comments 
+msg VARCHAR2, /* param2 comments */msg1 VARCHAR2 -- param3 comments 
+) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_014
+\sf+ first_day_month_func_014
+
+CREATE OR /*x1*/REPLACE /*x1*/ FUNCTION /*x1*/ first_day_month_func_015 /*x1*/ ( i_date IN  DATE, /*para1 comments*/msg VARCHAR2, -- param2 comments
+msg1 VARCHAR2 /*param3 comments*/
+) RETURN /*x1*/ VARCHAR2 /*x1*/ AS
+--header comments
+/* 1 mult-lines
+   comments */
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_015
+\sf+ first_day_month_func_015
+
+CREATE OR REPLACE FUNCTION first_day_month_func_016(i_date IN DATE, /*para1 comments*/msg VARCHAR2, -- param2 comments
+msg1 VARCHAR2 /*param3 comments*/
+) RETURN VARCHAR2 AS
+--header comments1
+--header comments2
+--header comments3
+/* 1 mult-lines
+   comments */
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_016
+\sf+ first_day_month_func_016
+
+CREATE OR REPLACE FUNCTION first_day_month_func_017(i_date IN DATE, /*para1 comments*/msg VARCHAR2, -- param2 comments
+msg1 VARCHAR2 /*param3 comments*/
+) RETURN VARCHAR2 AS
+
+
+
+/* 1 mult-lines
+   comments */
+--header comments
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_017
+\sf+ first_day_month_func_017
+
+CREATE OR REPLACE FUNCTION first_day_month_func_018(i_date IN DATE, /*para1 comments*/msg VARCHAR2, -- param2 comments
+msg1 VARCHAR2 /*param3 comments*/
+) RETURN VARCHAR2 AS
+/* 1 mult-lines
+   comments */
+/* 2 mult-lines
+   comments */ 
+/* 3 mult-lines
+   comments */
+--header comments
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_018
+\sf+ first_day_month_func_018
+
+CREATE OR REPLACE FUNCTION first_day_month_func_019(i_date IN DATE, /*para1 comments*/msg VARCHAR2, -- param2 comments
+msg1 VARCHAR2 /*param3 comments*/
+) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;
+/
+
+\sf first_day_month_func_019
+\sf+ first_day_month_func_019
+
+CREATE OR REPLACE FUNCTION first_day_month_func_020(i_date IN DATE, /*para1 comments*/msg VARCHAR2, -- param2 comments
+msg1 VARCHAR2 /*param3 comments*/
+) RETURN VARCHAR2 AS
+--header comments
+/* 1 mult-lines
+   comments */
+  lb_date VARCHAR2(16);
+BEGIN
+    lb_date := TO_CHAR(i_date, 'yyyymmdd');
+    RAISE NOTICE '%_%_%',msg,lb_date,msg1;
+   
+  RETURN lb_date;
+END;/* body end*/
+/
+
+\sf first_day_month_func_020
+\sf+ first_day_month_func_020
+
+
+\! @abs_bindir@/gs_dump -f @abs_bindir@/test_comment.tar -c -n test_comment -p @portstring@ test_comment -F t >>/dev/null
+
+drop database if exists test_comment1;
+create database test_comment1;
+\c test_comment1
+CREATE SCHEMA test_comment;
+
+\! @abs_bindir@/gs_restore @abs_bindir@/test_comment.tar -p @portstring@ -d test_comment1 -s -e -c  >>/dev/null
+
+SET search_path to test_comment;
+\sf fi_random_str
+\sf+ fi_random_str
+\sf comment_tst1
+\sf+ comment_tst1
+\sf comment_tst2
+\sf+ comment_tst2
+\sf comment_tst3
+\sf+ comment_tst3
+\sf comment_tst4
+\sf+ comment_tst4
+\sf comment_tst5
+\sf+ comment_tst5
+\sf comment_tst6
+\sf+ comment_tst6
+\sf comment_tst7
+\sf+ comment_tst7
+\sf comment_tst8
+\sf+ comment_tst8
+\sf comment_tst9
+\sf+ comment_tst9
+\sf comment_tst10
+\sf+ comment_tst10
+\sf comment_tst11
+\sf+ comment_tst11
+\sf comment_tst12
+\sf+ comment_tst12
+\sf comment_tst13
+\sf+ comment_tst13
+\sf comment_tst14
+\sf+ comment_tst14
+\sf comment_tst15
+\sf+ comment_tst15
+\sf comment_tst16
+\sf+ comment_tst16
+\sf comment_tst17
+\sf+ comment_tst17
+\sf comment_tst18
+\sf+ comment_tst18
+\sf comment_tst19
+\sf+ comment_tst19
+\sf comment_tst20
+\sf+ comment_tst20
+\sf comment_tst21
+\sf+ comment_tst21
+\sf comment_tst22
+\sf+ comment_tst22
+\sf first_day_month_func_001
+\sf+ first_day_month_func_001
+\sf first_day_month_func_002
+\sf+ first_day_month_func_002
+\sf first_day_month_func_003
+\sf+ first_day_month_func_003
+\sf first_day_month_func_004
+\sf+ first_day_month_func_004
+\sf first_day_month_func_005
+\sf+ first_day_month_func_005
+\sf first_day_month_func_006
+\sf+ first_day_month_func_006
+\sf first_day_month_func_007
+\sf+ first_day_month_func_007
+\sf first_day_month_func_008
+\sf+ first_day_month_func_008
+\sf first_day_month_func_009
+\sf+ first_day_month_func_009
+\sf first_day_month_func_010
+\sf+ first_day_month_func_010
+\sf first_day_month_func_011
+\sf+ first_day_month_func_011
+\sf first_day_month_func_012
+\sf+ first_day_month_func_012
+\sf first_day_month_func_013
+\sf+ first_day_month_func_013
+\sf first_day_month_func_014
+\sf+ first_day_month_func_014
+\sf first_day_month_func_015
+\sf+ first_day_month_func_015
+\sf first_day_month_func_016
+\sf+ first_day_month_func_016
+\sf first_day_month_func_017
+\sf+ first_day_month_func_017
+\sf first_day_month_func_018
+\sf+ first_day_month_func_018
+\sf first_day_month_func_019
+\sf+ first_day_month_func_019
+\sf first_day_month_func_020
+\sf+ first_day_month_func_020

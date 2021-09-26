@@ -42,7 +42,7 @@ public:
     /* *
      * @brief Default Constructor, in use for case not all info is exist in time of object creation
      */
-    CachedColumn(Oid table_oid, const char *database_name, const char *schema_name, const char *table_name,
+    CachedColumn(Oid oid, Oid table_oid, const char *database_name, const char *schema_name, const char *table_name,
         const char *column_name, int column_position, Oid data_type_oid, int data_type_mod);
 
     /*
@@ -119,10 +119,15 @@ public:
     void set_use_in_prepare(bool) override;
     const bool is_in_prepare() const override;
     void remove_from_columnslist();
+    void set_flag_columnslist();
     const bool is_in_columns_list() const override;
     ColumnHookExecutorsList *m_column_hook_executors_list; /* Opaque Arguments pass to hook */
-    
+     
+    Oid get_oid() const;
+    void set_oid(Oid oid);
+
 private:
+    Oid m_own_oid;               /* column oid - used by gs_encrypted_proc to relate input parameter */
     Oid m_table_oid;             /* < table oid - being used as one of the options to identify column */
     unsigned int m_column_index; /* < A value that uniquely identifies this column within its table */
     Oid m_data_type;

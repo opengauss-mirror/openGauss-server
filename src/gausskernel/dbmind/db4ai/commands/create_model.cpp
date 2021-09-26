@@ -29,7 +29,7 @@
 #include "db4ai/hyperparameter_validation.h"
 #include "catalog/indexing.h"
 #include "executor/executor.h"
-#include "executor/nodeKMeans.h"
+#include "executor/node/nodeKMeans.h"
 #include "nodes/value.h"
 #include "parser/analyze.h"
 #include "rewrite/rewriteHandler.h"
@@ -38,7 +38,7 @@
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "workload/workload.h"
-#include "executor/nodeGD.h"
+#include "executor/node/nodeGD.h"
 #include "db4ai/aifuncs.h"
 #include "utils/builtins.h"
 

@@ -32,7 +32,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS= remote_read.pb.o remote_read.grpc.pb.o rpc_server.o rpc_client.o
+OBJS= remote_read_client.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

@@ -3,7 +3,7 @@
  * tablespace.cpp
  *	  Commands to manipulate table spaces
  *
- * Tablespaces in PostgreSQL are designed to allow users to determine
+ * Tablespaces in openGauss are designed to allow users to determine
  * where the data file(s) for a given database object reside on the file
  * system.
  *
@@ -59,6 +59,7 @@
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/objectaccess.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_tablespace.h"
 #include "commands/comment.h"
 #include "commands/defrem.h"
@@ -69,8 +70,9 @@
 #include "nodes/makefuncs.h"
 #include "postmaster/bgwriter.h"
 #include "storage/dfs/dfs_connector.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/standby.h"
+#include "storage/smgr/segment.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
@@ -90,6 +92,8 @@
 #include "replication/replicainternal.h"
 #include "replication/slot.h"
 #include "dfs_adaptor.h"
+#include "postmaster/rbcleaner.h"
+#include "storage/tcap.h"
 
 static void create_tablespace_directories(const char* location, const Oid tablespaceoid);
 /*
@@ -119,37 +123,6 @@ Datum CanonicalizeTablespaceOptions(Datum datum);
         }                               \
     } while (0)
 
-static void TableSpaceCreateHbucketDir(const RelFileNode rnode, bool isRedo)
-{
-    struct stat st;
-    char* dir = NULL;
-
-    if (rnode.bucketNode <= InvalidBktId) {
-        return;
-    }
-
-    RelFileNode brnode = rnode;
-    brnode.bucketNode = DIR_BUCKET_ID;
-    dir = relpathbackend(brnode, InvalidBackendId, MAIN_FORKNUM);
-
-    if (stat(dir, &st) < 0) {
-        /* Directory does not exist */
-        if (errno == ENOENT) {
-            if (!isRedo) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("Hash bkt dir \"%s\" not exists:%m", dir)));
-            } else if (mkdir(dir, S_IRWXU) < 0 && errno != EEXIST) {
-                ereport(ERROR, (errcode_for_file_access(), errmsg("could not create directory \"%s\":%m", dir)));
-            }
-        } else {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat directory \"%s\": %m", dir)));
-        }
-    } else if (!S_ISDIR(st.st_mode)) {
-        ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" exists but is not a directory.", dir)));
-    }
-
-    pfree_ext(dir);
-}
-
 /*
  * Each database using a table space is isolated into its own name space
  * by a subdirectory named for the database OID.  On first creation of an
@@ -167,12 +140,10 @@ static void TableSpaceCreateHbucketDir(const RelFileNode rnode, bool isRedo)
  * If tablespaces are not supported, we still need it in case we have to
  * re-create a database subdirectory (of $PGDATA/base) during WAL replay.
  */
-void TablespaceCreateDbspace(const RelFileNode rnode, bool isRedo)
+void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo)
 {
     struct stat st;
     char* dir = NULL;
-    Oid spcNode = rnode.spcNode;
-    Oid dbNode = rnode.dbNode;
 
     /*
      * The global tablespace doesn't have per-database subdirectories, so
@@ -185,6 +156,7 @@ void TablespaceCreateDbspace(const RelFileNode rnode, bool isRedo)
     Assert(OidIsValid(dbNode));
 
     dir = GetDatabasePath(dbNode, spcNode);
+
     if (stat(dir, &st) < 0) {
         /* Directory does not exist? */
         if (errno == ENOENT) {
@@ -243,7 +215,6 @@ void TablespaceCreateDbspace(const RelFileNode rnode, bool isRedo)
                             ERROR, (errcode_for_file_access(), errmsg("could not create directory \"%s\": %m", dir)));
                 }
             }
-
             LWLockRelease(TablespaceCreateLock);
         } else {
             ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat directory \"%s\": %m", dir)));
@@ -255,8 +226,6 @@ void TablespaceCreateDbspace(const RelFileNode rnode, bool isRedo)
     }
 
     pfree_ext(dir);
-
-    TableSpaceCreateHbucketDir(rnode, isRedo);
 }
 
 #define KB_PER_MB 1024          /* 2^10 */
@@ -512,8 +481,8 @@ bool IsLegalRelativeLocation(const char* location)
 /*
  * Create a table space
  *
- * Only superusers can create a tablespace. This seems a reasonable restriction
- * since we're determining the system layout and, anyway, we probably have
+ * Only users with sysadmin privilege or the member of gs_role_tablespace role can create a tablespace.
+ * This seems a reasonable restriction since we're determining the system layout and, anyway, we probably have
  * root if we're doing this kind of activity
  */
 void CreateTableSpace(CreateTableSpaceStmt* stmt)
@@ -543,13 +512,14 @@ void CreateTableSpace(CreateTableSpaceStmt* stmt)
                 errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                 errmsg("Create tablespace with absolute location can't be allowed")));
 
-    /* Must be super user */
-    if (!superuser())
+    /* Must be users with sysadmin privilege or the member of gs_role_tablespace role */
+    if (!superuser() && !is_member_of_role(GetUserId(), DEFAULT_ROLE_TABLESPACE)) {
         ereport(ERROR,
             (errmodule(MOD_TBLSPC),
                 errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("Permission denied to create tablespace \"%s\".", stmt->tablespacename),
-                errhint("Must be system admin to create a tablespace.")));
+                errhint("Must be system admin or a member of the gs_role_tablespace role to create a tablespace.")));
+    }
 
     /* However, the eventual owner of the tablespace need not be */
     if (stmt->owner)
@@ -945,6 +915,12 @@ void DropTableSpace(DropTableSpaceStmt* stmt)
      */
     deleteSharedDependencyRecordsFor(TableSpaceRelationId, tablespaceoid, 0);
 
+
+    /*
+     * Purge the recyclebin relations.
+     */
+    RbCltPurgeSpace(tablespaceoid);
+
     /*
      * Acquire TablespaceCreateLock to ensure that no TablespaceCreateDbspace
      * is running concurrently.
@@ -1107,7 +1083,7 @@ static void check_tablespace_symlink(const char* location)
             ereport(ERROR,
                 (errmodule(MOD_TBLSPC),
                     errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("find conflict linkpath \"%s\" in pg_tblspc, location \"%s\"", linkpath, location)));
+                    errmsg("find conflict linkpath in pg_tblspc, try a different path.")));
         }
     }
 
@@ -1675,6 +1651,12 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo)
         rc = sprintf_s(subfile, len, "%s/%s", linkloc_with_version_dir, de->d_name);
         securec_check_ss(rc, "\0", "\0");
 
+        /* remove segment file */
+        if (!redo && strcmp(de->d_name, "pgsql_tmp") != 0) {
+            Oid dbNode = atoi(de->d_name);
+            spc_drop(tablespaceoid, dbNode, redo);
+        }
+
         /* This check is just to deliver a friendlier error message */
         if (!redo && !directory_is_empty(subfile)) {
             FreeDir(dirdesc);
@@ -1867,7 +1849,6 @@ void RenameTableSpace(const char* oldname, const char* newname)
  */
 void AlterTableSpaceOwner(const char* name, Oid newOwnerId)
 {
-    Relation rel;
     ScanKeyData entry[1];
     TableScanDesc scandesc;
     Form_pg_tablespace spcForm;
@@ -1880,7 +1861,7 @@ void AlterTableSpaceOwner(const char* name, Oid newOwnerId)
     }
 
     /* Search pg_tablespace */
-    rel = heap_open(TableSpaceRelationId, RowExclusiveLock);
+    Relation rel = heap_open(TableSpaceRelationId, RowExclusiveLock);
 
     ScanKeyInit(&entry[0], Anum_pg_tablespace_spcname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(name));
     scandesc = tableam_scan_begin(rel, SnapshotNow, 1, entry);
@@ -2396,8 +2377,10 @@ bool check_temp_tablespaces(char** newval, void** extra, GucSource source)
         if (myextra == NULL)
             return false;
         myextra->numSpcs = numSpcs;
-        rc = memcpy_s(myextra->tblSpcs, numSpcs * sizeof(Oid), tblSpcs, numSpcs * sizeof(Oid));
-        securec_check(rc, "\0", "\0");
+        if (numSpcs != 0) {
+            rc = memcpy_s(myextra->tblSpcs, numSpcs * sizeof(Oid), tblSpcs, numSpcs * sizeof(Oid));
+            securec_check(rc, "\0", "\0");
+        }
         *extra = (void*)myextra;
 
         pfree_ext(tblSpcs);
@@ -2695,7 +2678,6 @@ void xlog_drop_tblspc(Oid tsId)
     }
 }
 
-
 /*
  * TABLESPACE resource manager's routines
  */
@@ -2739,6 +2721,10 @@ void TableSpaceUsageManager::Init()
 
     u_sess->cmd_cxt.TableSpaceUsageArray = (TableSpaceUsageStruct*)ShmemInitStruct(
         "TableSpace Usage Information Array", TableSpaceUsageManager::ShmemSize(), &found);
+    u_sess->cmd_cxt.l_tableSpaceOid = InvalidOid;
+    u_sess->cmd_cxt.l_maxSize = 0;
+    u_sess->cmd_cxt.l_isLimit = false;
+
     if (!found) {
         for (uint32 counter = 0; counter < TABLESPACE_USAGE_SLOT_NUM; counter++) {
             bucket = &u_sess->cmd_cxt.TableSpaceUsageArray->m_tab[counter];
@@ -2903,7 +2889,7 @@ DataSpaceType RelationUsesSpaceType(char relpersistence)
  * Important: this founction will process  SI message queue .
  *                  after call this founction must reopen smgr if it set smgr owner
  */
-void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSize)
+void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSize, bool segment)
 {
     int slotIndex = -1;
     int bucketIndex = -1;
@@ -2913,6 +2899,24 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
     uint64 currentSize = 0;
     TableSpaceUsageBucket* bucket = NULL;
     TableSpaceUsageSlot* slot = NULL;
+    
+    /*
+     * Segment-page storage calls IsExceedMaxsize is often caused by 'smgrextend', which does physical file
+     * extension. However, smgrextend may be invoked in ReadBuffer_common_ReadBlock that after invoking
+     * StartBufferIO. TableSpaceUsageManager::IsLimited may also invoke StartBufferIO because it has to 
+     * scan the pg_tablespace system table. It forbids invoking 'StartBufferIO' twice in one call stack.
+     *
+     * Thus, we try to read tablespace's limit before entering any BufferIO, and store the limit info in 
+     * thread local variables. 
+     * requestSize == 0 means probing MaxSize info.
+     * requestSize != 0 means real ExceedMaxSize test.
+    */
+    if (segment && requestSize == 0) {
+        u_sess->cmd_cxt.l_tableSpaceOid = tableSpaceOid;
+        u_sess->cmd_cxt.l_isLimit =
+            TableSpaceUsageManager::IsLimited(tableSpaceOid, &u_sess->cmd_cxt.l_maxSize);
+        return;
+    }
 
     if (IgnoreTableSpaceCheck(tableSpaceOid, requestSize))
         return;
@@ -2922,7 +2926,20 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
 
     for (;;) {
         freeSlotIndex = -1;
-        isLimited = TableSpaceUsageManager::IsLimited(tableSpaceOid, &maxSize);
+        if (segment) {
+            if (u_sess->cmd_cxt.l_tableSpaceOid == tableSpaceOid) {
+                isLimited = u_sess->cmd_cxt.l_isLimit;
+                maxSize = u_sess->cmd_cxt.l_maxSize;
+            } else {
+                /*
+                 * Tablespace limist is not cached; we can not read system relation to avoid invalidating SMgrRelation
+                 * objects.
+                 */
+                return;
+            }
+        } else {
+            isLimited = TableSpaceUsageManager::IsLimited(tableSpaceOid, &maxSize);
+        }
         SpinLockAcquire(&bucket->mutex);
 
         /* skip if the tablespace is unlimited and the special bucket is empty */
@@ -2976,10 +2993,18 @@ void TableSpaceUsageManager::IsExceedMaxsize(Oid tableSpaceOid, uint64 requestSi
 
         /* just refresh currentSize if it is within limit */
         if (unlikely(currentSize)) {
-            if (unlikely(TableSpaceUsageManager::IsFull(maxSize, currentSize, requestSize))
-                && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+            if (unlikely(TableSpaceUsageManager::IsFull(maxSize, currentSize, requestSize)) &&
+                !u_sess->attr.attr_common.IsInplaceUpgrade) {
+                /* 
+                 * if space is not enough, purge some objs in RB and retry. 
+                 * We can not do DML when segment is on, because we can not read any buffer now.
+                 */
+                if (!segment && RbCltPurgeSpaceDML(tableSpaceOid)) {
+                    SpinLockRelease(&bucket->mutex);
+                    currentSize = pg_cal_tablespace_size_oid(tableSpaceOid);
+                    continue;
+                }
                 SpinLockRelease(&bucket->mutex);
-
                 ereport(ERROR,
                     (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
                         errmsg("Insufficient storage space for tablespace \"%s\"", get_tablespace_name(tableSpaceOid)),

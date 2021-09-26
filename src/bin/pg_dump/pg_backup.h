@@ -141,6 +141,8 @@ typedef struct _restoreOptions {
     int suppressDumpWarnings; /* Suppress output of WARNING entries
                                * to stderr */
     bool single_txn;
+    bool targetV1;
+    bool targetV5;
     int number_of_jobs;
 
     bool* idWanted; /* array showing which dump IDs to emit */

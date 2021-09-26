@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include <netinet/in.h>
+#include "sys/epoll.h"
 #ifndef WIN32
 #include <pthread.h>
 #else
@@ -34,6 +35,23 @@
 #endif
 #include <stdlib.h>
 #include "c.h"
+#include "cipher.h"
+#include "utils/palloc.h"
+
+#ifdef USE_SSL
+#include "openssl/err.h"
+#include "openssl/ssl.h"
+#include "openssl/rand.h"
+#include "openssl/ossl_typ.h"
+#include "openssl/obj_mac.h"
+#include "openssl/dh.h"
+#include "openssl/bn.h"
+#include "openssl/x509.h"
+#include "openssl/x509_vfy.h"
+#include "openssl/opensslconf.h"
+#include "openssl/crypto.h"
+#include "openssl/bio.h"
+#endif /* USE_SSL */
 
 #define ECOMMTCPARGSINVAL 1001
 #define ECOMMTCPMEMALLOC 1002
@@ -226,6 +244,36 @@ typedef struct {
     uint32 max_delay;
 } CommDelayInfo;
 
+#ifdef USE_SSL
+typedef struct SSL_INFO {
+    SSL* ssl;
+    X509* peer;
+    char* peer_cn;
+    unsigned long count;
+    int sock;
+} SSL_INFO;
+typedef struct libcommsslinfo {
+    SSL_INFO node;
+    struct libcommsslinfo* next;
+} libcomm_sslinfo;
+#endif
+typedef struct {
+    int socket;
+    char *libcommhost;              /* the machine on which the server is running */
+    char *sslcert;                  /* client certificate filename */
+    char *sslcrl;                   /* certificate revocation list filename */
+    char *sslkey;                   /* client key filename */
+    char *sslrootcert;              /* root certificte filename */
+    char *remote_nodename;          /* remote datanode name */
+    bool sigpipe_so;                /* have we masked SIGPIPE via SO_NOSIGPIPE? */
+#ifdef USE_SSL
+    SSL *ssl;
+    X509 *peer;                     /* X509 cert of server */
+#endif
+    char* sslmode;                  /* SSL mode (require,prefer,allow,disable) */
+    bool sigpipe_flag;              /* can we mask SIGPIPE via MSG_NOSIGNAL? */
+    unsigned char cipher_passwd[CIPHER_LEN + 1];
+} LibCommConn;
 // sctp address infomation
 //
 typedef struct libcommaddrinfo {
@@ -409,6 +457,9 @@ extern void gs_shutdown_comm();
 //
 extern void gs_r_cancel();
 
+// set t_thrd proc workingVersionNum
+extern void gs_set_working_version_num(int num);
+
 // export communication layer status
 //
 extern void gs_log_comm_status();
@@ -454,6 +505,9 @@ extern void gs_set_ackchk_time(int mod);
 extern void gs_set_libcomm_used_rate(int rate);
 
 extern void init_libcomm_cpu_rate();
+
+// set t_thrd proc workingVersionNum
+extern void gs_set_working_version_num(int num);
 
 // get availabe memory of communication layer
 //
@@ -513,6 +567,81 @@ extern void startCommReceiverWorker(ThreadId* threadid);
 
 extern void gs_init_hash_table();
 extern int mc_tcp_connect_nonblock(const char* host, int port);
+
+/* Network adaptation interface of the libcomm for the ThreadPoolListener. */
+extern void CommResourceInit();
+extern int CommEpollCreate(int size);
+extern int CommEpollCtl(int epfd, int op, int fd, struct epoll_event *event);
+extern int CommEpollWait(int epfd, struct epoll_event *event, int maxevents, int timeout);
+extern int CommEpollClose(int epfd);
+extern void InitCommLogicResource();
+extern void ProcessCommLogicTearDown();
+
+class CommEpollFd;
+struct HTAB;
+
+typedef struct LogicFd {
+    int idx;
+    int streamid;
+} LogicFd;
+
+typedef struct CommEpFdInfo {
+    /* hash key first */
+    int epfd;
+    CommEpollFd *comm_epfd;
+} CommEpFdInfo;
+
+typedef struct CommFd {
+    int fd;
+    gsocket logic_fd;
+} CommFd;
+
+struct knl_session_context;
+class CommEpollFd;
+typedef struct SessionInfo {
+    LogicFd logic_fd;                    // HASH key first
+
+    CommFd commfd;
+    int wakeup_cnt;
+    int handle_wakeup_cnt;
+    volatile bool err_occurs;
+    CommEpollFd *comm_epfd_ptr;
+    knl_session_context *session_ptr;
+    int is_idle;
+} SessionInfo;
+
+#ifndef NO_COMPILE_CLASS_FDCOLLECTION
+class FdCollection : public BaseObject {
+public:
+    FdCollection();
+    ~FdCollection();
+    void Init();
+    void DeInit();
+    int AddEpfd(int epfd, int size);
+    int DelEpfd(int epfd);
+    void CleanEpfd();
+    inline CommEpollFd* GetCommEpollFd(int epfd);
+
+    int AddLogicFd(CommEpollFd *comm_epfd, void *session_ptr);
+    int DelLogicFd(const LogicFd *logic_fd);
+    void CleanLogicFd();
+    SessionInfo* GetSessionInfo(const LogicFd *logic_fd);
+
+private:
+    inline bool IsEpfdValid(int fd);
+
+    /* SockfdAPI** m_sockfd_map */
+    HTAB *m_epfd_htab;
+    pthread_mutex_t m_epfd_htab_lock;
+
+    /* logicfd info  */
+    HTAB *m_logicfd_htab;
+    pthread_mutex_t m_logicfd_htab_lock;
+    int m_logicfd_nums;
+};
+#endif
+
+extern void WakeupSession(SessionInfo *session_info, bool err_occurs, const char* caller_name);
 
 /*
  * LIBCOMM_CHECK is defined when make commcheck

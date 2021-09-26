@@ -84,6 +84,7 @@ void ThreadPoolStream::WaitMission()
         pthread_cond_wait(m_cond, m_mutex);
     }
     pthread_mutex_unlock(m_mutex);
+    Assert(t_thrd.proc->pid == t_thrd.proc_cxt.MyProcPid);
 
     if (m_threadStatus == THREAD_EXIT) {
         StreamExit();

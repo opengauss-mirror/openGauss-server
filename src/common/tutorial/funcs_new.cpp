@@ -1,8 +1,8 @@
 /* src/common/tutorial/funcs_new.cpp */
 
 /******************************************************************************
-  These are user-defined functions that can be bound to a Postgres backend
-  and called by Postgres to execute SQL functions of the same name.
+  These are user-defined functions that can be bound to a openGauss backend
+  and called by openGauss to execute SQL functions of the same name.
 
   The calling format for these functions is defined by the CREATE FUNCTION
   SQL statement that binds them to the backend.
@@ -12,7 +12,7 @@
 *****************************************************************************/
 
 #include "postgres.h"
-#include "knl/knl_variable.h" /* general Postgres declarations */
+#include "knl/knl_variable.h" /* general openGauss declarations */
 
 #include "executor/executor.h" /* for GetAttributeByName() */
 #include "utils/geo_decls.h"   /* for point type */

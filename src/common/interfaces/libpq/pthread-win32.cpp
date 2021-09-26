@@ -16,8 +16,13 @@
 #include "postgres_fe.h"
 #define _WINSOCKAPI_
 #include <windows.h>
+#if !defined(_MINGW32)
 #include "pthread-win32.h"
+#else
+#include "libpq/libpq-int.h"
+#endif
 
+#if defined(WIN32) && !defined(_MINGW32)
 DWORD
 pthread_self(void)
 {
@@ -56,3 +61,4 @@ int pthread_mutex_unlock(pthread_mutex_t* mp)
     LeaveCriticalSection(*mp);
     return 0;
 }
+#endif

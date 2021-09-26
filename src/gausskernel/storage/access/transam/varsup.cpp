@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * varsup.cpp
- *	  postgres OID & XID variables support routines
+ *	  openGauss OID & XID variables support routines
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group

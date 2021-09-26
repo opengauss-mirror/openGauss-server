@@ -24,6 +24,7 @@
 #include "expr_parts_list.h"
 #include "expr_parts.h"
 #include "libpq-int.h"
+#define RESIZE_FACTOR 10
 
 ExprPartsList::ExprPartsList() : m_expr_parts_list(NULL), m_expr_parts_list_size(0) {}
 ExprPartsList::~ExprPartsList()
@@ -33,15 +34,17 @@ ExprPartsList::~ExprPartsList()
 
 bool ExprPartsList::add(ExprParts *expr_parts)
 {
-    m_expr_parts_list = (ExprParts *)libpq_realloc(m_expr_parts_list,
-        sizeof(*m_expr_parts_list) * m_expr_parts_list_size, sizeof(*m_expr_parts_list) * (m_expr_parts_list_size + 1));
+    if (m_expr_parts_list_size % RESIZE_FACTOR == 0) {
+        m_expr_parts_list = (ExprParts *)libpq_realloc(m_expr_parts_list, 
+            sizeof(*m_expr_parts_list) * m_expr_parts_list_size,
+            sizeof(*m_expr_parts_list) * (m_expr_parts_list_size + RESIZE_FACTOR));
+    }
     if (m_expr_parts_list == NULL) {
         return false;
     }
-
     /*
-     *   we just copy the entire structure at this point. we don't keep the pointer.
-     *  the structure is small enough for us to this.
+     * we just copy the entire structure at this point. we don't keep the pointer.
+     * the structure is small enough for us to this.
      */
     m_expr_parts_list[m_expr_parts_list_size] = (*expr_parts);
     ++m_expr_parts_list_size;

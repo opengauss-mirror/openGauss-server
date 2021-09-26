@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * kwlookup.cpp
- *	  lexical token lookup for key words in PostgreSQL
+ *	  lexical token lookup for key words in openGauss
  *
  * NB - this file is also used by ECPG and several frontend programs in
  * src/bin/ including pg_dump and psql

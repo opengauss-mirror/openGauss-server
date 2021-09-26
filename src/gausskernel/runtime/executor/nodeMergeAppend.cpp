@@ -40,8 +40,8 @@
 #include "knl/knl_variable.h"
 
 #include "access/tableam.h"
-#include "executor/execdebug.h"
-#include "executor/nodeMergeAppend.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeMergeAppend.h"
 
 /*
  * It gets quite confusing having a heap array (indexed by integers) which

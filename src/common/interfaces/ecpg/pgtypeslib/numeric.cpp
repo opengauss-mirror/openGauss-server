@@ -890,7 +890,7 @@ static int select_div_scale(numeric* var1, numeric* var2, int* rscale)
 
     /*
      * The result scale of a division isn't specified in any SQL standard. For
-     * PostgreSQL we select a display scale that will give at least
+     * openGauss we select a display scale that will give at least
      * NUMERIC_MIN_SIG_DIGITS significant digits, so that numeric gives a
      * result no less accurate than float8; but use a scale not less than
      * either input's display scale.

@@ -28,6 +28,7 @@
 #include "access/xlogproc.h"
 #include "access/redo_common.h"
 #include "catalog/storage_xlog.h"
+#include "storage/smgr/fd.h"
 
 XLogRecParseState *smgr_xlog_relnode_parse_to_block(XLogReaderState *record, uint32 *blocknum)
 {
@@ -58,7 +59,8 @@ XLogRecParseState *smgr_xlog_relnode_parse_to_block(XLogReaderState *record, uin
     RelFileNode tmp_node;
     RelFileNodeCopy(tmp_node, *rnode, XLogRecGetBucketId(record));
 
-    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, forknum, blkno, &tmp_node, recordstatehead);
+    RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&tmp_node, InvalidBackendId, forknum, blkno);
+    XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, recordstatehead);
 
     XLogRecSetBlockDdlState(&(recordstatehead->blockparse.extra_rec.blockddlrec), ddltype, colmrel,
                             (char *)XLogRecGetData(record));
@@ -78,3 +80,4 @@ XLogRecParseState *smgr_redo_parse_to_block(XLogReaderState *record, uint32 *blo
     }
     return recordstatehead;
 }
+

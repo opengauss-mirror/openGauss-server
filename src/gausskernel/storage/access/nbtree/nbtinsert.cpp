@@ -24,13 +24,24 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/genam.h"
-
+#include "catalog/index.h"
 #include "miscadmin.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/proc.h"
 #include "utils/inval.h"
 #include "utils/snapmgr.h"
+
+#define MarkItemDeadAndDirtyBuffer(itemid, opaque, buf, nbuf) \
+    do {                                                      \
+        ItemIdMarkDead((itemid));                             \
+        (opaque)->btpo_flags |= BTP_HAS_GARBAGE;              \
+        if ((nbuf) != InvalidBuffer) {                        \
+            MarkBufferDirtyHint((nbuf), true);                \
+        } else {                                              \
+            MarkBufferDirtyHint((buf), true);                 \
+        }                                                     \
+    } while (0)
 
 typedef struct {
     /* context data for _bt_checksplitloc */
@@ -94,12 +105,28 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     BTStack stack;
     Buffer buf;
     OffsetNumber offset;
+    Oid indexHeapRelOid = InvalidOid;
+
     GPIScanDesc gpiScan = NULL;
+    CBIScanDesc cbiScan = NULL;
     CUDescScan* cudescScan = NULL;
 
     if (RelationIsGlobalIndex(rel)) {
         GPIScanInit(&gpiScan);
-        gpiScan->parentRelation = relation_open(heapRel->parentId, AccessShareLock);
+        indexHeapRelOid = IndexGetRelation(rel->rd_id, false);
+        if (indexHeapRelOid != heapRel->parentId) {
+            Relation indexHeapRel = relation_open(indexHeapRelOid, AccessShareLock);
+            Partition part = partitionOpen(indexHeapRel, heapRel->parentId, AccessShareLock);
+            gpiScan->parentRelation = partitionGetRelation(indexHeapRel, part);
+            partitionClose(indexHeapRel, part, AccessShareLock);
+            relation_close(indexHeapRel, AccessShareLock);
+        } else {
+            gpiScan->parentRelation = relation_open(heapRel->parentId, AccessShareLock);
+        }
+    }
+    if (RelationIsCrossBucketIndex(rel)) {
+        cbi_scan_init(&cbiScan);
+        cbiScan->parentRelation = heapRel->parent;
     }
 
     if (RelationIsCUFormat(heapRel)) {
@@ -107,7 +134,8 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     }
 
     BTCheckElement element;
-    is_unique = SearchBufferAndCheckUnique(rel, itup, checkUnique, heapRel, gpiScan, cudescScan, &element);
+    is_unique = SearchBufferAndCheckUnique(rel, itup, checkUnique, heapRel,
+        gpiScan, cbiScan, cudescScan, &element);
 
     itup_scankey = element.itupScanKey;
     stack = element.btStack;
@@ -138,8 +166,16 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
     _bt_freeskey(itup_scankey);
 
     if (gpiScan != NULL) { // means rel switch happened
-        relation_close(gpiScan->parentRelation, AccessShareLock);
+        if (indexHeapRelOid != heapRel->parentId) {
+            releaseDummyRelation(&(gpiScan->parentRelation));
+        } else {
+            relation_close(gpiScan->parentRelation, AccessShareLock);
+        }
         GPIScanEnd(gpiScan);
+    }
+
+    if (cbiScan != NULL) {
+        cbi_scan_end(cbiScan);
     }
 
     if (cudescScan != NULL) {
@@ -152,7 +188,7 @@ bool _bt_doinsert(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, R
 }
 
 bool SearchBufferAndCheckUnique(Relation rel, IndexTuple itup, IndexUniqueCheck checkUnique, Relation heapRel,
-    GPIScanDesc gpiScan, CUDescScan* cudescScan, BTCheckElement* element)
+    GPIScanDesc gpiScan, CBIScanDesc cbiScan, CUDescScan* cudescScan, BTCheckElement* element)
 {
     bool is_unique = false;
     int indnkeyatts;
@@ -211,7 +247,7 @@ top:
 
         offset = _bt_binsrch(rel, buf, indnkeyatts, itup_scankey, false);
         xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey,
-            checkUnique, &is_unique, gpiScan, cudescScan);
+            checkUnique, &is_unique, gpiScan, cbiScan, cudescScan);
 
         if (TransactionIdIsValid(xwait)) {
             /* Have to wait for the other guy ... */
@@ -249,7 +285,8 @@ top:
  * core code must redo the uniqueness check later.
  */
 TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, Buffer buf, OffsetNumber offset,
-    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan, CUDescScan* cudescScan)
+    ScanKey itup_scankey, IndexUniqueCheck checkUnique, bool* is_unique, GPIScanDesc gpiScan, CBIScanDesc cbiScan,
+    CUDescScan* cudescScan)
 {
     int indnkeyatts = IndexRelationGetNumberOfKeyAttributes(rel);
     SnapshotData SnapshotDirty;
@@ -259,6 +296,7 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
     Buffer nbuf = InvalidBuffer;
     bool found = false;
     Relation tarRel = heapRel;
+    Relation hbktParentHeapRel = NULL;
 
     /* Assume unique until we find a duplicate */
     *is_unique = true;
@@ -318,27 +356,33 @@ TransactionId _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel, 
                 curitup = (IndexTuple)PageGetItem(page, curitemid);
                 htid = curitup->t_tid;
                 Oid curPartOid = InvalidOid;
-                Datum datum;
-                bool isNull;
+                int2 bucketid = InvalidBktId;
                 if (RelationIsGlobalIndex(rel)) {
-                    datum =
-                        index_getattr(curitup, IndexRelationGetNumberOfAttributes(rel), RelationGetDescr(rel), &isNull);
-                    curPartOid = DatumGetUInt32(datum);
-                    Assert(isNull == false);
+                    /* global partitioned index without crossbucket */
+                    curPartOid = index_getattr_tableoid(rel, curitup);
                     if (curPartOid != gpiScan->currPartOid) {
                         GPISetCurrPartOid(gpiScan, curPartOid);
                         if (!GPIGetNextPartRelation(gpiScan, CurrentMemoryContext, AccessShareLock)) {
-                            ItemIdMarkDead(curitemid);
-                            opaque->btpo_flags |= BTP_HAS_GARBAGE;
-                            if (nbuf != InvalidBuffer) {
-                                MarkBufferDirtyHint(nbuf, true);
-                            } else {
-                                MarkBufferDirtyHint(buf, true);
-                            }
+                            MarkItemDeadAndDirtyBuffer(curitemid, opaque, buf, nbuf);
                             goto next;
                         } else {
-                            tarRel = gpiScan->fakePartRelation;
+                            hbktParentHeapRel = tarRel = gpiScan->fakePartRelation;
                         }
+                    }
+                }
+                if (RelationIsCrossBucketIndex(rel) && RELATION_OWN_BUCKET(rel)) {
+                    bucketid = index_getattr_bucketid(rel, curitup);
+                    if (cbiScan->bucketid != bucketid) {
+                        cbi_set_bucketid(cbiScan, bucketid);
+                    }
+                    if (cbiScan->parentRelation != hbktParentHeapRel && RelationIsValid(hbktParentHeapRel)) {
+                        cbiScan->parentRelation = hbktParentHeapRel;
+                    }
+                    if (!cbi_get_bucket_relation(cbiScan, CurrentMemoryContext)) {
+                        MarkItemDeadAndDirtyBuffer(curitemid, opaque, buf, nbuf);
+                        goto next;
+                    } else {
+                        tarRel = cbiScan->fakeBucketRelation;
                     }
                 }
 

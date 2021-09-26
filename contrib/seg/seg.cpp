@@ -2,9 +2,9 @@
  * contrib/seg/seg.c
  *
  ******************************************************************************
-  This file contains routines that can be bound to a Postgres backend and
+  This file contains routines that can be bound to a openGauss backend and
   called by the backend in the process of processing queries.  The calling
-  format for these routines is dictated by Postgres architecture.
+  format for these routines is dictated by openGauss architecture.
 ******************************************************************************/
 
 #include "postgres.h"

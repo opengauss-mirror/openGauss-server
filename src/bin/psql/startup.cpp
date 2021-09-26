@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -45,6 +45,8 @@ PsqlSettings pset;
 /* Used for change child process name in gsql parallel execute mode. */
 char* argv_para;
 int argv_num;
+static bool is_pipeline = false;
+static bool is_interactive = true;
 
 /* The version of libpq */
 extern const char* libpqVersionString;
@@ -55,6 +57,10 @@ extern const char* libpqVersionString;
 #else
 #define SYSPSQLRC "gsqlrc"
 #define PSQLRC "gsqlrc.conf"
+#endif
+
+#ifdef ENABLE_UT
+#define static
 #endif
 
 /*
@@ -82,7 +88,7 @@ static void process_psqlrc(const char* argv0);
 static void process_psqlrc_file(char* filename);
 static void showVersion(void);
 static void EstablishVariableSpace(void);
-static char* GetEnvStr(const char* env);
+static void get_password_pipeline(struct adhoc_opts* options);
 
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
 bool check_parseonly_parameter(adhoc_opts options)
@@ -103,9 +109,9 @@ bool check_parseonly_parameter(adhoc_opts options)
 static void set_aes_key(const char* dencrypt_key);
 
 #ifdef HAVE_CE
-#define PARAMS_ARRAY_SIZE 11
+#define PARAMS_ARRAY_SIZE 12
 #else
-#define PARAMS_ARRAY_SIZE 10
+#define PARAMS_ARRAY_SIZE 11
 #endif
 /*
  *
@@ -234,6 +240,10 @@ int main(int argc, char* argv[])
     options.action_string = NULL;
     parse_psql_options(argc, argv, &options);
 
+    if (is_pipeline) {
+        get_password_pipeline(&options);
+    }
+
     /* Save the argv and argc for change process name. */
     argv_para = argv[0];
     argv_num = argc;
@@ -284,15 +294,17 @@ int main(int argc, char* argv[])
         values[3] = password;
         keywords[4] = "dbname";
         values[4] = (char*)((options.action == ACT_LIST_DB && options.dbname == NULL) ? "postgres" : options.dbname);
-        keywords[5] = "fallback_application_name";
+        keywords[5] = "application_name";
         values[5] = (char*)(pset.progname);
-        keywords[6] = "client_encoding";
-        values[6] = (char*)((pset.notty || (tmpenv != NULL)) ? NULL : "auto");
-        keywords[7] = "connect_timeout";
-        values[7] = CONNECT_TIMEOUT;
+        keywords[6] = "fallback_application_name";
+        values[6] = (char*)(pset.progname);
+        keywords[7] = "client_encoding";
+        values[7] = (char*)((pset.notty || (tmpenv != NULL)) ? NULL : "auto");
+        keywords[8] = "connect_timeout";
+        values[8] = CONNECT_TIMEOUT;
 #ifdef HAVE_CE
-        keywords[8] = "enable_ce";
-        values[8] = (pset.enable_client_encryption) ? (char*)"1" : NULL;
+        keywords[9] = "enable_ce";
+        values[9] = (pset.enable_client_encryption) ? (char*)"1" : NULL;
 #endif
         if (pset.maintance) {
             keywords[PARAMS_ARRAY_SIZE - 2] = "options";
@@ -558,6 +570,38 @@ int main(int argc, char* argv[])
     return successResult;
 }
 
+static void get_password_pipeline(struct adhoc_opts* options)
+{
+    int pass_max_len = 1024;
+    char* pass_buf = NULL;
+    errno_t rc = EOK;
+
+    if (isatty(fileno(stdin))) {
+        fprintf(stderr, "%s: %s", pset.progname, "Terminal is not allowed to use --pipeline\n");
+        exit(EXIT_USER);
+    }
+
+    if (is_interactive) {
+        fprintf(stderr, "%s: %s", pset.progname, "--pipeline must be used with -c or -f\n");
+        exit(EXIT_USER);
+    }
+
+    pass_buf = (char*)pg_malloc(pass_max_len);
+    rc = memset_s(pass_buf, pass_max_len, 0, pass_max_len);
+    securec_check_c(rc, "\0", "\0");
+
+    if (NULL != fgets(pass_buf, pass_max_len, stdin)) {
+        pset.getPassword = TRI_YES;
+        pass_buf[strlen(pass_buf) - 1] = '\0';
+        options->passwd = pg_strdup(pass_buf);
+    }
+
+    rc = memset_s(pass_buf, pass_max_len, 0, pass_max_len);
+    securec_check_c(rc, "\0", "\0");
+    free(pass_buf);
+    pass_buf = NULL;
+}
+
 /*
  * Parse command line options
  */
@@ -580,6 +624,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
         {"maintenance", no_argument, NULL, 'm'},
         {"no-libedit", no_argument, NULL, 'n'},
         {"single-transaction", no_argument, NULL, '1'},
+        {"pipeline", no_argument, NULL, '2'},
         {"output", required_argument, NULL, 'o'},
         {"port", required_argument, NULL, 'p'},
         {"pset", required_argument, NULL, 'P'},
@@ -622,7 +667,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     check_memset_s(rc);
 
     while ((c = getopt_long(
-                argc, argv, "aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?01", long_options, &optindex)) != -1) {
+                argc, argv, "aAc:d:eEf:F:gh:Hlk:L:mno:p:P:qCR:rsStT:U:v:W:VxXz?012", long_options, &optindex)) != -1) {
         switch (c) {
             case 'a':
                 if (!SetVariable(pset.vars, "ECHO", "all")) {
@@ -633,6 +678,10 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 pset.popt.topt.format = PRINT_UNALIGNED;
                 break;
             case 'c':
+                if (optarg == NULL) {
+                    break;
+                }
+                is_interactive = false;
                 options->action_string = optarg;
                 if (optarg[0] == '\\') {
                     options->action = ACT_SINGLE_SLASH;
@@ -659,6 +708,10 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 SetVariableBool(pset.vars, "ECHO_HIDDEN");
                 break;
             case 'f':
+                if (optarg == NULL) {
+                    break;
+                }
+                is_interactive = false;
                 if ((options->action_string != NULL) && options->action == ACT_FILE)
                     free(options->action_string);
                 options->action_string = pg_strdup(optarg);
@@ -682,12 +735,13 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
             /* Database Security: Data importing/dumping support AES128. */
             case 'k': {
                 pset.decryptInfo.encryptInclude = true;
-                if (optarg != NULL) {
-                    dencrypt_key = pg_strdup(optarg);
-                    rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
-                    check_memset_s(rc);
-                    set_aes_key(dencrypt_key);
+                if (optarg == NULL) {
+                    break;
                 }
+                dencrypt_key = pg_strdup(optarg);
+                rc = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
+                check_memset_s(rc);
+                set_aes_key(dencrypt_key);
                 break;
             }
             case 'L':
@@ -813,6 +867,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 break;
             case '1':
                 options->single_txn = true;
+                break;
+            case '2':
+                is_pipeline = true;
                 break;
 #if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
             case 'g':
@@ -1277,29 +1334,4 @@ static void set_aes_key(const char* dencrypt_key)
             KEY_LEN);
         exit(EXIT_FAILURE);
     }
-}
-
-/*
- * GetEnvStr
- *
- * Note: malloc space for get the return of getenv() function, then return the malloc space.
- *         so, this space need be free.
- */
-static char* GetEnvStr(const char* env)
-{
-    char* tmpvar = NULL;
-    const char* temp = getenv(env);
-    errno_t rc = 0;
-    if (temp != NULL) {
-        size_t len = strlen(temp);
-        if (0 == len)
-            return NULL;
-        tmpvar = (char*)malloc(len + 1);
-        if (tmpvar != NULL) {
-            rc = strcpy_s(tmpvar, len + 1, temp);
-            securec_check_c(rc, "\0", "\0");
-            return tmpvar;
-        }
-    }
-    return NULL;
 }

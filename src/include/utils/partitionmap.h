@@ -57,6 +57,10 @@ typedef struct PartitionMap {
 #define VALUE_PARTKEYMAXNUM 4
 #define INTERVAL_PARTKEYMAXNUM 1
 
+#define LIST_PARTKEYMAXNUM 1
+
+#define HASH_PARTKEYMAXNUM 1
+
 #define PartitionLogicalExist(partitionIdentifier) ((partitionIdentifier)->partSeq >= 0)
 
 #define PartitionPhysicalExist(partitionIdentifier) \
@@ -101,7 +105,9 @@ extern Oid getListPartitionOid(Relation relation, Const** partKeyValue, int* par
 extern Oid getHashPartitionOid(Relation relation, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid getRangePartitionOid(PartitionMap* partitionmap, Const** partKeyValue, int* partIndex, bool topClosed);
 extern Oid GetPartitionOidByParam(Relation relation, Param *paramArg, ParamExternData *prm);
-extern List* getPartitionBoundaryList(Relation rel, int sequence);
+extern List* getRangePartitionBoundaryList(Relation rel, int sequence);
+extern List* getListPartitionBoundaryList(Relation rel, int sequence);
+extern List* getHashPartitionBoundaryList(Relation rel, int sequence);
 extern Oid partitionKeyValueListGetPartitionOid(Relation rel, List* partKeyValueList, bool topClosed);
 extern int getNumberOfRangePartitions(Relation rel);
 extern int getNumberOfListPartitions(Relation rel);
@@ -112,7 +118,7 @@ extern Const* transformDatum2Const(TupleDesc tupledesc, int16 attnum, Datum datu
 extern List* relationGetPartitionList(Relation relation, LOCKMODE lockmode);
 extern List* indexGetPartitionOidList(Relation indexRelation);
 extern List* indexGetPartitionList(Relation indexRelation, LOCKMODE lockmode);
-extern void  releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode);
+extern void  releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode, bool validCheck = true);
 
 extern List* relationGetPartitionOidList(Relation rel);
 extern void releasePartitionOidList(List** partList);
@@ -132,8 +138,6 @@ extern int getPartitionNumber(PartitionMap* map);
 extern bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid);
 
 extern int constCompare_constType(Const* value1, Const* value2);
-
-extern bool tupleLocateThePartition(Relation partTableRel, int partSeq, TupleDesc tupleDesc, void* tuple);
 
 extern bool partitionHasToast(Oid partOid);
 

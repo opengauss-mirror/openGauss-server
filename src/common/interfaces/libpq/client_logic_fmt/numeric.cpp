@@ -353,7 +353,7 @@ static void round_var(NumericVar *var, int rscale)
  * scan_numeric() -
  * Input function for numeric data type
  */
-unsigned char *scan_numeric(const char *num, int typmod, size_t *binary_size, char *err_msg)
+unsigned char *scan_numeric(const PGconn* conn, const char *num, int typmod, size_t *binary_size, char *err_msg)
 {
     const char *cp = NULL;
 
@@ -367,7 +367,7 @@ unsigned char *scan_numeric(const char *num, int typmod, size_t *binary_size, ch
     }
 
     /* the first parameter is null, we should convert to 0 if sql_compatibility == TD_FORMAT */
-    if (ICachedColumnManager::get_instance().get_sql_compatibility() == TD_FORMAT && '\0' == *cp) {
+    if (conn->client_logic->m_cached_column_manager->get_sql_compatibility() == TD_FORMAT && '\0' == *cp) {
         NumericVar value;
         init_var(&value);
         zero_var(&value);

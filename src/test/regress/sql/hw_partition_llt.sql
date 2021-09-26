@@ -13,7 +13,7 @@ reindex index test_reindex_llt_index;
 drop table test_reindex_llt;
 
 
--- tupleLocateThePartition
+-- isTupleLocatePartition
 create table test_exchange_llt (a int)
 partition by range (a)
 (

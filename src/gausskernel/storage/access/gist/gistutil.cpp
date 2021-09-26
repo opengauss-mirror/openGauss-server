@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * gistutil.cpp
- *	  utilities routines for the postgres GiST index access method.
+ *	  utilities routines for the openGauss GiST index access method.
  *
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.

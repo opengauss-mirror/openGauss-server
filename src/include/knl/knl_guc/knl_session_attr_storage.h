@@ -40,6 +40,20 @@
 #include "knl/knl_guc/knl_guc_common.h"
 #include "datatype/timestamp.h"
 
+typedef struct knl_session_attr_dcf {
+    /* parameters can be reloaded while DCF is running */
+    int dcf_election_timeout;
+    int dcf_run_mode;
+    char* dcf_log_level;
+    int dcf_max_log_file_size;
+    int dcf_flow_control_cpu_threshold;
+    int dcf_flow_control_net_queue_message_num_threshold;
+    int dcf_flow_control_disk_rawait_threshold;
+    int dcf_log_backup_file_count;
+    /* dcf log truncate frequency */
+    int dcf_truncate_threshold;
+} knl_session_attr_dcf;
+
 typedef struct knl_session_attr_storage {
     bool raise_errors_if_no_files;
     bool enableFsync;
@@ -49,8 +63,9 @@ typedef struct knl_session_attr_storage {
 #ifdef LOCK_DEBUG
     bool Trace_locks;
     bool Trace_userlocks;
+#endif    
     bool Trace_lwlocks;
-#endif
+
     /* belong to #ifdef LOCK_DEBUG, but if #ifdef, compile error */
     bool Debug_deadlocks;
     bool log_lock_waits;
@@ -66,7 +81,6 @@ typedef struct knl_session_attr_storage {
     bool HaModuleDebug;
     bool hot_standby_feedback;
     bool enable_stream_replication;
-    bool EnforceTwoPhaseCommit;
     bool guc_most_available_sync;
     bool enable_show_any_tuples;
     bool enable_debug_vacuum;
@@ -75,6 +89,8 @@ typedef struct knl_session_attr_storage {
     bool log_pagewriter;
     bool enable_incremental_catchup;
     bool auto_explain_log_verbose;
+    bool enable_candidate_buf_usage_count;
+    bool enable_ustore_partial_seqscan;
     int wait_dummy_time;
     int DeadlockTimeout;
     int LockWaitTimeout;
@@ -147,7 +163,12 @@ typedef struct knl_session_attr_storage {
     int dfs_max_parsig_length;
     int plog_merge_age;
     int max_redo_log_size;
+
     int max_io_capacity;
+    int default_index_kind;
+    int max_buffer_usage_count;
+
+    int64 version_retention_age;
     int64 vacuum_freeze_min_age;
     int64 vacuum_freeze_table_age;
     int64 vacuum_defer_cleanup_age;
@@ -179,6 +200,9 @@ typedef struct knl_session_attr_storage {
     int target_rto;
     int time_to_target_rpo;
     bool enable_twophase_commit;
+    int ustats_tracker_naptime;
+    int umax_search_length_for_prune;
+
     /*
      * xlog keep for all standbys even through they are not connect and donnot created replslot.
      */
@@ -187,13 +211,27 @@ typedef struct knl_session_attr_storage {
     int defer_csn_cleanup_time;
 
     bool enable_hashbucket;
+    bool enable_segment;
+
+    /* for GTT */
+    int max_active_gtt;
+    int vacuum_gtt_defer_check_age;
+
+    bool enable_recyclebin;
+    int recyclebin_retention;
+    /*
+     * !!!!!!!!!!!     Be Carefull     !!!!!!!!!!!
+     * Make sure to use the same value in UHeapCalcTupleDataSize and UheapFillDiskTuple when creating a tuple.
+     * So we only read this value at the begining of UheapFormTuple and UheaptoastInsertOrUpdate, then pass the value
+     * to UHeapCalcTupleDataSize or UheapFillDiskTuple. The same for toast operations.
+     */
+    
 #ifndef ENABLE_MULTIPLE_NODES
     int recovery_min_apply_delay;
     TimestampTz recoveryDelayUntilTime;
 #endif
-    /* for GTT */
-    int max_active_gtt;
-    int vacuum_gtt_defer_check_age;
+    bool reserve_space_for_nullable_atts;
+    knl_session_attr_dcf dcf_attr;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

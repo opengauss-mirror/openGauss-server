@@ -43,9 +43,9 @@
 #include "catalog/pg_cast.h"
 #include "catalog/pg_type.h"
 #include "commands/typecmds.h"
-#include "executor/execdebug.h"
-#include "executor/nodeSubplan.h"
-#include "executor/nodeAgg.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeSubplan.h"
+#include "executor/node/nodeAgg.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -70,6 +70,7 @@
 #include "gstrace/executer_gstrace.h"
 #include "commands/trigger.h"
 #include "db4ai/gd.h"
+#include "catalog/pg_proc_fn.h"
 
 /* static function decls */
 static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
@@ -1226,8 +1227,9 @@ static Oid getRealFuncRetype(int arg_num, Oid* actual_arg_types, FuncExprState* 
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                 errmodule(MOD_EXECUTOR),
                 errmsg("cache lookup failed for function %u", funcid)));
-    Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
-    Oid* declared_arg_types = procform->proargtypes.values;
+
+    oidvector* proargs = ProcedureGetArgTypes(proctup);
+    Oid* declared_arg_types = proargs->values;
 
     /* Find the real return type based on the declared arg types and actual arg types.*/
     rettype = enforce_generic_type_consistency(actual_arg_types, declared_arg_types, arg_num, rettype, false);
@@ -2076,13 +2078,46 @@ static Datum ExecMakeFunctionResultNoSets(
             node->atomic = true;
             stp_set_commit_rollback_err_msg(STP_XACT_AFTER_TRIGGER_BEGIN);
         }
+        /*
+         * If proconfig is set we can't allow transaction commands because of the
+         * way the GUC stacking works: The transaction boundary would have to pop
+         * the proconfig setting off the stack.  That restriction could be lifted
+         * by redesigning the GUC nesting mechanism a bit.
+         */
+        if (!fcache->prokind) {
+            bool isNullSTP = false;
+            HeapTuple tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+            if (!HeapTupleIsValid(tp)) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("cache lookup failed for function %u", fexpr->funcid)));
+            }
+            if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
+                u_sess->SPI_cxt.is_proconfig_set = true;
+                node->atomic = true;
+                stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
+            }
+            Datum datum = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_prokind, &isNullSTP);
+            if (isNullSTP) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                            errmsg("cache lookup failed for Anum_pg_proc_prokind"),
+                            errdetail("N/A"),
+                            errcause("System error."),
+                            erraction("Contact Huawei Engineer.")));
+            }
+            proIsProcedure = PROC_IS_PRO(CharGetDatum(datum));
+            if (proIsProcedure) {
+                fcache->prokind = 'p';
+            } else {
+                fcache->prokind = 'f';
+            }
 
-        proIsProcedure = PROC_IS_PRO(fcache->prokind);
-        if (u_sess->SPI_cxt.is_proconfig_set) {
-            node->atomic = true;
+            /* if proIsProcedure is ture means it was a stored procedure */
+            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+            ReleaseSysCache(tp);
+        } else {
+            proIsProcedure = PROC_IS_PRO(fcache->prokind);
+            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
         }
-        /* if proIsProcedure is ture means it was a stored procedure */
-        u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
     }
 
     /* Guard against stack overflow due to overly complex expressions */
@@ -2309,7 +2344,6 @@ Tuplestorestate* ExecMakeTableFunctionResult(
     bool savedProConfigIsSet = u_sess->SPI_cxt.is_proconfig_set;
     bool proIsProcedure = false;
     bool supportTranaction = false;
-
 #ifdef ENABLE_MULTIPLE_NODES
     if (IS_PGXC_COORDINATOR && (t_thrd.proc->workingVersionNum  >= STP_SUPPORT_COMMIT_ROLLBACK)) {
         supportTranaction = true;
@@ -2322,6 +2356,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
     /* Only allow commit at CN, therefore only need to set atomic and relevant check at CN level. */
     if (supportTranaction && IsA(funcexpr->expr, FuncExpr)) {
         fexpr = (FuncExpr*)funcexpr->expr;
+        char prokind = (reinterpret_cast<FuncExprState*>(funcexpr))->prokind;
         if (!u_sess->SPI_cxt.is_allow_commit_rollback) {
             node->atomic = true;
         }
@@ -2329,14 +2364,38 @@ Tuplestorestate* ExecMakeTableFunctionResult(
             node->atomic = true;
             stp_set_commit_rollback_err_msg(STP_XACT_AFTER_TRIGGER_BEGIN);
         }
-
-        char prokind = (reinterpret_cast<FuncExprState*>(funcexpr))->prokind;
-        proIsProcedure = PROC_IS_PRO(prokind);
-        if (u_sess->SPI_cxt.is_proconfig_set) {
-            node->atomic = true;             
+        /*
+         * If proconfig is set we can't allow transaction commands because of the
+         * way the GUC stacking works: The transaction boundary would have to pop
+         * the proconfig setting off the stack.  That restriction could be lifted
+         * by redesigning the GUC nesting mechanism a bit.
+         */
+        if (!prokind) {
+            HeapTuple tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(fexpr->funcid));
+            bool isNull = false;
+            if (!HeapTupleIsValid(tp)) {
+                elog(ERROR, "cache lookup failed for function %u", fexpr->funcid);
+            }
+		
+            Datum datum = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_prokind, &isNull);
+            proIsProcedure = PROC_IS_PRO(CharGetDatum(datum));
+            if (proIsProcedure) {
+                (reinterpret_cast<FuncExprState*>(funcexpr))->prokind = 'p';
+            } else {
+                (reinterpret_cast<FuncExprState*>(funcexpr))->prokind = 'f';
+            }
+            /* if proIsProcedure means it was a stored procedure */
+            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+            if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
+                u_sess->SPI_cxt.is_proconfig_set = true;
+                node->atomic = true;
+                stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
+            }
+            ReleaseSysCache(tp);
+        } else {
+            proIsProcedure = PROC_IS_PRO(prokind);
+            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
         }
-        /* if proIsProcedure means it was a stored procedure */
-        u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
     }
 
     callerContext = CurrentMemoryContext;
@@ -2749,7 +2808,7 @@ static Datum ExecEvalFunc(FuncExprState* fcache, ExprContext* econtext, bool* is
         if (HeapTupleIsValid(cast_tuple)) {
             Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
             int castowner_Anum = Anum_pg_cast_castowner;
-            if (castowner_Anum <= (int)HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
+            if (castowner_Anum <= (int) HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
                 bool isnull = true;
                 Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
                 if (!isnull) {
@@ -4225,13 +4284,9 @@ static Datum ExecEvalHashFilter(HashFilterState* hstate, ExprContext* econtext, 
         }
     }
 
-#ifdef ENABLE_MULTIPLE_NODES
-    CheckBucketMapLenValid();
-#endif
-
     /* If has non null value, it should get nodeId and deside if need filter the value or not. */
     if (hasNonNullValue) {
-        modulo = hstate->bucketMap[abs((int)hashValue) & (BUCKETDATALEN - 1)];
+        modulo = hstate->bucketMap[abs((int)hashValue) & (hstate->bucketCnt - 1)];
         nodeIndex = hstate->nodelist[modulo];
 
         /* If there are null value and non null value, and the last value in distkey is null,
@@ -4918,29 +4973,10 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
         case T_FuncExpr: {
             FuncExpr* funcexpr = (FuncExpr*)node;
             FuncExprState* fstate = makeNode(FuncExprState);
-            bool isnull = true;
             fstate->xprstate.evalfunc = (ExprStateEvalFunc)ExecEvalFunc;
 
             fstate->args = (List*)ExecInitExpr((Expr*)funcexpr->args, parent);
             fstate->func.fn_oid = InvalidOid; /* not initialized */
-            HeapTuple proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcexpr->funcid));
-            if (!HeapTupleIsValid(proctup)) {
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
-                    errmsg("cache lookup failed for function %u", funcexpr->funcid)));
-            }
-            /*   
-             * If proconfig is set we can't allow transaction commands because of the
-             * way the GUC stacking works: The transaction boundary would have to pop
-             * the proconfig setting off the stack.  That restriction could be lifted
-             * by redesigning the GUC nesting mechanism a bit.
-             */
-            if (!heap_attisnull(proctup, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
-                u_sess->SPI_cxt.is_proconfig_set = true;
-                stp_set_commit_rollback_err_msg(STP_XACT_GUC_IN_OPT_CLAUSE);
-            }
-            Datum datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prokind, &isnull);
-            fstate->prokind = CharGetDatum(datum);
-            ReleaseSysCache(proctup);
             state = (ExprState*)fstate;
         } break;
         case T_OpExpr: {
@@ -5365,7 +5401,9 @@ ExprState* ExecInitExpr(Expr* node, PlanState* parent)
             }
 
             hstate->arg = outlist;
-            hstate->bucketMap = get_bucketmap_by_execnode(parent->plan->exec_nodes, parent->state->es_plannedstmt);
+            hstate->bucketMap = get_bucketmap_by_execnode(parent->plan->exec_nodes,
+                                                          parent->state->es_plannedstmt,
+                                                          &hstate->bucketCnt);
             hstate->nodelist = (uint2*)palloc(list_length(htest->nodeList) * sizeof(uint2));
             foreach (l, htest->nodeList)
                 hstate->nodelist[idx++] = lfirst_int(l);
@@ -5633,6 +5671,13 @@ static bool ExecTargetList(List* targetlist, ExprContext* econtext, Datum* value
         ELOG_FIELD_NAME_START(tle->resname);
 
         values[resind] = ExecEvalExpr(gstate->arg, econtext, &isnull[resind], &itemIsDone[resind]);
+
+        if (T_Var == nodeTag(tle->expr) && !isnull[resind]) {
+            Var *var = (Var *)tle->expr;
+            if (var->vartype == TIDOID) {
+                Assert(ItemPointerIsValid((ItemPointer)values[resind]));
+            }
+        }
 
         ELOG_FIELD_NAME_END;
 

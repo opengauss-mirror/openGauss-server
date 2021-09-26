@@ -1,0 +1,96 @@
+show vacuum_defer_cleanup_age;
+show version_retention_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+show vacuum_defer_cleanup_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 10000" > /dev/null 2>&1
+select pg_sleep(4);
+show version_retention_age;
+
+create table t_timecapsule_test_tmp(id int, snaptime timestamptz, snapcsn bigint);
+
+CREATE OR REPLACE FUNCTION findCsn(int8)
+  RETURNS INTEGER
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count integer;
+begin
+  count = (select snapcsn from t_timecapsule_test_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+
+CREATE OR REPLACE FUNCTION findTime(int8)
+  RETURNS timestamptz
+  LANGUAGE plpgsql
+AS
+$BODY$
+declare
+  count timestamptz;
+begin
+  count = (select snaptime from t_timecapsule_test_tmp where id =  $1);
+  return count;
+end;
+$BODY$;
+delete from t_timecapsule_test_tmp;
+drop table if exists tab1;
+drop table if exists city_t23;
+
+CREATE TABLE city_t23
+(
+    W_CITY            VARCHAR(60)                PRIMARY KEY,
+    W_ADDRESS       TEXT
+);
+
+CREATE TABLE tab1
+(
+    W_WAREHOUSE_SK            INTEGER               NOT NULL,
+    W_WAREHOUSE_ID            CHAR(16)              NOT NULL,
+    W_WAREHOUSE_NAME          VARCHAR(20)                   ,
+    W_SUITE_NUMBER            CHAR(10)                      ,
+    W_CITY                    VARCHAR(60)           REFERENCES city_t23(W_CITY)
+);
+
+insert into city_t23 values('xian', 'somewhere');
+
+insert into tab1 values(1, '1001', 'place', '320001', 'xian');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 1, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into tab1 values(2, '1002', 'place', '320002', 'xian');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 2, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+insert into tab1 values(3, '1003', 'place', '320003', 'xian');
+select pg_sleep(4);
+insert into t_timecapsule_test_tmp select 3, now(), int8in(xidout(next_csn)) from gs_get_next_xid_csn();
+
+timecapsule table tab1 to csn findCsn(1);
+select * from tab1 timecapsule csn findCsn(1) order by W_WAREHOUSE_SK;
+
+timecapsule table tab1 to csn findCsn(2);
+select * from tab1 timecapsule csn findCsn(2) order by W_WAREHOUSE_SK;
+
+timecapsule table tab1 to csn findCsn(3);
+select * from tab1 timecapsule csn findCsn(3) order by W_WAREHOUSE_SK;
+
+
+delete from t_timecapsule_test_tmp;
+drop table tab1;
+drop table city_t23;
+drop table t_timecapsule_test_tmp;
+
+show vacuum_defer_cleanup_age;
+show version_retention_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "vacuum_defer_cleanup_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+show vacuum_defer_cleanup_age;
+
+\! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "version_retention_age = 0" > /dev/null 2>&1
+select pg_sleep(4);
+show version_retention_age;

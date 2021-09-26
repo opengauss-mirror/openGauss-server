@@ -48,8 +48,8 @@
 
 #include "postgres.h"
 #include "knl/knl_variable.h"
-#include "executor/execdebug.h"
-#include "executor/execStream.h"
+#include "executor/exec/execdebug.h"
+#include "executor/exec/execStream.h"
 #include "vecexecutor/vecmergejoin.h"
 #include "miscadmin.h"
 #include "utils/acl.h"
@@ -1899,7 +1899,6 @@ VecMergeJoinState* ExecInitVecMergeJoin(VecMergeJoin* node, EState* estate, int 
         node->mergeNullsFirst,
         (PlanState*)mergestate);
 
-#ifdef ENABLE_LLVM_COMPILE
     /*
      * After all of the expressions have been decided, check if the following
      * exprs can be codegened or not.
@@ -1923,7 +1922,6 @@ VecMergeJoinState* ExecInitVecMergeJoin(VecMergeJoin* node, EState* estate, int 
                 jitted_vectarget, reinterpret_cast<void**>(&(mergestate->js.ps.ps_ProjInfo->jitted_vectarget)));
         }
     }
-#endif
 
     for (i = 0; i < mergestate->mj_NumClauses; i++) {
         VecMergeJoinClause clause = &mergestate->mj_Clauses[i];

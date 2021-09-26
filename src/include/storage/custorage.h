@@ -26,8 +26,8 @@
 #define CU_STORAGE_H
 
 #include "storage/cu.h"
-#include "storage/relfilenode.h"
-#include "storage/fd.h"
+#include "storage/smgr/relfilenode.h"
+#include "storage/smgr/fd.h"
 #include "storage/cstore/cstorealloc.h"
 
 class CUFile;

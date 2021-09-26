@@ -1,6 +1,6 @@
 /* -------------------------------------------------------------------------
  * logical.cpp
- *	 PostgreSQL logical decoding coordination
+ *	 openGauss logical decoding coordination
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2012-2014, PostgreSQL Global Development Group

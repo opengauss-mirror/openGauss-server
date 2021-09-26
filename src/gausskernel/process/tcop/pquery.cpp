@@ -290,6 +290,8 @@ static void ProcessQuery(
      */
     ExecutorRun(queryDesc, ForwardScanDirection, 0L);
 
+    u_sess->ledger_cxt.resp_tag = completionTag;
+
     /*
      * Build command completion status string, if caller wants one.
      */
@@ -745,7 +747,7 @@ void PortalStart(Portal portal, ParamListInfo params, int eflags, Snapshot snaps
                     u_sess->exec_cxt.need_track_resource = WLMNeedTrackResource(queryDesc);
 
                 if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) {
-                    if (u_sess->exec_cxt.need_track_resource) {
+                    if (queryDesc->plannedstmt != NULL && u_sess->exec_cxt.need_track_resource) {
                         queryDesc->instrument_options |= instrument_option;
                         queryDesc->plannedstmt->instrument_option = instrument_option;
                     }
@@ -1093,12 +1095,15 @@ bool PortalRun(
      * CurrentMemoryContext has a similar problem, but the other pointers we
      * save here will be NULL or pointing to longer-lived objects.
      */
+
     saveTopTransactionResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
     saveTopTransactionContext = u_sess->top_transaction_mem_cxt;
     saveActivePortal = ActivePortal;
     saveResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     savePortalContext = t_thrd.mem_cxt.portal_mem_cxt;
     saveMemoryContext = CurrentMemoryContext;
+
+    u_sess->attr.attr_sql.create_index_concurrently = false;
 
     PotalSetIoState(portal);
 

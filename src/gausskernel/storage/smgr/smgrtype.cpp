@@ -16,7 +16,7 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 
 typedef struct st_smgrid {
     const char *smgr_name;

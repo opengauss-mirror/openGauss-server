@@ -1,5 +1,5 @@
 /*
- * psql - the PostgreSQL interactive terminal
+ * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  *
@@ -30,8 +30,8 @@ typedef vector<char*> ErrCodes;
 #define DEFAULT_EDITOR_LINENUMBER_ARG "+"
 #endif
 
-#define DEFAULT_PROMPT1 "%/%R%# "
-#define DEFAULT_PROMPT2 "%/%R%# "
+#define DEFAULT_PROMPT1 "%o%R%# "   /* gaussdb-ify replace '/' with 'o' */
+#define DEFAULT_PROMPT2 "%o%R%# "
 #define DEFAULT_PROMPT3 ">> "
 
 typedef enum { PSQL_ECHO_NONE, PSQL_ECHO_QUERIES, PSQL_ECHO_ALL } PSQL_ECHO;
@@ -122,6 +122,8 @@ typedef struct _psqlSettings {
     bool retry_on;
     bool retry_sleep;
     int retry_times;
+    bool parallelCopyDone;
+    bool parallelCopyOk;
     char retry_sqlstate[6];
     int max_retry_times;
     ErrCodes errcodes_list;

@@ -1,6 +1,6 @@
 #----------------------------------------------------------------------------
 #
-# Postgres-XC documentation top-level makefile
+# openGauss documentation top-level makefile
 #
 # Copyright (c) 1994, Regents of the University of California
 #

@@ -26,7 +26,7 @@
 #include <ctype.h>
 
 #include "miscadmin.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/tzparser.h"

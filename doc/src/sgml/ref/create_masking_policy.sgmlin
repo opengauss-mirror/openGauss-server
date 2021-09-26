@@ -16,7 +16,7 @@ where masking_clause can be:
 masking_function ON LABEL(label_name [, ... ])
 
 where masking_function can be:
-{ maskall | randommasking | creditcardmasking | basicemailmasking | fullemailmasking | shufflemasking | alldigitsmasking }
+{ maskall | randommasking | creditcardmasking | basicemailmasking | fullemailmasking | shufflemasking | alldigitsmasking | regexpmasking }
 
 where policy_filter_clause can be:
 FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }

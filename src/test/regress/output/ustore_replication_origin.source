@@ -1,0 +1,125 @@
+SELECT 'init' FROM pg_create_logical_replication_slot('regression_slot', 'mppdb_decoding');
+ ?column? 
+----------
+ init
+(1 row)
+
+create table a (a int, b int)with(storage_type = ustore);
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);
+--?.*
+--?.*
+--?.*
+--?.*
+--?.*
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+--?.*
+--?.*
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["1","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["2","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["3","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["4","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["5","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["6","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["7","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["8","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["9","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["10","1"]}
+--?.*
+--?.*
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["1","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["2","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["3","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["4","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["5","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["6","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["7","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["8","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["9","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["10","2"]}
+--?.*
+(38 rows)
+
+set reporiginid = 1;
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL);
+ data 
+------
+(0 rows)
+
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'only-local', '0');
+--?.*
+--?.*
+--?.*
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+ {"table_name":"public.a","op_type":"INSERT","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","1"],"old_keys_name":[],"old_keys_type":[],"old_keys_val":[]}
+--?.*
+--?.*
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["1","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["1","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["2","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["2","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["3","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["3","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["4","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["4","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["5","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["5","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["6","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["6","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["7","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["7","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["8","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["8","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["9","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["9","1"]}
+ {"table_name":"public.a","op_type":"UPDATE","columns_name":["a","b"],"columns_type":["integer","integer"],"columns_val":["10","2"],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["10","1"]}
+--?.*
+--?.*
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["1","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["2","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["3","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["4","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["5","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["6","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["7","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["8","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["9","2"]}
+ {"table_name":"public.a","op_type":"DELETE","columns_name":[],"columns_type":[],"columns_val":[],"old_keys_name":["a","b"],"old_keys_type":["integer","integer"],"old_keys_val":["10","2"]}
+--?.*
+(36 rows)
+
+insert into a values(generate_series(1, 10), 1);
+update a set b = b+1 where b = 1;
+delete a where b = 2;
+SELECT data FROM pg_logical_slot_get_changes('regression_slot', NULL, NULL, 'only-local', '1');
+ data 
+------
+(0 rows)
+
+SELECT pg_drop_replication_slot('regression_slot');
+WARNING:  replicationSlotMinLSN is InvalidXLogRecPtr!!!
+CONTEXT:  referenced column: pg_drop_replication_slot
+WARNING:  replicationSlotMaxLSN is InvalidXLogRecPtr!!!
+CONTEXT:  referenced column: pg_drop_replication_slot
+ pg_drop_replication_slot 
+--------------------------
+ 
+(1 row)
+
+drop table a;

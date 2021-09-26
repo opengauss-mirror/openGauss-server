@@ -1,0 +1,2 @@
+class CollectFromKafka:
+    pass

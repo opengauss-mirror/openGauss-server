@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * rbtree.h
- *	  interface for PostgreSQL generic Red-Black binary tree package
+ *	  interface for openGauss generic Red-Black binary tree package
  *
  * Copyright (c) 2009-2012, PostgreSQL Global Development Group
  *
@@ -44,9 +44,10 @@ typedef int (*rb_comparator)(const RBNode* a, const RBNode* b, void* arg);
 typedef void (*rb_combiner)(RBNode* existing, const RBNode* newdata, void* arg);
 typedef RBNode* (*rb_allocfunc)(void* arg);
 typedef void (*rb_freefunc)(RBNode* x, void* arg);
+typedef void (*rb_copyfunc)(RBTree* rb, RBNode* dest, const RBNode* src);
 
 extern RBTree* rb_create(Size node_size, rb_comparator comparator, rb_combiner combiner, rb_allocfunc allocfunc,
-    rb_freefunc freefunc, void* arg);
+    rb_freefunc freefunc, void* arg, rb_copyfunc = NULL);
 
 extern RBNode* rb_find(RBTree* rb, const RBNode* data);
 extern RBNode* rb_leftmost(RBTree* rb);
@@ -56,5 +57,29 @@ extern void rb_delete(RBTree* rb, RBNode* node);
 
 extern void rb_begin_iterate(RBTree* rb, RBOrderControl ctrl);
 extern RBNode* rb_iterate(RBTree* rb);
+
+/*
+ * RBTree control structure
+ */
+struct RBTree {
+    RBNode* root; /* root node, or RBNIL if tree is empty */
+
+    /* Iteration state */
+    RBNode* cur; /* current iteration node */
+    RBNode* (*iterate)(RBTree* rb);
+
+    /* Remaining fields are constant after rb_create */
+
+    Size node_size; /* actual size of tree nodes */
+    /* The caller-supplied manipulation functions */
+    rb_comparator comparator;
+    rb_combiner combiner;
+    rb_allocfunc allocfunc;
+    rb_freefunc freefunc;
+    rb_copyfunc copyfunc;
+    /* Passthrough arg passed to all manipulation functions */
+    void* arg;
+};
+
 
 #endif /* RBTREE_H */

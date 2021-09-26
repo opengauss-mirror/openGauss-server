@@ -50,10 +50,10 @@
 #include "pgstat.h"
 #include "pgxc/pgxc.h"
 #include "storage/ipc.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/pmsignal.h"
 #include "storage/sinvaladt.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
 #include "tcop/dest.h"
 #include "tcop/tcopprot.h"
 #include "utils/guc.h"
@@ -65,6 +65,8 @@
 #include "utils/syscache.h"
 #include "utils/xml.h"
 #include "executor/executor.h"
+#include "storage/procarray.h"
+#include "communication/commproxy_interface.h"
 
 /* ===================== Static functions to init session ===================== */
 static bool InitSession(knl_session_context* sscxt);
@@ -145,15 +147,15 @@ int ThreadPoolWorker::StartUp()
 void PreventSignal()
 {
     HOLD_INTERRUPTS();
-    t_thrd.int_cxt.ignoreBackendSignal = true;
     t_thrd.int_cxt.QueryCancelPending = false;
+    t_thrd.int_cxt.ignoreBackendSignal = true;
     disable_sig_alarm(true);
 }
 
 void AllowSignal()
 {
-    /* now we can accept signal. out of this, we rely on signal handle. */
     t_thrd.int_cxt.ignoreBackendSignal = false;
+    /* now we can accept signal. out of this, we rely on signal handle. */
     RESUME_INTERRUPTS();
 }
 
@@ -196,6 +198,16 @@ void ThreadPoolWorker::WaitMission()
             }
             Assert(m_currentSession != NULL);
             Assert(u_sess != NULL);
+			
+            /*
+             * CommProxy Support
+             *
+             * session attach thread success, we record relation of sock with worker
+             */
+            if (AmIProxyModeSockfd(m_currentSession->proc_cxt.MyProcPort->sock)) {
+                g_comm_controller->SetCommSockActive(m_currentSession->proc_cxt.MyProcPort->sock, m_idx);
+            }
+			
             break;
         }
     }
@@ -321,6 +333,7 @@ void ThreadPoolWorker::SetSessionInfo()
     thread_proc->roleId = m_currentSession->proc_cxt.MyRoleId;
     Assert(thread_proc->pid == t_thrd.proc_cxt.MyProcPid);
     thread_proc->sessionid = m_currentSession->session_id;
+    thread_proc->globalSessionId = m_currentSession->globalSessionId;
     thread_proc->workingVersionNum = m_currentSession->proc_cxt.MyProcPort->SessionVersionNum;
     m_currentSession->attachPid = thread_proc->pid;
 
@@ -364,6 +377,12 @@ void ThreadPoolWorker::WaitNextSession()
             m_group->GetListener()->RemoveWorkerFromList(this);
             pg_atomic_fetch_sub_u32((volatile uint32*)&m_group->m_idleWorkerNum, 1);
             pgstat_report_waitstatus(oldStatus);
+        } else {
+            u_sess = t_thrd.fake_session;
+            ereport(DEBUG2,
+                    (errmodule(MOD_THREAD_POOL),
+                     errmsg("TryFeedWorker remove a session:%lu from m_readySessionList into worker",
+                            m_currentSession->session_id)));
         }
     }
 }
@@ -407,6 +426,13 @@ void ThreadPoolWorker::ShutDownIfNecessary()
 
 void ThreadPoolWorker::CleanThread()
 {
+    if (m_currentSession != NULL && t_thrd.libpq_cxt.PqSendPointer > 0) {
+        int res = pq_flush();
+        if (res != 0) {
+            ereport(WARNING, (errmsg("[cleanup thread] failed to flush the remaining content. detail: %d", res)));
+        }
+    }
+
     /*
      * In thread pool mode, ensure that packet transmission must be completed before thread switchover.
      * Otherwise, packet format disorder may occurs.
@@ -444,6 +470,7 @@ void ThreadPoolWorker::CleanThread()
     thread_proc->databaseId = InvalidOid;
     thread_proc->roleId = InvalidOid;
     thread_proc->sessionid = t_thrd.fake_session->session_id;
+    thread_proc->globalSessionId = t_thrd.fake_session->globalSessionId;
     thread_proc->workingVersionNum = pg_atomic_read_u32(&WorkingGrandVersionNum);
 
     if (m_currentSession != NULL) {
@@ -453,6 +480,11 @@ void ThreadPoolWorker::CleanThread()
 
 void ThreadPoolWorker::DetachSessionFromThread()
 {
+    /* session attach thread success, we record relation of sock with worker */
+    if (AmIProxyModeSockfd(m_currentSession->proc_cxt.MyProcPort->sock)) {
+        g_comm_controller->SetCommSockIdle(m_currentSession->proc_cxt.MyProcPort->sock);
+    }
+
     /* If some error occur at session initialization, we need to close it. */
     if (m_currentSession->status == KNL_SESS_UNINIT) {
         m_currentSession->status = KNL_SESS_CLOSERAW;
@@ -520,6 +552,10 @@ bool ThreadPoolWorker::AttachSessionToThread()
     switch (m_currentSession->status) {
         case KNL_SESS_UNINIT: {
             if (InitSession(m_currentSession)) {
+                /* Registering backend_version */
+                if (t_thrd.proc && contain_backend_version(t_thrd.proc->workingVersionNum)) {
+                    register_backend_version(t_thrd.proc->workingVersionNum);
+                }
                 m_currentSession->status = KNL_SESS_ATTACH;
             } else {
                 m_currentSession->status = KNL_SESS_CLOSE;
@@ -597,6 +633,7 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
 
         if (!threadexit) {
             CleanUpSessionWithLock();
+            DecreaseUserCount(m_currentSession->proc_cxt.MyRoleId);
         }
 
         /* Close Session. */
@@ -633,7 +670,7 @@ void ThreadPoolWorker::CleanUpSession(bool threadexit)
     if (!t_thrd.proc_cxt.proc_exit_inprogress) {
         if (ENABLE_DN_GPC)
             CleanSessGPCPtr(m_currentSession);
-        if (u_sess->pcache_cxt.unnamed_stmt_psrc && u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.InShareTable())
+        if (u_sess->pcache_cxt.unnamed_stmt_psrc && u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.InShareTable()) 
             u_sess->pcache_cxt.unnamed_stmt_psrc->gpc.status.SubRefCount();
         CNGPCCleanUpSession();
     }
@@ -700,7 +737,7 @@ static bool InitSession(knl_session_context* session)
 
     /* Read in remaining GUC variables */
     read_nondefault_variables();
-    
+
     /* now safe to ereport to client */
     t_thrd.postgres_cxt.whereToSendOutput = DestRemote;
 
@@ -743,7 +780,7 @@ static bool InitSession(knl_session_context* session)
     InitFileAccess();
     smgrinit();
 
-    /* Postgres init. */
+    /* openGauss init. */
     char* dbname = session->proc_cxt.MyProcPort->database_name;
     char* username = session->proc_cxt.MyProcPort->user_name;
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);

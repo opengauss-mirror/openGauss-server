@@ -19,6 +19,11 @@
 #define MD5_PASSWD_CHARSET "0123456789abcdef"
 #define MD5_PASSWD_LEN 35
 
+/*
+ * md5 produces a 16 byte (128 bit) hash; double it for hex.
+ */
+#define MD5_HASH_LEN 32
+
 #define isMD5(passwd)                                                          \
     ((strncmp(passwd, "md5", 3) == 0) && (strlen(passwd) == MD5_PASSWD_LEN) && \
         (strspn(passwd + 3, MD5_PASSWD_CHARSET) == MD5_PASSWD_LEN - 3))

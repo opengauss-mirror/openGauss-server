@@ -14,9 +14,9 @@
  * -------------------------------------------------------------------------
  * File Name	: evp_cipher.cpp
  * Brief		:
- * Description	: encrypt and decrypt functions for MPPDB
+ * Description	: encrypt and decrypt functions for TDE
  *
- * History	: 2019-06
+ * History	: 2021-04
  * 
  * IDENTIFICATION
  *	  src/gausskernel/cbb/utils/aes/evp_cipher.cpp
@@ -31,201 +31,214 @@
 #include "utils/evp_cipher.h"
 
 #define SM4_ENGINE_ID "kae";
-THR_LOCAL ENGINE* engine = NULL;
-THR_LOCAL bool inited = false;
-/* init hardware driver. */
-void init_cipher_engine()
+THR_LOCAL ENGINE* g_engine = NULL;
+THR_LOCAL bool g_init_engine = false;
+
+/* init hardware driver for SM4. */
+ENGINE* init_cipher_engine()
 {
-    if (inited) {
-        return;
+    if (g_init_engine) {
+        return g_engine;
     }
+
     const char* id = SM4_ENGINE_ID;
+    /* OPENSSL_init_crypto return 1 on success or 0 on error */
     if (OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, NULL) == 0) {
-        fprintf(stderr, ("Openssl crypto init config fail, Maybe cann't use hardware."));
+        ereport(LOG, (errmsg("OpenSSL init crypto failed for %s hardware driver", id)));
+        return NULL;
     }
-    engine = ENGINE_by_id(id);
-    inited = true;
+    g_engine = ENGINE_by_id(id);
+    g_init_engine = true;
+    return g_engine;
 }
 
-unsigned long ctr_dec_partial_mode(const char* decalgoText, const EVP_CIPHER* cipher, const char* cipherText,
-    const size_t cipherLength, char* plainText, size_t* plainLength, unsigned char* key, unsigned char* iv)
+bool ctr_dec_partial_mode(const char* decalgoText, ENGINE* engine, const EVP_CIPHER* cipher,
+    const char* cipherText, const size_t cipherLength, char* plainText, size_t* plainLength,
+    unsigned char* key, unsigned char* iv)
 {
+    int segPlainLength = 0;
+    int lastSegPlainLength = 0;
+    int ret = 0;
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     if (ctx == NULL) {
-        fprintf(stderr, ("%s ctx new fail\n"), decalgoText);
-        return 1;
+        ereport(LOG, (errmsg("EVP_CIPHER_CTX_new failed when decrypt with %s", decalgoText)));
+        return false;
     }
 
-    if (EVP_DecryptInit_ex(ctx, cipher, NULL, key, iv) < 0) {
-        fprintf(stderr, ("%s EVP_EncryptInit_ex fail\n"), decalgoText);
+    /* EVP_DecryptInit_ex() and EVP_DecryptUpdate() return 1 for success and 0 for failure. */
+    ret = EVP_DecryptInit_ex(ctx, cipher, engine, key, iv);
+    if (ret == 0) {
         EVP_CIPHER_CTX_free(ctx);
-        return 1;
+        ereport(LOG, (errmsg("EVP_DecryptInit_ex failed when decrypt with %s", decalgoText)));
+        return false;
     }
 
-    int SegPlainLength = 0;
-    int LastSegPlainLength = 0;
-    int ret =
-        EVP_DecryptUpdate(ctx, (unsigned char*)plainText, &SegPlainLength, (unsigned char*)cipherText, cipherLength);
+    ret = EVP_DecryptUpdate(ctx, (unsigned char*)plainText, &segPlainLength, (unsigned char*)cipherText, cipherLength);
     if (ret == 0) {
-        fprintf(stderr, ("%s EVP_DecryptUpdate fail\n"), decalgoText);
         EVP_CIPHER_CTX_free(ctx);
-        return 1;
+        ereport(LOG, (errmsg("EVP_DecryptUpdate failed when decrypt with %s", decalgoText)));
+        return false;
     }
-    ret = EVP_DecryptFinal_ex(ctx, (unsigned char*)plainText + SegPlainLength, &LastSegPlainLength);
+
+    /* EVP_DecryptFinal_ex() returns 0 if the decrypt failed or 1 for success. */
+    ret = EVP_DecryptFinal_ex(ctx, (unsigned char*)plainText + segPlainLength, &lastSegPlainLength);
     if (ret == 0) {
-        fprintf(stderr, ("%s EVP_EncryptFinal_ex fail\n"), decalgoText);
         EVP_CIPHER_CTX_free(ctx);
-        return 1;
+        ereport(LOG, (errmsg("EVP_DecryptFinal_ex failed when decrypt with %s", decalgoText)));
+        return false;
     }
-    *plainLength = SegPlainLength + LastSegPlainLength;
+    
+    *plainLength = segPlainLength + lastSegPlainLength;
     EVP_CIPHER_CTX_free(ctx);
-
-    return 0;
+    return true;
 }
 
-unsigned long ctr_enc_partial_mode(const char* encalgoText, const EVP_CIPHER* cipher, const char* plainText,
-    const size_t plainLength, char* cipherText, size_t* cipherLength, unsigned char* key, unsigned char* iv)
+bool ctr_enc_partial_mode(const char* encalgoText, ENGINE* engine, const EVP_CIPHER* cipher,
+    const char* plainText, const size_t plainLength, char* cipherText, size_t* cipherLength,
+    unsigned char* key, unsigned char* iv)
 {
-    int plen = plainLength;
-    EVP_CIPHER_CTX* ctx;
-    ctx = EVP_CIPHER_CTX_new();
-    if (ctx == NULL) {
-        fprintf(stderr, ("%s new ctx fail.\n"), encalgoText);
-        return 1;
-    }
-    if (EVP_EncryptInit_ex(ctx, cipher, engine, key, iv) < 0) {
-        fprintf(stderr, ("%s EVP_EncryptInit_ex fail.\n"), encalgoText);
-        EVP_CIPHER_CTX_free(ctx);
-        return 1;
-    }
-
     int SegCipherLength = 0;
     int LastSegCipherLength = 0;
-    int ret = EVP_EncryptUpdate(ctx, (unsigned char*)cipherText, &SegCipherLength, (unsigned char*)plainText, plen);
+    int ret = 0;
+    EVP_CIPHER_CTX* ctx = NULL;
+    ctx = EVP_CIPHER_CTX_new();
+    if (ctx == NULL) {
+        ereport(LOG, (errmsg("EVP_CIPHER_CTX_new failed when encrypt with %s", encalgoText)));
+        return false;
+    }
+
+    /* EVP_EncryptInit_ex(), EVP_EncryptUpdate() and EVP_EncryptFinal_ex() return 1 for success and 0 for failure. */
+    ret = EVP_EncryptInit_ex(ctx, cipher, engine, key, iv);
     if (ret == 0) {
-        fprintf(stderr, ("%s EVP_EncryptUpdate fail.\n"), encalgoText);
         EVP_CIPHER_CTX_free(ctx);
-        return 1;
+        ereport(LOG, (errmsg("EVP_EncryptInit_ex failed when encrypt with %s", encalgoText)));
+        return false;
+    }
+
+    ret = EVP_EncryptUpdate(ctx, (unsigned char*)cipherText, &SegCipherLength, (unsigned char*)plainText, plainLength);
+    if (ret == 0) {
+        EVP_CIPHER_CTX_free(ctx);
+        ereport(LOG, (errmsg("EVP_EncryptUpdate failed when encrypt with %s", encalgoText)));
+        return false;
     }
 
     ret = EVP_EncryptFinal_ex(ctx, (unsigned char*)cipherText + SegCipherLength, &LastSegCipherLength);
     if (ret == 0) {
-        fprintf(stderr, ("%s EVP_EncryptFinal_ex fail.\n"), encalgoText);
         EVP_CIPHER_CTX_free(ctx);
-        return 1;
+        ereport(LOG, (errmsg("EVP_EncryptFinal_ex failed when encrypt with %s", encalgoText)));
+        return false;
     }
+    
     *cipherLength = SegCipherLength + LastSegCipherLength;
     EVP_CIPHER_CTX_free(ctx);
-    return 0;
+    return true;
 }
 
 /*
- * Target		:Encrypt functions for security.
- * Description		:Encrypt with standard SM4 128 algorthm using openssl functions.
- * Notes		:The Key and iv here must be the same as it  was used in decrypt.
- * Input		:plainText	plain text need to be decrypted
- * 				plainLength	plain length
- * 				Key			user assigned key
- * 				iv   	 	IV for decrypt. General get from file or ciphertext
- * Output		:cipherText	ciphertext text after encrypted
- *				cipherLength		cipherText length
- *				fail 1, success 0
+ * Description:
+ *      Encrypt with standard AES/SM4 algorthm using openssl functions.
+ *      For SM4, engine is set for hardware instruction acceleration on ARM platform.
+ * Input:
+ *      plainText: plain text need to be encrypted
+ *      plainLength: plain text length
+ *      key: encryption key
+ *      iv: initial vector
+ *      algo: encryption algorithm
+ * Output:
+ *      cipherText: ciphertext text after encrypted
+ *      cipherLength: cipher text length
+ * Return:
+ *      true: success
+ *      false: failure
  */
-unsigned long sm4_ctr_enc_partial_mode(const char* plainText, const size_t plainLength, char* cipherText,
-    size_t* cipherLength, unsigned char* key, unsigned char* iv)
+bool encrypt_partial_mode(const char* plainText, const size_t plainLength, char* cipherText,
+    size_t* cipherLength, unsigned char* key, unsigned char* iv, TdeAlgo algo)
 {
-    const char* sm4AlgoText = "sm4";
-
-    init_cipher_engine();
+    const char* algoText = NULL;
+    ENGINE* engine = NULL; /* if engine is NULL then the default implementation is used */
     const EVP_CIPHER* cipher = NULL;
-    cipher = EVP_sm4_ctr();
-    if (cipher == NULL) {
-        fprintf(stderr, ("sm4 new cipher fail.\n"));
-        return 1;
+
+    switch (algo) {
+        case TDE_ALGO_AES_128_CTR:
+            algoText = "aes-128-ctr";
+            cipher = EVP_aes_128_ctr();
+            break;
+        case TDE_ALGO_SM4_CTR:
+            algoText = "sm4-ctr";
+            engine = init_cipher_engine();
+            cipher = EVP_sm4_ctr();
+            break;
+        default:
+            break;
     }
 
-    unsigned ret = ctr_enc_partial_mode(sm4AlgoText, cipher, plainText, plainLength, cipherText, cipherLength, key, iv);
-    if (ret == 1) {
-        fprintf(stderr, ("sm4 ctr_enc_partial_mode fail.\n"));
-        return 1;
+    if (algoText == NULL) {
+        ereport(LOG, (errmsg("the tde algo is not support")));
+        return false;
     }
-    return 0;
+
+    if (cipher == NULL) {
+        ereport(LOG, (errmsg("new cipher failed when encrypt with %s", algoText)));
+        return false;
+    }
+    
+    /* begin to encrypt now */
+    bool result = ctr_enc_partial_mode(algoText, engine, cipher, plainText, plainLength, cipherText, 
+        cipherLength, key, iv);
+    return result;
 }
 
 /*
- * Target		:Decrypt functions for security.
- * Description	:Decrypt with standard sm4 128 algorthm using openssl functions.
- * Notes		:The Key and InitVector here must be the same as it  was used in encrypt.
- * Input		:CipherText	cipher text need to be decrypted
- * 				CipherLength	ciphertext length
- * 				key		user assigned key
- * 				iv		IV for decrypt. General get from file or ciphertext
- * Output		:plainText		plain text after decrypted
- *				plainLength		plaintext length
- *				fail 1, success 0
+ * Description:
+ *      Encrypt with standard AES/SM4 algorthm using openssl functions.
+ *      For SM4, engine is set for hardware instruction acceleration on ARM platform.
+ * Input:
+ *      cipherText: ciphertext text to be decrypted
+ *      cipherLength: cipher text length
+ *      key: decryption key
+ *      iv: initial vector
+ *      algo: decryption algorithm
+ * Output:
+ *      plainText: plain text need after decrypted
+ *      plainLength: plain text length
+ * Return:
+ *      true: success
+ *      false: failure
  */
-unsigned long sm4_ctr_dec_partial_mode(const char* cipherText, const size_t cipherLength, char* plainText,
-    size_t* plainLength, unsigned char* key, unsigned char* iv)
+bool decrypt_partial_mode(const char* cipherText, const size_t cipherLength, char* plainText,
+    size_t* plainLength, unsigned char* key, unsigned char* iv, TdeAlgo algo)
 {
-    const char* sm4AlgoText = "sm4";
-
-    init_cipher_engine();
+    const char* algoText = NULL;
+    ENGINE* engine = NULL;
     const EVP_CIPHER* cipher = NULL;
-    cipher = EVP_sm4_ctr();
-    if (cipher == NULL) {
-        fprintf(stderr, ("sm4 Cipher new fail"));
-        return 1;
+
+    switch (algo) {
+        case TDE_ALGO_AES_128_CTR:
+            algoText = "aes-128-ctr";
+            cipher = EVP_aes_128_ctr();
+            break;
+        case TDE_ALGO_SM4_CTR:
+            algoText = "sm4-ctr";
+            engine = init_cipher_engine();
+            cipher = EVP_sm4_ctr();
+            break;
+        default:
+            break;
     }
 
-    unsigned ret = ctr_dec_partial_mode(sm4AlgoText, cipher, cipherText, cipherLength, plainText, plainLength, key, iv);
-    if (ret == 1) {
-        fprintf(stderr, ("sm4 ctr_dec_partial_mode fail.\n"));
-        return 1;
+    if (algoText == NULL) {
+        ereport(LOG, (errmsg("the tde algo is not support")));
+        return false;
     }
-    return 0;
+
+    if (cipher == NULL) {
+        ereport(LOG, (errmsg("new cipher failed when decrypt with %s", algoText)));
+        return false;
+    }
+
+    /* begin to decrypt now */
+    bool result = ctr_dec_partial_mode(algoText, engine, cipher, cipherText, cipherLength, plainText, 
+        plainLength, key, iv);
+    return result;
 }
 
-/*
- * This encrypt code for AES CTR operation using data availability type as FULL
- * This code uses AES128 CTR and key is 16 bytes. For AES192 CTR, AES256 CTR, operations
- * are exactly same except key should be passed as 24 bytes & 32 bytes
- */
-unsigned long aes_ctr_enc_partial_mode(const char* plainText, const size_t plainLength, char* cipherText,
-    size_t* cipherLength, unsigned char* key, unsigned char* iv)
-{
-    const char* aesAlgoText = "aes";
-    const EVP_CIPHER* cipher = EVP_aes_128_ctr();
-    if (cipher == NULL) {
-        fprintf(stderr, ("aes new cipher fail.\n"));
-        return 1;
-    }
-    unsigned ret = ctr_enc_partial_mode(aesAlgoText, cipher, plainText, plainLength, cipherText, cipherLength, key, iv);
-    if (ret == 1) {
-        fprintf(stderr, ("aes ctr_enc_partial_mode fail.\n"));
-        return 1;
-    }
-    return 0;
-}
-
-/*
- * This decrypt code for AES CTR operation using data availability type as FULL
- * This code uses AES128 CTR and key is 16 bytes. For AES192 CTR, AES256 CTR, operations
- * are exactly same except key should be passed as 24 bytes & 32 bytes
- */
-unsigned long aes_ctr_dec_partial_mode(const char* cipherText, const size_t cipherLength, char* plainText,
-    size_t* plainLength, unsigned char* key, unsigned char* iv)
-{
-    const char* aesAlgoText = "aes";
-    const EVP_CIPHER* cipher = EVP_aes_128_ctr();
-    if (cipher == NULL) {
-        fprintf(stderr, ("aes new cipher fail.\n"));
-        return 1;
-    }
-
-    unsigned ret = ctr_dec_partial_mode(aesAlgoText, cipher, cipherText, cipherLength, plainText, plainLength, key, iv);
-    if (ret == 1) {
-        fprintf(stderr, ("aes ctr_dec_partial_mode fail.\n"));
-        return 1;
-    }
-    return 0;
-}

@@ -86,7 +86,8 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
         fctx->tupdesc = BlessTupleDesc(tupledesc);
 
         /* Allocate g_instance.attr.attr_storage.NBuffers worth of BufferCachePagesRec records. */
-        fctx->record = (BufferCachePagesRec *)palloc_huge(CurrentMemoryContext,
+        fctx->record =
+            (BufferCachePagesRec*)palloc_huge(CurrentMemoryContext,
             sizeof(BufferCachePagesRec) * g_instance.attr.attr_storage.NBuffers);
 
         /* Set max calls and remember the user function context. */

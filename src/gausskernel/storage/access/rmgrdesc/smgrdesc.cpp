@@ -19,6 +19,7 @@
 #include "catalog/catalog.h"
 #include "catalog/storage_xlog.h"
 #include "storage/custorage.h"
+#include "storage/smgr/relfilenode.h"
 
 void smgr_desc(StringInfo buf, XLogReaderState *record)
 {

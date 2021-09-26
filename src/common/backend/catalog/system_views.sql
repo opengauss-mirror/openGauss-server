@@ -1061,7 +1061,8 @@ CREATE VIEW pg_session_iostat AS
              WHEN T.io_priority = 20 THEN 'Medium'::text
              WHEN T.io_priority = 50 THEN 'High'::text END AS io_priority,
         S.query,
-        S.node_group
+        S.node_group,
+        T.curr_io_limits as curr_io_limits
 FROM pg_stat_activity_ng AS S,  pg_stat_get_wlm_session_iostat_info(0) AS T
 WHERE S.pid = T.threadid;
 
@@ -2881,6 +2882,9 @@ CREATE VIEW gs_stat_session_cu AS
 CREATE VIEW pg_comm_delay AS
     SELECT DISTINCT * from pg_comm_delay();
 
+CREATE VIEW gs_comm_proxy_thread_status AS
+    SELECT DISTINCT * from gs_comm_proxy_thread_status();
+
 ALTER TEXT SEARCH CONFIGURATION ngram ADD MAPPING
         FOR zh_words, en_word, numeric, alnum, grapsymbol, multisymbol
         WITH simple;
@@ -3453,3 +3457,6 @@ CREATE unlogged table statement_history(
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
+
+CREATE OR REPLACE VIEW PG_CATALOG.SYS_DUMMY AS (SELECT 'X'::TEXT AS DUMMY);
+GRANT SELECT ON TABLE SYS_DUMMY TO PUBLIC;

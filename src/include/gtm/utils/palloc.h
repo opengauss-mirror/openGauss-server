@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * palloc.h
- *	  POSTGRES memory allocator definitions.
+ *	  openGauss memory allocator definitions.
  *
  * This file contains the basic memory allocation interface that is
  * needed by almost every backend module.  It is included directly by

@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * numeric_gs.h
- *	  Definitions for the exact numeric data type of Postgres
+ *	  Definitions for the exact numeric data type of openGauss
  *
  * Original coding 1998, Jan Wieck.  Heavily revised 2003, Tom Lane.
  *

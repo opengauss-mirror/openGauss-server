@@ -43,12 +43,17 @@
 #include "utils/resowner.h"
 #include "catalog/pg_database.h"
 #include "pgxc/pgxcnode.h"
+#include "tcop/utility.h"
+#include "pgxc/poolutils.h"
 
 const int BARRIER_NAME_LEN = 40;
 #define TIME_GET_MILLISEC(t) (((long)(t).tv_sec * 1000) + ((long)(t).tv_usec) / 1000)
 
-#define BARRIER_FILE "hadr_barrier_id"
-
+bool IsFirstCn()
+{
+    char* firstExecNode = find_first_exec_cn();
+    return (strcmp(firstExecNode, g_instance.attr.attr_common.PGXCNodeName) == 0);
+}
 void barrier_creator_thread_shutdown(void)
 {
     g_instance.barrier_creator_cxt.stop = true;
@@ -84,19 +89,14 @@ static void barrier_creator_setup_signal_hook(void)
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 }
 
-static void write_barrier_id_to_obs(const char* barrier_name)
-{
-    obsWrite(BARRIER_FILE, barrier_name, BARRIER_NAME_LEN - 1);
-}
-
-static uint64_t read_barrier_id_from_obs(const ReplicationSlot *obs_archive_slot)
+static uint64_t read_barrier_id_from_obs(const char *slotName)
 {
     char barrier_name[BARRIER_NAME_LEN];
     int ret;
     uint64_t barrier_id;
     long ts = 0;
 
-    if (obs_replication_read_barrier(BARRIER_FILE, (char *)barrier_name)) {
+    if (obs_replication_read_file(BARRIER_FILE, (char *)barrier_name, MAX_BARRIER_ID_LENGTH, slotName)) {
         barrier_name[BARRIER_NAME_LEN - 1] = '\0';
         ereport(LOG, (errmsg("[BarrierCreator] read barrier id from obs %s", barrier_name)));
     } else {
@@ -112,28 +112,56 @@ static uint64_t read_barrier_id_from_obs(const ReplicationSlot *obs_archive_slot
     return 0;
 }
 
-static void BarrierPoolerReload(void) 
+uint64_t GetObsBarrierIndex(const List *archiveSlotNames)
 {
-    MemoryContext oldContext;
+    uint64_t maxIndex = 0;
     
-    /* Now session information is reset in correct memory context */
-    oldContext = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_COMMUNICATION));
+    foreach_cell(cell, archiveSlotNames) {
+        char* slotName = (char*)lfirst(cell);
+        if (slotName == NULL || strlen(slotName) == 0) {
+            continue;
+        }
+        uint64_t readIndex = read_barrier_id_from_obs(slotName);
+        maxIndex = (readIndex > maxIndex) ? readIndex : maxIndex;
+    }
 
-    /* Reinitialize session, while old pooler connection is active */
-    InitMultinodeExecutor(true);
-    /* And reconnect to pool manager */
-    PoolManagerReconnect();
+    return maxIndex;
+}
 
-    MemoryContextSwitchTo(oldContext);
+static void AllocBarrierLsnInfo()
+{
+    int rc;
+    g_instance.archive_obs_cxt.barrier_lsn_info = (ArchiveBarrierLsnInfo *)palloc0(
+        sizeof(ArchiveBarrierLsnInfo) * g_instance.archive_obs_cxt.max_node_cnt);
+    rc = memset_s(g_instance.archive_obs_cxt.barrier_lsn_info, 
+        sizeof(ArchiveBarrierLsnInfo) * g_instance.archive_obs_cxt.max_node_cnt, 0, 
+        sizeof(ArchiveBarrierLsnInfo) * g_instance.archive_obs_cxt.max_node_cnt);
+    securec_check(rc, "", "");
+}
+
+#ifdef ENABLE_MULTIPLE_NODES
+static void BarrierCreatorPoolerReload(void) 
+{
+    processPoolerReload();
     ereport(LOG,
-        (errmsg("[barrierPoolerReload] Reload connections with CN/DN, dn count : %d, cn count : %d",
+        (errmsg("[BarrierCreatorPoolerReload] Reload connections with CN/DN, dn count : %d, cn count : %d",
             u_sess->pgxc_cxt.NumDataNodes,
             u_sess->pgxc_cxt.NumCoords)));
+    
+    int maxNodeCnt = *t_thrd.pgxc_cxt.shmemNumCoords + *t_thrd.pgxc_cxt.shmemNumDataNodes;
+    
+    if (maxNodeCnt > g_instance.archive_obs_cxt.max_node_cnt) {
+        if (g_instance.archive_obs_cxt.barrier_lsn_info != NULL) {
+            pfree_ext(g_instance.archive_obs_cxt.barrier_lsn_info);
+        }
+        g_instance.archive_obs_cxt.max_node_cnt = maxNodeCnt;
+        AllocBarrierLsnInfo();
+    }
 }
+#endif
 
 void barrier_creator_main(void)
 {
-    ReplicationSlot *obs_archive_slot = NULL;
     uint64_t index = 0;
     char barrier_name[BARRIER_NAME_LEN];
     MemoryContext barrier_creator_context;
@@ -144,6 +172,7 @@ void barrier_creator_main(void)
     char *dbname = (char *)pstrdup(DEFAULT_DATABASE);
 
     ereport(LOG, (errmsg("[BarrierCreator] barrier creator thread starts.")));
+
     SetProcessingMode(InitProcessing);
 
     t_thrd.role = BARRIER_CREATOR;
@@ -159,7 +188,8 @@ void barrier_creator_main(void)
     t_thrd.proc_cxt.PostInit->SetDatabaseAndUser(dbname, InvalidOid, username);
     t_thrd.proc_cxt.PostInit->InitBarrierCreator();
 
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "BarrierCreator", MEMORY_CONTEXT_STORAGE);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "BarrierCreator",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
     /*
      * Create a memory context that we will do all our work in.  We do this so
@@ -232,47 +262,80 @@ void barrier_creator_main(void)
         pg_usleep(USECS_PER_SEC);
     }
     
-    exec_init_poolhandles();
-    ereport(LOG,
-        (errmsg("[BarrierCreator] Init connections with CN/DN, dn count : %d, cn count : %d",
-            u_sess->pgxc_cxt.NumDataNodes,
-            u_sess->pgxc_cxt.NumCoords)));
-
     SetProcessingMode(NormalProcessing);
-    obs_archive_slot = getObsReplicationSlot();
-    if (obs_archive_slot == NULL) {
-        g_instance.barrier_creator_cxt.stop = true;
-        ereport(LOG, (errmsg("[BarrierCreator] barrier creator thread exits.")));
+
+    on_shmem_exit(PGXCNodeCleanAndRelease, 0);
+    
+    exec_init_poolhandles();
+    
+#ifdef ENABLE_MULTIPLE_NODES
+    /*
+     * Ensure all barrier commond execuet on first coordinator
+     */
+    do {
+        if (IsFirstCn())
+            break;
+
+        ereport(DEBUG1, (errmsg("[BarrierCreator] Current node is not first node: %s",
+            g_instance.attr.attr_common.PGXCNodeName)));
+        if (u_sess->sig_cxt.got_PoolReload) {
+            BarrierCreatorPoolerReload();
+            u_sess->sig_cxt.got_PoolReload = false;
+        }
+        CHECK_FOR_INTERRUPTS();
+        pg_usleep(10000000L);
+    } while (1);
+#endif
+    ereport(DEBUG1,
+        (errmsg("[BarrierCreator] Init connections with CN/DN, dn count : %d, cn count : %d",
+            u_sess->pgxc_cxt.NumDataNodes, u_sess->pgxc_cxt.NumCoords)));
+    g_instance.barrier_creator_cxt.stop = false;
+    List *archiveSlotNames = get_all_archive_obs_slots_name();
+    if (archiveSlotNames == NIL || archiveSlotNames->length == 0) {
         return;
     }
-    g_instance.barrier_creator_cxt.stop = false;
-    index = read_barrier_id_from_obs(obs_archive_slot);
+    index = GetObsBarrierIndex(archiveSlotNames);
+    list_free_deep(archiveSlotNames);
+
+    if (g_instance.archive_obs_cxt.barrier_lsn_info == NULL) {
+        g_instance.archive_obs_cxt.max_node_cnt = *t_thrd.pgxc_cxt.shmemNumCoords + *t_thrd.pgxc_cxt.shmemNumDataNodes;
+        AllocBarrierLsnInfo();
+    }
 
     while (!g_instance.barrier_creator_cxt.stop) {
+        /* in hadr switchover, barrier creator thread stop creating new barriers during service truncate.*/
+        if (g_instance.archive_obs_cxt.in_service_truncate == true) {
+            continue;
+        }
+    
         pg_usleep_retry(1000000L, 0);
-        if (!XLogArchivingActive()) {
+        if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
             g_instance.barrier_creator_cxt.stop = true;
             break;
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (u_sess->sig_cxt.got_PoolReload) {
-            BarrierPoolerReload();
+            BarrierCreatorPoolerReload();
             u_sess->sig_cxt.got_PoolReload = false;
+            if (!IsFirstCn())
+                break;
         }
+#endif
+
         gettimeofday(&tv, NULL);
 
         /* create barrier with increasing index */
-        ereport(LOG, (errmsg("[BarrierCreator] %s is barrier creator", g_instance.attr.attr_common.PGXCNodeName)));
+        ereport(DEBUG1, (errmsg("[BarrierCreator] %s is barrier creator", g_instance.attr.attr_common.PGXCNodeName)));
         rc = snprintf_s(barrier_name, BARRIER_NAME_LEN, BARRIER_NAME_LEN - 1, "hadr_%020" PRIu64 "_%013ld", index, 
             TIME_GET_MILLISEC(tv));
         securec_check_ss_c(rc, "\0", "\0");
-        ereport(LOG, (errmsg("[BarrierCreator] creating barrier %s", barrier_name)));
+        ereport(DEBUG1, (errmsg("[BarrierCreator] creating barrier %s", barrier_name)));
 #ifdef ENABLE_MULTIPLE_NODES
         RequestBarrier(barrier_name, NULL);
 #else
         DisasterRecoveryRequestBarrier(barrier_name);
 #endif
-        write_barrier_id_to_obs(barrier_name);
         index++;
     }
     ereport(LOG, (errmsg("[BarrierCreator] barrier creator thread exits.")));

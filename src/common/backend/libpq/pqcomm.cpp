@@ -102,6 +102,7 @@
 #include "pgxc/nodemgr.h"
 #include "storage/lz4_file.h"
 #include "tcop/stmt_retry.h"
+#include "communication/commproxy_interface.h"
 #include "distributelayer/streamProducer.h"
 
 #define MAXLISTEN 64
@@ -138,6 +139,8 @@ static void pq_disk_generate_checking_header(
     const char* src_data, StringInfo dest_data, uint32 data_len, uint32 seq_num);
 static size_t pq_disk_read_data_block(
     LZ4File* file_handle, char* src_data, char* dest_data, uint32 data_len, uint32 seq_num);
+
+static int libnet_flush(void);
 
 #ifdef HAVE_UNIX_SOCKETS
 static int Lock_AF_UNIX(unsigned short portNumber, const char* unixSocketName, bool is_create_psql_sock);
@@ -518,7 +521,7 @@ void pq_close(int code, Datum arg)
             gs_close_gsocket(&(u_sess->proc_cxt.MyProcPort->gs_sock));
         } else {
             if (u_sess->proc_cxt.MyProcPort->sock != PGINVALID_SOCKET) {
-                closesocket(u_sess->proc_cxt.MyProcPort->sock);
+                comm_closesocket(u_sess->proc_cxt.MyProcPort->sock);
             }
             u_sess->proc_cxt.MyProcPort->sock = PGINVALID_SOCKET;
         }
@@ -670,7 +673,15 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
                 break;
         }
 
-        if ((fd = socket(addr->ai_family, SOCK_STREAM, 0)) < 0) {
+        /*
+         * Config the socket() is in proxy mode
+         *
+         * Note: Onece fd is created from socket(), go raw TCP/IP or proxy-enabled path is
+         *       determined, here we make the specification in StreamServerPort()
+         */
+        CommConfigSocketOption(CommConnSocketServer, hostName, portNumber);
+        fd = comm_socket(addr->ai_family, SOCK_STREAM, 0);
+        if (fd < 0) {
             ereport(LOG,
                 (errcode_for_socket_access(),
                     /* translator: %s is IPv4, IPv6, or Unix */
@@ -689,8 +700,8 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
         }
 
 #ifdef F_SETFD
-        if (fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
-            ereport(LOG, (errcode_for_socket_access(), errmsg("setsockopt(FD_CLOEXEC) failed: %m")));
+        if (comm_fcntl(fd, F_SETFD, FD_CLOEXEC) == -1) {
+            ereport(LOG, (errcode_for_socket_access(), errmsg("comm_setsockopt(FD_CLOEXEC) failed: %m")));
             goto errhandle;
         }
 #endif /* F_SETFD */
@@ -708,9 +719,9 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
          * behavior. With no flags at all, win32 behaves as Unix with
          * SO_REUSEADDR.
          */
-        if (!IS_AF_UNIX(addr->ai_family)) {
-            if ((setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&one, sizeof(one))) == -1) {
-                ereport(LOG, (errcode_for_socket_access(), errmsg("setsockopt(SO_REUSEADDR) failed: %m")));
+        if (!IS_AF_UNIX(addr->ai_family) || IsCommProxyStartUp()) {
+            if ((comm_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (char*)&one, sizeof(one))) == -1) {
+                ereport(LOG, (errcode_for_socket_access(), errmsg("comm_setsockopt(SO_REUSEADDR) failed: %m")));
                 goto errhandle;
             }
         }
@@ -718,8 +729,9 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
 
 #ifdef IPV6_V6ONLY
         if (addr->ai_family == AF_INET6) {
-            if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&one, sizeof(one)) == -1) {
-                ereport(LOG, (errcode_for_socket_access(), errmsg("setsockopt(IPV6_V6ONLY) failed: %m")));
+            if (comm_setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (char*)&one, sizeof(one)) == -1) {
+                ereport(LOG, (errcode_for_socket_access(), errmsg("comm_setsockopt(IPV6_V6ONLY) failed: %m")));
+
                 goto errhandle;
             }
         }
@@ -733,7 +745,7 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
          * We will try at most 30 times, because of slow clean of OS.
          */
         for (i = 0; i != tryBindNum; ++i) {
-            err = bind(fd, addr->ai_addr, addr->ai_addrlen);
+            err = comm_bind(fd, addr->ai_addr, addr->ai_addrlen);
             if (err < 0) {
                 /* need not retry when a addr is added before */
                 if (added != 0) {
@@ -781,12 +793,12 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
         maxconn = Max(maxconn, PG_SOMINCONN);
         maxconn = Min(maxconn, PG_SOMAXCONN);
 
-        err = listen(fd, maxconn);
+        err = comm_listen(fd, maxconn);
         if (err < 0) {
             ereport(LOG,
                 (errcode_for_socket_access(),
                     /* translator: %s is IPv4, IPv6, or Unix */
-                    errmsg("could not listen on %s socket: %m", familyDesc)));
+                    errmsg("could not listen on %s socket[%s:%d]: %m", familyDesc, hostName, (int)portNumber)));
             goto errhandle;
         }
         ListenSocket[listen_index] = fd;
@@ -825,7 +837,7 @@ int StreamServerPort(int family, char* hostName, unsigned short portNumber, cons
 
     errhandle:
         if (fd != PGINVALID_SOCKET) {
-            closesocket(fd);
+            comm_closesocket(fd);
         }
     }
 
@@ -959,8 +971,10 @@ int StreamConnection(pgsocket server_fd, Port* port)
 {
     /* accept connection and fill in the client (remote) address */
     port->raddr.salen = sizeof(port->raddr.addr);
-    if ((port->sock = accept4(server_fd, (struct sockaddr*)&port->raddr.addr, &port->raddr.salen, SOCK_CLOEXEC)) < 0) {
-        ereport(LOG, (errcode_for_socket_access(), errmsg("could not accept new connection: %m")));
+
+    /* CommProxy Support */
+    if ((port->sock = comm_accept4(server_fd, (struct sockaddr*)&port->raddr.addr, &port->raddr.salen, SOCK_CLOEXEC)) < 0) {
+        ereport(LOG, (errcode_for_socket_access(), errmsg("could not comm_accept() new connection: %m")));
 
         /*
          * If accept() fails then postmaster.c will still see the server
@@ -986,8 +1000,10 @@ int StreamConnection(pgsocket server_fd, Port* port)
 
     /* fill in the server (local) address */
     port->laddr.salen = sizeof(port->laddr.addr);
-    if (getsockname(port->sock, (struct sockaddr*)&port->laddr.addr, &port->laddr.salen) < 0) {
-        ereport(LOG, (errmsg("getsockname() failed: %m")));
+
+    /* CommProxy Support */
+    if (comm_getsockname(port->sock, (struct sockaddr*)&port->laddr.addr, &port->laddr.salen) < 0) {
+        ereport(LOG, (errmsg("comm_getsockname() failed: %m")));
         return STATUS_ERROR;
     }
 
@@ -996,17 +1012,16 @@ int StreamConnection(pgsocket server_fd, Port* port)
         int on;
         int opval = 0;
         on = 1;
-        socklen_t oplen = sizeof(opval);
-        if (getsockopt(port->sock, SOL_SOCKET, SO_PROTOCOL, &opval, &oplen) < 0) {
-            ereport(LOG, (errmsg("getsockopt(SO_PROTOCOL) failed: %m")));
+
+        /* CommProxy Support */
+        if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
+            ereport(LOG, (errmsg("comm_setsockopt(TCP_NODELAY) failed: %m")));
             return STATUS_ERROR;
         }
-        if (setsockopt(port->sock, IPPROTO_TCP, TCP_NODELAY, (char*)&on, sizeof(on)) < 0) {
-            ereport(LOG, (errmsg("setsockopt(TCP_NODELAY) failed: %m")));
-            return STATUS_ERROR;
-        }
-        if (setsockopt(port->sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on)) < 0) {
-            ereport(LOG, (errmsg("setsockopt(SO_KEEPALIVE) failed: %m")));
+
+        /* CommProxy Support */
+        if (comm_setsockopt(port->sock, SOL_SOCKET, SO_KEEPALIVE, (char*)&on, sizeof(on)) < 0) {
+            ereport(LOG, (errmsg("comm_setsockopt(SO_KEEPALIVE) failed: %m")));
             return STATUS_ERROR;
         }
 #ifdef WIN32
@@ -1016,8 +1031,10 @@ int StreamConnection(pgsocket server_fd, Port* port)
          * http://support.microsoft.com/kb/823764/EN-US/
          */
         on = PQ_SEND_BUFFER_SIZE * 4;
-        if (setsockopt(port->sock, SOL_SOCKET, SO_SNDBUF, (char*)&on, sizeof(on)) < 0) {
-            ereport(LOG, (errmsg("setsockopt(SO_SNDBUF) failed: %m")));
+
+        /* CommProxy Support */
+        if (comm_setsockopt(port->sock, SOL_SOCKET, SO_SNDBUF, (char*)&on, sizeof(on)) < 0) {
+            ereport(LOG, (errmsg("comm_setsockopt(SO_SNDBUF) failed: %m")));
             return STATUS_ERROR;
         }
 #endif
@@ -1051,7 +1068,8 @@ int StreamConnection(pgsocket server_fd, Port* port)
  */
 void StreamClose(pgsocket sock)
 {
-    closesocket(sock);
+    /* CommProxy Support */
+    comm_closesocket(sock);
 }
 
 /*
@@ -1105,7 +1123,7 @@ void TouchSocketFile(void)
  * blocking otherwise.
  * --------------------------------
  */
-static void pq_set_nonblocking(bool nonblocking)
+void pq_set_nonblocking(bool nonblocking)
 {
     if (u_sess->proc_cxt.MyProcPort->noblock == nonblocking) {
         return;
@@ -1122,11 +1140,11 @@ static void pq_set_nonblocking(bool nonblocking)
      */
     if (nonblocking) {
         if (!pg_set_noblock(u_sess->proc_cxt.MyProcPort->sock)) {
-            ereport(COMMERROR, (errmsg("could not set socket to non-blocking mode: %m")));
+            ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to non-blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
         }
     } else {
         if (!pg_set_block(u_sess->proc_cxt.MyProcPort->sock)) {
-            ereport(COMMERROR, (errmsg("could not set socket to blocking mode: %m")));
+            ereport(COMMERROR, (errmsg("fd:[%d] could not set socket to blocking mode: %m", u_sess->proc_cxt.MyProcPort->sock)));
         }
     }
 #endif
@@ -1576,8 +1594,12 @@ int pq_flush(void)
  * and the socket is in non-blocking mode), or EOF if trouble.
  * --------------------------------
  */
-static int internal_flush(void)
+int internal_flush(void)
 {
+    if ((t_thrd.walsender_cxt.ep_fd != -1 && g_comm_proxy_config.s_send_xlog_mode == CommSendXlogWaitIn)) {
+        return libnet_flush();
+    }
+
     static THR_LOCAL int last_reported_send_errno = 0;
 
     char* bufptr = t_thrd.libpq_cxt.PqSendBuffer + t_thrd.libpq_cxt.PqSendStart;
@@ -1685,6 +1707,43 @@ static int internal_flush(void)
     (void)pgstat_report_waitstatus(oldStatus);
     return 0;
 }
+
+static int libnet_flush(void)
+{
+    char* bufptr = t_thrd.libpq_cxt.PqSendBuffer + t_thrd.libpq_cxt.PqSendStart;
+    char* bufend = t_thrd.libpq_cxt.PqSendBuffer + t_thrd.libpq_cxt.PqSendPointer;
+    WaitState oldStatus = pgstat_report_waitstatus(STATE_WAIT_UNDEFINED, true);
+
+    int ep_fd = t_thrd.walsender_cxt.ep_fd;
+    struct epoll_event events[512];
+    int fd = u_sess->proc_cxt.MyProcPort->sock;
+    int temp_len = 0;
+    int r;
+    do {
+        int nevents = comm_epoll_wait(ep_fd, events, 512, 10000);
+        for (int i = 0; i < nevents; ++i) {
+            if (events[i].events & EPOLLOUT) {
+                int event_fd = events[i].data.fd;
+                if (event_fd == fd) {
+                    r = comm_send(fd, bufptr, bufend - bufptr);
+                    if (r > 0) {
+                        bufptr += r;
+                        t_thrd.libpq_cxt.PqSendStart += r;
+                    } else if (temp_len < 0 && !IgnoreErrorNo(errno)) {
+                        return EOF;
+                    }
+                } else {
+
+                }
+            }
+        }
+    } while (bufptr < bufend);
+
+    t_thrd.libpq_cxt.PqSendStart = t_thrd.libpq_cxt.PqSendPointer = 0;
+    (void)pgstat_report_waitstatus(oldStatus);
+    return 0;
+}
+
 
 /* --------------------------------
  *		pq_flush_if_writable - flush pending output if writable without blocking
@@ -1928,7 +1987,7 @@ bool pq_select(int timeout_ms)
 {
     int ret;
 
-    /* We use poll(2) if available, otherwise select(2) */
+    /* We use comm_poll(2) if available, otherwise select(2) */
     {
 #ifdef HAVE_POLL
         struct pollfd input_fd;
@@ -1937,7 +1996,8 @@ bool pq_select(int timeout_ms)
         input_fd.events = POLLIN | POLLERR;
         input_fd.revents = 0;
 
-        ret = poll(&input_fd, 1, timeout_ms);
+        /* CommProxy Intefrace changes */
+        ret = comm_poll(&input_fd, 1, timeout_ms);
 #else  /* !HAVE_POLL */
 
         fd_set input_mask;
@@ -1955,7 +2015,8 @@ bool pq_select(int timeout_ms)
             ptr_timeout = &timeout;
         }
 
-        ret = select(u_sess->proc_cxt.MyProcPort->sock + 1, &input_mask, NULL, NULL, ptr_timeout);
+        /* CommProxy Intefrace changes */
+        ret = comm_select(u_sess->proc_cxt.MyProcPort->sock + 1, &input_mask, NULL, NULL, ptr_timeout);
 #endif /* HAVE_POLL */
     }
 
@@ -1963,7 +2024,7 @@ bool pq_select(int timeout_ms)
         return false;
     }
     if (ret < 0) {
-        ereport(ERROR, (errcode_for_socket_access(), errmsg("select() failed: %m")));
+        ereport(ERROR, (errcode_for_socket_access(), errmsg("comm_select() failed: %m")));
     }
     return true;
 }
@@ -2021,13 +2082,15 @@ int pq_getkeepalivesidle(Port* port)
         ACCEPT_TYPE_ARG3 size = sizeof(port->default_keepalives_idle);
 
 #ifdef TCP_KEEPIDLE
-        if (getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPIDLE, (char*)&port->default_keepalives_idle, &size) < 0) {
-            ereport(LOG, (errmsg("getsockopt(TCP_KEEPIDLE) failed: %m")));
+        /* CommProxy Intefrace changes */
+        if (comm_getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPIDLE, (char*)&port->default_keepalives_idle, &size) < 0) {
+            ereport(LOG, (errmsg("comm_getsockopt(TCP_KEEPIDLE) failed: %m")));
             port->default_keepalives_idle = -1; /* don't know */
         }
 #else
-        if (getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPALIVE, (char*)&port->default_keepalives_idle, &size) < 0) {
-            ereport(LOG, (errmsg("getsockopt(TCP_KEEPALIVE) failed: %m")));
+        /* CommProxy Intefrace changes */
+        if (comm_getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPALIVE, (char*)&port->default_keepalives_idle, &size) < 0) {
+            ereport(LOG, (errmsg("comm_getsockopt(TCP_KEEPALIVE) failed: %m")));
             port->default_keepalives_idle = -1; /* don't know */
         }
 #endif /* TCP_KEEPIDLE */
@@ -2071,13 +2134,15 @@ int pq_setkeepalivesidle(int idle, Port* port)
 
     if (port->sock != NO_SOCKET) {
 #ifdef TCP_KEEPIDLE
-        if (setsockopt(port->sock, IPPROTO_TCP, TCP_KEEPIDLE, (char*)&idle, sizeof(idle)) < 0) {
-            ereport(LOG, (errmsg("setsockopt(TCP_KEEPIDLE) failed: %m")));
+        /* CommProxy Intefrace changes */
+        if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_KEEPIDLE, (char*)&idle, sizeof(idle)) < 0) {
+            ereport(LOG, (errmsg("comm_setsockopt(TCP_KEEPIDLE) failed: %m")));
             return STATUS_ERROR;
         }
 #else
-        if (setsockopt(port->sock, IPPROTO_TCP, TCP_KEEPALIVE, (char*)&idle, sizeof(idle)) < 0) {
-            ereport(LOG, (errmsg("setsockopt(TCP_KEEPALIVE) failed: %m")));
+        /* CommProxy Intefrace changes */
+        if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_KEEPALIVE, (char*)&idle, sizeof(idle)) < 0) {
+            ereport(LOG, (errmsg("comm_setsockopt(TCP_KEEPALIVE) failed: %m")));
             return STATUS_ERROR;
         }
 #endif
@@ -2111,8 +2176,9 @@ int pq_getkeepalivesinterval(Port* port)
 #ifndef WIN32
         ACCEPT_TYPE_ARG3 size = sizeof(port->default_keepalives_interval);
 
-        if (getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPINTVL, (char*)&port->default_keepalives_interval, &size) < 0) {
-            ereport(LOG, (errmsg("getsockopt(TCP_KEEPINTVL) failed: %m")));
+        /* CommProxy Intefrace changes */
+        if (comm_getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPINTVL, (char*)&port->default_keepalives_interval, &size) < 0) {
+            ereport(LOG, (errmsg("comm_getsockopt(TCP_KEEPINTVL) failed: %m")));
             port->default_keepalives_interval = -1; /* don't know */
         }
 #else
@@ -2154,8 +2220,9 @@ int pq_setkeepalivesinterval(int interval, Port* port)
     }
 
     if (port->sock != NO_SOCKET) {
-        if (setsockopt(port->sock, IPPROTO_TCP, TCP_KEEPINTVL, (char*)&interval, sizeof(interval)) < 0) {
-            ereport(LOG, (errmsg("setsockopt(TCP_KEEPINTVL) failed: %m")));
+        /* CommProxy Intefrace changes */
+        if (comm_setsockopt(port->sock, IPPROTO_TCP, TCP_KEEPINTVL, (char*)&interval, sizeof(interval)) < 0) {
+            ereport(LOG, (errmsg("comm_setsockopt(TCP_KEEPINTVL) failed: %m")));
             return STATUS_ERROR;
         }
 
@@ -2167,7 +2234,7 @@ int pq_setkeepalivesinterval(int interval, Port* port)
 #endif
 #else
     if (interval != 0) {
-        ereport(LOG, (errmsg("setsockopt(TCP_KEEPINTVL) not supported")));
+        ereport(LOG, (errmsg("comm_setsockopt(TCP_KEEPINTVL) not supported")));
         return STATUS_ERROR;
     }
 #endif
@@ -2189,8 +2256,9 @@ int pq_getkeepalivescount(Port* port)
     if ((port->default_keepalives_count == 0) && (port->sock != NO_SOCKET)) {
         ACCEPT_TYPE_ARG3 size = sizeof(port->default_keepalives_count);
 
-        if (getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPCNT, (char*)&port->default_keepalives_count, &size) < 0) {
-            ereport(LOG, (errmsg("getsockopt(TCP_KEEPCNT) failed: %m")));
+        /* CommProxy Intefrace changes */
+        if (comm_getsockopt(port->sock, IPPROTO_TCP, TCP_KEEPCNT, (char*)&port->default_keepalives_count, &size) < 0) {
+            ereport(LOG, (errmsg("comm_getsockopt(TCP_KEEPCNT) failed: %m")));
             port->default_keepalives_count = -1; /* don't know */
         }
     }
@@ -2227,8 +2295,9 @@ int pq_setkeepalivescount(int count, Port* port)
     }
 
     if (port->sock != NO_SOCKET) {
+        /* CommProxy Intefrace changes */
         if (setsockopt(port->sock, IPPROTO_TCP, TCP_KEEPCNT, (char*)&count, sizeof(count)) < 0) {
-            ereport(LOG, (errmsg("setsockopt(TCP_KEEPCNT) failed: %m")));
+            ereport(LOG, (errmsg("comm_setsockopt(TCP_KEEPCNT) failed: %m")));
             return STATUS_ERROR;
         }
 
@@ -2237,7 +2306,7 @@ int pq_setkeepalivescount(int count, Port* port)
 
 #else
     if (count != 0) {
-        ereport(LOG, (errmsg("setsockopt(TCP_KEEPCNT) not supported")));
+        ereport(LOG, (errmsg("comm_setsockopt(TCP_KEEPCNT) not supported")));
         return STATUS_ERROR;
     }
 #endif

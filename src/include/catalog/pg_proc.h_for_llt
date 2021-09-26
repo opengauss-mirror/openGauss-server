@@ -2868,6 +2868,8 @@ DESCR("statistics: sql count information about currently node");
 /* stream replication */
 DATA(insert OID = 3099 (  pg_stat_get_wal_senders	PGNSP PGUID 12 1 10 0 0 f f f f f t s 0 0 2249 "" "{20,23,25,25,25,25,1184,1184,25,25,25,25,25,25,25,25,25,25,23,25,25}" "{o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o,o}" "{pid,sender_pid,local_role,peer_role,peer_state,state,catchup_start,catchup_end,sender_sent_location,sender_write_location,sender_flush_location,sender_replay_location,receiver_received_location,receiver_write_location,receiver_flush_location,receiver_replay_location,sync_percent,sync_state,sync_priority,sync_most_available,channel}" _null_ pg_stat_get_wal_senders _null_ _null_ _null_ "" f));
 DESCR("statistics: information about currently active wal senders");
+DATA(insert OID = 4384 (  get_paxos_replication_info	PGNSP PGUID 12 1 10 0 0 f f f f f t s 0 0 2249 "" "{25,25,25,25,25,25}" "{o,o,o,o,o,o}" "{paxos_write_location, paxos_commit_location, local_write_location, local_flush_location, local_replay_location, dcf_replication_info}" _null_ get_paxos_replication_info _null_ _null_ _null_ "" f _null_ f));
+DESCR("statistics: information about currently active paxos senders");
 DATA(insert OID = 3819 (  pg_stat_get_wal_receiver      PGNSP PGUID 12 1 10 0 0 f f f f f t s 0 0 2249 "" "{23,25,25,25,25,25,25,25,25,25,25,25,25,25,25}" "{o,o,o,o,o,o,o,o,o,o,o,o,o,o,o}" "{receiver_pid,local_role,peer_role,peer_state,state,sender_sent_location,sender_write_location,sender_flush_location,sender_replay_location,receiver_received_location,receiver_write_location,receiver_flush_location,receiver_replay_location,sync_percent,channel}" _null_ pg_stat_get_wal_receiver _null_ _null_ _null_ "" f));
 DESCR("statistics: information about currently wal receiver");
 DATA(insert OID = 3499 (  pg_stat_get_stream_replications   PGNSP PGUID 12 1 10 0 0 f f f f f t s 0 0 2249 "" "{25,23,25,25}" "{o,o,o,o}" "{local_role,static_connections,db_state,detail_information}" _null_ pg_stat_get_stream_replications _null_ _null_ _null_ "" f));
@@ -5555,6 +5557,39 @@ DESCR("cgin(internal)");
 DATA(insert OID = 4401 (  cgingetbitmap	   PGNSP PGUID 12 1 0 0 0 f f f f t f v 2 0 20 "2281 2281" _null_ _null_ _null_ _null_	cgingetbitmap _null_ _null_ _null_ "" f));
 DESCR("cgin(internal)");
 
+/* ubtree index */
+DATA(insert OID = 4750 (  ubtinsert		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 6 0 16 "2281 2281 2281 2281 2281 2281" _null_ _null_ _null_ _null_	ubtinsert _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4751 (  ubtbeginscan	   PGNSP PGUID 12 1 0 0 0 f f f f t f v 3 0 2281 "2281 2281 2281" _null_ _null_ _null_ _null_	ubtbeginscan _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4752 (  ubtgettuple		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 2 0 16 "2281 2281" _null_ _null_ _null_ _null_	ubtgettuple _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4753 (  ubtgetbitmap	   PGNSP PGUID 12 1 0 0 0 f f f f t f v 2 0 20 "2281 2281" _null_ _null_ _null_ _null_	ubtgetbitmap _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4754 (  ubtrescan		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 5 0 2278 "2281 2281 2281 2281 2281" _null_ _null_ _null_ _null_ ubtrescan _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4755 (  ubtendscan		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 2278 "2281" _null_ _null_ _null_ _null_ ubtendscan _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4756 (  ubtmarkpos		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 2278 "2281" _null_ _null_ _null_ _null_ ubtmarkpos _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4757 (  ubtrestrpos		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 2278 "2281" _null_ _null_ _null_ _null_ ubtrestrpos _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4758 (  ubtmerge		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 5 0 2278 "2281 2281 2281 2281 2281" _null_ _null_ _null_ _null_ ubtmerge _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4759 (  ubtbuild		   PGNSP PGUID 12 1 0 0 0 f f f f t f v 3 0 2281 "2281 2281 2281" _null_ _null_ _null_ _null_ ubtbuild _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4760 (  ubtbuildempty	   PGNSP PGUID 12 1 0 0 0 f f f f t f v 1 0 2278 "2281" _null_ _null_ _null_ _null_ ubtbuildempty _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4761 (  ubtbulkdelete	   PGNSP PGUID 12 1 0 0 0 f f f f t f v 4 0 2281 "2281 2281 2281 2281" _null_ _null_ _null_ _null_ ubtbulkdelete _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4762 (  ubtvacuumcleanup   PGNSP PGUID 12 1 0 0 0 f f f f t f v 2 0 2281 "2281 2281" _null_ _null_ _null_ _null_ ubtvacuumcleanup _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4763 (  ubtcanreturn	   PGNSP PGUID 12 1 0 0 0 f f f f t f s 1 0 16 "2281" _null_ _null_ _null_ _null_ ubtcanreturn _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4764 (  ubtoptions		   PGNSP PGUID 12 1 0 0 0 f f f f t f s 2 0 17 "1009 16" _null_ _null_ _null_ _null_  ubtoptions _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
+DATA(insert OID = 4765 (  ubtcostestimate   PGNSP PGUID 12 1 0 0 0 f f f f t f v 7 0 2278 "2281 2281 2281 2281 2281 2281 2281" _null_ _null_ _null_ _null_ ubtcostestimate _null_ _null_ _null_ "" f));
+DESCR("ubtree(internal)");
 
 
 /* used for data redistribution bucket functions OID from 4100 to 4129 */

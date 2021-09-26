@@ -1,10 +1,10 @@
 /* -------------------------------------------------------------------------
  *
  * catversion.h
- *	  "Catalog version number" for PostgreSQL.
+ *	  "Catalog version number" for openGauss.
  *
  * The catalog version number is used to flag incompatible changes in
- * the PostgreSQL system catalogs.	Whenever anyone changes the format of
+ * the openGauss system catalogs.	Whenever anyone changes the format of
  * a system catalog relation, or adds, deletes, or modifies standard
  * catalog entries in such a way that an updated backend wouldn't work
  * with an old database (or vice versa), the catalog version number
@@ -60,6 +60,7 @@
 #endif
 
 #define NAILED_IN_CATALOG_NUM 8
-#define CATALOG_NUM	92
+
+#define CATALOG_NUM	97
 
 #endif

@@ -11,7 +11,7 @@
 <refsynopsisdiv>
 <synopsis>
 [ WITH [ RECURSIVE ] with_query [, ...] ]
-DELETE FROM [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+DELETE [/*+ plan_hint */] FROM [ ONLY ] table_name [ * ] [ [ AS ] alias ]
     [ USING using_list ]
     [ WHERE condition | WHERE CURRENT OF cursor_name ] [ LIMIT row_count ]
     [ RETURNING { * | { output_expr [ [ AS ] output_name ] } [, ...] } ];

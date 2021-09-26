@@ -831,10 +831,21 @@ Bitmapset* ng_get_group_nodeids(const Oid groupoid)
          * Note: we only have to do the special processing for installation node group, because in
          * cluster expansion stage(adding node), only installation group's node will change.
          */
-        if (groupoid == ng_get_installation_group_oid())
+        Oid ng_installation_group_oid = ng_get_installation_group_oid();
+        if (groupoid == ng_installation_group_oid) {
             bms_nodeids = ng_node_oid_array_to_id_bms_skip_null(members, nmembers, PGXC_NODE_DATANODE);
-        else
-            bms_nodeids = ng_node_oid_array_to_id_bms(members, nmembers, PGXC_NODE_DATANODE);
+        } else {
+            const char *group_parent = get_pgxc_groupparent(groupoid);
+            Oid group_parent_oid = InvalidOid;
+            if (group_parent != NULL) {
+                group_parent_oid = get_pgxc_groupoid(group_parent, false);
+            }
+            if (group_parent_oid != InvalidOid && group_parent_oid == ng_installation_group_oid) {
+                bms_nodeids = ng_node_oid_array_to_id_bms_skip_null(members, nmembers, PGXC_NODE_DATANODE);
+            } else {
+                bms_nodeids = ng_node_oid_array_to_id_bms(members, nmembers, PGXC_NODE_DATANODE);
+            }
+        }
         pfree_ext(members);
 
         ngroup_info_hash_insert(groupoid, bms_nodeids);
@@ -1366,6 +1377,9 @@ unsigned int ng_get_dest_num_data_nodes(PlannerInfo* root, RelOptInfo* rel)
         case RTE_VALUES:
         case RTE_CTE:
             num_data_nodes = u_sess->pgxc_cxt.NumDataNodes;
+            break;
+        case RTE_RESULT:
+            num_data_nodes = 1;
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("Unexpected range table entry type.")));
@@ -2450,7 +2464,15 @@ bool ng_is_special_group(Distribution* distribution)
     if (installation_distribution->group_oid == distribution->group_oid) {
         return true;
     }
-
+    const char *group_parent = get_pgxc_groupparent(distribution->group_oid);
+    if (group_parent != NULL) {
+        Oid group_parent_oid = get_pgxc_groupoid(group_parent, false);
+        if ((u_sess->opt_cxt.in_redistribution_group_distribution != NULL &&
+            u_sess->opt_cxt.in_redistribution_group_distribution->group_oid == group_parent_oid) ||
+            installation_distribution->group_oid == group_parent_oid) {
+            return true;
+        }
+    }
     /* Not a special group */
     return false;
 }
@@ -2491,6 +2513,8 @@ bool ng_is_same_group(ExecNodes* exec_nodes, Bitmapset* bms_nodeids)
  */
 bool ng_is_same_group(Distribution* distribution_1, Distribution* distribution_2)
 {
+    int bucketlen1 = -1;
+    int bucketlen2 = -1;
     /* Compare using group oid */
     if (InvalidOid != distribution_1->group_oid && InvalidOid != distribution_2->group_oid &&
         distribution_1->group_oid == distribution_2->group_oid) {
@@ -2503,9 +2527,15 @@ bool ng_is_same_group(Distribution* distribution_1, Distribution* distribution_2
     if (is_special_group_1 || is_special_group_2) {
         return false;
     }
-
+    if (InvalidOid != distribution_1->group_oid) {
+        (void)BucketMapCacheGetBucketmap(distribution_1->group_oid, &bucketlen1);
+    }
+    if (InvalidOid != distribution_2->group_oid) {
+        (void)BucketMapCacheGetBucketmap(distribution_2->group_oid, &bucketlen2);
+    }
     /* Bucket map are all ordered? just compare data node index bitmap set */
-    return ng_is_same_group(distribution_1->bms_data_nodeids, distribution_2->bms_data_nodeids);
+    return (bucketlen1 == bucketlen2) &&
+        ng_is_same_group(distribution_1->bms_data_nodeids, distribution_2->bms_data_nodeids);
 }
 
 /*

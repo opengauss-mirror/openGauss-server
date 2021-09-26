@@ -1254,7 +1254,7 @@ Datum time_transform(PG_FUNCTION_ARGS)
 
 /* time_scale()
  * Adjust time type for specified scale factor.
- * Used by PostgreSQL type system to stuff columns.
+ * Used by openGauss type system to stuff columns.
  */
 Datum time_scale(PG_FUNCTION_ARGS)
 {
@@ -1969,7 +1969,7 @@ recalc:
 
 /* timetz_scale()
  * Adjust time type for specified scale factor.
- * Used by PostgreSQL type system to stuff columns.
+ * Used by openGauss type system to stuff columns.
  */
 Datum timetz_scale(PG_FUNCTION_ARGS)
 {

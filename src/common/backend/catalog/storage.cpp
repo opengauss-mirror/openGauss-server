@@ -28,6 +28,7 @@
 #include "access/xlog.h"
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
+#include "access/xlogproc.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/dfsstore_ctlg.h"
@@ -35,11 +36,13 @@
 #include "catalog/storage_gtt.h"
 #include "catalog/storage_xlog.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/pg_tablespace.h"
 #include "commands/tablespace.h"
 #include "pgxc/pgxc.h"
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
-#include "storage/smgr.h"
+#include "storage/smgr/smgr.h"
+#include "storage/smgr/segment.h"
 #include "threadpool/threadpool.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
@@ -84,6 +87,7 @@ typedef struct PendingRelDelete {
     Oid ownerid;                   /* owner id for user space statistics */
     bool atCommit;                 /* T=delete at commit; F=delete at abort */
     int nestLevel;                 /* xact nesting level of request */
+    bool tempTable;                /* whether a table is a temporary table */
     struct PendingRelDelete* next; /* linked-list link */
 } PendingRelDelete;
 
@@ -107,7 +111,6 @@ typedef struct MapperFileOptions {
 } MapperFileOptions;
 
 extern int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber forknum);
-extern int64 calculate_relation_bucket_dir_size(RelFileNode *rfn, BackendId backend, ForkNumber forknum);
 
 void DropDfsDirectory(ColFileNode* colFileNode, bool cfgFromMapper);
 void DropMapperFile(RelFileNode fNode);
@@ -116,6 +119,11 @@ static int SetConnConfig(RelFileNode fNode, DfsSrvOptions* srvOptions, StringInf
 
 extern bool find_tmptable_cache_key(Oid relNode);
 extern void make_tmptable_cache_key(Oid relNode);
+
+static inline bool cbi_is_dummy_rel(Relation rel)
+{
+    return (PointerIsValid(rel) && !OidIsValid(rel->rd_id) && IsCreatingCrossBucketIndex(rel));
+}
 
 /* before creating storage and inserting into the pending
  * delete list, we first set the right backend and check
@@ -155,8 +163,8 @@ static void StorageSetBackendAndLogged(_in_ char relpersistence, _out_ BackendId
  * if it's a row-storage table, *whichAttr* must is *AllTheAttrs*.
  * if it's a column-storage table, *whichAttr* >= *AllTheAttrs*.
  */
-static void InsertStorageIntoPendingList(_in_ const RelFileNode* rnode, _in_ AttrNumber attrnum, _in_ BackendId backend,
-    _in_ Oid ownerid, _in_ bool atCommit, _in_ bool isDfsTruncate = false, Relation rel = NULL)
+void InsertStorageIntoPendingList(_in_ const RelFileNode* rnode, _in_ AttrNumber attrnum, _in_ BackendId backend,
+    _in_ Oid ownerid, _in_ bool atCommit, _in_ bool isDfsTruncate, Relation rel)
 {
     PendingRelDelete* pending = (PendingRelDelete*)MemoryContextAlloc(
         SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(PendingRelDelete));
@@ -192,41 +200,37 @@ static void InsertStorageIntoPendingList(_in_ const RelFileNode* rnode, _in_ Att
     pending->next = u_sess->catalog_cxt.pendingDeletes;
     u_sess->catalog_cxt.pendingDeletes = pending;
 
+    if (rel && RELATION_IS_TEMP(rel)) {
+        pending->tempTable = true;
+    } else {
+        pending->tempTable = false;
+    }
     if (RELATION_IS_GLOBAL_TEMP(rel)) {
         pending->relOid = RelationGetRelid(rel);
-    } else if (!u_sess->attr.attr_sql.enable_cluster_resize) {
+    } else if (!u_sess->attr.attr_sql.enable_cluster_resize && enable_heap_bcm_data_replication()) {
         /* Lock RelFileNode to control concurrent with Catchup Thread */
         LockRelFileNode(*rnode, AccessExclusiveLock);
     }
 }
 
-static void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence, Oid ownerid, const oidvector* bucketlist = NULL, Relation rel = NULL)
+void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence, Oid ownerid, Relation rel = NULL)
 {
     SMgrRelation srel;
     BackendId backend;
     bool needs_wal = false;
-
-    Assert(rnode.bucketNode == DIR_BUCKET_ID || rnode.bucketNode == InvalidBktId);
     
     StorageSetBackendAndLogged(relpersistence, &backend, &needs_wal);
 
-    srel = smgropen(rnode, backend, 0, bucketlist);
+    srel = smgropen(rnode, backend);
     smgrcreate(srel, MAIN_FORKNUM, false);
 
     if (needs_wal) {
-        log_smgrcreate(&srel->smgr_rnode.node, MAIN_FORKNUM, bucketlist);
+        log_smgrcreate(&srel->smgr_rnode.node, MAIN_FORKNUM);
     }
 
-    /* Add the relation to the list of stuff to delete at abort 
-     * Just record non bucket file and bucket dir, not record bucket file
-     * When delete bucket dir, keep bucket dir and delete all the bucket files under dir
-     */
-    if (!BUCKET_NODE_IS_VALID(rnode.bucketNode)) {
+    /* Add the relation to the list of stuff to delete at abort */
+    if (!IsBucketFileNode(rnode)) {
         InsertStorageIntoPendingList(&rnode, InvalidAttrNumber, backend, ownerid, false, false, rel);
-        /* create buckets file */
-        if (rnode.bucketNode == DIR_BUCKET_ID) {
-            smgrcreatebuckets(srel, MAIN_FORKNUM, false);
-        }
     }
 
     /* remember global temp table storage info to localhash */
@@ -246,13 +250,22 @@ static void RelationCreateStorageInternal(RelFileNode rnode, char relpersistence
  * This function is transactional. The creation is WAL-logged, and if the
  * transaction aborts later on, the storage will be destroyed.
  */
-void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid,
-    Oid bucketOid, Oid relfilenode, Relation rel)
+void RelationCreateStorage(RelFileNode rnode, char relpersistence, Oid ownerid, Oid bucketOid, Relation rel)
 {
-    if (OidIsValid(bucketOid) && (bucketOid != VirtualBktOid)) {
-        BucketCreateStorage(rnode, bucketOid, ownerid, relfilenode);
+    if (IsSegmentFileNode(rnode)) {
+        bool newcbi = (rel != NULL) && rel->newcbi;
+        ereport(LOG, (errmodule(MOD_SEGMENT_PAGE), errmsg("Relation Create Storage, rnode %u/%u/%u/%u, "
+                "bucketOid: %u, rel->newcbi: %d",
+                rnode.spcNode, rnode.dbNode, rnode.relNode, rnode.bucketNode, bucketOid, newcbi)));
+    }
+    if (BUCKET_OID_IS_VALID(bucketOid) && !(rel != NULL && IsCreatingCrossBucketIndex(rel))) {
+        BucketCreateStorage(rnode, bucketOid, ownerid);
     } else {
-        RelationCreateStorageInternal(rnode, relpersistence, ownerid, NULL, rel);
+        if (cbi_is_dummy_rel(rel)) {
+            /* dummy relation */
+            rel = NULL;
+        }
+        RelationCreateStorageInternal(rnode, relpersistence, ownerid, rel);
     }
 }
 
@@ -275,62 +288,45 @@ void CStoreRelCreateStorage(RelFileNode* rnode, AttrNumber attrnum, char relpers
     InsertStorageIntoPendingList(rnode, attrnum, backend, ownerid, false);
 }
 
-void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid, Oid relfilenode)
+void BucketCreateStorage(RelFileNode rnode, Oid bucketOid, Oid ownerid)
 {
     RelFileNodeBackend newrnode;
     oidvector* bucketlist = searchHashBucketByOid(bucketOid);
-    bool check_file_exist = true;
 
-    SMgrRelation srel;
-    if (!OidIsValid(relfilenode) || t_thrd.xact_cxt.inheritFileNode != true) {
-        check_file_exist = false;
-    }
     newrnode.node = rnode;
     newrnode.backend = InvalidBackendId;
 
+    ereport(LOG, (errmodule(MOD_SEGMENT_PAGE), errmsg("Bucket Create Storage, bucket dim: %d", bucketlist->dim1)));
+    /* create file storage for each bucket relation */
     for (int i = 0; i < bucketlist->dim1; i++) {
-        /* remove the last shrink remains */
-        if (unlikely(check_file_exist)) {
-            newrnode.node.bucketNode = bucketlist->values[i];
-            srel = smgropen(newrnode.node, InvalidBackendId);
-            if (smgrexists(srel, MAIN_FORKNUM)) {
-                smgrdounlink(srel, false);
-                ereport(WARNING, 
-                    (errmsg("delete file for shrink remains %d/%d/%d_b%d", 
-                        newrnode.node.spcNode, newrnode.node.dbNode, newrnode.node.relNode, newrnode.node.bucketNode)));
-            }
-        }
-
-    }
-
-    if (!OidIsValid(relfilenode) || t_thrd.xact_cxt.inheritFileNode != true) {
-        /* Create Bucket Dir in datanode */
-        newrnode.node.bucketNode = DIR_BUCKET_ID;
-        RelationCreateStorageInternal(newrnode.node, RELPERSISTENCE_PERMANENT, ownerid, bucketlist);
+        newrnode.node.bucketNode = bucketlist->values[i];
+        RelationCreateStorageInternal(newrnode.node, RELPERSISTENCE_PERMANENT, ownerid);
         smgrclosenode(newrnode);
     }
+
+    /* Add the relation to the list of stuff to delete at abort */
+    InsertStorageIntoPendingList(&rnode, InvalidAttrNumber, InvalidBackendId, ownerid, false);
 }
 
 /*
  * Perform XLogInsert of a XLOG_SMGR_CREATE record to WAL.
  */
-void log_smgrcreate(RelFileNode* rnode, ForkNumber forkNum, const oidvector* bucketlist)
+void log_smgrcreate(RelFileNode* rnode, ForkNumber forkNum)
 {
-    xl_smgr_create xlrec;
-
+    if (IsSegmentFileNode(*rnode)) {
+        return;
+    }
+    
     /*
      * Make an XLOG entry reporting the file creation.
      */
+    xl_smgr_create xlrec;
     xlrec.forkNum = forkNum;
     RelFileNodeRelCopy(xlrec.rnode, *rnode);
 
     XLogBeginInsert();
     XLogRegisterData((char*)&xlrec, sizeof(xlrec));
-    if(rnode->bucketNode == DIR_BUCKET_ID) {
-        XLogRegisterData((char*)bucketlist, offsetof(oidvector, values) + (bucketlist->dim1 * sizeof(Oid)));
-    }
     XLogInsert(RM_SMGR_ID, XLOG_SMGR_CREATE | XLR_SPECIAL_REL_UPDATE, false, rnode->bucketNode);
-
 }
 
 static void CStoreRelDropStorage(Relation rel, RelFileNode* rnode, Oid ownerid)
@@ -367,6 +363,8 @@ void InsertPartStorageIntoPendingList(_in_ RelFileNode* partition_rnode, _in_ At
     pending->nestLevel = GetCurrentTransactionNestLevel();
     pending->next = u_sess->catalog_cxt.pendingDeletes;
     u_sess->catalog_cxt.pendingDeletes = pending;
+
+    pending->tempTable = false;
 
     /* Lock RelFileNode to control concurrent with Catchup Thread */
     LockRelFileNode(*partition_rnode, RowExclusiveLock);
@@ -528,14 +526,9 @@ void RelationDropStorage(Relation rel, bool isDfsTruncate)
         }
     }
 
-    /* Drop all bucket's storage of this relation if there is any */
-    if (RELATION_CREATE_BUCKET(rel)) {
-        BucketDropStorage(rel, NULL);
-    } else {
-        /* Add the relation to the list of stuff to delete at commit */
-        InsertStorageIntoPendingList(
-            &rel->rd_node, InvalidAttrNumber, rel->rd_backend, rel->rd_rel->relowner, true, isDfsTruncate, rel);
-    }
+    /* Add the relation to the list of stuff to delete at commit */
+    InsertStorageIntoPendingList(
+        &rel->rd_node, InvalidAttrNumber, rel->rd_backend, rel->rd_rel->relowner, true, isDfsTruncate, rel);
 
     /*
      * NOTE: if the relation was created in this transaction, it will now be
@@ -586,13 +579,8 @@ void PartitionDropStorage(Relation rel, Partition part)
     }
 #endif   /* ENABLE_MULTIPLE_NODES */
 
-    /* Drop all bucket's storage of this relation if there is any */
-    if (RELATION_OWN_BUCKETKEY(rel)) {
-        BucketDropStorage(rel, part);
-    } else {
-        /* Add the relation to the list of stuff to delete at commit */
-        InsertStorageIntoPendingList(&part->pd_node, InvalidAttrNumber, rel->rd_backend, rel->rd_rel->relowner, true);
-    }
+    /* Add the relation to the list of stuff to delete at commit */
+    InsertStorageIntoPendingList(&part->pd_node, InvalidAttrNumber, rel->rd_backend, rel->rd_rel->relowner, true);
 
     /*
      * NOTE: if the relation was created in this transaction, it will now be
@@ -604,36 +592,6 @@ void PartitionDropStorage(Relation rel, Partition part)
      * for now I'll keep the logic simple.
      */
     PartitionCloseSmgr(part);
-}
-
-void BucketDropStorage(Relation relation, Partition partition)
-{
-    RelFileNodeBackend rnode;
-
-    Assert(relation->rd_backend == InvalidBackendId);
-
-    rnode.backend = InvalidBackendId;
-    if (RelationIsPartitioned(relation)) {
-        Assert(PointerIsValid(partition));
-        rnode.node = partition->pd_node;
-    } else {
-        rnode.node = relation->rd_node;
-    }
-
-    /* Add the relation to the list of stuff to delete at commit */
-    InsertStorageIntoPendingList(
-        &rnode.node, InvalidAttrNumber, InvalidBackendId, relation->rd_rel->relowner, true);
-
-    /*
-     * NOTE: if the relation was created in this transaction, it will now be
-     * present in the pending-delete list twice, once with atCommit true and
-     * once with atCommit false.  Hence, it will be physically deleted at end
-     * of xact in either case (and the other entry will be ignored by
-     * smgrDoPendingDeletes, so no error will occur).  We could instead remove
-     * the existing list entry and delete the physical file immediately, but
-     * for now I'll keep the logic simple.
-     */
-    smgrclosenode(rnode);
 }
 
 void RelationPreserveStorage(RelFileNode rnode, bool atCommit)
@@ -669,6 +627,9 @@ void RelationPreserveStorage(RelFileNode rnode, bool atCommit)
  */
 void RelationTruncate(Relation rel, BlockNumber nblocks)
 {
+    /* Currently, segment-page tables should not be truncated */
+    Assert(!RelationIsSegmentTable(rel));
+
     bool fsm = false;
     bool vm = false;
     bool bcm = false;
@@ -685,6 +646,7 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
      * Make sure smgr_targblock etc aren't pointing somewhere past new end
      */
     rel->rd_smgr->smgr_targblock = InvalidBlockNumber;
+    rel->rd_smgr->smgr_prevtargblock = InvalidBlockNumber;
     rel->rd_smgr->smgr_fsm_nblocks = InvalidBlockNumber;
     rel->rd_smgr->smgr_vm_nblocks = InvalidBlockNumber;
     rel->rd_smgr->smgr_cached_nblocks = InvalidBlockNumber;
@@ -758,6 +720,9 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
 
 void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
 {
+    /* Currently, segment-page tables should not be truncated */
+    Assert(!RelationIsSegmentTable(parent));
+
     Relation rel = NULL;
     bool fsm = false;
     bool vm = false;
@@ -777,6 +742,7 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
      * Make sure smgr_targblock etc aren't pointing somewhere past new end
      */
     rel->rd_smgr->smgr_targblock = InvalidBlockNumber;
+    rel->rd_smgr->smgr_prevtargblock = InvalidBlockNumber;
     rel->rd_smgr->smgr_fsm_nblocks = InvalidBlockNumber;
     rel->rd_smgr->smgr_vm_nblocks = InvalidBlockNumber;
 
@@ -841,7 +807,7 @@ static inline bool smgrCheckPendingNumberOverHashThreshold(bool isCommit)
         next = pending->next;
         if (pending->nestLevel >= nestLevel) {
             if (pending->atCommit == isCommit) {
-                if (!IsValidColForkNum(pending->forknum)) {
+                if (!IsValidColForkNum(pending->forknum) && IsSegmentFileNode(pending->relnode)) {
                     pending_cnt++;
                     if (pending_cnt > DROP_BUFFER_USING_HASH_DEL_REL_NUM_THRESHOLD) {
                         return true;
@@ -866,7 +832,7 @@ void smgrDoDropBufferUsingScan(bool isCommit)
         next = pending->next;
         if (pending->nestLevel >= nestLevel) {
             if (pending->atCommit == isCommit) {
-                if (!IsValidColForkNum(pending->forknum)) {
+                if (!IsValidColForkNum(pending->forknum) && IsSegmentFileNode(pending->relnode)) {
                     rnodes[rnode_len++] = pending->relnode;
                 }
             }
@@ -889,7 +855,7 @@ void smgrDoDropBufferUsingHashTbl(bool isCommit)
         if (pending->nestLevel >= nestLevel) {
             /* do deletion if called for */
             if (pending->atCommit == isCommit) {
-                if (!IsValidColForkNum(pending->forknum)) {
+                if (!IsValidColForkNum(pending->forknum) && IsSegmentFileNode(pending->relnode)) {
                     (void)hash_search(relfilenode_hashtbl, &(pending->relnode), HASH_ENTER, &found);
                     if (!found) {
                         enter_cnt++;
@@ -907,7 +873,7 @@ void smgrDoDropBufferUsingHashTbl(bool isCommit)
     relfilenode_hashtbl = NULL;
 }
 
-static inline void smgrDoDropBuffers(bool isCommit)
+static inline void segmentSmgrDoDropBuffers(bool isCommit)
 {
     bool over_hash_thresh = smgrCheckPendingNumberOverHashThreshold(isCommit);
     if (over_hash_thresh) {
@@ -916,6 +882,78 @@ static inline void smgrDoDropBuffers(bool isCommit)
         smgrDoDropBufferUsingScan(isCommit);
     }
 }
+
+static bool ContainsSegmentTable(bool isCommit)
+{
+    PendingRelDelete* pending = NULL;
+    PendingRelDelete* next = NULL;
+
+    int nestLevel = GetCurrentTransactionNestLevel();
+    bool found = false;
+    for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = next) {
+        next = pending->next;
+        if (pending->nestLevel >= nestLevel && pending->atCommit == isCommit) {
+            if (!IsValidColForkNum(pending->forknum) && IsSegmentFileNode(pending->relnode)) {
+                found = true;
+                return found;
+            } 
+        }
+    }
+    return found;
+}
+
+void push_del_rel_to_hashtbl(bool isCommit)
+{
+    HTAB *relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    DelFileTag *entry = NULL;
+    PendingRelDelete* pending = NULL;
+    PendingRelDelete* next = NULL;
+    uint del_rel_num = 0;
+    int nestLevel = GetCurrentTransactionNestLevel();
+    bool found = false;
+
+    for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = next) {
+        next = pending->next;
+        if (pending->nestLevel >= nestLevel) {
+            /* do deletion if called for */
+            if (pending->atCommit == isCommit) {
+                if (!IsValidColForkNum(pending->forknum)) {
+                    del_rel_num++;
+                }
+            }
+        }
+    }
+
+    /* Only push */
+    if (del_rel_num > 0) {
+        LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_EXCLUSIVE);
+        for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = next) {
+            next = pending->next;
+            if (pending->nestLevel >= nestLevel) {
+                /* do deletion if called for */
+                if (pending->atCommit == isCommit) {
+                    if (!IsValidColForkNum(pending->forknum) && !IsSegmentFileNode(pending->relnode)) {
+                        entry = (DelFileTag*)hash_search(relfilenode_hashtbl, &(pending->relnode), HASH_ENTER, &found);
+                        if (!found) {
+                            entry->rnode.spcNode = pending->relnode.spcNode;
+                            entry->rnode.dbNode = pending->relnode.dbNode;
+                            entry->rnode.relNode = pending->relnode.relNode;
+                            entry->rnode.bucketNode = pending->relnode.bucketNode;
+                            entry->maxSegNo = -1;
+                        }
+                    }
+                }
+            }
+        }
+        LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+    }
+
+    if (del_rel_num > 0 && g_instance.bgwriter_cxt.invalid_buf_proc_latch != NULL) {
+        SetLatch(g_instance.bgwriter_cxt.invalid_buf_proc_latch);
+    }
+    return;
+}
+
 
 /*
  *	smgrDoPendingDeletes() -- Take care of relation deletes at end of xact.
@@ -934,10 +972,18 @@ void smgrDoPendingDeletes(bool isCommit)
     PendingRelDelete* pending = NULL;
     PendingRelDelete* prev = NULL;
     PendingRelDelete* next = NULL;
-
+    bool needDelete = PointerIsValid(u_sess->catalog_cxt.pendingDeletes);
     ColMainFileNodesCreate();
 
-    smgrDoDropBuffers(isCommit);
+    if (needDelete) {
+        START_CRIT_SECTION();
+        t_thrd.pgxact->delayChkpt = true;
+    }
+
+    if (ContainsSegmentTable(isCommit)) {
+        segmentSmgrDoDropBuffers(isCommit);
+    }
+    push_del_rel_to_hashtbl(isCommit);
 
     for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = next) {
         next = pending->next;
@@ -996,6 +1042,10 @@ void smgrDoPendingDeletes(bool isCommit)
         }
     }
     ColMainFileNodesDestroy();
+    if (needDelete) {
+        t_thrd.pgxact->delayChkpt = false;
+        END_CRIT_SECTION();
+    }
 
     /* just for "vacuum full" to delete files in hdfs */
     if (u_sess->catalog_cxt.pendingDfsDeletes)
@@ -1019,7 +1069,7 @@ void smgrDoPendingDeletes(bool isCommit)
  * Note that the list does not include anything scheduled for termination
  * by upper-level transactions.
  */
-int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr)
+int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr, bool skipTemp, int *numTempRel)
 {
     int nestLevel = GetCurrentTransactionNestLevel();
     int nrels;
@@ -1028,7 +1078,8 @@ int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr)
 
     nrels = 0;
     for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = pending->next) {
-        if (pending->nestLevel >= nestLevel && pending->atCommit == forCommit && pending->backend == InvalidBackendId)
+        if (pending->nestLevel >= nestLevel && pending->atCommit == forCommit && pending->backend == InvalidBackendId
+            && (!skipTemp || !pending->tempTable))
             nrels++;
     }
     if (nrels == 0) {
@@ -1039,8 +1090,27 @@ int smgrGetPendingDeletes(bool forCommit, ColFileNodeRel** ptr)
     rptrRel = (ColFileNodeRel*)palloc(nrels * sizeof(ColFileNodeRel));
     *ptr = rptrRel;
 
+    /* Obtain the temporary table first */
+    if (!skipTemp) {
+        for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = pending->next) {
+            if (pending->nestLevel >= nestLevel && pending->atCommit == forCommit &&
+                pending->backend == InvalidBackendId && pending->tempTable) {
+                rptrRel->filenode.spcNode = pending->relnode.spcNode;
+                rptrRel->filenode.dbNode = pending->relnode.dbNode;
+                rptrRel->filenode.relNode = pending->relnode.relNode;
+                rptrRel->forknum = pending->forknum;
+                rptrRel->ownerid = pending->ownerid;
+                /* Add bucketid into forknum */
+                forknum_add_bucketid(rptrRel->forknum, pending->relnode.bucketNode);
+                rptrRel++;
+                *numTempRel += 1;
+            }
+        }
+    }
+
     for (pending = u_sess->catalog_cxt.pendingDeletes; pending != NULL; pending = pending->next) {
-        if (pending->nestLevel >= nestLevel && pending->atCommit == forCommit && pending->backend == InvalidBackendId) {
+        if (pending->nestLevel >= nestLevel && pending->atCommit == forCommit && pending->backend == InvalidBackendId
+            && !pending->tempTable) {
             rptrRel->filenode.spcNode = pending->relnode.spcNode;
             rptrRel->filenode.dbNode = pending->relnode.dbNode;
             rptrRel->filenode.relNode = pending->relnode.relNode;
@@ -1097,7 +1167,7 @@ void AtSubCommit_smgr(void)
  * We can execute these operations immediately because we know this
  * subtransaction will not commit.
  */
-void AtSubAbort_smgr(void)
+void AtSubAbort_smgr()
 {
     smgrDoPendingDeletes(false);
 }
@@ -1105,20 +1175,13 @@ void AtSubAbort_smgr(void)
 void smgr_redo_create(RelFileNode rnode, ForkNumber forkNum, char *data)
 {
     if (!IsValidColForkNum(forkNum)) {
-        oidvector* bucketlist = NULL;
-        if (rnode.bucketNode == DIR_BUCKET_ID) {
-            bucketlist = (oidvector*)(data + sizeof(xl_smgr_create));
-        }
-        SMgrRelation reln = smgropen(rnode, InvalidBackendId, 0, bucketlist);
+        SMgrRelation reln = smgropen(rnode, InvalidBackendId, 0);
         smgrcreate(reln, forkNum, true);
-        if (rnode.bucketNode == DIR_BUCKET_ID) {
-            smgrcreatebuckets(reln, forkNum, true);
-        }
     } else {
         CFileNode cFileNode(rnode, ColForkNum2ColumnId(forkNum), MAIN_FORKNUM);
         CUStorage* cuStorage = New(CurrentMemoryContext) CUStorage(cFileNode);
         Assert(cuStorage);
-        TablespaceCreateDbspace(rnode, true);
+        TablespaceCreateDbspace(rnode.spcNode, rnode.dbNode, true);
         cuStorage->CreateStorage(0, true);
         DELETE_EX(cuStorage);
     }
@@ -1139,6 +1202,7 @@ void xlog_block_smgr_redo_truncate(RelFileNode rnode, BlockNumber blkno, XLogRec
     FreeFakeRelcacheEntry(rel);
     UnlockRelFileNode(rnode, AccessExclusiveLock);
 }
+
 void smgr_redo(XLogReaderState* record)
 {
     XLogRecPtr lsn = record->EndRecPtr;
@@ -1188,7 +1252,6 @@ void smgr_redo(XLogReaderState* record)
         xlog_block_smgr_redo_truncate(rnode, xlrec->blkno, lsn);
     } else
         ereport(PANIC, (errmsg("smgr_redo: unknown op code %u", info)));
-
 }
 
 void smgrApplyXLogTruncateRelation(XLogReaderState* record)
@@ -2179,26 +2242,29 @@ void RowRelationDoDeleteFiles(RelFileNode rnode, BackendId backend, Oid ownerid,
     /* decrease the permanent space on users' record */
     uint64 size = GetSMgrRelSize(&rnode, backend, InvalidForkNumber);
     perm_space_decrease(ownerid, size, find_tmptable_cache_key(rnode.relNode) ? SP_TEMP : SP_PERM);
+
     SMgrRelation srel = smgropen(rnode, backend);
 
     /* Before unlinking files, invalid all the shared buffers first. */
     smgrdounlink(srel, false);
     smgrclose(srel);
 
-    /* clean global temp table flags when transaction commit or rollback */
-    if (SmgrIsTemp(srel) && relOid != InvalidOid && gtt_storage_attached(relOid)) {
-        forget_gtt_storage_info(relOid, rnode, isCommit);
+    if (!IsSegmentFileNode(rnode)) {
+        /* clean global temp table flags when transaction commit or rollback */
+        if (SmgrIsTemp(srel) && relOid != InvalidOid && gtt_storage_attached(relOid)) {
+            forget_gtt_storage_info(relOid, rnode, isCommit);
+        }
+
+        /*
+         * After files are deleted, append this filenode into BCM file list,
+         * so that we know all the BCM shared buffers of column relation has been
+         * invalided.
+         */
+        ColMainFileNodesAppend(&rnode, backend);
+
+        /* do nothing for row table. or invalid space cache for column table. */
+        CStore::InvalidRelSpaceCache(&rnode);
     }
-
-    /*
-     * After files are deleted, append this filenode into BCM file list,
-     * so that we know all the BCM shared buffers of column relation has been
-     * invalided.
-     */
-    ColMainFileNodesAppend(&rnode, backend);
-
-    /* do nothing for row table. or invalid space cache for column table. */
-    CStore::InvalidRelSpaceCache(&rnode);
 }
 
 /*
@@ -2214,11 +2280,12 @@ uint64 GetSMgrRelSize(RelFileNode* relfilenode, BackendId backend, ForkNumber fo
 
     uint64 size = 0;
 
-    if (BUCKET_ID_IS_DIR(relfilenode->bucketNode)) {
-        size = calculate_relation_bucket_dir_size(relfilenode, backend, forkNum);
-    } else if (forkNum == InvalidForkNumber) {
+    if (forkNum == InvalidForkNumber) {
         for (int fork = 0; fork <= MAX_FORKNUM; fork++) {
             size += calculate_relation_size(relfilenode, backend, fork);
+            if (relfilenode->bucketNode == SegmentBktId) {
+                break;
+            }
         }
     } else {
         /* Column data 's BCM */
@@ -2275,10 +2342,12 @@ uint64 GetDfsDelFileSize(List* dfsfilelist, bool isCommit)
 
     return size;
 }
+
 bool IsSmgrTruncate(const XLogReaderState* record)
 {
-    return (XLogRecGetRmid(record) == RM_SMGR_ID && (XLogRecGetInfo(record) & (~XLR_INFO_MASK)) == XLOG_SMGR_TRUNCATE);
+    return ((XLogRecGetRmid(record) == RM_SMGR_ID && (XLogRecGetInfo(record) & (~XLR_INFO_MASK)) == XLOG_SMGR_TRUNCATE));
 }
+
 bool IsSmgrCreate(const XLogReaderState* record)
 {
     return (XLogRecGetRmid(record) == RM_SMGR_ID && (XLogRecGetInfo(record) & (~XLR_INFO_MASK)) == XLOG_SMGR_CREATE);

@@ -18,7 +18,7 @@
 
 #include "access/gist_private.h"
 #include "lib/stringinfo.h"
-#include "storage/relfilenode.h"
+#include "storage/smgr/relfilenode.h"
 
 static void out_gistxlogPageSplit(StringInfo buf, gistxlogPageSplit *xlrec)
 {

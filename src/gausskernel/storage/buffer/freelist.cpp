@@ -28,6 +28,7 @@
 #include "access/double_write.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/storage_gstrace.h"
+#include "pgstat.h"
 
 #define INT_ACCESS_ONCE(var) ((int)(*((volatile int *)&(var))))
 
@@ -232,21 +233,37 @@ BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state)
 
     /* Check the Candidate list */
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
-        g_instance.bgwriter_cxt.bgwriter_num > 0) {
-        buf = get_buf_from_candidate_list(strategy, buf_state);
-        if (buf != NULL) {
-            (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
-            return buf;
+        g_instance.bgwriter_cxt.curr_bgwriter_num > 0) {
+        if (u_sess->attr.attr_storage.enable_candidate_buf_usage_count) {
+            if (pg_atomic_read_u32(&g_instance.bgwriter_cxt.curr_bgwriter_num) > 0) {
+                uint64 maxSleep = 10000L;
+                uint64 minSleep = 1000L;
+                uint64 sleepTime = minSleep;
+                while (true) {
+                    buf = get_buf_from_candidate_list(strategy, buf_state);
+                    if (buf != NULL) {
+                        (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
+                        return buf;
+                    }
+                    pg_usleep(sleepTime);
+                    sleepTime = Min(sleepTime * 2, maxSleep);
+                }
+            }
+        } else {
+            buf = get_buf_from_candidate_list(strategy, buf_state);
+            if (buf != NULL) {
+                (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
+                return buf;
+            }
         }
     }
 
 retry:
     /* Nothing on the freelist, so run the "clock sweep" algorithm */
     if (am_standby)
-        max_buffer_can_use =
-            int(g_instance.attr.attr_storage.NBuffers * u_sess->attr.attr_storage.shared_buffers_fraction);
+        max_buffer_can_use = int(NORMAL_SHARED_BUFFER_NUM * u_sess->attr.attr_storage.shared_buffers_fraction);
     else
-        max_buffer_can_use = g_instance.attr.attr_storage.NBuffers;
+        max_buffer_can_use = NORMAL_SHARED_BUFFER_NUM;
     try_counter = max_buffer_can_use;
     int try_get_loc_times = max_buffer_can_use;
     for (;;) {
@@ -266,6 +283,7 @@ retry:
 
         retry_lock_status.retry_times = 0;
         if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 &&
+            !(local_buf_state & BM_IS_META) &&
             (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
             /* Found a usable buffer */
             if (strategy != NULL)
@@ -327,7 +345,7 @@ int StrategySyncStart(uint32 *complete_passes, uint32 *num_buf_alloc)
 
     SpinLockAcquire(&t_thrd.storage_cxt.StrategyControl->buffer_strategy_lock);
     next_victim_buffer = pg_atomic_read_u32(&t_thrd.storage_cxt.StrategyControl->nextVictimBuffer);
-    result = next_victim_buffer % g_instance.attr.attr_storage.NBuffers;
+    result = next_victim_buffer % TOTAL_BUFFER_NUM;
 
     if (complete_passes != NULL) {
         *complete_passes = t_thrd.storage_cxt.StrategyControl->completePasses;
@@ -335,7 +353,7 @@ int StrategySyncStart(uint32 *complete_passes, uint32 *num_buf_alloc)
          * Additionally add the number of wraparounds that happened before
          * completePasses could be incremented. C.f. ClockSweepTick().
          */
-        *complete_passes += next_victim_buffer / (unsigned int)g_instance.attr.attr_storage.NBuffers;
+        *complete_passes += next_victim_buffer / (unsigned int) NORMAL_SHARED_BUFFER_NUM;
     }
 
     if (num_buf_alloc != NULL) {
@@ -378,7 +396,7 @@ Size StrategyShmemSize(void)
     Size size = 0;
 
     /* size of lookup hash table ... see comment in StrategyInitialize */
-    size = add_size(size, BufTableShmemSize(g_instance.attr.attr_storage.NBuffers + NUM_BUFFER_PARTITIONS));
+    size = add_size(size, BufTableShmemSize(TOTAL_BUFFER_NUM + NUM_BUFFER_PARTITIONS));
 
     /* size of the shared replacement strategy control block */
     size = add_size(size, MAXALIGN(sizeof(BufferStrategyControl)));
@@ -407,7 +425,7 @@ void StrategyInitialize(bool init)
      * happening in each partition concurrently, so we could need as many as
      * NBuffers + NUM_BUFFER_PARTITIONS entries.
      */
-    InitBufTable(g_instance.attr.attr_storage.NBuffers + NUM_BUFFER_PARTITIONS);
+    InitBufTable(TOTAL_BUFFER_NUM + NUM_BUFFER_PARTITIONS);
 
     /*
      * Get or create the shared strategy control block
@@ -585,18 +603,20 @@ RETRY:
      * shouldn't re-use it.
      */
     buf = GetBufferDescriptor(buf_num - 1);
-    if ((pg_atomic_read_u32(&buf->state) & BM_DIRTY) &&
-        retry_times < Min(MAX_RETRY_RING_TIMES, strategy->ring_size * MAX_RETRY_RING_PCT)) {
-        goto RETRY;
-    } else if (get_curr_candidate_nums() >= (uint32)g_instance.attr.attr_storage.NBuffers *
-        u_sess->attr.attr_storage.candidate_buf_percent_target) {
-        strategy->current_was_in_ring = false;
-        return NULL;
+    if (pg_atomic_read_u32(&buf->state) & (BM_DIRTY | BM_IS_META)) {
+        if (retry_times < Min(MAX_RETRY_RING_TIMES, strategy->ring_size * MAX_RETRY_RING_PCT)) {
+            goto RETRY;
+        } else if (get_curr_candidate_nums(false) >= (uint32)g_instance.attr.attr_storage.NBuffers *
+            u_sess->attr.attr_storage.candidate_buf_percent_target){
+            strategy->current_was_in_ring = false;
+            return NULL;
+        }
     }
 
     local_buf_state = LockBufHdr(buf);
     if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && BUF_STATE_GET_USAGECOUNT(local_buf_state) <= 1 &&
-        (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
+        (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY)) &&
+        !(local_buf_state & BM_IS_META)) {
         strategy->current_was_in_ring = true;
         *buf_state = local_buf_state;
         return buf;
@@ -672,36 +692,60 @@ void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, in
 }
 
 const int CANDIDATE_DIRTY_LIST_LEN = 100;
+const float HIGH_WATER = 0.75;
 static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint32* buf_state)
 {
     BufferDesc* buf = NULL;
     int bgwriter_num = g_instance.bgwriter_cxt.bgwriter_num;
     uint32 local_buf_state;
     int buf_id = 0;
-
-    int list_num = bgwriter_num;
-    int list_id = random() % list_num;
-    Buffer *candidate_dirty_list = (Buffer*)palloc0(sizeof(Buffer) * CANDIDATE_DIRTY_LIST_LEN);
+    int list_num = bgwriter_num - 1;
+    int list_id = 0;
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    Buffer *candidate_dirty_list = NULL;
     int dirty_list_num = 0;
+    bool need_scan_dirty =
+        (g_instance.ckpt_cxt_ctl->actual_dirty_page_num / (float)(g_instance.attr.attr_storage.NBuffers) > HIGH_WATER)
+        && backend_can_flush_dirty_page();
+    if (need_scan_dirty) {
+        /*Not return the dirty page when there are few dirty pages */
+        candidate_dirty_list = (Buffer*)palloc0(sizeof(Buffer) * CANDIDATE_DIRTY_LIST_LEN);
+    }
+
+    if (beentry->st_tid > 0) {
+        list_id = (t_thrd.shemem_ptr_cxt.MyBEEntry->st_tid) % list_num;
+    } else {
+        list_id = (t_thrd.shemem_ptr_cxt.MyBEEntry->st_sessionid) % list_num;
+    }
+
     for (int i = 0; i < list_num; i++) {
         int thread_id = (list_id + i) % list_num;
         BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
 
         while (candidate_buf_pop(&buf_id, thread_id)) {
+            Assert(buf_id < SegmentBufferStartID);
             buf = GetBufferDescriptor(buf_id);
             local_buf_state = LockBufHdr(buf);
 
             if (g_instance.bgwriter_cxt.candidate_free_map[buf_id]) {
                 g_instance.bgwriter_cxt.candidate_free_map[buf_id] = false;
-                if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_DIRTY)) {
+                bool empty_usage_count = (!u_sess->attr.attr_storage.enable_candidate_buf_usage_count ||
+                    BUF_STATE_GET_USAGECOUNT(local_buf_state) == 0);
+                bool available_buffer = BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && empty_usage_count 
+                    && !(local_buf_state & BM_IS_META) 
+                    && !(local_buf_state & BM_DIRTY);
+                bool add_to_candidate_dirty_list = (need_scan_dirty && !(local_buf_state & BM_IS_META) &&
+                    BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && dirty_list_num < CANDIDATE_DIRTY_LIST_LEN);
+                if (available_buffer) {
                     if (strategy != NULL) {
                         AddBufferToRing(strategy, buf);
                     }
                     *buf_state = local_buf_state;
-                    pfree(candidate_dirty_list);
+                    if (candidate_dirty_list != NULL) {
+                        pfree(candidate_dirty_list);
+                    }
                     return buf;
-                } else if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 &&
-                    dirty_list_num < CANDIDATE_DIRTY_LIST_LEN) {
+                } else if (add_to_candidate_dirty_list) {
                     candidate_dirty_list[dirty_list_num++] = buf_id;
                 }
             }
@@ -714,12 +758,14 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
             SetLatch(&bgwriter->proc->procLatch);
         }
     }
-    if (backend_can_flush_dirty_page()) {
+
+    if (need_scan_dirty) {
         for (int i = 0; i < dirty_list_num; i++) {
             buf_id = candidate_dirty_list[i];
             buf = GetBufferDescriptor(buf_id);
             local_buf_state = LockBufHdr(buf);
-            if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0) {
+            if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 
+                && !(local_buf_state & BM_IS_META)) {
                 if (strategy != NULL) {
                     AddBufferToRing(strategy, buf);
                 }
@@ -731,6 +777,10 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
             UnlockBufHdr(buf, local_buf_state);
         }
     }
-    pfree(candidate_dirty_list);
-	return NULL;
+
+    if (candidate_dirty_list != NULL) {
+        pfree(candidate_dirty_list);
+    }
+    return NULL;
 }
+

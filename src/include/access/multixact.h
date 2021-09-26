@@ -27,6 +27,33 @@
 #define NUM_MXACTOFFSET_BUFFERS 8
 #define NUM_MXACTMEMBER_BUFFERS 16
 
+/*
+ * Possible multixact lock modes ("status").  The first four modes are for
+ * tuple locks (FOR KEY SHARE, FOR SHARE, FOR NO KEY UPDATE, FOR UPDATE); the
+ * next two are used for update and delete modes.
+ */
+typedef enum {
+        MultiXactStatusForKeyShare = 0x00,
+        MultiXactStatusForShare = 0x01,
+        MultiXactStatusForNoKeyUpdate = 0x02,
+        MultiXactStatusForUpdate = 0x03,
+        /* an update that doesn't touch "key" columns */
+        MultiXactStatusNoKeyUpdate = 0x04,
+        /* other updates, and delete */
+        MultiXactStatusUpdate = 0x05
+} MultiXactStatus;
+
+#define MaxMultiXactStatus MultiXactStatusUpdate
+
+/* does a status value correspond to a tuple update? */
+#define ISUPDATE_from_mxstatus(status) \
+                        ((status) > MultiXactStatusForUpdate)
+
+typedef struct MultiXactMember {
+        TransactionId xid;
+        MultiXactStatus status;
+} MultiXactMember;
+
 /* ----------------
  *		multixact-related XLOG entries
  * ----------------

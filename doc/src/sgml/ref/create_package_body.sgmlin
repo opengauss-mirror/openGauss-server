@@ -1,0 +1,17 @@
+<refentry id="SQL-CREATE_PACKAGE_BODY">
+<refmeta>
+<refentrytitle>CREATE PACKAGE BODY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE PACKAGE BODY</refname>
+<refpurpose>create a package body</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ OR REPLACE ] PACKAGE BODY [ schema ] package_name
+    { IS | AS } declare_section [ initialize_section ] END package_name;
+</synopsis>
+</refsynopsisdiv>
+</refentry>

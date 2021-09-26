@@ -100,10 +100,6 @@ static int KeyUpdatedtimeCmp(const void* a, const void* b);
 static bool AutoRecycleUniqueSQLEntry();
 #endif
 
-/* ---------Thread Local Variable---------- */
-/* save prev-hooks */
-static post_parse_analyze_hook_type g_prev_post_parse_analyze_hook = NULL;
-
 static uint32 uniqueSQLHashCode(const void* key, Size size)
 {
     const UniqueSQLKey* k = (const UniqueSQLKey*)key;
@@ -238,6 +234,7 @@ void InitUniqueSQL()
         UNIQUE_SQL_MAX_HASH_SIZE,
         &ctl,
         HASH_ELEM | HASH_SHRCTX | HASH_FUNCTION | HASH_COMPARE | HASH_PARTITION | HASH_NOEXCEPT);
+    init_builtin_unique_sql();
 }
 
 void instr_unique_sql_register_hook()
@@ -248,7 +245,7 @@ void instr_unique_sql_register_hook()
     }
 
     // register hooks
-    g_prev_post_parse_analyze_hook = post_parse_analyze_hook;
+    t_thrd.statement_cxt.instr_prev_post_parse_analyze_hook = (void *)post_parse_analyze_hook;
     post_parse_analyze_hook = UniqueSq::unique_sql_post_parse_analyze;
 }
 
@@ -1745,6 +1742,10 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
     if (!OidIsValid(u_sess->unique_sql_cxt.unique_sql_cn_id)) {
         Oid node_oid = get_pgxc_nodeoid(g_instance.attr.attr_common.PGXCNodeName);
         u_sess->unique_sql_cxt.unique_sql_cn_id = get_pgxc_node_id(node_oid);
+        if (u_sess->globalSessionId.sessionId) {
+            u_sess->globalSessionId.nodeId = u_sess->unique_sql_cxt.unique_sql_cn_id;
+            pgstat_report_global_session_id(u_sess->globalSessionId);
+        }
     }
 
     u_sess->unique_sql_cxt.unique_sql_user_id = GetUserId();
@@ -1776,8 +1777,8 @@ void UniqueSq::unique_sql_post_parse_analyze(ParseState* pstate, Query* query)
         }
     }
 
-    if (g_prev_post_parse_analyze_hook != NULL) {
-        g_prev_post_parse_analyze_hook(pstate, query);
+    if (t_thrd.statement_cxt.instr_prev_post_parse_analyze_hook != NULL) {
+        ((post_parse_analyze_hook_type)(t_thrd.statement_cxt.instr_prev_post_parse_analyze_hook))(pstate, query);
     }
 }
 
@@ -1803,6 +1804,8 @@ static void SetLocalUniqueSQLId(List* query_list)
                 if (!OidIsValid(u_sess->unique_sql_cxt.unique_sql_cn_id)) {
                     Oid node_oid = get_pgxc_nodeoid(g_instance.attr.attr_common.PGXCNodeName);
                     u_sess->unique_sql_cxt.unique_sql_cn_id = get_pgxc_node_id(node_oid);
+                    u_sess->globalSessionId.nodeId = u_sess->unique_sql_cxt.unique_sql_cn_id;
+                    pgstat_report_global_session_id(u_sess->globalSessionId);
                 }
 
                 u_sess->unique_sql_cxt.unique_sql_user_id = GetUserId();
@@ -2041,7 +2044,8 @@ void ReplyUniqueSQLsStat(StringInfo msg, uint32 count)
 
     ResourceOwner old_cur_owner = t_thrd.utils_cxt.CurrentResourceOwner;
     MemoryContext old_ctx = MemoryContextSwitchTo(t_thrd.mem_cxt.msg_mem_cxt);
-    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ReplyUniqueSQL", MEMORY_CONTEXT_DFX);
+    t_thrd.utils_cxt.CurrentResourceOwner = ResourceOwnerCreate(NULL, "ReplyUniqueSQL",
+        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_DFX));
 
     PG_TRY();
     {
@@ -2482,7 +2486,7 @@ static bool AutoRecycleUniqueSQLEntry()
     long totalCount = hash_get_num_entries(g_instance.stat_cxt.UniqueSQLHashtbl);
     if (totalCount < u_sess->attr.attr_common.instr_unique_sql_count - 1) {
         LWLockRelease(UniqueSqlEvictLock);
-        ereport(DEBUG1,
+        ereport(LOG,
             (errmodule(MOD_INSTR), errmsg("[UniqueSQL] There is still free space in unique SQL hash table and no need to clean it up.")));
         return true;
     }
@@ -2519,7 +2523,7 @@ static bool AutoRecycleUniqueSQLEntry()
     }
     pfree(removeList);
     LWLockRelease(UniqueSqlEvictLock);
-    ereport(DEBUG1,
+    ereport(LOG,
             (errmodule(MOD_INSTR), errmsg("[UniqueSQL] Auto-cleanup over, %d uniquesqls are recycled.", cleanCount)));
     return true;
 }

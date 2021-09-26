@@ -68,6 +68,7 @@
 #include "access/twophase.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "catalog/pgxc_group.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/procarray.h"
 #include "utils/builtins.h"
@@ -340,7 +341,9 @@ bool HeapTupleSatisfiesSelf(HeapTuple htup, Snapshot snapshot, Buffer buffer)
 /* Don't sync pgxc node table, it will hold NodeTableLock to read tuple and it's only useful in local node */
 static inline bool NeedSyncXact(uint32 syncFlag, Oid tableOid) 
 {
-    return ((syncFlag & SNAPSHOT_NOW_NEED_SYNC) && IsNormalProcessingMode()) && (tableOid != PgxcNodeRelationId) &&
+    return ((syncFlag & SNAPSHOT_NOW_NEED_SYNC) && IsNormalProcessingMode()) &&
+        (tableOid != PgxcNodeRelationId) &&
+        (tableOid != PgxcGroupRelationId) &&
         !u_sess->attr.attr_common.xc_maintenance_mode && !t_thrd.xact_cxt.bInAbortTransaction;
 }
 /*
@@ -881,7 +884,9 @@ static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buf
         if (HeapTupleHeaderXminInvalid(tuple))
             return false;
 
-        if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple))) {
+        /* IMPORTANT: Version snapshot is independent of the current transaction. */
+        if (!IsVersionMVCCSnapshot(snapshot) &&
+            TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple))) {
             if ((tuple->t_infomask & HEAP_COMBOCID) && CheckStreamCombocid(tuple, snapshot->curcid, page))
                 return true; /* delete after stream producer thread scan started */
 
@@ -960,7 +965,9 @@ recheck_xmax:
         bool sync = false;
         TransactionId xmax = HeapTupleHeaderGetXmax(page, tuple);
 
-        if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
+        /* IMPORTANT: Version snapshot is independent of the current transaction. */
+        if (!IsVersionMVCCSnapshot(snapshot) &&
+            TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
             if (HeapTupleHeaderGetCmax(tuple, page) >= snapshot->curcid)
                 return true; /* deleted after scan started */
             else
@@ -1011,121 +1018,40 @@ recheck_xmax:
     return false;
 }
 
-/*
- * HeapTupleSatisfiesLocalMVCC
- *		True iff heap tuple is valid for the given local MVCC snapshot.
- *
- *	Here, we consider the effects of:
- *		all transactions local committed as of the time of the given snapshot
- *		previous commands of this transaction
- *
- *	Does _not_ include:
- *		transactions committed in gtm but not committed locally
- *		transactions shown as in-progress by the snapshot
- *		transactions started after the snapshot was taken
- *		changes made by the current command
- *
- * This is the same as HeapTupleSatisfiesNow, except that transactions that
- * were in progress or as yet unstarted when the snapshot was taken will
- * be treated as uncommitted, even if they have committed by now.
- *
- * (Notice, the tuple status hint bits will be not updated.)
- */
-
-static bool HeapTupleSatisfiesLocalMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer)
+static bool HeapTupleSatisfiesVersionMVCC(HeapTuple htup, Snapshot snapshot, Buffer buffer)
 {
-    HeapTupleHeader tuple = htup->t_data;
-    Assert(ItemPointerIsValid(&htup->t_self));
-    Assert(htup->t_tableOid != InvalidOid);
-    bool visible = false;
-    Page page = BufferGetPage(buffer);
-
-    ereport(DEBUG1,
-        (errmsg("HeapTupleSatisfiesLocalMVCC ctid (%u,%u) cur_xid " XID_FMT " xmin " XID_FMT
-                " xmax " XID_FMT " csn " CSN_FMT,
-            ItemPointerGetBlockNumber(&tuple->t_ctid),
-            ItemPointerGetOffsetNumber(&tuple->t_ctid),
-            GetCurrentTransactionIdIfAny(),
-            HeapTupleHeaderGetXmin(page, tuple),
-            HeapTupleHeaderGetXmax(page, tuple),
-            snapshot->snapshotcsn)));
-
     /*
-     * Just valid for read-only transaction when u_sess->attr.attr_common.XactReadOnly is true.
-     * Show any tuples including dirty ones when u_sess->attr.attr_storage.enable_show_any_tuples is true.
-     * GUC param u_sess->attr.attr_storage.enable_show_any_tuples is just for analyse or maintenance
+     * IMPORTANT: We distinguish the SNAPSHOT_MVCC and SNAPSHOT_VERSION_MVCC 
+     *     with IsVersionMVCCSnapshot MACRO in HeapTupleSatisfiesMVCC implement.
+     *     Here we define HeapTupleSatisfiesVersionMVCC to point the differences.
      */
-    if (u_sess->attr.attr_common.XactReadOnly && u_sess->attr.attr_storage.enable_show_any_tuples)
-        return true;
+    return HeapTupleSatisfiesMVCC(htup, snapshot, buffer);
+}
 
-    if (!HeapTupleHeaderXminCommitted(tuple)) {
-        if (HeapTupleHeaderXminInvalid(tuple))
-            return false;
+static bool HeapTupleSatisfiesLost(HeapTuple htup, Snapshot snapshot, Buffer buffer)
+{
+    /*
+     * Used for `TIMECAPSULE TABLE TO TIMESTAMP/CSN expr` stmt.
+     *
+     * Tuple is visiable if inserted before `snapshot` and deleted after `snapshot` until SnapshotNow.
+     * SnapshotNow is safe to use as we already locked table in AccessExclusiveLock before scan.
+     */
 
-        if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple))) {
-            if ((tuple->t_infomask & HEAP_COMBOCID) && CheckStreamCombocid(tuple, snapshot->curcid, page))
-                return true; /* delete after stream producer thread scan started */
+    return HeapTupleSatisfiesVersionMVCC(htup, snapshot, buffer) &&
+        !HeapTupleSatisfiesNow(htup, SnapshotNow, buffer);
+}
 
-            if (HeapTupleHeaderGetCmin(tuple, page) >= snapshot->curcid)
-                return false; /* inserted after scan started */
+static bool HeapTupleSatisfiesDelta(HeapTuple htup, Snapshot snapshot, Buffer buffer)
+{
+    /*
+     * Used for `TIMECAPSULE TABLE TO TIMESTAMP/CSN expr` stmt.
+     *
+     * Tuple is visiable if inserted after `snapshot` until SnapshotNow.
+     * SnapshotNow is safe to use as we already locked table in AccessExclusiveLock before scan.
+     */
 
-            if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
-                return true;
-
-            if (tuple->t_infomask & HEAP_IS_LOCKED) /* not deleter */
-                return true;
-
-            Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
-
-            if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
-                return true;
-            }
-
-            if (HeapTupleHeaderGetCmax(tuple, page) >= snapshot->curcid)
-                return true; /* deleted after scan started */
-            else
-                return false; /* deleted before scan started */
-        } else {
-            visible = XidVisibleInLocalSnapshot(HeapTupleHeaderGetXmin(page, tuple), snapshot);
-
-            if (!visible)
-                return false;
-        }
-    } else {
-        /* xmin is committed, but maybe not according to our snapshot */
-        if (!HeapTupleHeaderXminFrozen(tuple) &&
-            !XidVisibleInLocalSnapshot(HeapTupleHeaderGetXmin(page, tuple), snapshot))
-            return false; /* treat as still in progress */
-    }
-    if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid or aborted */
-        return true;
-
-    if (tuple->t_infomask & HEAP_IS_LOCKED)
-        return true;
-
-    if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
-        /* MultiXacts are currently only allowed to lock tuples */
-        Assert(tuple->t_infomask & HEAP_IS_LOCKED);
-        return true;
-    }
-
-    if (!(tuple->t_infomask & HEAP_XMAX_COMMITTED)) {
-        if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
-            if (HeapTupleHeaderGetCmax(tuple, page) >= snapshot->curcid)
-                return true; /* deleted after scan started */
-            else
-                return false; /* deleted before scan started */
-        }
-
-        visible = XidVisibleInLocalSnapshot(HeapTupleHeaderGetXmax(page, tuple), snapshot);
-        if (!visible)
-            return true; /* treat as still in progress */
-    } else {
-        /* xmax is committed, but maybe not according to our snapshot */
-        if (!XidVisibleInLocalSnapshot(HeapTupleHeaderGetXmax(page, tuple), snapshot))
-            return true; /* treat as still in progress */
-    }
-    return false;
+    return !HeapTupleSatisfiesVersionMVCC(htup, snapshot, buffer) &&
+        HeapTupleSatisfiesNow(htup, SnapshotNow, buffer);
 }
 
 /*
@@ -1505,8 +1431,14 @@ bool HeapTupleSatisfiesVisibility(HeapTuple tup, Snapshot snapshot, Buffer buffe
         case SNAPSHOT_MVCC:
             return HeapTupleSatisfiesMVCC(tup, snapshot, buffer);
             break;
-        case SNAPSHOT_LOCAL_MVCC:
-            return HeapTupleSatisfiesLocalMVCC(tup, snapshot, buffer);
+        case SNAPSHOT_VERSION_MVCC:
+            return HeapTupleSatisfiesVersionMVCC(tup, snapshot, buffer);
+            break;
+        case SNAPSHOT_DELTA:
+            return HeapTupleSatisfiesDelta(tup, snapshot, buffer);
+            break;
+        case SNAPSHOT_LOST:
+            return HeapTupleSatisfiesLost(tup, snapshot, buffer);
             break;
         case SNAPSHOT_NOW:
             return HeapTupleSatisfiesNow(tup, snapshot, buffer);
@@ -1529,5 +1461,19 @@ bool HeapTupleSatisfiesVisibility(HeapTuple tup, Snapshot snapshot, Buffer buffe
     }
 
     return false; /* keep compiler quiet */
+}
+
+void HeapTupleCheckVisible(Snapshot snapshot, HeapTuple tuple, Buffer buffer)
+{
+    if (!IsolationUsesXactSnapshot())
+        return;
+    LockBuffer(buffer, BUFFER_LOCK_SHARE);
+    if (!HeapTupleSatisfiesVisibility(tuple, snapshot, buffer)) {
+        LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
+        ereport(ERROR,
+                (errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
+                 errmsg("could not serialize access due to concurrent update")));
+    }
+    LockBuffer(buffer, BUFFER_LOCK_UNLOCK);
 }
 

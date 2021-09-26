@@ -1,0 +1,317 @@
+-- for concurrent delete and update
+-- test case: rollback, delete first and then update the same records
+create table z1 (c1 int) with (storage_type=USTORE);
+insert into z1 values (1);
+insert into z1 values (2);
+insert into z1 values (3);
+insert into z1 values (4);
+insert into z1 values (5);
+insert into z1 values (6);
+\parallel on 2
+declare
+	cnt int;
+begin
+	delete from z1 where c1=1;
+	delete from z1 where c1=2;
+	perform pg_sleep(2);
+	select count(*) into cnt from z1;
+	if cnt != 4 then
+		raise notice 'ERROR: worker 1 expect cnt = %, but %', 4, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+declare
+	cnt int;
+begin
+	perform pg_sleep(1);
+	update z1 set c1=11 where c1=1;
+	update z1 set c1=12 where c1=2;
+	select count(*) into cnt from z1;
+	if cnt != 6 then
+		raise notice 'ERROR: worker 2 expect cnt = %, but %', 4, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+\parallel off
+WARNING:  UHeapUpdate returned 5
+CONTEXT:  SQL statement "update z1 set c1=11 where c1=1"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+ERROR:  
+ERROR:  
+select * from z1; -- should be 1, 2, 3, 4, 5, 6 
+ c1 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+drop table z1;
+-- test case: rollback, update first and then delete the same records
+create table z1 (c1 int) with (storage_type=USTORE);
+insert into z1 values (1);
+insert into z1 values (2);
+insert into z1 values (3);
+insert into z1 values (4);
+insert into z1 values (5);
+insert into z1 values (6);
+\parallel on 2
+declare
+	cnt int;
+begin
+	update z1 set c1=11 where c1=1;
+	update z1 set c1=12 where c1=2;
+	perform pg_sleep(2);
+	select count(*) into cnt from z1;
+	if cnt != 6 then
+		raise notice 'ERROR: worker 1 expect cnt = %, but %', 6, cnt;
+	end if;
+	RAISE EXCEPTION '';	
+end;
+/
+declare
+	cnt int;
+begin
+	perform pg_sleep(1);
+	delete from z1 where c1=1;
+	delete from z1 where c1=2;
+	select count(*) into cnt from z1;
+	if cnt != 4 then
+		raise notice 'ERROR: worker 2 expect cnt = %, but %', 6, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+\parallel off
+WARNING:  UHeapDelete returned 5
+CONTEXT:  SQL statement "delete from z1 where c1=1"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+ERROR:  
+ERROR:  
+select * from z1; -- should be 1, 2, 3, 4, 5, 6 
+ c1 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+drop table z1;
+ 
+-- test case: rollback, 1st worker no rollback and 2rd rollback, update first and then delete the same records
+create table z1 (c1 int) with (storage_type=USTORE);
+insert into z1 values (1);
+insert into z1 values (2);
+insert into z1 values (3);
+insert into z1 values (4);
+insert into z1 values (5);
+insert into z1 values (6);
+\parallel on 2
+declare
+	cnt int;
+begin
+	update z1 set c1=11 where c1=1;
+	update z1 set c1=12 where c1=2;
+	perform pg_sleep(2);
+	select count(*) into cnt from z1;
+	if cnt != 6 then
+		raise notice 'ERROR: worker 1 expect cnt = %, but %', 6, cnt;
+	end if;
+end;
+/
+declare
+	cnt int;
+begin
+	perform pg_sleep(1);
+	delete from z1 where c1=1;
+	delete from z1 where c1=2;
+	select count(*) into cnt from z1;
+	if cnt != 6 then
+		raise notice 'ERROR: worker 2 expect cnt = %, but %', 6, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+\parallel off
+WARNING:  UHeapDelete returned 5
+CONTEXT:  SQL statement "delete from z1 where c1=1"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+WARNING:  UHeapDelete returned 3
+CONTEXT:  SQL statement "delete from z1 where c1=1"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+WARNING:  UHeapLockTuple returned 3
+CONTEXT:  SQL statement "delete from z1 where c1=1"
+PL/pgSQL function inline_code_block line 4 at SQL statement
+ERROR:  
+select * from z1; -- should be 11, 12, 3, 4, 5, 6 
+ c1 
+----
+ 11
+ 12
+  3
+  4
+  5
+  6
+(6 rows)
+
+drop table z1;
+-- test case: rollback, delete first and then update different records
+create table z1 (c1 int) with (storage_type=USTORE);
+insert into z1 values (1);
+insert into z1 values (2);
+insert into z1 values (3);
+insert into z1 values (4);
+insert into z1 values (5);
+insert into z1 values (6);
+\parallel on 2
+declare
+	cnt int;
+begin
+	delete from z1 where c1=1;
+	perform pg_sleep(1);
+	delete from z1 where c1=2;
+	perform pg_sleep(1);
+	select count(*) from z1 into cnt;
+	if cnt != 4 then
+		raise notice 'ERROR: worker 1 expect cnt = %, but %', 4, cnt;
+	end if;
+	RAISE EXCEPTION '';	
+end;
+/
+declare
+	cnt int;
+begin
+	perform pg_sleep(1);
+	update z1 set c1=13 where c1=3;
+	perform pg_sleep(2);
+	update z1 set c1=14 where c1=4;
+	select count(*) from z1 into cnt;
+	if cnt != 6 then
+		raise notice 'ERROR: worker 2 expect cnt = %, but %', 6, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+\parallel off
+ERROR:  
+ERROR:  
+select * from z1; -- should be 1, 2, 3, 4, 5, 6
+ c1 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+drop table z1;
+-- test case: rollback, update first and then delete different records
+create table z1 (c1 int) with (storage_type=USTORE);
+insert into z1 values (1);
+insert into z1 values (2);
+insert into z1 values (3);
+insert into z1 values (4);
+insert into z1 values (5);
+insert into z1 values (6);
+\parallel on 2
+declare
+	cnt int;
+begin
+	update z1 set c1=11 where c1=1;
+	update z1 set c1=12 where c1=2;
+	perform pg_sleep(1);
+	select count(*) from z1 into cnt;
+	if cnt != 6 then
+		raise notice 'ERROR: worker 1 expect cnt = %, but %', 6, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+declare
+	cnt int;
+begin
+	perform pg_sleep(1);
+	delete from z1 where c1=3;
+	perform pg_sleep(1);
+	delete from z1 where c1=4;
+	select count(*) from z1 into cnt;
+	if cnt != 4 then
+		raise notice 'ERROR: worker 2 expect cnt = %, but %', 4, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+\parallel off
+ERROR:  
+ERROR:  
+select * from z1; -- should be 1, 2, 3, 4, 5, 6
+ c1 
+----
+  1
+  2
+  3
+  4
+  5
+  6
+(6 rows)
+
+drop table z1;
+-- test case: rollback, 1st worker no rollback and 2rd worker rollback, update first and then delete different records
+create table z1 (c1 int) with (storage_type=USTORE);
+insert into z1 values (1);
+insert into z1 values (2);
+insert into z1 values (3);
+insert into z1 values (4);
+insert into z1 values (5);
+insert into z1 values (6);
+\parallel on 2
+declare
+	cnt int;
+begin
+	update z1 set c1=11 where c1=1;
+	update z1 set c1=12 where c1=2;
+	perform pg_sleep(1);
+	select count(*) from z1 into cnt;
+	if cnt != 6 then
+		raise notice 'ERROR: worker 1 expect cnt = %, but %', 6, cnt;
+	end if;
+end;
+/
+declare
+	cnt int;
+begin
+	perform pg_sleep(1);
+	delete from z1 where c1=3;
+	perform pg_sleep(1);
+	delete from z1 where c1=4;
+	select count(*) from z1 into cnt;
+	if cnt != 4 then
+		raise notice 'ERROR: worker 2 expect cnt = %, but %', 4, cnt;
+	end if;
+	RAISE EXCEPTION '';
+end;
+/
+\parallel off
+ERROR:  
+select * from z1; -- should be 11, 12, 3, 4, 5, 6
+ c1 
+----
+ 11
+ 12
+  3
+  4
+  5
+  6
+(6 rows)
+
+drop table z1;

@@ -197,7 +197,7 @@ void DataCacheMgr::DropRelationCUCache(const RelFileNode& rnode)
     for (CacheSlotId_t slot = 0; slot <= maxSlot; slot++) {
         m_cache_mgr->CopyCacheBlockTag(slot, &tag);
         cuTag = *(CUSlotTag*)tag.key;
-        if (CACHE_COlUMN_DATA == tag.type && RelFileNodeRelEquals(rnode, cuTag.m_rnode)) {
+        if (CACHE_COlUMN_DATA == tag.type && RelFileColumnNodeRelEquals(rnode, cuTag.m_rnode)) {
             /* try to invalid this CU */
             InvalidateCU(&cuTag.m_rnode, cuTag.m_colId, cuTag.m_CUId, cuTag.m_cuPtr);
         }

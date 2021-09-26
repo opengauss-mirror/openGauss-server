@@ -6,7 +6,6 @@ FROM pg_type AS p1
 WHERE p1.typtype not in ('b', 'p')
 ORDER BY 1;
 
-SET enforce_two_phase_commit TO off;
 
 create table slot_getattr_normal_view_column_t(id1 int,id2 int);
 create or replace view slot_getattr_normal_view_column_v as select * from slot_getattr_normal_view_column_t;

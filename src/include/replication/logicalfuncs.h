@@ -1,7 +1,7 @@
 /* ---------------------------------------------------------------------------------------
  * 
  * logicalfuncs.h
- *         PostgreSQL WAL to logical transformation support functions
+ *         openGauss WAL to logical transformation support functions
  * 
  * Copyright (c) 2012-2014, PostgreSQL Global Development Group
  * 

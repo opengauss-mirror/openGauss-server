@@ -40,7 +40,7 @@ my_cursor REFCURSOR;
 username text;
 respool_name text;
 BEGIN
-sql_stmt := 'select rolname from  pg_authid  where rolsuper != ''t'' ';
+sql_stmt := 'select rolname from  pg_authid  where rolsuper != ''t'' and rolname !~ ''^gs_role_'' ';
 OPEN my_cursor FOR EXECUTE sql_stmt;
 FETCH FROM my_cursor INTO username;
 WHILE my_cursor % FOUND LOOP

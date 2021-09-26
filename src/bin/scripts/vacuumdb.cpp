@@ -316,7 +316,7 @@ static void vacuum_all_databases(bool full, bool verbose, bool and_analyze, bool
 
 static void help(const char* progname)
 {
-    printf(_("%s cleans and analyzes a PostgreSQL database.\n\n"), progname);
+    printf(_("%s cleans and analyzes a openGauss database.\n\n"), progname);
     printf(_("Usage:\n"));
     printf(_("  %s [OPTION]... [DBNAME]\n"), progname);
     printf(_("\nOptions:\n"));

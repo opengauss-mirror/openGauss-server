@@ -17,25 +17,37 @@
 #include "knl/knl_variable.h"
 
 #include "access/xact.h"
-#include "executor/execdebug.h"
-#include "executor/nodeAgg.h"
-#include "executor/nodeHashjoin.h"
-#include "executor/nodeMaterial.h"
-#include "executor/nodeRecursiveunion.h"
-#include "executor/nodeSetOp.h"
-#include "executor/nodeSort.h"
+#include "executor/exec/execdebug.h"
+#include "executor/node/nodeAgg.h"
+#include "executor/node/nodeHashjoin.h"
+#include "executor/node/nodeMaterial.h"
+#include "executor/node/nodeRecursiveunion.h"
+#include "executor/node/nodeSetOp.h"
+#include "executor/node/nodeSort.h"
 #include "libpq/libpq.h"
 #include "libpq/pqformat.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "utils/memutils.h"
+#include "utils/elog.h"
 
-#define LOOP_ELOG(elevel, format, ...)           \
-    do {                                         \
-        if (loop_count >= 20) {                  \
-            elog(elevel, format, ##__VA_ARGS__); \
-        }                                        \
+#ifdef USE_ASSERT_CHECKING
+#define LOOP_ELOG(elevel, format, ...)                \
+    do {                                              \
+        if (loop_count >= 20) {                       \
+            ereport(elevel, (errmodule(MOD_EXECUTOR), \
+                    (errmsg(format, ##__VA_ARGS__)))); \
+        }                                             \
     } while (0)
+#else
+#define LOOP_ELOG(elevel, format, ...)                \
+    do {                                              \
+        if (loop_count >= 20) {                       \
+            ereport(DEBUG1, (errmodule(MOD_EXECUTOR), \
+                    (errmsg(format, ##__VA_ARGS__)))); \
+        }                                             \
+    } while (0)
+#endif
 
 #define INSTR (node->ps.instrument)
 
@@ -923,7 +935,9 @@ void ExecSyncRecursiveUnionConsumer(RecursiveUnionController* controller, int st
                 stream_node_group->ConsumerGetSyncUpMessage(
                     controller, step, (StreamState*)state, RUSYNC_MSGTYPE_NODE_FINISH);
                 LOOP_ELOG(
-                    LOG, "MPP with-recursive[DEBUG] consumer step:%d in-loop[%d] wait step-finish", step, loop_count);
+                    DEBUG1, "MPP with-recursive[DEBUG] consumer step:%d in-loop[%d] wait step-finish", 
+                    step, 
+                    loop_count);
                 loop_count++;
                 for (int i = 0; i < consumer_number; i++) {
                     if (controller->none_recursive_tuples[i] == -1) {
@@ -974,7 +988,7 @@ void ExecSyncRecursiveUnionConsumer(RecursiveUnionController* controller, int st
             while (true) {
                 /* Try to receive 'R' for each none RU-Coordinator nodes */
                 bool step_ready = true;
-                LOOP_ELOG(LOG,
+                LOOP_ELOG(DEBUG1,
                     "MPP with-recursive[DEBUG] consumer step:%d in-loop[%d] wait all node-finish",
                     step,
                     loop_count);
@@ -1082,7 +1096,9 @@ void ExecSyncRecursiveUnionProducer(RecursiveUnionController* controller, int pr
             /* wait on current node-step1 to finish */
             while (true) {
                 LOOP_ELOG(
-                    LOG, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait node-finish", step, loop_count);
+                    DEBUG1, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait node-finish", 
+                    step, 
+                    loop_count);
                 loop_count++;
                 tuple_produced = controller->controller.executor_stop ? 0 : 
                     controller->none_recursive_tuples[u_sess->pgxc_cxt.PGXCNodeId];
@@ -1127,7 +1143,9 @@ void ExecSyncRecursiveUnionProducer(RecursiveUnionController* controller, int pr
                 }
 
                 LOOP_ELOG(
-                    LOG, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait step-finish", step, loop_count);
+                    DEBUG1, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait step-finish", 
+                    step, 
+                    loop_count);
                 loop_count++;
                 if (controller->none_recursive_finished) {
                     /* Mark the curent step is forwarding to recursive-term (control-node) */
@@ -1178,7 +1196,9 @@ void ExecSyncRecursiveUnionProducer(RecursiveUnionController* controller, int pr
                 }
 
                 LOOP_ELOG(
-                    LOG, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait node-finish", step, loop_count);
+                    DEBUG1, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait node-finish", 
+                    step, 
+                    loop_count);
                 loop_count++;
 
                 /* Fetch tuple count */
@@ -1215,7 +1235,9 @@ void ExecSyncRecursiveUnionProducer(RecursiveUnionController* controller, int pr
              */
             while (target_iteration <= current_iteration) {
                 LOOP_ELOG(
-                    LOG, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait step-finish", step, loop_count);
+                    DEBUG1, "MPP with-recursive[DEBUG] producer step:%d in-loop[%d] wait step-finish", 
+                    step, 
+                    loop_count);
                 loop_count++;
                 /* the corresponding consumer may encounter a "short-circuit" */
                 if (controller->controller.executor_stop) {

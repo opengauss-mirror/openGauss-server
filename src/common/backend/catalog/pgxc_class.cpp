@@ -110,18 +110,6 @@ void PgxcClassCreate(Oid pcrelid, char pclocatortype, int2* pcattnum, int pchash
         } else {
             groupForm = (Form_pgxc_group)GETSTRUCT(ghtup);
 
-            /*
-             * If groupname is NULL, it means we didn't specify GROUP in table creation,
-             * so just use the default installation as target group
-             */
-            if (groupname == NULL) {
-                if (isRestoreMode || strcmp(u_sess->attr.attr_sql.default_storage_nodegroup, INSTALLATION_MODE) == 0) {
-                    groupname = PgxcGroupGetInstallationGroup();
-                } else {
-                    groupname = u_sess->attr.attr_sql.default_storage_nodegroup;
-                }
-            }
-
             /* Continue until finding target node group */
             if (strcmp(groupname, groupForm->group_name.data) != 0) {
                 continue;
@@ -182,6 +170,7 @@ void PgxcClassCreateForReloption(Oid pcrelid, const char* reloptionstr)
 {
     bool nulls[Natts_pgxc_class];
     Datum values[Natts_pgxc_class];
+    ObjectAddress myself, referenced;
     int i;
 
     /* Iterate through attributes initializing nulls and values */
@@ -200,6 +189,18 @@ void PgxcClassCreateForReloption(Oid pcrelid, const char* reloptionstr)
     nulls[Anum_pgxc_class_pcrelid - 1] = false;
     nulls[Anum_pgxc_class_option - 1] = false;
     PgxcClassCreateInner(nulls, values);
+    
+    Oid relid = partid_get_parentid(pcrelid);
+    /* Make dependency entries */
+    myself.classId = PgxcClassRelationId;
+    myself.objectId = pcrelid;
+    myself.objectSubId = 0;
+
+    /* Dependency on relation */
+    referenced.classId = RelationRelationId;
+    referenced.objectId = ((relid == InvalidOid) ? pcrelid : relid);
+    referenced.objectSubId = 0;
+    recordDependencyOn(&myself, &referenced, DEPENDENCY_INTERNAL);
 }
 
 /*
@@ -384,7 +385,7 @@ void PgxcClassAlterForReloption(Oid pcrelid, const char* reloptionstr)
  * RemovePGXCClass():
  *		Remove extended PGXC information
  */
-void RemovePgxcClass(Oid pcrelid)
+void RemovePgxcClass(Oid pcrelid, bool canmiss)
 {
     Relation relation;
     HeapTuple tup;
@@ -395,14 +396,13 @@ void RemovePgxcClass(Oid pcrelid)
     relation = heap_open(PgxcClassRelationId, RowExclusiveLock);
     tup = SearchSysCache(PGXCCLASSRELID, ObjectIdGetDatum(pcrelid), 0, 0, 0);
 
-    if (!HeapTupleIsValid(tup)) /* should not happen */
+    if (!HeapTupleIsValid(tup) && !canmiss) /* should not happen */
         ereport(
             ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for pgxc_class %u", pcrelid)));
-
-    simple_heap_delete(relation, &tup->t_self);
-
-    ReleaseSysCache(tup);
-
+    if (HeapTupleIsValid(tup)) {
+        simple_heap_delete(relation, &tup->t_self);
+        ReleaseSysCache(tup);
+    }
     heap_close(relation, RowExclusiveLock);
 }
 

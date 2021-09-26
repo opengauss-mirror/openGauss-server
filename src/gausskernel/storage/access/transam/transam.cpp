@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * transam.cpp
- *	  postgres transaction log interface routines
+ *	  openGauss transaction log interface routines
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -45,7 +45,7 @@ Datum pgxc_get_csn(PG_FUNCTION_ARGS);
 #endif
 
 /* ----------------------------------------------------------------
- *		Postgres log access method interface
+ *		openGauss log access method interface
  *
  *		TransactionLogFetch
  * ----------------------------------------------------------------
@@ -59,7 +59,8 @@ void SetLatestFetchState(TransactionId transactionId, CommitSeqNo result)
 /*
  * TransactionIdGetCommitSeqNo --- fetch CSN of specified transaction id
  */
-CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest)
+CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest,
+    Snapshot snapshot)
 {
     XLogRecPtr lsn;
     CommitSeqNo result;
@@ -70,7 +71,8 @@ CommitSeqNo TransactionIdGetCommitSeqNo(TransactionId transactionId, bool isComm
      * Before going to the commit log manager, check our single item cache to
      * see if we didn't just check the transaction status a moment ago.
      */
-    if (TransactionIdEquals(transactionId, t_thrd.xact_cxt.cachedFetchCSNXid)) {
+    if ((snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) &&
+        TransactionIdEquals(transactionId, t_thrd.xact_cxt.cachedFetchCSNXid)) {
         t_thrd.xact_cxt.latestFetchCSNXid = t_thrd.xact_cxt.cachedFetchCSNXid;
         t_thrd.xact_cxt.latestFetchCSN = t_thrd.xact_cxt.cachedFetchCSN;
         return t_thrd.xact_cxt.cachedFetchCSN;
@@ -105,7 +107,7 @@ RETRY:
     }
 
     Assert(TransactionIdIsValid(xid));
-    if (TransactionIdPrecedes(transactionId, xid)) {
+    if ((snapshot == NULL || !IsVersionMVCCSnapshot(snapshot)) && TransactionIdPrecedes(transactionId, xid)) {
         if (isCommit) {
             result = COMMITSEQNO_FROZEN;
         } else {
@@ -160,78 +162,6 @@ RETRY:
 
     t_thrd.xact_cxt.latestFetchCSNXid = transactionId;
     t_thrd.xact_cxt.latestFetchCSN = result;
-
-    return result;
-}
-
-/*
- * TransactionIdGetCommitSeqNo --- fetch CSN of specified transaction id
- * without set the cache(cachedFetchCSN, cachedFetchCSNXid, latestFetchCSN, latestFetchCSNXid)
- */
-CommitSeqNo TransactionIdGetCommitSeqNoNCache(TransactionId transactionId, bool isCommit, bool isMvcc, bool isNest)
-{
-    XLogRecPtr lsn;
-    CommitSeqNo result;
-    TransactionId xid;
-
-    /*
-     * Also, check to see if the transaction ID is a permanent one.
-     */
-    if (!TransactionIdIsNormal(transactionId)) {
-        if (TransactionIdEquals(transactionId, BootstrapTransactionId)) {
-            return COMMITSEQNO_FROZEN;
-        }
-        if (TransactionIdEquals(transactionId, FrozenTransactionId)) {
-            return COMMITSEQNO_FROZEN;
-        }
-        return COMMITSEQNO_ABORTED;
-    }
-
-    /*
-     * If the XID is older than RecentGlobalXmin, check the clog. Otherwise
-     * check the csnlog.
-     */
-    if (!isMvcc) {
-        TransactionId recentGlobalXmin = pg_atomic_read_u64(&t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin);
-        if (!TransactionIdIsValid(recentGlobalXmin)) {
-            xid = t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin;
-        } else {
-            xid = recentGlobalXmin;
-        }
-    } else {
-        xid = u_sess->utils_cxt.RecentXmin;
-    }
-
-    Assert(TransactionIdIsValid(xid));
-    if (TransactionIdPrecedes(transactionId, xid)) {
-        if (isCommit) {
-            result = COMMITSEQNO_FROZEN;
-        } else {
-            if (CLogGetStatus(transactionId, &lsn) == CLOG_XID_STATUS_COMMITTED) {
-                result = COMMITSEQNO_FROZEN;
-            } else {
-                result = COMMITSEQNO_ABORTED;
-            }
-        }
-    } else {
-        if (isNest) {
-            result = CSNLogGetNestCommitSeqNo(transactionId);
-        } else {
-            result = CSNLogGetCommitSeqNo(transactionId);
-        }
-    }
-
-    ereport(DEBUG1,
-        (errmsg("Get CSN xid %lu cur_xid %lu xid %lu result %lu iscommit %d, recentLocalXmin %lu, isMvcc :%d, "
-                "RecentXmin: %lu",
-            transactionId,
-            GetCurrentTransactionIdIfAny(),
-            xid,
-            result,
-            isCommit,
-            t_thrd.xact_cxt.ShmemVariableCache->recentLocalXmin,
-            isMvcc,
-            u_sess->utils_cxt.RecentXmin)));
 
     return result;
 }
@@ -384,7 +314,7 @@ Datum pgxc_get_csn(PG_FUNCTION_ARGS)
         if (u_sess->attr.attr_common.xc_maintenance_mode)
             xidCsn = TransactionIdGetCommitSeqNoForGSClean(tid);
         else
-            xidCsn = TransactionIdGetCommitSeqNo(tid, false, false, true);
+            xidCsn = TransactionIdGetCommitSeqNo(tid, false, false, true, NULL);
     }
 
     PG_RETURN_INT64(xidCsn);
@@ -726,7 +656,7 @@ TransactionIdStatus TransactionIdGetStatus(TransactionId transactionId)
 {
     CommitSeqNo csn;
 
-    csn = TransactionIdGetCommitSeqNo(transactionId, false, true, true);
+    csn = TransactionIdGetCommitSeqNo(transactionId, false, true, true, NULL);
     if (COMMITSEQNO_IS_COMMITTED(csn))
         return XID_COMMITTED;
     else if (COMMITSEQNO_IS_ABORTED(csn))

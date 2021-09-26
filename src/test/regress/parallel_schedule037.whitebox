@@ -1,0 +1,18 @@
+#test: test_ustore_concurrent_whitebox1
+test: test_ustore_concurrent_whitebox2
+test: test_ustore_transactions
+test: test_ustore_concurrent_whitebox3
+test: test_ustore_concurrent_whitebox4
+
+test: test_whitebox_concurrent_insert
+test: test_whitebox_concurrent_multiInsert
+test: test_whitebox_concurrent_delete
+test: test_whitebox_concurrent_update
+test: test_whitebox_concurrent_lock
+test: test_whitebox_concurrent_fetch
+test: test_whitebox_concurrent_pagePrune
+test: test_whitebox_concurrent_toastDelete
+test: test_whitebox_concurrent_toastInsert
+
+test: test_whitebox_undo
+test: test_whitebox_ubtree_insert

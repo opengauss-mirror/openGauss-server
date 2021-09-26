@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * memnodes.h
- *	  POSTGRES memory context node definitions.
+ *	  openGauss memory context node definitions.
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group

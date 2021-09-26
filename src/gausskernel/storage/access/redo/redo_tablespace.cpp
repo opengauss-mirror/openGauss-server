@@ -45,7 +45,7 @@
 #include "nodes/makefuncs.h"
 #include "postmaster/bgwriter.h"
 #include "storage/dfs/dfs_connector.h"
-#include "storage/fd.h"
+#include "storage/smgr/fd.h"
 #include "storage/standby.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
@@ -76,6 +76,7 @@ XLogRecParseState *tblspc_xlog_common_parse_to_block(XLogReaderState *record, ui
     XLogRecParseState *recordstatehead = NULL;
     XLogBlockParseEnum blockparsetype;
     RelFileNode relnode;
+    RelFileNodeForkNum filenode;
     bool isRelativePath = false;
     char *tblPath = NULL;
 
@@ -103,9 +104,10 @@ XLogRecParseState *tblspc_xlog_common_parse_to_block(XLogReaderState *record, ui
         return NULL;
     }
 
-    XLogRecSetBlockCommonState(record, blockparsetype, InvalidForkNumber, InvalidBlockNumber, &relnode,
-                               recordstatehead);
+    filenode = RelFileNodeForkNumFill(&relnode, InvalidBackendId, InvalidForkNumber, InvalidBlockNumber);
+    XLogRecSetBlockCommonState(record, blockparsetype, filenode, recordstatehead);
     XLogRecSetTblSpcState(&recordstatehead->blockparse.extra_rec.blocktblspc, tblPath, isRelativePath);
+    recordstatehead->isFullSync = record->isFullSync;
     return recordstatehead;
 }
 

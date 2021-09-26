@@ -15,11 +15,14 @@
 #ifndef NAMESPACE_H
 #define NAMESPACE_H
 
+#ifndef FRONTEND
 #include "access/htup.h"
-#include "nodes/primnodes.h"
 #include "storage/lock/lock.h"
-#include "lib/stringinfo.h"
+#include "utils/plpgsql.h"
+#endif
 
+#include "nodes/primnodes.h"
+#include "lib/stringinfo.h"
 
 /*
  *	This structure holds a list of possible functions or operators
@@ -34,6 +37,7 @@ typedef struct _FuncCandidateList
 	int			pathpos;		/* for internal use of namespace lookup */
 	Oid			oid;			/* the function or operator's OID */
 	int			nargs;			/* number of arg types returned */
+	Oid         packageOid;     /* package oid */
 	int			nvargs;			/* number of args to become variadic array */
 	int			ndargs;			/* number of defaulted args */
 	int		   *argnumbers;		/* args' positional indexes, if named call */
@@ -96,6 +100,7 @@ typedef void (*RangeVarGetRelidCallback) (const RangeVar *relation, Oid relId,
 #define IS_CATALOG_NAMESPACE(name) \
     (strncasecmp((name), "pg_catalog", 10) == 0)
 
+#ifndef FRONTEND
 extern Oid RangeVarGetRelidExtended(const RangeVar *relation,
 						 LOCKMODE lockmode, bool missing_ok, bool nowait, bool target_is_partition, 
 						 bool isSupportSynonym,
@@ -119,13 +124,14 @@ extern bool TypeIsVisible(Oid typid);
 
 extern void SetTempFromSearchPath(List* namelist);
 
-
 extern FuncCandidateList FuncnameGetCandidates(List *names,
-					  int nargs, List *argnames,
-					  bool expand_variadic,
-					  bool expand_defaults,
-					  bool func_create,
-					  bool	include_out = false);
+                      int nargs, List *argnames,
+                      bool expand_variadic,
+                      bool expand_defaults,
+                      bool func_create,
+                      bool  include_out = false);
+					  
+extern PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum);
 
 extern bool FunctionIsVisible(Oid funcid);
 
@@ -159,7 +165,9 @@ extern bool TSConfigIsVisible(Oid cfgid);
 
 extern void DeconstructQualifiedName(const List *names,
 						 char **nspname_p,
-						 char **objname_p);
+						 char **objname_p,
+
+						 char **pkgname_p = NULL);
 extern Oid	LookupNamespaceNoError(const char *nspname);
 extern Oid	LookupExplicitNamespace(const char *nspname);
 extern Oid	get_namespace_oid(const char *nspname, bool missing_ok);
@@ -168,6 +176,7 @@ extern Oid GetOidBySchemaName(bool missing_ok = false);
 extern Oid	LookupCreationNamespace(const char *nspname);
 extern void CheckSetNamespace(Oid oldNspOid, Oid nspOid, Oid classid,
 				  Oid objid);
+extern void ResetNameSpace(const List* names, Oid* namespaceOid);
 extern Oid	QualifiedNameGetCreationNamespace(const List *names, char **objname_p);
 extern RangeVar *makeRangeVarFromNameList(List *names);
 extern char *NameListToString(const List *names);
@@ -218,6 +227,7 @@ extern bool validateTempNamespace(Oid tmepNspId);
 extern bool IsPackageFunction(List* funcname);
 
 extern void recomputeNamespacePath(StringInfo error_info = NULL);
-extern KeyCandidateList GlobalSettingGetCandidates(List *names, bool);
-extern KeyCandidateList CeknameGetCandidates(List *names, bool);
+extern KeyCandidateList GlobalSettingGetCandidates(const List *names, bool);
+extern KeyCandidateList CeknameGetCandidates(const List *names, bool);
+#endif // !FRONTEND
 #endif   /* NAMESPACE_H */

@@ -15,9 +15,11 @@
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
+#include "access/reloptions.h"
 #include "access/transam.h"
 #include "access/tuptoaster.h"
 #include "access/xact.h"
+#include "access/ustore/knl_utuptoaster.h"
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
 #include "catalog/index.h"
@@ -39,12 +41,12 @@
 
 /* Potentially set by contrib/pg_upgrade_support functions */
 static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid,
-    Datum reloptions, bool isPartition, List *filenodelist);
+    Datum reloptions, bool isPartition, bool useLowLockLevel);
 static bool needs_toast_table(Relation rel);
 
 static void updateCatalogToastRelid(Oid relOid, Oid toast_relid, bool isPartition);
 
-static bool createToastTableForPartitionedTable(Relation rel, Datum reloptions, List *flienodelist);
+static bool createToastTableForPartitionedTable(Relation rel, Datum reloptions, LOCKMODE partLockMode);
 
 static Oid binary_upgrade_get_next_part_toast_pg_type_oid();
 static bool binary_upgrade_is_next_part_toast_pg_type_oid_valid();
@@ -62,7 +64,7 @@ extern bool binary_upgrade_is_next_part_toast_pg_class_oid_valid();
  * already done any necessary permission checks.  Callers expect this function
  * to end with CommandCounterIncrement if it makes any changes.
  */
-void AlterTableCreateToastTable(Oid relOid, Datum reloptions, List *filenodelist)
+void AlterTableCreateToastTable(Oid relOid, Datum reloptions, LOCKMODE partLockMode)
 {
     Relation rel;
     bool rel_is_partitioned = check_rel_is_partitioned(relOid);
@@ -76,11 +78,11 @@ void AlterTableCreateToastTable(Oid relOid, Datum reloptions, List *filenodelist
          */
         rel = heap_open(relOid, AccessExclusiveLock);
         if (needs_toast_table(rel))
-            (void)create_toast_table(rel, InvalidOid, InvalidOid, reloptions, false, filenodelist);
+            (void)create_toast_table(rel, InvalidOid, InvalidOid, reloptions, false, false);
     } else {
         rel = heap_open(relOid, AccessShareLock);
         if (needs_toast_table(rel))
-            (void)createToastTableForPartitionedTable(rel, reloptions, filenodelist);
+            (void)createToastTableForPartitionedTable(rel, reloptions, partLockMode);
     }
 
     heap_close(rel, NoLock);
@@ -102,7 +104,7 @@ void BootstrapToastTable(char* relName, Oid toastOid, Oid toastIndexOid)
                 errmsg("\"%s\" is not a table or materialized view", relName)));
 
     /* create_toast_table does all the work */
-    if (!create_toast_table(rel, toastOid, toastIndexOid, (Datum)0, false, NULL))
+    if (!create_toast_table(rel, toastOid, toastIndexOid, (Datum)0, false, false))
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_TABLE_DEFINITION), errmsg("\"%s\" does not require a toast table", relName)));
 
@@ -117,7 +119,7 @@ void BootstrapToastTable(char* relName, Oid toastOid, Oid toastIndexOid)
  * bootstrap they can be nonzero to specify hand-assigned OIDs
  */
 static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Datum reloptions,
-    bool isPartition, List *filenodelist)
+    bool isPartition, bool useLowLockLevel)
 {
     Oid relOid = RelationGetRelid(rel);
     TupleDesc tupdesc;
@@ -136,8 +138,6 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     ObjectAddress baseobject, toastobject;
     errno_t rc = EOK;
     HashBucketInfo bucketinfo;
-    Oid indexfilenode = InvalidOid;
-    List *relfilenode = NULL;
 
     /*
      * Is it already toasted?
@@ -222,12 +222,8 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
         toast_typid = binary_upgrade_get_next_part_toast_pg_type_oid();
     }
 
-    if (t_thrd.xact_cxt.inheritFileNode) {
-        relfilenode  = lappend_oid(relfilenode,  list_nth_oid(filenodelist, 0));		
-        indexfilenode = list_nth_oid(filenodelist, 1);
-    }
-
     bucketinfo.bucketOid = RelationGetBucketOid(rel);
+    StorageType storage_type = RelationGetStorageType(rel);
     toast_relid = heap_create_with_catalog(toast_relname,
         namespaceid,
         rel->rd_rel->reltablespace,
@@ -249,16 +245,25 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
         true,
         NULL,
         REL_CMPRS_NOT_SUPPORT,
-        relfilenode,
-        RELATION_CREATE_BUCKET(rel) ? &bucketinfo : NULL);
+        RELATION_CREATE_BUCKET(rel) ? &bucketinfo : NULL,
+        true,
+        NULL,
+        storage_type);
     Assert(toast_relid != InvalidOid);
-    list_free_ext(relfilenode);
 
     /* make the toast relation visible, else heap_open will fail */
     CommandCounterIncrement();
 
     /* ShareLock is not really needed here, but take it anyway */
-    toast_rel = heap_open(toast_relid, ShareLock);
+    toast_rel = heap_open(toast_relid, (useLowLockLevel ? AccessShareLock : ShareLock));
+
+    Datum indexReloptions = (Datum)0;
+    List* indexOptions = NULL;
+    if (RelationIsUstoreFormat(toast_rel)) {
+        DefElem* def = makeDefElem("storage_type", (Node*)makeString(TABLE_ACCESS_METHOD_USTORE));
+        indexOptions = list_make1(def);
+        indexReloptions = transformRelOptions((Datum)0, indexOptions, NULL, NULL, false, false);
+    }
 
     /*
      * Create unique index on chunk_id, chunk_seq.
@@ -288,6 +293,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     indexInfo->ii_Concurrent = false;
     indexInfo->ii_BrokenHotChain = false;
     indexInfo->ii_PgClassAttrId = 0;
+    indexInfo->ii_ParallelWorkers = 0;
 
     collationObjectId[0] = InvalidOid;
     collationObjectId[1] = InvalidOid;
@@ -304,7 +310,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     index_create(toast_rel,
         toast_idxname,
         toastIndexOid,
-        indexfilenode,
+        InvalidOid,
         indexInfo,
         list_make2((void*)"chunk_id", (void*)"chunk_seq"),
         BTREE_AM_OID,
@@ -312,7 +318,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
         collationObjectId,
         classObjectId,
         coloptions,
-        (Datum)0,
+        indexReloptions,
         true,
         false,
         false,
@@ -320,7 +326,8 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
         true,
         !u_sess->upg_cxt.new_catalog_need_storage,
         false,
-        &extra);
+        &extra,
+        useLowLockLevel);
 
     heap_close(toast_rel, NoLock);
 
@@ -370,7 +377,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
  * Return		: If succeed in creating a toast table, return true; else return false
  * Notes		:
  */
-bool createToastTableForPartition(Oid relOid, Oid partOid, Datum reloptions, List *relfilenode)
+bool createToastTableForPartition(Oid relOid, Oid partOid, Datum reloptions, LOCKMODE partLockMode)
 {
     Relation partRel = NULL;
     Relation rel = NULL;
@@ -383,7 +390,7 @@ bool createToastTableForPartition(Oid relOid, Oid partOid, Datum reloptions, Lis
     }
 
     rel = relation_open(relOid, NoLock);
-    partition = partitionOpen(rel, partOid, AccessExclusiveLock);
+    partition = partitionOpen(rel, partOid, partLockMode);
 
     /*
      * create toast table for the special table partition
@@ -393,7 +400,7 @@ bool createToastTableForPartition(Oid relOid, Oid partOid, Datum reloptions, Lis
     partRel = partitionGetRelation(rel, partition);
 
     Assert(PointerIsValid(partRel));
-    result = create_toast_table(partRel, InvalidOid, InvalidOid, reloptions, true, relfilenode);
+    result = create_toast_table(partRel, InvalidOid, InvalidOid, reloptions, true, (partLockMode == AccessShareLock));
 
     releaseDummyRelation(&partRel);
 
@@ -414,14 +421,12 @@ bool createToastTableForPartition(Oid relOid, Oid partOid, Datum reloptions, Lis
  * Return		: If some one toast table is created successfully, return true, else false.
  * Notes		:
  */
-static bool createToastTableForPartitionedTable(Relation rel, Datum reloptions, List *filenodelist)
+static bool createToastTableForPartitionedTable(Relation rel, Datum reloptions, LOCKMODE partLockMode)
 {
     Oid partition = InvalidOid;
     List* partitionList = NIL;
     ListCell* cell = NULL;
-    List *relfilenode = NIL;
     bool result = false;
-    int  iter = 0;
 
     Assert(RELATION_IS_PARTITIONED(rel));
 
@@ -440,15 +445,7 @@ static bool createToastTableForPartitionedTable(Relation rel, Datum reloptions, 
 
     foreach (cell, partitionList) {
         partition = DatumGetObjectId(lfirst(cell));
-
-        if (t_thrd.xact_cxt.inheritFileNode) {
-	    /* toast relfilenode */
-	    relfilenode = lappend_oid(relfilenode, list_nth_oid(filenodelist, iter++));
-	    /* toast index relfilenode */
-	    relfilenode = lappend_oid(relfilenode, list_nth_oid(filenodelist, iter++));		
-        }
-        result = createToastTableForPartition(rel->rd_id, partition, reloptions, relfilenode);
-        list_free_ext(relfilenode);
+        result = createToastTableForPartition(rel->rd_id, partition, reloptions, partLockMode);
     }
 
     if (partitionList != NIL) {
@@ -514,8 +511,15 @@ static bool needs_toast_table(Relation rel)
     if (maxlength_unknown) {
         return true; /* any unlimited-length attrs? */
     }
-    tuple_length = MAXALIGN(offsetof(HeapTupleHeaderData, t_bits) + BITMAPLEN(tupdesc->natts)) + MAXALIGN(data_length);
-    return ((unsigned long)tuple_length > TOAST_TUPLE_THRESHOLD);
+    if (RelationIsUstoreFormat(rel)) { // uheap format
+        tuple_length = MAXALIGN(offsetof(UHeapDiskTupleData, data) +
+            BITMAPLEN(tupdesc->natts)) + MAXALIGN(data_length);
+        return ((unsigned long)tuple_length > UTOAST_TUPLE_THRESHOLD);
+    } else { // heap
+        tuple_length = MAXALIGN(offsetof(HeapTupleHeaderData, t_bits) +
+            BITMAPLEN(tupdesc->natts)) + MAXALIGN(data_length);
+        return ((unsigned long)tuple_length > TOAST_TUPLE_THRESHOLD);
+    }
 }
 
 static void updateCatalogToastRelid(Oid relOid, Oid toast_relid, bool isPartition)

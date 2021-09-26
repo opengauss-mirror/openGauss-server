@@ -26,6 +26,7 @@
 
 #include "access/reloptions.h"
 #include "access/xlogdefs.h"
+#include "access/ustore/knl_uundovec.h"
 #include "commands/tablespace.h"
 #include "executor/instrument.h"
 #include "gssignal/gs_signal.h"
@@ -69,6 +70,24 @@ extern int SysCacheSize;
 
 #define DEFAULT_DBE_BUFFER_LIMIT 20000
 
+static void
+KnlUUstoreInit(knl_u_ustore_context *ustoreCxt)
+{
+    ustoreCxt->urecvec = New(CurrentMemoryContext) URecVector();
+    ustoreCxt->urecvec->Initialize(MAX_UNDORECORDS_PER_OPERATION, true);
+
+    for (int i = 0; i < MAX_UNDORECORDS_PER_OPERATION; i++) {
+        ustoreCxt->undo_records[i] = New(CurrentMemoryContext)UndoRecord();
+        ustoreCxt->urecvec->PushBack(ustoreCxt->undo_records[i]);
+    }
+
+    ustoreCxt->undo_buffer_idx = 0;
+    ustoreCxt->undo_buffers = (UndoBuffer*) palloc0(MAX_UNDO_BUFFERS * sizeof(UndoBuffer));
+
+    ustoreCxt->tdSlotWaitFinishTime = 0;
+    ustoreCxt->tdSlotWaitActive = false;
+}
+
 static void knl_u_analyze_init(knl_u_analyze_context* anl_cxt)
 {
     anl_cxt->is_under_analyze = false;
@@ -86,6 +105,7 @@ static void knl_u_attr_init(knl_session_attr* attr)
     attr->attr_common.log_min_messages = WARNING;
     attr->attr_common.client_min_messages = NOTICE;
     attr->attr_common.SessionTimeout = sessionDefaultTimeout;
+    attr->attr_common.SessionTimeoutCount = 0;
     attr->attr_common.enable_full_encryption = false;
     attr->attr_storage.sync_method = DEFAULT_SYNC_METHOD;
     attr->attr_sql.under_explain = false;
@@ -103,6 +123,7 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
     exec_cxt->under_auto_explain =  false;
     exec_cxt->extension_is_valid = false;
     exec_cxt->global_bucket_map = NULL;
+    exec_cxt->global_bucket_cnt = 0;
     exec_cxt->vec_func_hash = NULL;
     exec_cxt->route = (PartitionIdentifier*)palloc0(sizeof(PartitionIdentifier));
     exec_cxt->cur_tuple_hash_table = NULL;
@@ -133,6 +154,10 @@ void knl_u_executor_init(knl_u_executor_context* exec_cxt)
 
     exec_cxt->CurrentRouter = NULL;
     exec_cxt->is_dn_enable_router = false;
+
+    exec_cxt->isExecTrunc = false;
+
+    exec_cxt->isLockRows = false;
 }
 
 static void knl_u_index_init(knl_u_index_context* index_cxt)
@@ -239,6 +264,37 @@ static void knl_u_parser_init(knl_u_parser_context* parser_cxt)
     parser_cxt->param_info = NULL;
     parser_cxt->param_message = NULL;
     parser_cxt->ddl_pbe_context = NULL;
+    parser_cxt->in_package_function_compile = false;
+}
+
+static void knl_u_advisor_init(knl_u_advisor_context* adv_cxt) 
+{
+    adv_cxt->adviseMode = AM_NONE;
+    adv_cxt->adviseType = AT_NONE;
+    adv_cxt->adviseCostMode = ACM_NONE;
+    adv_cxt->adviseCompressLevel = ACL_NONE;
+    adv_cxt->isOnline = false;
+    adv_cxt->isConstraintPrimaryKey = true;
+    adv_cxt->isJumpRecompute = false;
+    adv_cxt->isCostModeRunning = false;
+    adv_cxt->currGroupIndex = 0;
+    adv_cxt->joinWeight = 0;
+    adv_cxt->groupbyWeight = 0;
+    adv_cxt->qualWeight = 0;
+    adv_cxt->maxTime = 0;
+    adv_cxt->startTime = 0;
+    adv_cxt->endTime = 0;
+    adv_cxt->maxMemory = 0;
+    adv_cxt->maxsqlCount = 0;
+
+    adv_cxt->candicateTables = NULL;
+    adv_cxt->candicateQueries = NIL;
+    adv_cxt->candicateAdviseGroups = NIL;
+    adv_cxt->result = NIL;
+
+    adv_cxt->SQLAdvisorContext = NULL;
+
+    adv_cxt->getPlanInfoFunc = NULL;
 }
 
 static void knl_u_stream_init(knl_u_stream_context* stream_cxt)
@@ -277,6 +333,8 @@ static void knl_u_SPI_init(knl_u_SPI_context* spi)
     spi->is_proconfig_set = false;
     spi->portal_stp_exception_counter = 0;
     spi->current_stp_with_exception = false;
+    spi->autonomous_session = NULL;
+    spi->spi_exec_cplan_stack = NULL;
 }
 
 static void knl_u_trigger_init(knl_u_trigger_context* tri_cxt)
@@ -319,6 +377,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->test_err_type = 0;
     utils_cxt->cur_last_tid = (ItemPointerData*)palloc0(sizeof(ItemPointerData));
     utils_cxt->distribute_test_param = NULL;
+    utils_cxt->segment_test_param = NULL;
     utils_cxt->hist_start = (PGLZ_HistEntry**)palloc0(sizeof(PGLZ_HistEntry*) * PGLZ_HISTORY_LISTS);
     utils_cxt->hist_entries = (PGLZ_HistEntry*)palloc0(sizeof(PGLZ_HistEntry) * PGLZ_HISTORY_SIZE);
     utils_cxt->analysis_options_configure = (char*)palloc0(sizeof(char) * ANLS_BEMD_BITMAP_SIZE);
@@ -330,16 +389,14 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->GUC_check_errhint_string = NULL;
     utils_cxt->set_params_htab = NULL;
     utils_cxt->sync_guc_variables = NULL;
-    utils_cxt->ConfigureNamesBool[SINGLE_GUC] = NULL;
-    utils_cxt->ConfigureNamesBool[DISTRIBUTE_GUC] = NULL;
-    utils_cxt->ConfigureNamesInt[SINGLE_GUC] = NULL;
-    utils_cxt->ConfigureNamesInt[DISTRIBUTE_GUC] = NULL;
-    utils_cxt->ConfigureNamesReal[SINGLE_GUC] = NULL;
-    utils_cxt->ConfigureNamesReal[DISTRIBUTE_GUC] = NULL;
-    utils_cxt->ConfigureNamesInt64 = NULL;
-    utils_cxt->ConfigureNamesString[SINGLE_GUC] = NULL;
-    utils_cxt->ConfigureNamesString[DISTRIBUTE_GUC] = NULL;
-    utils_cxt->ConfigureNamesEnum = NULL;
+    for (int strategy = 0; strategy < MAX_GUC_ATTR; strategy++) {
+        utils_cxt->ConfigureNamesBool[strategy] = NULL;
+        utils_cxt->ConfigureNamesInt[strategy] = NULL;
+        utils_cxt->ConfigureNamesReal[strategy] = NULL;
+        utils_cxt->ConfigureNamesInt64[strategy] = NULL;
+        utils_cxt->ConfigureNamesString[strategy] = NULL;
+        utils_cxt->ConfigureNamesEnum[strategy] = NULL;
+    }
     utils_cxt->guc_dirty = false;
     utils_cxt->reporting_enabled = false;
     utils_cxt->GUCNestLevel = 0;
@@ -715,9 +772,10 @@ static void knl_u_upgrade_init(knl_u_upgrade_context* upg_cxt)
 static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
 {
     plsql_cxt->inited = false;
-    plsql_cxt->plpgsql_func_cxt = NULL;
+    plsql_cxt->plpgsql_cxt = NULL;
+    plsql_cxt->plpgsql_pkg_cxt = NULL;
     plsql_cxt->plpgsql_HashTable = NULL;
-    plsql_cxt->plpgsql_dlist_functions = NULL;
+    plsql_cxt->plpgsql_dlist_objects = NULL;
     plsql_cxt->datums_alloc = 0;
     plsql_cxt->plpgsql_nDatums = 0;
     plsql_cxt->datums_last = 0;
@@ -740,8 +798,15 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->yyscanner = NULL;
     plsql_cxt->goto_labels = NIL;
     plsql_cxt->rendezvousHash = NULL;
+    plsql_cxt->debug_proc_htbl = NULL;
+    plsql_cxt->debug_client = NULL;
+    plsql_cxt->has_step_into = false;
+    plsql_cxt->cur_debug_server = NULL;
     plsql_cxt->dbe_output_buffer_limit = DEFAULT_DBE_BUFFER_LIMIT;
     plsql_cxt->is_delete_function = false;
+    plsql_cxt->plpgsql_curr_compile_package = NULL;
+    plsql_cxt->is_compile_pkg_body = false;
+    plsql_cxt->is_compile_pkg_spec = false;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
@@ -821,14 +886,21 @@ static void knl_u_storage_init(knl_u_storage_context* storage_cxt)
 
     /* var in md.cpp */
     storage_cxt->MdCxt = NULL;
-    storage_cxt->pendingOpsTable = NULL;
+
+    /* var in knl_uundofile.cpp */
+    storage_cxt->UndoFileCxt = NULL;
+
+    /* var in sync.cpp */
     storage_cxt->pendingUnlinks = NIL;
-    storage_cxt->mdsync_cycle_ctr = 0;
-    storage_cxt->mdckpt_cycle_ctr = 0;
-    storage_cxt->mdsync_in_progress = false;
+    storage_cxt->pendingOpsCxt = NULL;
+    storage_cxt->sync_cycle_ctr = 0;
+    storage_cxt->checkpoint_cycle_ctr = 0;
+    storage_cxt->pendingOps = NULL;
+
     storage_cxt->nextLocalTransactionId = InvalidTransactionId;
-    for (int i = 0; i < MAX_LOCKMETHOD; i++)
+    for (int i = 0; i < MAX_LOCKMETHOD; i++) {
         storage_cxt->holdSessionLock[i] = false;
+    }
     storage_cxt->twoPhaseCommitInProgress = false;
     storage_cxt->dumpHashbucketIdNum = 0;
     storage_cxt->dumpHashbucketIds = NULL;
@@ -931,6 +1003,11 @@ static void knl_u_slow_query_init(knl_u_slow_query_context* slow_query_cxt)
     slow_query_cxt->slow_query.unique_sql_id = 0;
 }
 
+static void knl_u_ledger_init(knl_u_ledger_context *ledger_context)
+{
+    ledger_context->resp_tag = NULL;
+}
+
 static void knl_u_user_login_init(knl_u_user_login_context* user_login_cxt)
 {
     Assert(user_login_cxt != NULL);
@@ -968,6 +1045,7 @@ static void knl_u_relmap_init(knl_u_relmap_context* relmap_cxt)
     relmap_cxt->pending_shared_updates = (RelMapFile*)palloc0(sizeof(RelMapFile));
     relmap_cxt->pending_local_updates = (RelMapFile*)palloc0(sizeof(RelMapFile));
     relmap_cxt->RelfilenodeMapHash = NULL;
+    relmap_cxt->UHeapRelfilenodeMapHash = NULL;
 }
 
 static void knl_u_inval_init(knl_u_inval_context* inval_cxt)
@@ -1020,6 +1098,8 @@ static void knl_u_catalog_init(knl_u_catalog_context* catalog_cxt)
     catalog_cxt->baseSearchPathValid = true;
     catalog_cxt->overrideStack = NIL;
     catalog_cxt->overrideStackValid = true;
+    catalog_cxt->setCurCreateSchema = false;
+    catalog_cxt->curCreateSchema = NULL;
     catalog_cxt->myTempNamespaceOld = InvalidOid;
     catalog_cxt->myTempNamespace = InvalidOid;
     catalog_cxt->myTempToastNamespace = InvalidOid;
@@ -1130,6 +1210,7 @@ static void knl_u_xact_init(knl_u_xact_context* xact_cxt)
     xact_cxt->SubXact_callbacks = NULL;
 #ifdef PGXC
     xact_cxt->dbcleanup_info = (abort_callback_type*)palloc0(sizeof(abort_callback_type));
+    xact_cxt->dbcleanupInfoList = NIL;
 #endif
 
     /* alloc in TopTransactionMemory Context, safe to set NULL */
@@ -1138,7 +1219,9 @@ static void knl_u_xact_init(knl_u_xact_context* xact_cxt)
     xact_cxt->savePrepareGID = NULL;
 
     xact_cxt->pbe_execute_complete = true;
-    xact_cxt->send_seqname = NULL;
+    xact_cxt->sendSeqDbName = NULL;
+    xact_cxt->sendSeqSchmaName = NULL;
+    xact_cxt->sendSeqName = NULL;
     xact_cxt->send_result = 0;
 }
 
@@ -1185,9 +1268,13 @@ void knl_session_init(knl_session_context* sess_cxt)
     sess_cxt->guc_variables = NULL;
     sess_cxt->num_guc_variables = 0;
     sess_cxt->session_id = 0;
+    sess_cxt->globalSessionId.sessionId = 0;
+    sess_cxt->globalSessionId.nodeId = 0;
+    sess_cxt->globalSessionId.seq = 0;
     sess_cxt->debug_query_id = 0;
     sess_cxt->prog_name = NULL;
     sess_cxt->ClientAuthInProgress = false;
+    sess_cxt->is_autonomous_session = false;
     sess_cxt->need_report_top_xid = false;
     sess_cxt->on_sess_exit_index = 0;
     sess_cxt->cn_session_abort_count = 0;
@@ -1199,6 +1286,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     /* workload manager session context init */
     sess_cxt->wlm_cxt = (knl_u_wlm_context*)palloc0(sizeof(knl_u_wlm_context));
 
+    knl_u_advisor_init(&sess_cxt->adv_cxt);
     knl_u_analyze_init(&sess_cxt->analyze_cxt);
     knl_u_attr_init(&sess_cxt->attr);
     knl_u_cache_init(&sess_cxt->cache_cxt);
@@ -1246,9 +1334,12 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_slow_query_init(&sess_cxt->slow_query_cxt);
     knl_u_statement_init(&sess_cxt->statement_cxt);
     knl_u_streaming_init(&sess_cxt->streaming_cxt);
+    knl_u_ledger_init(&sess_cxt->ledger_cxt);
 #ifdef ENABLE_MOT
     knl_u_mot_init(&sess_cxt->mot_cxt);
 #endif
+    KnlUUstoreInit(&sess_cxt->ustore_cxt);
+
     MemoryContextSeal(sess_cxt->top_mem_cxt);
 }
 
@@ -1310,6 +1401,9 @@ knl_session_context* create_session_context(MemoryContext parent, uint64 id)
     sess->top_mem_cxt = top_mem_cxt;
     knl_session_init(sess);
     sess->session_id = id;
+#ifdef ENABLE_MULTIPLE_NODES
+    sess->globalSessionId.sessionId = id;
+#endif
     u_sess = sess;
 
     if (id != 0) {
@@ -1401,6 +1495,10 @@ bool stp_set_commit_rollback_err_msg(stp_xact_err_type type)
             case STP_XACT_AFTER_TRIGGER_BEGIN:
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
                     "transaction statement in store procedure used as sql to get value is not supported");
+                break;
+            case STP_XACT_PACKAGE_INSTANTIATION:
+                rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
+                    "can not use commit rollback in package instantiation");
                 break;
             default:
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",

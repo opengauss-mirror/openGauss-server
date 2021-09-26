@@ -1,0 +1,369 @@
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5a
+\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5a';
+-- case 5a: concurrent lock and insert; second insert is delayed for 0.5 seconds
+drop table if exists t1;
+NOTICE:  table "t1" does not exist, skipping
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (15,10);
+insert into t1 values (default);
+select * from t1;
+ c1 | c2 | c3  
+----+----+-----
+ 15 | 10 | 100
+    |  1 | 100
+(2 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (3,15); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1 | c2 | c3  
+--?.* \[terminal 2\] ----\+----\+-----
+--?.* \[terminal 2\]  15 | 10 | 100
+--?.* \[terminal 2\]     |  1 | 100
+--?.* \[terminal 2\]   3 | 15 | 100
+--?.* \[terminal 2\] \(3 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 1\] INSERT 0 1
+select * from t1;
+ c1 | c2 |  c3  
+----+----+------
+ 15 | 10 |  100
+    |  1 | 1000
+  3 | 15 |  100
+(3 rows)
+
+-- case 5b: concurrent lock and multi-insert; multi-insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5b
+\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5b
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5b';
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (15,10);
+insert into t1 values (default);
+select * from t1;
+ c1 | c2 | c3  
+----+----+-----
+ 15 | 10 | 100
+    |  1 | 100
+(2 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); \copy t1 from '@abs_srcdir@/tmp_check/datanode1/pg_copydir/whitebox_lockTuple.data' delimiter '|'; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\]  c1 | c2 | c3  
+--?.* \[terminal 2\] ----\+----\+-----
+--?.* \[terminal 2\]  15 | 10 | 100
+--?.* \[terminal 2\]     |  1 | 100
+--?.* \[terminal 2\]   1 |  2 | 100
+--?.* \[terminal 2\]   3 |  4 | 100
+--?.* \[terminal 2\]   2 |  3 | 100
+--?.* \[terminal 2\]   5 |  6 | 100
+--?.* \[terminal 2\]   3 |  8 | 100
+--?.* \[terminal 2\] \(7 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 1\] INSERT 0 1
+select * from t1;
+ c1 | c2 |  c3  
+----+----+------
+ 15 | 10 |  100
+    |  1 | 1000
+  1 |  2 |  100
+  3 |  4 |  100
+  2 |  3 |  100
+  5 |  6 |  100
+  3 |  8 |  100
+(7 rows)
+
+-- case 5c: concurrent lock and delete; delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5c
+\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5c
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5c';
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT default 3, c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (15,10);
+insert into t1 values (default);
+INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;
+WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+WARNING:  UHeapUpdate returned 5
+select * from t1;
+ c1 | c2 |  c3  
+----+----+------
+ 15 | 10 |  100
+  3 |  1 | 1000
+(2 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=3; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  UHeapDelete returned 5
+--?.* \[terminal 1\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 2\] WARNING:  UHeapDelete returned 3
+--?.* \[terminal 1\] INSERT 0 1
+--?.* \[terminal 2\] WARNING:  UHeapLockTuple returned 3
+--?.* \[terminal 2\] WARNING:  UHeapDelete returned 5
+--?.* \[terminal 2\] DELETE 1
+--?.* \[terminal 2\]  c1 | c2 | c3  
+--?.* \[terminal 2\] ----\+----\+-----
+--?.* \[terminal 2\]  15 | 10 | 100
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+select * from t1;
+ c1 | c2 | c3  
+----+----+-----
+ 15 | 10 | 100
+(1 row)
+
+---- case 5d: concurrent lock and update; update is delayed for 0.5 seconds
+--\! rm -f @abs_srcdir@/concurrent_uheap_lock_5d
+--\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=1" >> @abs_srcdir@/concurrent_uheap_lock_5d
+--set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5d';
+--
+--drop table if exists t1;
+--CREATE TABLE t1 (c1 INT default 3, c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+--insert into t1 values (15,10);
+--insert into t1 values (default);
+--INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;
+--select * from t1;
+--
+--\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+--\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c1=1 where c1=3; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+--\! sleep 15
+--select * from t1;
+---- case 5e: concurrent lock and lock; lock is delayed for 0.5 seconds
+--\! rm -f @abs_srcdir@/concurrent_uheap_lock_5e
+--\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5e
+--set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5e';
+--
+--drop table if exists t1;
+--CREATE TABLE t1 (c1 INT default 3, c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+--insert into t1 values (15,10);
+--insert into t1 values (default);
+--INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;
+--select * from t1;
+--
+--\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+--\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000; select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+--\! sleep 15
+--select * from t1;
+-- case 5f: concurrent lock and fetch; fetch is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5f
+\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5f
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5f';
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100) with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (15,10);
+insert into t1 values (default);
+select * from t1;
+ c1 | c2 | c3  
+----+----+-----
+ 15 | 10 | 100
+    |  1 | 100
+(2 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); select * from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\]  c1 | c2 | c3  
+--?.* \[terminal 2\] ----\+----\+-----
+--?.* \[terminal 2\]  15 | 10 | 100
+--?.* \[terminal 2\]     |  1 | 100
+--?.* \[terminal 2\] \(2 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 1\] INSERT 0 1
+select * from t1;
+ c1 | c2 |  c3  
+----+----+------
+ 15 | 10 |  100
+    |  1 | 1000
+(2 rows)
+
+-- case 5g: concurrent lock and page prune; page prune is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5g
+\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5g
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5g';
+drop table if exists t1;
+CREATE TABLE t1 (c1 INT , c2 INT DEFAULT 1 PRIMARY KEY, c3 INT DEFAULT 100, c4 varchar default 'hi') with(storage_type=ustore);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (15,10,100,'abc');
+insert into t1 values (default);
+insert into t1 values (2,20,400,'xyz');
+insert into t1 values (10,40,350,'fbc');
+update t1 set c4 = 'hello' where c1 > 60;
+select * from t1;
+ c1 | c2 | c3  | c4  
+----+----+-----+-----
+ 15 | 10 | 100 | abc
+    |  1 | 100 | hi
+  2 | 20 | 400 | xyz
+ 10 | 40 | 350 | fbc
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update t1 set c4='xyzxyz' where c2<=15; select * from t1 order by c1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 1\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 2\] WARNING:  UHeapUpdate returned 3
+--?.* \[terminal 1\] INSERT 0 1
+--?.* \[terminal 2\] WARNING:  UHeapLockTuple returned 3
+--?.* \[terminal 2\] WARNING:  UHeapUpdate returned 5
+--?.* \[terminal 2\] UPDATE 2
+--?.* \[terminal 2\]  c1 | c2 |  c3  |   c4   
+--?.* \[terminal 2\] ----\+----\+------\+--------
+--?.* \[terminal 2\]   2 | 20 |  400 | xyz
+--?.* \[terminal 2\]  10 | 40 |  350 | fbc
+--?.* \[terminal 2\]  15 | 10 |  100 | xyzxyz
+--?.* \[terminal 2\]     |  1 | 1000 | xyzxyz
+--?.* \[terminal 2\] \(4 rows\)
+--?.* \[terminal 2\] 
+select * from t1 order by c1;
+ c1 | c2 |  c3  |   c4   
+----+----+------+--------
+  2 | 20 |  400 | xyz
+ 10 | 40 |  350 | fbc
+ 15 | 10 |  100 | xyzxyz
+    |  1 | 1000 | xyzxyz
+(4 rows)
+
+-- case 5h: concurrent lock and toast delete; toast delete is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5h
+\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5h
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5h';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); delete from t1 where c1=1; select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] INSERT 0 1
+--?.* \[terminal 2\] DELETE 3
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  3 |  9
+(1 row)
+
+-- case 5i: concurrent lock and toast insert; toast insert is delayed for 0.5 seconds
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5i
+\! echo "ExecConflictUpdate_Begin,SLEEP,TIMEOUT=10000000,SKIP_ITERATION=0" >> @abs_srcdir@/concurrent_uheap_lock_5i
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheap_lock_5i';
+drop table if exists t1;
+create table t1 (c1 int default 1, c2 int default 1 primary key, c3 text default repeat('xyzxyz',10000), c4 text default repeat('hello',10000));
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "t1_pkey" for table "t1"
+insert into t1 values (1,1,repeat('xyzxyz',100000),repeat('hello',10000));
+insert into t1 values (1,5,repeat('abcabc',100000),repeat('hello',10000));
+insert into t1 values (1,6,'hello','hi');
+insert into t1 values (3,9,'abc','xyz');
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  1
+  1 |  5
+  1 |  6
+  3 |  9
+(4 rows)
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "INSERT INTO t1 VALUES(DEFAULT) ON DUPLICATE KEY UPDATE c3 = 1000;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); insert into t1 values (10,15,repeat('e',10000),repeat('d',10000)); select c1, c2 from t1;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 15
+--?.* \[terminal 1\] WARNING:  Suspending at breakpoint ExecConflictUpdate_Begin timeout=10000000
+--?.* \[terminal 2\]  pg_sleep 
+--?.* \[terminal 2\] ----------
+--?.* \[terminal 2\]  
+--?.* \[terminal 2\] \(1 row\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 2\] INSERT 0 1
+--?.* \[terminal 2\]  c1 | c2 
+--?.* \[terminal 2\] ----\+----
+--?.* \[terminal 2\]   1 |  1
+--?.* \[terminal 2\]   1 |  5
+--?.* \[terminal 2\]   1 |  6
+--?.* \[terminal 2\]   3 |  9
+--?.* \[terminal 2\]  10 | 15
+--?.* \[terminal 2\] \(5 rows\)
+--?.* \[terminal 2\] 
+--?.* \[terminal 1\] INSERT 0 1
+select c1, c2 from t1;
+ c1 | c2 
+----+----
+  1 |  5
+  1 |  6
+  3 |  9
+ 10 | 15
+  1 |  1
+(5 rows)
+
+-- drop all tables
+drop table t1;
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5a
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5b
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5c
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5d
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5e
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5f
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5g
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5h
+\! rm -f @abs_srcdir@/concurrent_uheap_lock_5i

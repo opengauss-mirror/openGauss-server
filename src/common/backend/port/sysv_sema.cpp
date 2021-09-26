@@ -217,7 +217,7 @@ static IpcSemaphoreId IpcSemaphoreCreate(int numSems)
         }
 
         /*
-         * The sema set appears to be from a dead Postgres process, or from a
+         * The sema set appears to be from a dead openGauss process, or from a
          * previous cycle of life in this same process.  Zap it, if possible.
          * This probably shouldn't fail, but if it does, assume the sema set
          * belongs to someone else after all, and continue quietly.

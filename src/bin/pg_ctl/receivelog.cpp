@@ -583,7 +583,7 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
         PQclear(res);
     }
 
-    pg_log(PG_PROGRESS, _(" check identify system success\n"));
+    pg_log(PG_PROGRESS, _("check identify system success\n"));
 
     /* Initiate the replication stream at specified location */
     ss_c = snprintf_s(query,
@@ -596,13 +596,13 @@ bool ReceiveXlogStream(PGconn* conn, XLogRecPtr startpos, uint32 timeline, const
     securec_check_ss_c(ss_c, "", "");
     res = PQexec(conn, query);
     if (PQresultStatus(res) != PGRES_COPY_BOTH) {
-        pg_log(PG_WARNING, _(" could not start replication: %s\n"), PQresultErrorMessage(res));
+        pg_log(PG_WARNING, _("could not start replication: %s\n"), PQresultErrorMessage(res));
         PQclear(res);
         return false;
     }
     PQclear(res);
 
-    pg_log(PG_PROGRESS, _(" send %s success\n"), query);
+    pg_log(PG_PROGRESS, _("send %s success\n"), query);
     /* Set the last reply timestamp */
     last_recv_timestamp = localGetCurrentTimestamp();
     ping_sent = false;

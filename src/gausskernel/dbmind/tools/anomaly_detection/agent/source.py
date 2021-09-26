@@ -16,22 +16,17 @@ See the Mulan PSL v2 for more details.
 
 class Source:
     """
-    This is father class which is used for acquiring mutiple metric data at same time.
+    This is parent class which is used for acquiring
+     multiple metric data at the same time.
     """
 
     def __init__(self):
-        self._channel_manager = None
-
-    def start(self):
-        pass
-
-    def stop(self):
-        pass
+        self._channel = None
 
     @property
-    def channel_manager(self):
-        return self._channel_manager
+    def channel(self):
+        return self._channel
 
-    @channel_manager.setter
-    def channel_manager(self, channel_manager):
-        self._channel_manager = channel_manager
+    @channel.setter
+    def channel(self, channel):
+        self._channel = channel

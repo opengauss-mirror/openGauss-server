@@ -228,7 +228,7 @@ int main(int argc, char* argv[])
         printf(_("WARNING: possible byte ordering mismatch\n"
                  "The byte ordering used to store the pg_control file might not match the one\n"
                  "used by this program.  In that case the results below would be incorrect, and\n"
-                 "the PostgreSQL installation would be incompatible with this data directory.\n"));
+                 "the openGauss installation would be incompatible with this data directory.\n"));
     printf(_("Catalog version number:               %u\n"), ControlFile.catalog_version_no);
     printf(_("Database system identifier:           %s\n"), sysident_str);
     printf(_("Database cluster state:               %s\n"), dbState(ControlFile.state));

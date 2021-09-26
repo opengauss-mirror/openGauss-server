@@ -27,4 +27,6 @@ subdir = contrib/spi
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 include $(top_srcdir)/contrib/contrib-global.mk
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC
 endif

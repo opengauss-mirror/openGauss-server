@@ -24,6 +24,7 @@
 #include "catalog/indexing.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/gs_package.h"
 #include "commands/dbcommands.h"
 #include "commands/schemacmds.h"
 #include "miscadmin.h"
@@ -36,6 +37,8 @@
 #include "utils/syscache.h"
 #include "utils/fmgroids.h"
 #include "utils/snapmgr.h"
+#include "gs_ledger/ledger_utils.h"
+#include "gs_ledger/userchain.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
@@ -45,6 +48,7 @@
 
 static const int TABLE_TYPE_HDFS = 1;
 static const int TABLE_TYPE_TIMESERIES = 2;
+static const int TABLE_TYPE_ANY = 3;
 
 static void AlterSchemaOwner_internal(HeapTuple tup, Relation rel, Oid newOwnerId);
 static StringInfo TableExistInSchema(Oid schemaOid, const int tableType);
@@ -61,6 +65,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
 {
     const char* schemaName = stmt->schemaname;
     const char* authId = stmt->authid;
+    bool hasBlockChain = stmt->hasBlockChain;
     Oid namespaceId;
     OverrideSearchPath* overridePath = NULL;
     List* parsetree_list = NIL;
@@ -72,7 +77,14 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     char* queryStringwithinfo = (char*)queryString;
 
     GetUserIdAndSecContext(&saved_uid, &save_sec_context);
-
+    if (IsExistPackageName(schemaName)) {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("schema name can not same as package"),
+                errdetail("same package name exists"),
+                errcause("schema name conflict"),
+                erraction("rename schema name")));
+    }
     /*
      * Who is supposed to own the new schema?
      */
@@ -163,7 +175,7 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
         SetUserIdAndSecContext(owner_uid, (uint32)save_sec_context | SECURITY_LOCAL_USERID_CHANGE);
 
     /* Create the schema's namespace */
-    namespaceId = NamespaceCreate(schemaName, owner_uid, false);
+    namespaceId = NamespaceCreate(schemaName, owner_uid, false, hasBlockChain);
 
     /* Advance cmd counter to make the namespace visible */
     CommandCounterIncrement();
@@ -277,6 +289,94 @@ void CreateSchemaCommand(CreateSchemaStmt* stmt, const char* queryString)
     list_free(parsetree_list);
 }
 
+void AlterSchemaCommand(AlterSchemaStmt* stmt)
+{
+    char *nspName = stmt->schemaname;
+    Assert(nspName != NULL);
+    bool withBlockchain = stmt->hasBlockChain;
+    bool nspIsBlockchain = false;
+    HeapTuple tup;
+    Relation rel;
+    AclResult aclresult;
+    const int STR_SCHEMA_NAME_LENGTH = 9;
+    const int STR_SNAPSHOT_LENGTH = 8;
+
+    if (withBlockchain && ((strncmp(nspName, "dbe_perf", STR_SCHEMA_NAME_LENGTH) == 0) ||
+        (strncmp(nspName, "snapshot", STR_SNAPSHOT_LENGTH) == 0))) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED),
+                        errmsg("The schema '%s' doesn't allow to alter to blockchain schema", nspName)));
+    }
+
+    if (get_namespace_oid(nspName, true) == PG_BLOCKCHAIN_NAMESPACE) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema blockchain doesn't allow to alter")));
+    }
+
+    rel = heap_open(NamespaceRelationId, RowExclusiveLock);
+
+    tup = SearchSysCacheCopy1(NAMESPACENAME, CStringGetDatum(nspName));
+    if (!HeapTupleIsValid(tup))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema \"%s\" does not exist", nspName)));
+
+    /* Must be owner or have alter privilege of the schema. */
+    aclresult = pg_namespace_aclcheck(HeapTupleGetOid(tup), GetUserId(), ACL_ALTER);
+    if (aclresult != ACLCHECK_OK && !pg_namespace_ownercheck(HeapTupleGetOid(tup), GetUserId())) {
+        aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_NAMESPACE, nspName);
+    }
+
+    /* must have CREATE privilege on database */
+    aclresult = pg_database_aclcheck(u_sess->proc_cxt.MyDatabaseId, GetUserId(), ACL_CREATE);
+    if (aclresult != ACLCHECK_OK)
+        aclcheck_error(aclresult, ACL_KIND_DATABASE, get_and_check_db_name(u_sess->proc_cxt.MyDatabaseId));
+
+    if (withBlockchain && !g_instance.attr.attr_common.allowSystemTableMods &&
+        !u_sess->attr.attr_common.IsInplaceUpgrade && IsReservedName(nspName))
+        ereport(ERROR,
+            (errcode(ERRCODE_RESERVED_NAME),
+                errmsg("The system schema \"%s\" doesn't allow to alter to blockchain schema", nspName)));
+    /*
+     * If the any table exists in the schema, do not change to ledger schema.
+     */
+    StringInfo existTbl = TableExistInSchema(HeapTupleGetOid(tup), TABLE_TYPE_ANY);
+    if (existTbl->len != 0) {
+        if (withBlockchain) {
+            ereport(ERROR,
+                (errcode(ERRCODE_RESERVED_NAME),
+                    errmsg("It is not supported to change \"%s\" to blockchain schema which includes tables.",
+                        nspName)));
+        } else {
+            ereport(ERROR,
+                (errcode(ERRCODE_RESERVED_NAME),
+                    errmsg("It is not supported to change \"%s\" to normal schema which includes tables.",
+                        nspName)));
+        }
+
+    }
+
+    /* modify nspblockchain attribute */
+    bool is_null = true;
+    Datum datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspblockchain, &is_null);
+    if (!is_null) {
+        nspIsBlockchain = DatumGetBool(datum);
+    }
+    if (nspIsBlockchain != withBlockchain) {
+        Datum new_record[Natts_pg_namespace] = {0};
+        bool new_record_nulls[Natts_pg_namespace] = {false};
+        bool new_record_repl[Natts_pg_namespace] = {false};
+
+        new_record[Anum_pg_namespace_nspblockchain - 1] = BoolGetDatum(withBlockchain);
+        new_record_repl[Anum_pg_namespace_nspblockchain - 1] = true;
+
+        HeapTuple new_tuple = (HeapTuple) tableam_tops_modify_tuple(tup, RelationGetDescr(rel),
+            new_record, new_record_nulls, new_record_repl);
+        simple_heap_update(rel, &tup->t_self, new_tuple);
+        /* Update indexes */
+        CatalogUpdateIndexes(rel, new_tuple);
+    }
+
+    heap_close(rel, NoLock);
+    tableam_tops_free_tuple(tup);
+}
+
 /*
  * Guts of schema deletion.
  */
@@ -290,6 +390,10 @@ void RemoveSchemaById(Oid schemaOid)
     }
     if (IsSnapshotNamespace(schemaOid)) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema 'snapshot' doesn't allow to drop")));
+    }
+
+    if (schemaOid == PG_BLOCKCHAIN_NAMESPACE) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema 'blockchain' doesn't allow to drop")));
     }
 
     relation = heap_open(NamespaceRelationId, RowExclusiveLock);
@@ -316,9 +420,14 @@ void RenameSchema(const char* oldname, const char* newname)
     AclResult aclresult;
     const int STR_SCHEMA_NAME_LENGTH = 9;
     const int STR_SNAPSHOT_LENGTH = 8;
+    bool is_nspblockchain = false;
     if ((strncmp(oldname, "dbe_perf", STR_SCHEMA_NAME_LENGTH) == 0) ||
         (strncmp(oldname, "snapshot", STR_SNAPSHOT_LENGTH) == 0)) {
         ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema '%s' doesn't allow to rename", oldname)));
+    }
+
+    if (get_namespace_oid(oldname, true) == PG_BLOCKCHAIN_NAMESPACE) {
+        ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("The schema blockchain doesn't allow to rename")));
     }
 
     rel = heap_open(NamespaceRelationId, RowExclusiveLock);
@@ -368,6 +477,21 @@ void RenameSchema(const char* oldname, const char* newname)
                     existTimeSeriesTbl->data)));
     }
 
+    /* Before rename schema (with blockchain) rename related ledger tables first */
+    bool is_null = true;
+    Datum datum = SysCacheGetAttr(NAMESPACENAME, tup, Anum_pg_namespace_nspblockchain, &is_null);
+    if (!is_null) {
+        is_nspblockchain = DatumGetBool(datum);
+    }
+
+    if (is_nspblockchain) {
+        List *related_table = namespace_get_depended_relid(HeapTupleGetOid(tup));
+        rename_histlist_by_newnsp(related_table, newname);
+        if (related_table != NIL) {
+            list_free(related_table);
+        }
+    }
+
     /* rename */
     (void)namestrcpy(&(((Form_pg_namespace)GETSTRUCT(tup))->nspname), newname);
     simple_heap_update(rel, &tup->t_self, tup);
@@ -401,7 +525,11 @@ static StringInfo TableExistInSchema(Oid namespaceId, const int tableType)
         Oid RelOid = HeapTupleGetOid(tuple);
 
         Relation rel = relation_open(RelOid, AccessShareLock);
-        if (tableType == TABLE_TYPE_HDFS && RelationIsDfsStore(rel)) {
+        if (tableType == TABLE_TYPE_ANY) {
+            appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
+            relation_close(rel, AccessShareLock);
+            break;
+        } else if (tableType == TABLE_TYPE_HDFS && RelationIsDfsStore(rel)) {
             appendStringInfo(existTbl, "%s", RelationGetRelationName(rel));
             relation_close(rel, AccessShareLock);
             break;

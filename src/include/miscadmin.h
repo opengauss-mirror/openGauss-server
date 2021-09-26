@@ -1,11 +1,11 @@
 /* -------------------------------------------------------------------------
  *
  * miscadmin.h
- *	  This file contains general postgres administration and initialization
+ *	  This file contains general openGauss administration and initialization
  *	  stuff that used to be spread out between the following files:
  *		globals.h						global variables
  *		pdir.h							directory path crud
- *		pinit.h							postgres initialization
+ *		pinit.h							openGauss initialization
  *		pmod.h							processing modes
  *	  Over time, this has also become the preferred place for widely known
  *	  resource-limitation stuff, such as u_sess->attr.attr_memory.work_mem and check_stack_depth().
@@ -39,6 +39,9 @@
 
 extern const uint32 GRAND_VERSION_NUM;
 
+extern const uint32 COMMENT_PROC_VERSION_NUM;
+extern const uint32 COMMENT_PCT_TYPE_VERSION_NUM;
+extern const uint32 HINT_ENHANCEMENT_VERSION_NUM;
 extern const uint32 MATVIEW_VERSION_NUM;
 extern const uint32 PARTIALPUSH_VERSION_NUM;
 extern const uint32 SUBLINKPULLUP_VERSION_NUM;
@@ -53,7 +56,20 @@ extern const uint32 PRIVS_VERSION_NUM;
 extern const uint32 ML_OPT_MODEL_VERSION_NUM;
 extern const uint32 RANGE_LIST_DISTRIBUTION_VERSION_NUM;
 extern const uint32 FIX_SQL_ADD_RELATION_REF_COUNT;
+extern const uint32 INPLACE_UPDATE_WERSION_NUM;
 extern const uint32 GENERATED_COL_VERSION_NUM;
+extern const uint32 SEGMENT_PAGE_VERSION_NUM;
+extern const uint32 DECODE_ABORT_VERSION_NUM;
+extern const uint32 COPY_TRANSFORM_VERSION_NUM;
+extern const uint32 TDE_VERSION_NUM;
+extern const uint32 V5R1C20_BACKEND_VERSION_NUM;
+extern const uint32 V5R2C00_START_VERSION_NUM;
+extern const uint32 V5R2C00_BACKEND_VERSION_NUM;
+extern const uint32 TWOPHASE_FILE_VERSION;
+extern const uint32 CLIENT_ENCRYPTION_PROC_VERSION_NUM;
+
+extern void register_backend_version(uint32 backend_version);
+extern bool contain_backend_version(uint32 version_number);
 extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
 
@@ -147,6 +163,14 @@ extern void ProcessInterrupts(void);
         t_thrd.int_cxt.CritSectionCount--;           \
     } while (0)
 
+#define HOLD_CANCEL_INTERRUPTS()  (t_thrd.int_cxt.QueryCancelHoldoffCount++)
+
+#define RESUME_CANCEL_INTERRUPTS() \
+do { \
+    Assert(t_thrd.int_cxt.QueryCancelHoldoffCount > 0); \
+    t_thrd.int_cxt.QueryCancelHoldoffCount--; \
+} while (0)
+
 /*****************************************************************************
  *	  globals.h --															 *
  *****************************************************************************/
@@ -167,7 +191,7 @@ extern bool InplaceUpgradePrecommit;
 extern THR_LOCAL PGDLLIMPORT bool IsUnderPostmaster;
 extern THR_LOCAL PGDLLIMPORT char my_exec_path[];
 
-extern int8 ce_cache_refresh_type;
+extern uint8 ce_cache_refresh_type;
 
 #define MAX_QUERY_DOP (64)
 #define MIN_QUERY_DOP -(MAX_QUERY_DOP)
@@ -252,7 +276,7 @@ extern int trace_recovery(int trace_level);
 
 /*****************************************************************************
  *	  pdir.h --																 *
- *			POSTGRES directory path definitions.							 *
+ *			openGauss directory path definitions.							 *
  *****************************************************************************/
 
 /* flags to be OR'd to form sec_context */
@@ -320,20 +344,21 @@ extern bool CheckExecDirectPrivilege(const char* query); /* check user have priv
 
 /*****************************************************************************
  *	  pmod.h --																 *
- *			POSTGRES processing mode definitions.							 *
+ *			openGauss processing mode definitions.							 *
  *****************************************************************************/
 
 #define IsBootstrapProcessingMode() (u_sess->misc_cxt.Mode == BootstrapProcessing)
 #define IsInitProcessingMode() (u_sess->misc_cxt.Mode == InitProcessing)
 #define IsNormalProcessingMode() (u_sess->misc_cxt.Mode == NormalProcessing)
 #define IsPostUpgradeProcessingMode() (u_sess->misc_cxt.Mode == PostUpgradeProcessing)
+#define IsFencedProcessingMode() (u_sess->misc_cxt.Mode == FencedProcessing)
 
 #define GetProcessingMode() u_sess->misc_cxt.Mode
 
 #define SetProcessingMode(mode)                                                                              \
     do {                                                                                                     \
         AssertArg((mode) == BootstrapProcessing || (mode) == InitProcessing || (mode) == NormalProcessing || \
-                  (mode) == PostUpgradeProcessing);                                                          \
+                  (mode) == PostUpgradeProcessing ||  (mode) == FencedProcessing);                                                          \
         u_sess->misc_cxt.Mode = (mode);                                                                      \
     } while (0)
 
@@ -347,6 +372,7 @@ typedef enum {
     BootstrapProcess,
     StartupProcess,
     BgWriterProcess,
+    SpBgWriterProcess,
     CheckpointerProcess,
     WalWriterProcess,
     WalWriterAuxiliaryProcess,
@@ -367,6 +393,7 @@ typedef enum {
 #endif
     AsyncIOCompleterProcess,
     TpoolSchdulerProcess,
+    UndoRecyclerProcess,
     TsCompactionProcess,
     TsCompactionAuxiliaryProcess,
     NUM_SINGLE_AUX_PROC, /* Sentry for auxiliary type with single thread. */
@@ -416,7 +443,7 @@ typedef enum {
 
 /*****************************************************************************
  *	  pinit.h --															 *
- *			POSTGRES initialization and cleanup definitions.				 *
+ *			openGauss initialization and cleanup definitions.				 *
  *****************************************************************************/
 
 /* in utils/init/postinit.c */

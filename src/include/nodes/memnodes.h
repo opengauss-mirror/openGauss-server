@@ -1,7 +1,7 @@
 /* -------------------------------------------------------------------------
  *
  * memnodes.h
- *	  POSTGRES memory context node definitions.
+ *	  openGauss memory context node definitions.
  *
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
@@ -69,6 +69,7 @@ typedef struct MemoryTrackData {
 
 typedef struct MemoryContextData {
     NodeTag type;                  /* identifies exact kind of context */
+    bool allowInCritSection;       /* allow palloc in critical section */
     MemoryContextMethods* methods; /* virtual function table */
     MemoryContext parent;          /* NULL if no parent (toplevel context) */
     MemoryContext firstchild;      /* head of linked list of children */

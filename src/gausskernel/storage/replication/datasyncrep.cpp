@@ -57,8 +57,9 @@ void WaitForDataSync(void)
      * sync replication standby names defined. Note that those standbys don't
      * need to be connected.
      */
-    if (!u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() || !SyncStandbysDefined() ||
-        (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE)) {
+    bool isResetBcm = !u_sess->attr.attr_storage.enable_stream_replication || !SyncRepRequested() || !SyncStandbysDefined() ||
+        (t_thrd.postmaster_cxt.HaShmData->current_mode == NORMAL_MODE);
+    if (isResetBcm) {
         ResetBCMArray();
         return;
     }

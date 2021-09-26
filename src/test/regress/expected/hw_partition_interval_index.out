@@ -113,8 +113,7 @@ create unique index on hw_partition_index_ip (logdate) local
 );
 ERROR:  number of partitions of LOCAL index must equal that of the underlying table
 create unique index on hw_partition_index_ip (logdate);
-ERROR:  Global and local partition index should not be on same column
---fail wrong syntax
+--succeed
 drop table hw_partition_index_ip;
 --unique index , index para must contain partition key
 create table hw_partition_index_ip

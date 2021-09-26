@@ -39,7 +39,6 @@ char source_slot_name[NAMEDATALEN] = {0};
 #define CHUNKSIZE (1024 * 1024)
 #define BLOCKSIZE (8 * 1024)
 const uint64 MAX_FILE_SIZE = 0xFFFFFFFF;
-const int XLOG_NAME_LENGTH = 24;
 #ifndef WIN32
 #define _atoi64(val) strtol(val, NULL, 10)
 #endif
@@ -199,14 +198,14 @@ void libpqRequestCheckpoint(void)
 /*
  * Calls pg_current_xlog_insert_location() function
  */
-XLogRecPtr libpqGetCurrentXlogFlushLocation(void)
+XLogRecPtr libpqGetCurrentXlogInsertLocation(void)
 {
     XLogRecPtr result = InvalidXLogRecPtr;
     uint32 hi = 0;
     uint32 lo = 0;
     char* val = NULL;
 
-    val = run_simple_query("SELECT pg_get_flush_lsn()");
+    val = run_simple_query("SELECT gs_current_xlog_insert_end_location()");
     if (val == NULL) {
         pg_fatal("Could not get source flush lsn.\n");
         goto error;

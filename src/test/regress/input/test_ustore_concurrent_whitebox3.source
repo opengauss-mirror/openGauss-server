@@ -1,0 +1,29 @@
+
+create table toasttest (col1 int4, col2 int4 NOT NULL, col3 text default 'testing') with (storage_type=USTORE);
+
+\! rm -f @abs_srcdir@/concurrent_uheaptoast3a
+\! echo "UHEAP_UPDATE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast3a
+\! echo "UHEAP_TOAST_DELETE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast3a
+\! echo "UHEAP_TOAST_INSERT_UPDATE,PRINT," >> @abs_srcdir@/concurrent_uheaptoast3a
+set ustore_attr to 'enable_default_ustore_table=on;ustore_unit_test=@abs_srcdir@/concurrent_uheaptoast3a';
+
+-- case 3a: concurrent toast updates; first update faster than second update
+truncate table toasttest;
+insert into toasttest values (30, 50, repeat('x', 100000000));
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update toasttest set col3=repeat('y', 100000000); select length(col3), substring(col3 from 1 for 3) from toasttest;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update toasttest set col3=col3||col3; select length(col3), substring(col3 from 1 for 3) from toasttest;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 20
+select length(col3), substring(col3 from 1 for 3) from toasttest;
+
+-- case 3b: concurrent toast updates; first update slower than second update
+truncate table toasttest;
+insert into toasttest values (30, 50, repeat('x', 100000000));
+
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "update toasttest set col3=repeat('y', 400000000); select length(col3), substring(col3 from 1 for 3) from toasttest;" 2>&1 | append_timestamp "terminal 1" &
+\! source @abs_srcdir@/gsql_with_timestamp.sh && @abs_bindir@/gsql -r -p @portstring@ -d regression -c "select pg_sleep(0.5); update toasttest set col3=col3||col3; select length(col3), substring(col3 from 1 for 3) from toasttest;" 2>&1 | append_timestamp "terminal 2" &
+\! sleep 30
+select length(col3), substring(col3 from 1 for 3) from toasttest;
+
+drop table toasttest;
+

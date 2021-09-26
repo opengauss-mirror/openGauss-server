@@ -50,7 +50,7 @@ $(top_builddir)/src/lib/elog/elog.a:
 
 gscgroup: $(OBJS)
 	$(CC) -fPIC -shared $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -lcgroup -o lib$@.so 
-	mv lib$@.so $(top_builddir)/src/distribute/test/ut/lib
+	mv lib$@.so $(top_builddir)/../distribute/test/ut/lib
 
 install: all installdirs
 	$(INSTALL_PROGRAM) gs_cgroup$(X) '$(DESTDIR)$(bindir)/gs_cgroup$(X)'

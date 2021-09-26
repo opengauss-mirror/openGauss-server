@@ -47,10 +47,14 @@ extern void AlignXlogPtrToNextPageIfNeeded(XLogRecPtr* recPtr);
 extern struct XLogRecord* XLogReadRecord(
     XLogReaderState* state, XLogRecPtr recptr, char** errormsg, bool readoldversion = false, bool doDecode = true);
 
-extern bool XLogRecGetBlockTag(
-    XLogReaderState* record, uint8 block_id, RelFileNode* rnode, ForkNumber* forknum, BlockNumber* blknum);
+extern bool XLogRecGetBlockTag(XLogReaderState *record, uint8 block_id, RelFileNode *rnode, ForkNumber *forknum,
+    BlockNumber *blknum, XLogPhyBlock *pblk = NULL);
 extern bool XLogRecGetBlockLastLsn(XLogReaderState* record, uint8 block_id, XLogRecPtr* lsn);
 extern char* XLogRecGetBlockImage(XLogReaderState* record, uint8 block_id, uint16* hole_offset, uint16* hole_length);
+extern void XLogRecGetPhysicalBlock(const XLogReaderState *record, uint8 blockId,
+                                    uint8 *segFileno, BlockNumber *segBlockno);
+extern void XLogRecGetVMPhysicalBlock(const XLogReaderState *record, uint8 blockId,
+                                    uint8 *vmFileno, BlockNumber *vmblock, bool *has_vm_loc);
 
 /* Invalidate read state */
 extern void XLogReaderInvalReadState(XLogReaderState* state);
@@ -68,6 +72,7 @@ extern bool DecodeXLogRecord(XLogReaderState* state, XLogRecord* record, char** 
 #define XLogRecGetTotalLen(decoder) ((decoder)->decoded_record->xl_tot_len)
 #define XLogRecGetPrev(decoder) ((decoder)->decoded_record->xl_prev)
 #define XLogRecGetInfo(decoder) ((decoder)->decoded_record->xl_info)
+#define XLogRecGetTdeInfo(decoder) ((decoder)->isTde)
 #define XLogRecGetRmid(decoder) ((decoder)->decoded_record->xl_rmid)
 #define XLogRecGetXid(decoder) ((decoder)->decoded_record->xl_xid)
 #define XLogRecGetTerm(decoder) ((decoder)->decoded_record->xl_term)

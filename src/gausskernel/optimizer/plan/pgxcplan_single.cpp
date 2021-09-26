@@ -141,7 +141,7 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
     MemoryContext current_context = CurrentMemoryContext;
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tempOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "pgxc_planner",
-        MEMORY_CONTEXT_OPTIMIZER);
+        u_sess->top_transaction_mem_cxt);
     t_thrd.utils_cxt.CurrentResourceOwner = tempOwner;
 
     /* we need Coordinator for evaluation, invoke standard planner */
@@ -193,6 +193,15 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
          * 3. non unsupport-stream error info
          */
         if (NULL == re_query || stream_unsupport || edata->sqlerrcode != ERRCODE_STREAM_NOT_SUPPORTED) {
+            /*
+             * Release resources applied in standard_planner, release the tempOwner and reinstate the currentOwner
+             * before PG_RE_THROW().
+             */
+            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
+            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_LOCKS, false, false);
+            ResourceOwnerRelease(tempOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
+            t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
+            ResourceOwnerDelete(tempOwner);
             MemoryContextSwitchTo(ecxt);
             PG_RE_THROW();
         }
@@ -356,7 +365,7 @@ Plan* pgxc_make_modifytable(PlannerInfo* root, Plan* topplan)
 
     /*
      * PGXC should apply INSERT/UPDATE/DELETE to a Datanode. We are overriding
-     * normal Postgres behavior by modifying final plan or by adding a node on
+     * normal openGauss behavior by modifying final plan or by adding a node on
      * top of it.
      * If the optimizer finds out that there is nothing to UPDATE/INSERT/DELETE
      * in the table/s (say using constraint exclusion), it does not add modify
