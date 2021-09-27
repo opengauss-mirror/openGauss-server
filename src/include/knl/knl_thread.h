@@ -2283,7 +2283,8 @@ typedef struct knl_t_walsender_context {
     struct pg_conn* advancePrimaryConn;
     /* Timestamp of the last check-timeout time in WalSndCheckTimeOut. */
     TimestampTz last_check_timeout_timestamp;
-
+    /* flag set in WalSndCheckTimeout */
+    bool isWalSndSendTimeoutMessage;
 
     int datafd;
     int ep_fd;

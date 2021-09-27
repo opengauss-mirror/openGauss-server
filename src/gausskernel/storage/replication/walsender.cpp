@@ -3588,6 +3588,8 @@ static void WalSndCheckTimeOut(TimestampTz now)
          * standby.
          */
         if (log_min_messages <= ERROR || client_min_messages <= ERROR) {
+            t_thrd.walsender_cxt.isWalSndSendTimeoutMessage = true;
+
             WalReplicationTimestampInfo timeStampInfo;
             WalReplicationTimestampToString(&timeStampInfo, now, timeout, *last_reply_time, heartbeat);
             ereport(ERROR, (errmsg("terminating Walsender process due to replication timeout."),

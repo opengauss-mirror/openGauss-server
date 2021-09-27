@@ -1364,6 +1364,7 @@ static void knl_t_walsender_init(knl_t_walsender_context* walsender_cxt)
     walsender_cxt->remotePort = 0;
     walsender_cxt->walSndCaughtUp = false;
     walsender_cxt->last_check_timeout_timestamp = 0;
+    walsender_cxt->isWalSndSendTimeoutMessage = false;
     walsender_cxt->advancePrimaryConn = NULL;
 	
     walsender_cxt->ep_fd = -1;

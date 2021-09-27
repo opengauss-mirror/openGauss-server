@@ -3639,7 +3639,15 @@ static void send_message_to_frontend(ErrorData* edata)
             !t_thrd.log_cxt.flush_message_immediately)
             return;
 
-        pq_flush();
+        /*
+         * If it is WalSender's timeout message, choose pq_flush_if_writable()
+         * to avoid blokcing in send() if the send buffer of the socket is full.
+         */
+        if (AM_WAL_NORMAL_SENDER && t_thrd.walsender_cxt.isWalSndSendTimeoutMessage) {
+            pq_flush_if_writable();
+        } else {
+            pq_flush();
+        }
 
         if (edata->elevel == FATAL)
             t_thrd.log_cxt.flush_message_immediately = true;
