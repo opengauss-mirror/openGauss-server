@@ -1772,6 +1772,7 @@ int init_gauss_cluster_config(void)
 
     if (g_nodeHeader.node <= 0) {
         free(g_node);
+        g_node = nullptr;
         return 1;
     }
 
@@ -1784,12 +1785,14 @@ int init_gauss_cluster_config(void)
 
     if (NULL == g_currentNode) {
         free(g_node);
+        g_node = nullptr;
         return 1;
     }
 
     if (get_dynamic_dn_role() != 0) {
         // failed to get dynamic dn role
         free(g_node);
+        g_node = nullptr;
         return 1;
     }
 
@@ -1810,7 +1813,6 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
         SyncRepConfigData *pconf = NULL;
         syncrep_scanner_yyscan_t yyscanner;
         char* data_dir = t_thrd.proc_cxt.DataDir;
-        uint32 idx;
         char* p = NULL;
 
         /* Reset communication variables to ensure a fresh start */
@@ -1845,20 +1847,15 @@ bool check_synchronous_standby_names(char **newval, void **extra, GucSource sour
             // The sync number must less or equals to the number of standby node names.
             return false;
         }
-
         /* get current cluster information from cluster_staic_config */
-        if (strcmp(u_sess->attr.attr_common.application_name, "gsql") == 0 && has_static_config()
-            && 0 == init_gauss_cluster_config()) {
-            for (idx = 0; idx < g_node_num; idx++) {
-                if (g_currentNode->node == g_node[idx].node) {
-                    g_local_node_idx = idx;
-                    break;
-                }
+        if (t_thrd.role == WORKER && strcmp(u_sess->attr.attr_common.application_name, "gsql") == 0
+            && has_static_config()) {
+            if (0 != init_gauss_cluster_config()) {
+                goto pass;
             }
         } else {
             goto pass;
         }
-        g_local_node_name = g_node[g_local_node_idx].nodeName;
 
         p = pconf->member_names;
         for (int i = 1; i <= pconf->nmembers; i++) {

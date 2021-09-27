@@ -294,11 +294,6 @@ int read_config_file(const char* file_path, int* err_no, bool inReload, int mall
     FREAD(&g_nodeHeader.nodeCount, 1, sizeof(uint32), fd);
     FREAD(&g_nodeHeader.node, 1, sizeof(uint32), fd);
 
-    if (g_node != NULL && !inReload) {
-        free(g_node);
-        g_node = NULL;
-    }
-
     if (g_nodeHeader.nodeCount > CM_NODE_MAXNUM || g_nodeHeader.nodeCount == 0) {
         fclose(fd);
         return READ_FILE_ERROR;
@@ -308,14 +303,16 @@ int read_config_file(const char* file_path, int* err_no, bool inReload, int mall
         goto read_failed;
 
     if (!inReload) {
-        if (mallocByNodeNum == MALLOC_BY_NODE_NUM) {
-            g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_nodeHeader.nodeCount);
-        } else {
-            g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * CM_NODE_MAXNUM);
-        }
         if (g_node == NULL) {
-            fclose(fd);
-            return OUT_OF_MEMORY;
+            if (mallocByNodeNum == MALLOC_BY_NODE_NUM) {
+                g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_nodeHeader.nodeCount);
+            } else {
+                g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * CM_NODE_MAXNUM);
+            }
+            if (g_node == NULL) {
+                fclose(fd);
+                return OUT_OF_MEMORY;
+            }
         }
 
         /* g_node size may be larger than SECUREC_STRING_MAX_LEN in large cluster.*/
@@ -816,15 +813,12 @@ int read_lc_config_file(const char* file_path, int* err_no)
         return READ_FILE_ERROR;
     }
 
-    if (g_node != NULL) {
-        free(g_node);
-        g_node = NULL;
-    }
-
-    g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_node_num);
     if (g_node == NULL) {
-        fclose(fd);
-        return OUT_OF_MEMORY;
+        g_node = (staticNodeConfig*)malloc(sizeof(staticNodeConfig) * g_node_num);
+        if (g_node == NULL) {
+            fclose(fd);
+            return OUT_OF_MEMORY;
+        }
     }
 
     for (ii = 0; ii < g_node_num; ii++) {
