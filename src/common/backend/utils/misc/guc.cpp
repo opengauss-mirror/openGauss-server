@@ -459,6 +459,12 @@ static bool check_perf_log(char** newval, void** extra, GucSource source);
 static bool check_timezone_abbreviations(char** newval, void** extra, GucSource source);
 static void assign_timezone_abbreviations(const char* newval, void* extra);
 static void pg_timezone_abbrev_initialize(void);
+static void assign_tcp_keepalives_idle(int newval, void *extra);
+static void assign_tcp_keepalives_interval(int newval, void *extra);
+static void assign_tcp_keepalives_count(int newval, void *extra);
+static const char* show_tcp_keepalives_idle(void);
+static const char* show_tcp_keepalives_interval(void);
+static const char* show_tcp_keepalives_count(void);
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source);
 static void assign_effective_io_concurrency(int newval, void* extra);
 static void assign_pgstat_temp_directory(const char* newval, void* extra);
@@ -2195,8 +2201,8 @@ static void InitConfigureNamesInt()
             0,
             3600,
             NULL,
-            NULL,
-            NULL},
+            assign_tcp_keepalives_idle,
+            show_tcp_keepalives_idle},
 
         {{"tcp_keepalives_interval",
             PGC_USERSET,
@@ -2210,8 +2216,8 @@ static void InitConfigureNamesInt()
             0,
             180,
             NULL,
-            NULL,
-            NULL},
+            assign_tcp_keepalives_interval,
+            show_tcp_keepalives_interval},
         {{"tcp_keepalives_count",
             PGC_USERSET,
             NODE_ALL,
@@ -2226,8 +2232,8 @@ static void InitConfigureNamesInt()
             0,
             100,
             NULL,
-            NULL,
-            NULL},
+            assign_tcp_keepalives_count,
+            show_tcp_keepalives_count},
         {{"gin_fuzzy_search_limit",
             PGC_USERSET,
             NODE_ALL,
@@ -11047,6 +11053,67 @@ static void assign_timezone_abbreviations(const char* newval, void* extra)
 static void pg_timezone_abbrev_initialize(void)
 {
     SetConfigOption("timezone_abbreviations", "Default", PGC_POSTMASTER, PGC_S_DYNAMIC_DEFAULT);
+}
+
+static void assign_tcp_keepalives_idle(int newval, void *extra)
+{
+    /*
+     * The kernel API provides no way to test a value without setting it; and
+     * once we set it we might fail to unset it.  So there seems little point
+     * in fully implementing the check-then-assign GUC API for these
+     * variables.  Instead we just do the assignment on demand.  pqcomm.c
+     * reports any problems via ereport(LOG).
+     *
+     * This approach means that the GUC value might have little to do with the
+     * actual kernel value, so we use a show_hook that retrieves the kernel
+     * value rather than trusting GUC's copy.
+     */
+    (void) pq_setkeepalivesidle(newval, u_sess->proc_cxt.MyProcPort);
+}
+
+static const char* show_tcp_keepalives_idle(void)
+{
+    /* See comments in assign_tcp_keepalives_idle */
+    const int maxBufLen = 16;
+    static char nbuf[maxBufLen];
+
+    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_getkeepalivesidle(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rc, "\0", "\0");
+    return nbuf;
+}
+
+static void assign_tcp_keepalives_interval(int newval, void *extra)
+{
+    /* See comments in assign_tcp_keepalives_idle */
+    (void) pq_setkeepalivesinterval(newval, u_sess->proc_cxt.MyProcPort);
+}
+
+static const char* show_tcp_keepalives_interval(void)
+{
+    /* See comments in assign_tcp_keepalives_idle */
+    const int maxBufLen = 16;
+    static char nbuf[maxBufLen];
+
+    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_getkeepalivesinterval(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rc, "\0", "\0");
+    return nbuf;
+}
+
+static void assign_tcp_keepalives_count(int newval, void *extra)
+{
+    /* See comments in assign_tcp_keepalives_idle */
+    (void) pq_setkeepalivescount(newval, u_sess->proc_cxt.MyProcPort);
+}
+
+static const char* show_tcp_keepalives_count(void)
+{
+    /* See comments in assign_tcp_keepalives_idle */
+    const int maxBufLen = 16;
+    static char nbuf[maxBufLen];
+
+    errno_t rc = snprintf_s(nbuf, maxBufLen, maxBufLen - 1, "%d", pq_getkeepalivescount(u_sess->proc_cxt.MyProcPort));
+    securec_check_ss(rc, "\0", "\0");
+    return nbuf;
 }
 
 static bool check_effective_io_concurrency(int* newval, void** extra, GucSource source)
