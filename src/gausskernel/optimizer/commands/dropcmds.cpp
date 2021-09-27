@@ -60,7 +60,7 @@ static bool CheckObjectDropPrivilege(ObjectType removeType, Oid objectId)
     return (aclresult == ACLCHECK_OK) ? true : false;
 }
 
-static void DropExtensionIsSupported(List* objname)
+static void DropExtensionInListIsSupported(List* objname)
 {
     static const char *supportList[] = {
         "postgis",
@@ -70,6 +70,7 @@ static void DropExtensionIsSupported(List* objname)
         "oracle_fdw",
         "postgres_fdw",
         "dblink",
+        "security_plugin",
         "db_a_parser",
         "db_b_parser",
         "db_c_parser",
@@ -131,7 +132,7 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             does_not_exist_skipping(stmt->removeType, objname, objargs, missing_ok);
             continue;
         } else if (stmt->removeType == OBJECT_EXTENSION) {
-            DropExtensionIsSupported(objname);
+            DropExtensionInListIsSupported(objname);
         }
 
         TrForbidAccessRbObject(address.classId, address.objectId);
