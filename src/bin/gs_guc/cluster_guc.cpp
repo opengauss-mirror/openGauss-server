@@ -1877,18 +1877,14 @@ char* get_AZ_value(const char* value, const char* data_dir)
 
     if (NULL == nodenameList) {
         // try dn
-        len = strlen(q);
+        len = strlen(q) + 1;
         s = (char *)pg_malloc_zero(len * sizeof(char));
-        nRet = snprintf_s(s, len + 1, len, "%s", q);
+        nRet = snprintf_s(s, len, len - 1, "%s", q);
         securec_check_ss_c(nRet, s, "\0");
 
         vptr = strtok_r(s, delims, &vouter_ptr);
         while (vptr != NULL) {
             p = vptr;
-            int len_p = strlen(p) + 1;
-            char *temp = (char *)pg_malloc_zero(len_p * sizeof(char));
-            nRet = snprintf_s(temp, len_p + 1, len_p, "%s,", p);
-            securec_check_ss_c(nRet, temp, "\0");
 
             if (CheckDataNameValue(p, data_dir) == false) {
                 goto failed;
