@@ -464,7 +464,7 @@ static bool WriteContentToFile(const char* filename, const void* content, size_t
 /* Judge if the KeyMode is legal */
 static bool isModeExists(KeyMode mode)
 {
-    if (mode != SERVER_MODE && mode != CLIENT_MODE && 
+    if (mode != SERVER_MODE && mode != CLIENT_MODE && mode != USER_MAPPING_MODE &&
         mode != OBS_MODE && mode != SOURCE_MODE && mode != GDS_MODE) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("AK/SK encrypt/decrypt encounters invalid key mode.\n"));
