@@ -306,6 +306,7 @@ ifeq ($(with_3rd), NONE)
   ZSTD_HOME = $(top_builddir)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(top_builddir)/$(BINARYPATH)/nanomsg/comm
   PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
+  JAVA_HOME = $(top_builddir)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
   MASSTREE_HOME = $(top_builddir)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME    = $(top_builddir)/dependency/mysql_fdw
   ORCFDW_HOME   = $(top_builddir)/dependency/oracle_fdw
@@ -350,6 +351,7 @@ endif
   ZSTD_HOME = $(with_3rd)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(with_3rd)/$(BINARYPATH)/nanomsg/comm
   PLJAVA_HOME = $(with_3rd)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
+  JAVA_HOME = $(with_3rd)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
   MASSTREE_HOME = $(with_3rd)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME = $(with_3rd)/dependency/mysql_fdw
   ORCFDW_HOME = $(with_3rd)/dependency/oracle_fdw
