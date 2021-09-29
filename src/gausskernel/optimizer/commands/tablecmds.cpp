@@ -9905,6 +9905,12 @@ static void ATExecAddIndex(AlteredTableInfo* tab, Relation rel, IndexStmt* stmt,
     Assert(IsA(stmt, IndexStmt));
     Assert(!stmt->concurrent);
 
+    /* Primary key/Unique constraint on cstore does not support deferrable */
+    if (RelationIsCUFormat(rel) && stmt->isconstraint && (stmt->deferrable || stmt->initdeferred)) {
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+            errmsg("column store unsupport DEFERRABLE/INITIALLY DEFERRED on primary key/unique constraint")));
+    }
+
     /* suppress schema rights check when rebuilding existing index */
     check_rights = !is_rebuild;
     /* skip index build if phase 3 will do it or we're reusing an old one */
