@@ -3026,7 +3026,7 @@ static bool check_behavior_compat_options(char** newval, void** extra, GucSource
     /* Need a modifiable copy of string */
     rawstring = pstrdup(*newval);
     /* Parse string into list of identifiers */
-    if (!SplitIdentifierString(rawstring, ';', &elemlist, false, false)) {
+    if (!SplitIdentifierString(rawstring, ',', &elemlist)) {
         /* syntax error in list */
         GUC_check_errdetail("invalid paramater for behavior compat information.");
         pfree(rawstring);
