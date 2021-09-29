@@ -145,7 +145,6 @@
 #include "utils/guc_resource.h"
 
 const int NO_LIMIT_SIZE = -1;
-#define UNIQUE_SQL_DEFAULT_CLEAN_RATIO 0.1
 
 static void assign_statistics_memory(int newval, void* extra);
 static bool check_cgroup_name(char** newval, void** extra, GucSource source);
@@ -167,9 +166,6 @@ static const char* show_enable_dynamic_workload(void);
 static void assign_control_group(const bool newval, void* extra);
 static void assign_enable_cgroup_switch(bool newval, void* extra);
 static void assign_memory_quota(int newval, void* extra);
-#ifndef ENABLE_MULTIPLE_NODES
-static bool CheckUniqueSqlCleanRatio(double* newval, void** extra, GucSource source);
-#endif
 
 static void InitResourceConfigureNamesBool();
 static void InitResourceConfigureNamesInt();
@@ -823,24 +819,7 @@ static void InitResourceConfigureNamesInt()
 static void InitResourceConfigureNamesReal()
 {
     struct config_real localConfigureNamesReal[] = {
-#ifndef ENABLE_MULTIPLE_NODES
-        {{"unique_sql_clean_ratio",
-          PGC_POSTMASTER,
-          NODE_ALL,
-          RESOURCES_WORKLOAD,
-          gettext_noop("The percentage of the UniquesQl hash table"),
-          gettext_noop("The percentage of the UniquesQl hash table that will be "
-                       "automatically eliminated when the UniquesQl hash table "
-                       "is full. 0 means that auto-eliminate is not enabled."),
-          },
-         &u_sess->attr.attr_common.unique_sql_clean_ratio,
-         UNIQUE_SQL_DEFAULT_CLEAN_RATIO,
-         0,
-         0.2,
-         CheckUniqueSqlCleanRatio,
-         NULL,
-         NULL},
-#endif
+
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -1323,18 +1302,3 @@ static void assign_memory_quota(int newval, void* extra)
         gs_compare_and_swap_32(&srvmgr->freesize, old_freesize_limit, srvmgr->freesize_limit);
     }
 }
-
-#ifndef ENABLE_MULTIPLE_NODES
-static bool CheckUniqueSqlCleanRatio(double* newval, void** extra, GucSource source)
-{
-    if (g_instance.attr.attr_common.enable_auto_clean_unique_sql && *newval == 0) {
-        ereport(WARNING,
-                (errmsg("Can't set unique_sql_clean_ratio to 0 when enable_auto_clean_unique_sql is true. "
-                        "Reset it's value to default(%lf). If you want to disable auto clean unique sql, "
-                        "please set enable_auto_clean_unique_sql to false.",
-                        UNIQUE_SQL_DEFAULT_CLEAN_RATIO)));
-        *newval = UNIQUE_SQL_DEFAULT_CLEAN_RATIO;
-    }
-    return true;
-}
-#endif

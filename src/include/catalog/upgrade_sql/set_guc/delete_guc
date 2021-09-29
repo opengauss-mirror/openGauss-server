@@ -12,3 +12,4 @@ comm_tcp_mode datanode
 comm_usable_memory datanode
 minimum_pool_size datanode
 pooler_maximum_idle_time datanode
+unique_sql_clean_ratio datanode

@@ -2502,8 +2502,8 @@ static bool AutoRecycleUniqueSQLEntry()
             (errmodule(MOD_INSTR), errcode(ERRCODE_LOG), errmsg("[UniqueSQL] instr_unique_sql_count is too large, uniquesql auto-clean will not happen.")));
         return false;
     }
-    double ratio = u_sess->attr.attr_common.unique_sql_clean_ratio;
-    int cleanCount = Max(int(ratio * instr_unique_sql_count + totalCount - instr_unique_sql_count), 1);
+    const double cleanRatio = 0.1;
+    int cleanCount = Max(int(cleanRatio * instr_unique_sql_count + totalCount - instr_unique_sql_count), 1);
     /* get remove entry list */
     KeyUpdatedtime* removeList = GetSortedEntryList();
     if (removeList == NULL) {
