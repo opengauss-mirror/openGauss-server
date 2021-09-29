@@ -279,9 +279,6 @@ void CNGPCCleanUpSession()
         return;
     }
 
-    if (u_sess->plsql_cxt.plpgsql_HashTable) {
-        plpgsql_HashTableDeleteAll();
-    }
     DropAllPreparedStatements();
     /* if in shared memory, delete context. */
     CachedPlanSource* psrc = u_sess->pcache_cxt.ungpc_saved_plan;
