@@ -703,6 +703,16 @@ static bool table_contain_unsupport_feature(Oid relid, Query* query)
             u_sess->opt_cxt.not_shipping_info->need_log = false;
         }
 
+        /* global temp table could not ship */
+        if (rel->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
+            sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                NOTPLANSHIPPING_LENGTH,
+                "global template table not support stream operator.");
+            securec_check_ss_c(sprintf_rc, "\0", "\0");
+            relation_close(rel, NoLock);
+            return true;
+        }
+
         /* Currently dml with trigger can not get stream plan. */
         if (rel->rd_rel->relhastriggers && NULL != rel->trigdesc &&
             ((query->commandType == CMD_INSERT && pgxc_has_trigger_for_event(TRIGGER_TYPE_INSERT, rel->trigdesc)) ||
