@@ -92,7 +92,6 @@ enum HistTableColumn {
     USERCHAIN_COLUMN_NUM
 };
 
-void reload_next_g_blocknum();
 uint64 get_next_g_blocknum();
 void reset_g_blocknum();
 

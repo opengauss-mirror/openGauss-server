@@ -33,30 +33,29 @@ static HTAB *g_recnum_cache = NULL;
  * 
  * Note:If gchain is empty, next blocknum will start from 0.
  */
-void reload_next_g_blocknum()
+static uint32 reload_next_g_blocknum()
 {
     Relation gchain_rel = NULL;
     HeapTuple tup = NULL;
     TableScanDesc scan;
     uint32 blocknum;
     uint32 max_num = 0;
-    bool empty = true;
     bool isnull = false;
 
-    gchain_rel = heap_open(GsGlobalChainRelationId, AccessShareLock);
+    gchain_rel = heap_open(GsGlobalChainRelationId, RowExclusiveLock);
     scan = heap_beginscan(gchain_rel, SnapshotAny, 0, NULL);
     while ((tup = heap_getnext(scan, BackwardScanDirection)) != NULL) {
         blocknum = DatumGetUInt32(heap_getattr(tup, Anum_gs_global_chain_blocknum,
                                                RelationGetDescr(gchain_rel), &isnull));
-        if (blocknum >= max_num) {
+        if (blocknum > max_num) {
             max_num = blocknum;
-            empty = false;
+        } else {
+            break;
         }
     }
     heap_endscan(scan);
-    heap_close(gchain_rel, AccessShareLock);
-    blocknum = empty ? 0 : (max_num + 1);
-    pg_atomic_fetch_add_u64(&g_blocknum, blocknum);
+    heap_close(gchain_rel, RowExclusiveLock);
+    return max_num;
 }
 
 /*
@@ -70,7 +69,9 @@ uint64 get_next_g_blocknum()
     if (g_blocknum == 0) {
         LWLockAcquire(GlobalPrevHashLock, LW_EXCLUSIVE);
         if (g_blocknum == 0) {
-            reload_next_g_blocknum();
+            pg_atomic_fetch_add_u64(&g_blocknum, 1);
+            int cur_num = reload_next_g_blocknum();
+            pg_atomic_fetch_add_u64(&g_blocknum, cur_num);
         }
         LWLockRelease(GlobalPrevHashLock);
     }

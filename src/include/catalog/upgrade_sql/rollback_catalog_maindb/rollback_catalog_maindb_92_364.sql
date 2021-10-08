@@ -20,7 +20,6 @@ DROP FUNCTION IF EXISTS pg_catalog.ledger_gchain_repair(text, text);
 DROP INDEX IF EXISTS pg_toast.pg_toast_5818_index;
 DROP TYPE IF EXISTS pg_toast.pg_toast_5818;
 DROP TABLE IF EXISTS pg_toast.pg_toast_5818;
-DROP INDEX IF EXISTS pg_catalog.gs_global_chain_oid_index;
 DROP INDEX IF EXISTS pg_catalog.gs_global_chain_relid_index;
 DROP TYPE IF EXISTS pg_catalog.gs_global_chain;
 DROP TABLE IF EXISTS pg_catalog.gs_global_chain;

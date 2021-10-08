@@ -44,7 +44,7 @@
 #define new_timestamptz
 #endif
 
-CATALOG(gs_global_chain,5818) BKI_SCHEMA_MACRO
+CATALOG(gs_global_chain,5818) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 {
     int8        blocknum;
     NameData    dbname;
