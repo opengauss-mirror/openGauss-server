@@ -296,7 +296,7 @@ function install_gaussdb()
     export PATH=${BUILD_DIR}:$PATH
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:$LD_LIBRARY_PATH
 
-    commitid=$(LD_PRELOAD='' ${BUILD_DIR}/bin/gaussdb -V | awk '{print $6}' | cut -d ")" -f 1)
+    commitid=$(LD_PRELOAD='' ${BUILD_DIR}/bin/gaussdb -V | awk '{print $5}' | cut -d ")" -f 1)
     if [ -z "$commitid" ]
     then
         commitid=$(date "+%Y%m%d%H%M%S")
