@@ -191,6 +191,7 @@ typedef struct knl_session_attr_storage {
     char* Inplace_upgrade_next_system_object_oids;
     int resource_track_log;
     int guc_synchronous_commit;
+    int sync_rep_wait_mode;
     int sync_method;
     int autovacuum_mode;
     int cstore_insert_mode;
