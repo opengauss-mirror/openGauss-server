@@ -1807,6 +1807,7 @@ static bool cmdStringLengthCheck(const char* cmd_string)
 {
     const size_t cmd_length_limit = 1024*100;
     const size_t slotname_limit = 64;
+    const size_t double_quotes_len = 2;
     char comd[cmd_length_limit] = {'\0'};
     char* sub_cmd = NULL;
     char* rm_cmd = NULL;
@@ -1856,7 +1857,7 @@ static bool cmdStringLengthCheck(const char* cmd_string)
         return true;
     }
 
-    if (strlen(slot_name) >= slotname_limit) {
+    if (strlen(slot_name) >= slotname_limit + double_quotes_len) {
         return false;
     }
     return true;
