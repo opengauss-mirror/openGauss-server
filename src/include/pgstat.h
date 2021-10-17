@@ -2653,7 +2653,7 @@ extern void sessionStatShmemInit(void);
 typedef struct {
     uint32 bufferid;
     Oid relfilenode;
-    int2 bucketnode;
+    int4 bucketnode;
     uint32 storage_type;
     Oid reltablespace;
     Oid reldatabase;
