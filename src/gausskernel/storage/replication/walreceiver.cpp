@@ -87,8 +87,6 @@ bool wal_catchup = false;
 
 #define TEMP_CONF_FILE "postgresql.conf.bak"
 
-#define MAX_PATH 256
-
 const char *g_reserve_param[RESERVE_SIZE] = {
     "application_name",
     "archive_command",
@@ -169,7 +167,6 @@ static void WalRcvSigHupHandler(SIGNAL_ARGS);
 static void WalRcvShutdownHandler(SIGNAL_ARGS);
 static void WalRcvQuickDieHandler(SIGNAL_ARGS);
 static void sigusr1_handler(SIGNAL_ARGS);
-static void sigusr2_handler(SIGNAL_ARGS);
 static void ConfigFileTimer(void);
 static bool ProcessConfigFileMessage(char *buf, Size len);
 static void firstSynchStandbyFile(void);
@@ -178,12 +175,8 @@ static TimestampTz GetHeartbeatLastReplyTimestamp();
 static bool WalRecCheckTimeOut(TimestampTz nowtime, TimestampTz last_recv_timestamp, bool ping_sent);
 static void WalRcvRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn);
 static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message);
-static void ProcessStandbyArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message);
 static void WalRecvSendArchiveXlogResponse();
-static void WalRecvSendArchiveXlogResult2Standby();
-static void SendArchiveStatus(bool status);
-static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response);
-static XLogRecPtr InitArchiveStartPoint();
+
 void ProcessWalRcvInterrupts(void)
 {
     /*
@@ -306,15 +299,6 @@ void setObsArchLatch(const Latch* latch)
     SpinLockRelease(&walrcv->mutex);
 }
 
-void SetStandbyArchLatch(const Latch* latch)
-{
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    SpinLockAcquire(&walrcv->mutex);
-    walrcv->arch_latch = (Latch *)latch;
-    SpinLockRelease(&walrcv->mutex);
-}
-
 static void wakeupObsArchLatch()
 {
     /* use volatile pointer to prevent code rearrangement */
@@ -322,17 +306,6 @@ static void wakeupObsArchLatch()
     SpinLockAcquire(&walrcv->mutex);
     if (walrcv->obsArchLatch != NULL) {
         SetLatch(walrcv->obsArchLatch);
-    }
-    SpinLockRelease(&walrcv->mutex);
-}
-
-static void wakeupArchLatch()
-{
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-    SpinLockAcquire(&walrcv->mutex);
-    if (walrcv->obsArchLatch != NULL) {
-        SetLatch(walrcv->arch_latch);
     }
     SpinLockRelease(&walrcv->mutex);
 }
@@ -402,20 +375,6 @@ void WalRcvrProcessData(TimestampTz *last_recv_timestamp, bool *ping_sent)
         WalRecvSendArchiveXlogResponse();
         pg_memory_barrier();
         pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
-    }
-
-    /* send archive status to primary */
-    if (g_instance.archive_standby_cxt.need_to_send_archive_status) {
-        g_instance.archive_standby_cxt.need_to_send_archive_status = false;
-        SendArchiveStatus(g_instance.archive_standby_cxt.archive_enabled);
-    }
-
-    /* response the result of archive to primary */
-    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-    if (unlikely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_DONE)) {
-        WalRecvSendArchiveXlogResult2Standby();
-        pg_memory_barrier();
-        pg_atomic_write_u32(arch_task_status, ARCH_TASK_NONE);
     }
 
     if (!WalRcvWriterInProgress())
@@ -593,7 +552,7 @@ void WalReceiverMain(void)
     (void)gspqsignal(SIGALRM, SIG_IGN);
     (void)gspqsignal(SIGPIPE, SIG_IGN);
     (void)gspqsignal(SIGUSR1, sigusr1_handler);
-    (void)gspqsignal(SIGUSR2, sigusr2_handler);
+    (void)gspqsignal(SIGUSR2, SIG_IGN);
 
     /* Reset some signals that are accepted by postmaster but not here */
     (void)gspqsignal(SIGCHLD, SIG_DFL);
@@ -918,18 +877,6 @@ static void sigusr1_handler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
-static void sigusr2_handler(SIGNAL_ARGS) {
-    /* get sigusr2 */
-    int save_errno = errno;
-    gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
-    /*
-     * sending archive status to the primary in this step
-     */
-    g_instance.archive_standby_cxt.need_to_send_archive_status = true;
-    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
-    errno = save_errno;
-}
-
 /* Wal receiver is shut down? */
 bool WalRcvIsShutdown(void)
 {
@@ -1083,25 +1030,6 @@ static void XLogWalRcvProcessMsg(unsigned char type, char *buf, Size len)
             errorno = memcpy_s(&archiveXLogMessage, sizeof(ArchiveXlogMessage), buf, sizeof(ArchiveXlogMessage));
             securec_check(errorno, "\0", "\0");
             ProcessArchiveXlogMessage(&archiveXLogMessage);
-            break;
-        }
-        case 'n' : /* process the archive task message sent by primary */
-        {
-            ArchiveXlogMessage archiveXLogMessage;
-            CHECK_MSG_SIZE(len, ArchiveXlogMessage, "invalid ArchiveXlogMessage message received from primary");
-            /* memcpy is required here for alignment reasons */
-            errorno = memcpy_s(&archiveXLogMessage, sizeof(ArchiveXlogMessage), buf, sizeof(ArchiveXlogMessage));
-            securec_check(errorno, "\0", "\0");
-            ProcessStandbyArchiveXlogMessage(&archiveXLogMessage);
-            break;
-        }
-        case 'S': /* send the status of the archive thread on standby */
-        {
-            ArchiveStatusResponseMessage response;
-            CHECK_MSG_SIZE(len, ArchiveStatusResponseMessage, "invalid ArchiveStatusResponseMessage message received from primary");
-            errorno = memcpy_s(&response, sizeof(ArchiveStatusResponseMessage), buf, sizeof(ArchiveStatusResponseMessage));
-            securec_check(errorno, "\0", "\0");
-            ProcessArchiveStatusResponse(&response);
             break;
         }
         default:
@@ -1951,36 +1879,6 @@ static void ProcessArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_mes
 }
 
 /*
- * Process ProcessStandbyArchiveXlogMessage received from primary sender, message type is 'n'.
- */
-static void ProcessStandbyArchiveXlogMessage(const ArchiveXlogMessage* archive_xlog_message)
-{
-    ereport(LOG, (errmsg("ProcessStandbyArchiveXlogMessage: get archive xlog message :%X/%X",
-                        (uint32)(archive_xlog_message->targetLsn >> 32), (uint32)(archive_xlog_message->targetLsn))));
-    errno_t errorno = EOK;
-    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-    unsigned int expected = ARCH_TASK_NONE;
-    int failed_times = 0;
-    while (pg_atomic_compare_exchange_u32(arch_task_status, &expected, ARCH_TASK_GET) == false) {
-        /* some task arrived before last task done if expected not equal to NONE */
-        expected = ARCH_TASK_NONE;
-        pg_usleep(ARCHIVE_XLOG_DELAY);  // sleep 0.01s
-        if (failed_times++ >= GET_ARCHIVE_XLOG_RETRY_MAX) {
-            ereport(WARNING, (errmsg("get archive xlog message :%X/%X, but not finished",
-                                     (uint32)(archive_xlog_message->targetLsn >> 32),
-                                     (uint32)(archive_xlog_message->targetLsn))));
-            return;
-        }
-    }
-    errorno = memcpy_s(&g_instance.archive_standby_cxt.archive_task,
-        sizeof(ArchiveXlogMessage) + 1,
-        archive_xlog_message,
-        sizeof(ArchiveXlogMessage));
-    securec_check(errorno, "\0", "\0");
-    wakeupArchLatch();
-}
-
-/*
  * Send switchover request message to primary, indicating the current time.
  */
 static void XLogWalRcvSendSwitchRequest(void)
@@ -2016,57 +1914,22 @@ static void XLogWalRcvSendSwitchRequest(void)
  */
 static void WalRecvSendArchiveXlogResponse()
 {
-    char buf[sizeof(ArchiveXlogResponseMessage) + 1];
-    ArchiveXlogResponseMessage reply;
+    char buf[sizeof(ArchiveXlogResponseMeeeage) + 1];
+    ArchiveXlogResponseMeeeage reply;
     errno_t errorno = EOK;
     reply.pitr_result = g_instance.archive_obs_cxt.pitr_finish_result;
     reply.targetLsn = g_instance.archive_obs_cxt.archive_task.targetLsn;
-    XLogSegNo segno = 0;
-    char lastoff[MAXFNAMELEN];
-    XLByteToSeg(reply.targetLsn, segno);
-    XLogFileName(lastoff, reply.targetLsn, segno);
-    if (!reply.pitr_result) {
-        reply.archive_result = ARCHIVE_FAILED;
-    } else if (XLogArchiveCheckDone(lastoff)) {
-        reply.archive_result = ARCHIVE_SUCCESS;
-    } else {
-        reply.archive_result = ARCHIVE_SKIP;
-    }
 
     buf[0] = 'a';
     errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveXlogResponseMessage),
+        sizeof(ArchiveXlogResponseMeeeage),
         &reply,
-        sizeof(ArchiveXlogResponseMessage));
+        sizeof(ArchiveXlogResponseMeeeage));
     securec_check(errorno, "\0", "\0");
-    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMessage) + 1);
+    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMeeeage) + 1);
 
     ereport(LOG,
         (errmsg("WalRecvSendArchiveXlogResponse %d %X/%X", reply.pitr_result, 
-            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
-
-}
-
-/*
- * Send archive xlog result message to primary.
- */
-static void WalRecvSendArchiveXlogResult2Standby()
-{
-    char buf[sizeof(ArchiveXlogResponseMessage) + 1];
-    ArchiveXlogResponseMessage reply;
-    errno_t errorno = EOK;
-    reply.pitr_result = g_instance.archive_standby_cxt.arch_finish_result;
-    reply.targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
-    buf[0] = 'n';
-    errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveXlogResponseMessage),
-        &reply,
-        sizeof(ArchiveXlogResponseMessage));
-    securec_check(errorno, "\0", "\0");
-    libpqrcv_send(buf, sizeof(ArchiveXlogResponseMessage) + 1);
-    const char* archive_result_string = ((reply.pitr_result) ? "success" : "fail");
-    ereport(LOG,
-        (errmsg("WalRecvSendArchiveXlogResult2Standby archive_result:%s archive_lsn:%X/%X", archive_result_string, 
             (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
 
 }
@@ -2877,78 +2740,4 @@ static void WalRcvRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecP
     } else {
         WalRcvSetPercentCountStartLsn(currentDoneLsn);
     }
-}
-
-/* 
- * SendArchiveStatus
- * This function is used to notify the primary of
- * whether archiving is enabled for standby.
- * 
- * If the value of status is true, archiving is enabled for the standby node.
- * Otherwise, archiving is disabled.
- * 
- * The targetLsn is the minimum lsn which is not archived.
- */
-static void SendArchiveStatus(bool status)
-{
-    char buf[sizeof(ArchiveStatusMessage) + 1];
-    ArchiveStatusMessage message;
-    errno_t errorno = EOK;
-    message.is_archive_activied = status;
-    XLogRecPtr start_point = InitArchiveStartPoint();
-    const char* status_string = status ? "on" : "off";
-    ereport(LOG, (errmsg("the archive thread status is %s, and the start point of lsn is %X/%X",
-                        status_string, (uint32)(start_point >> 32), (uint32)start_point)));
-    message.startLsn = start_point;
-    buf[0] = 'S';
-    errorno = memcpy_s(&buf[1],
-        sizeof(ArchiveStatusMessage),
-        &message,
-        sizeof(ArchiveStatusMessage));
-    securec_check(errorno, "\0", "\0");
-    volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-    pg_atomic_write_u32(arch_task_status, ARCH_TASK_NONE);
-    libpqrcv_send(buf, sizeof(ArchiveStatusMessage) + 1);
-}
-
-static void ProcessArchiveStatusResponse(ArchiveStatusResponseMessage* response)
-{
-    ereport(LOG, (errmsg("get updating archive status response")));
-    bool is_success = response->is_set_status_success;
-    if (is_success) {
-        SetLatch(g_instance.archive_standby_cxt.arch_latch);
-    } else {
-        ereport(WARNING,
-                (errcode(ERRCODE_WARNING),
-                    errmsg("it is failed to notify the primary that updating the archive status of standby")));
-    }
-}
-
-/*
- * InitArchiveStartPoint is used to find a start point which is the standby should check
- */
-static XLogRecPtr InitArchiveStartPoint()
-{
-    XLogRecPtr flushPtr = t_thrd.walreceiverfuncs_cxt.WalRcv->walRcvCtlBlock->flushPtr;
-    XLogRecPtr targetLsn = flushPtr - XLogSegSize;
-
-    /*
-     * Start from the previous xlog file of the flushptr.
-     * If the xlog file exists, it traverses backwards until the xlog file is archived.
-     * The next file is the oldest xlog file that has not been archived.
-     */
-    while (XlogFileIsExisted(t_thrd.proc_cxt.DataDir, targetLsn, DEFAULT_TIMELINE_ID)) {
-        int errorno = 0;
-        XLogSegNo segno = 0;
-        char lastoff[MAXFNAMELEN];
-        XLByteToSeg(targetLsn, segno);
-        errorno = snprintf_s(lastoff, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", t_thrd.xlog_cxt.ThisTimeLineID,
-                            (uint32)((segno) / XLogSegmentsPerXLogId), (uint32)((segno) % XLogSegmentsPerXLogId));
-
-        if (XLogArchiveCheckDone(lastoff)) {
-            return targetLsn + XLogSegSize;
-        }
-        targetLsn -= XLogSegSize;
-    }
-    return targetLsn + XLogSegSize;
 }

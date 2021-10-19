@@ -142,32 +142,13 @@ typedef struct ArchiveXlogMessage {
 } ArchiveXlogMessage;
 
 /*
- * Refence :ArchiveXlogResponseMessage
+ * Refence :ArchiveXlogResponseMeeeage
  */
-typedef struct ArchiveXlogResponseMessage {
+typedef struct ArchiveXlogResponseMeeeage {
     bool pitr_result;
     XLogRecPtr targetLsn;
-    unsigned int archive_result;
-} ArchiveXlogResponseMessage;
+} ArchiveXlogResponseMeeeage;
 
-/* the result type of archive task */
-typedef enum {
-    ARCHIVE_SUCCESS = 0,
-    ARCHIVE_SKIP,
-    ARCHIVE_FAILED
-} ARCH_RESULT_STATUS;
-
-/*
- * Refence :ArchiveStatusMessage
- */
-typedef struct ArchiveStatusMessage {
-    bool is_archive_activied;
-    XLogRecPtr startLsn;
-} ArchiveStatusMessage;
-
-typedef struct ArchiveStatusResponseMessage {
-    bool is_set_status_success;
-} ArchiveStatusResponseMessage;
 /*
  * Keepalive message from primary (message type 'k'). (lowercase k)
  * This is wrapped within a CopyData message at the FE/BE protocol level.
@@ -191,12 +172,6 @@ typedef enum {
     PITR_TASK_GET,
     PITR_TASK_DONE
 } PITR_TASK_STATUS;
-
-typedef enum {
-    ARCH_TASK_NONE = 0,
-    ARCH_TASK_GET,
-    ARCH_TASK_DONE
-} ARCH_TASK_STATUS;
 
 /*
  * switchover response message from primary (message type 'p').  This is wrapped within

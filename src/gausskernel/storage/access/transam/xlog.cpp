@@ -532,8 +532,9 @@ static void XLogFlushCore(XLogRecPtr WriteRqstPtr);
 static void XLogSelfFlush(void);
 static void XLogSelfFlushWithoutStatus(int numHitsOnStartPage, XLogRecPtr CurrPos, int currLRC);
 
+static void XLogArchiveNotify(const char *xlog);
 static void XLogArchiveNotifySeg(XLogSegNo segno);
-static bool HasBeenArchivedOnHaMode(const char* xlog);
+static bool XLogArchiveCheckDone(const char *xlog);
 static bool XLogArchiveIsBusy(const char *xlog);
 static bool XLogArchiveIsReady(const char *xlog);
 static void XLogArchiveCleanup(const char *xlog);
@@ -2325,7 +2326,7 @@ static uint64 XLogRecPtrToBytePos(XLogRecPtr ptr)
  * and the archiver then knows to archive XLOGDIR/0000000100000001000000C6,
  * then when complete, rename it to 0000000100000001000000C6.done
  */
-void XLogArchiveNotify(const char *xlog)
+static void XLogArchiveNotify(const char *xlog)
 {
     char archiveStatusPath[MAXPGPATH];
     FILE *fd = NULL;
@@ -2430,19 +2431,11 @@ void XLogArchiveForceDone(const char *xlog)
  * The reason we do things this way is so that if the original attempt to
  * create <XLOG>.ready fails, we'll retry during subsequent checkpoints.
  */
-bool XLogArchiveCheckDone(const char *xlog)
+static bool XLogArchiveCheckDone(const char *xlog)
 {
     char archiveStatusPath[MAXPGPATH];
     struct stat stat_buf;
     errno_t errorno = EOK;
-
-    /* Only the primary need this step to check this xlog has been archived on standby.
-     * If this xlog has been archived by all standby which start up the archive thread,
-     * we should check weather the primary (if primary start up the archive s)
-     */
-    if (!HasBeenArchivedOnHaMode(xlog)) {
-        return false;
-    }
 
     /* Always deletable if archiving is off or in recovery process. Archiving is always disabled on standbys. */
     if (!XLogArchivingActive() || RecoveryInProgress()) {
@@ -2473,66 +2466,6 @@ bool XLogArchiveCheckDone(const char *xlog)
     /* Retry creation of the .ready file */
     XLogArchiveNotify(xlog);
     return false;
-}
-
-static bool HasBeenArchivedOnHaMode(const char* xlog)
-{
-    /*
-     * Generally, the validity of the xlog transferred from the upper layer has been verified.
-     * Therefore, if the length of the xlog name transferred is greater than the standard length
-     * of the xlog name (24 characters), the transferred file is a .backup file.
-     * Therefore, if the xlog name contains more than 24 characters, return true directly.
-     */
-    if (strlen(xlog) > XLOG_NAME_LENGTH) {
-        return true;
-    }
-
-    load_server_mode();
-    int mode = t_thrd.xlog_cxt.server_mode;
-    XLogRecPtr minium_lsn = PG_UINT64_MAX;
-
-    for (int i = 0; mode == PRIMARY_MODE && i < g_instance.attr.attr_storage.max_wal_senders; i++) {
-        /* use volatile pointer to prevent code rearrangement */
-        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
-        if (walsnd == NULL) {
-            continue;
-        }
-
-        SpinLockAcquire(&walsnd->mutex);
-        if (IsValidArchiverStandby((WalSnd*)walsnd) &&
-            walsnd->arch_task_last_lsn != 0 && walsnd->arch_task_last_lsn < minium_lsn) {
-            minium_lsn = walsnd->arch_task_last_lsn;
-        }
-        SpinLockRelease(&walsnd->mutex);
-    }
-
-    if (mode == STANDBY_MODE && XLogArchivingActive()) {
-        XLogRecPtr target_lsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
-        minium_lsn = target_lsn;
-    }
-
-    if (minium_lsn == PG_UINT64_MAX) {
-        return true;
-    }
-    char minium_archived_xlog_name[MAXFNAMELEN];
-    XLogSegNo xlogSegno = 0;
-    XLByteToSeg(minium_lsn, xlogSegno);
-    XLogFileName(minium_archived_xlog_name, DEFAULT_TIMELINE_ID, xlogSegno);
-
-    if (mode == STANDBY_MODE) {
-        /* 
-         * targetLsn or start_point may be the xlog to be archived. Therefore,
-         * the value of targetLsn or start_point must be smaller than minium_archived_xlog_name
-         * to ensure that the xlog has been archived.
-         */
-        return strcmp(xlog, minium_archived_xlog_name) < 0;
-    }
-
-    /*
-     * if the input xlog name is smaller than or equal to the minium_archived_xlog_name,
-     * we can confirm that the xlog has been archived by all standby nodes.
-     */
-    return strcmp(xlog, minium_archived_xlog_name) <= 0;
 }
 
 /*

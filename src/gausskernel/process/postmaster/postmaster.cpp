@@ -313,6 +313,10 @@ char g_bbox_dump_path[1024] = {0};
         }                                                                                                   \
     } while (0)
 
+#define WalRcvIsOnline()                                                              \
+    ((g_instance.pid_cxt.WalReceiverPID != 0 && t_thrd.walreceiverfuncs_cxt.WalRcv && \
+        t_thrd.walreceiverfuncs_cxt.WalRcv->isRuning))
+
 #define DataRcvIsOnline()                                                                                         \
     ((IS_DN_DUMMY_STANDYS_MODE() ? (g_instance.pid_cxt.DataReceiverPID != 0 && t_thrd.datareceiver_cxt.DataRcv && \
                                        t_thrd.datareceiver_cxt.DataRcv->isRuning)                                 \
@@ -2791,6 +2795,7 @@ static int ServerLoop(void)
                 }
             }
         }
+
         /* If we have lost the stats collector, try to start a new one */
         if (g_instance.pid_cxt.PgStatPID == 0 && (pmState == PM_RUN || pmState == PM_HOT_STANDBY) && !dummyStandbyMode)
             g_instance.pid_cxt.PgStatPID = pgstat_start();
@@ -4867,6 +4872,7 @@ static void reaper(SIGNAL_ARGS)
 #define LOOPHEADER() (exitstatus = (long)(intptr_t)status)
 
     gs_signal_setmask(&t_thrd.libpq_cxt.BlockSig, NULL);
+    ReplicationSlot *obs_slot = NULL;
     ereport(DEBUG4, (errmsg_internal("reaping dead processes")));
 
     for (;;) {
@@ -5412,8 +5418,13 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("archiver process"), pid, exitstatus);
 
             if (XLogArchivingActive()) {
-                if (pmState == PM_RUN || pmState == PM_HOT_STANDBY || pmState == PM_RECOVERY) {
+                if (pmState == PM_RUN) {
                     g_instance.pid_cxt.PgArchPID = pgarch_start();
+                }else if (pmState == PM_HOT_STANDBY) {
+                    obs_slot = getObsReplicationSlot();
+                    if (obs_slot != NULL) {
+                        g_instance.pid_cxt.PgArchPID = pgarch_start();
+                    }
                 }
             }
             continue;

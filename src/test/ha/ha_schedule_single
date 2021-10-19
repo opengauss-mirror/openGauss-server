@@ -52,4 +52,3 @@ llt_single/sequence_llt_coverage
 llt_single/temp_table_stop
 llt_single/text_search
 llt_single/xlog_redo
-llt_single/archive
