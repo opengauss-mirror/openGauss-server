@@ -24,6 +24,7 @@
 #include "access/xlog_internal.h"
 #include "nodes/pg_list.h"
 #include "access/obs/obs_am.h"
+#include "access/obs/archive_am.h"
 #include "utils/timestamp.h"
 #include "miscadmin.h"
 #include "replication/walreceiver.h"
@@ -174,8 +175,10 @@ bool obs_receive(int timeout, unsigned char* type, char** buffer, int* len)
     msghdr.sender_flush_location = InvalidXLogRecPtr;
     msghdr.catchup = false;
     
+    uint32 size = isObsSlot() ? OBS_XLOG_SLICE_BLOCK_SIZE : NAS_XLOG_FILE_SIZE;
+
     int headLen = sizeof(WalDataMessageHeader);
-    int totalLen = headLen + OBS_XLOG_SLICE_BLOCK_SIZE + 1;
+    int totalLen = headLen + size + 1;
     // copy WalDataMessageHeader
     rc = memcpy_s(recvBuf, totalLen, &msghdr, headLen);
     securec_check(rc, "", "");
@@ -230,9 +233,14 @@ static char *obs_replication_get_xlog_prefix(XLogRecPtr recptr, bool onlyPath)
     /* Generate directory path of pg_xlog on OBS when onlyPath is true */
     if (onlyPath == false) {
         XLByteToSeg(recptr, xlogSegno);
-        rc = snprintf_s(xlogfname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X_%02u", timeLine,
+        if (isObsSlot()) {
+            rc = snprintf_s(xlogfname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X_%02u", timeLine,
                         (uint32)((xlogSegno) / XLogSegmentsPerXLogId), (uint32)((xlogSegno) % XLogSegmentsPerXLogId),
                         (uint32)((recptr / OBS_XLOG_SLICE_BLOCK_SIZE) & OBS_XLOG_SLICE_NUM_MAX));
+        } else {
+            rc = snprintf_s(xlogfname, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", timeLine,
+                        (uint32)((xlogSegno) / XLogSegmentsPerXLogId), (uint32)((xlogSegno) % XLogSegmentsPerXLogId));
+        }
         securec_check_ss_c(rc, "", "");
     }
     rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlogfname);
@@ -243,6 +251,9 @@ static char *obs_replication_get_xlog_prefix(XLogRecPtr recptr, bool onlyPath)
 
 static char *path_skip_prefix(char *path)
 {
+    if (!isObsSlot()) {
+        return path;
+    }
     char *key = path;
     /* Skip path prefix, prefix format:'xxxx/cn/' */
     for (int i = 0; i <= 1; i++) {
@@ -283,7 +294,7 @@ static char *obs_replication_get_last_xlog_slice(XLogRecPtr startPtr, bool onlyP
 
     fileNamePrefix = obs_replication_get_xlog_prefix(startPtr, onlyPath);
 
-    object_list = obsList(fileNamePrefix);
+    object_list = ArchiveList(fileNamePrefix);
     if (object_list == NIL || object_list->length <= 0) {
         ereport(LOG, (errmsg("The OBS objects with the prefix %s cannot be found.", fileNamePrefix)));
 
@@ -401,9 +412,13 @@ int obs_replication_archive(const ArchiveXlogMessage *xlogInfo)
     uint offset = 0;
 
     XLogSegNo xlogSegno = 0;
-
-    xlogBuff = (char *)palloc(OBS_XLOG_SLICE_FILE_SIZE);
-    rc = memset_s(xlogBuff, OBS_XLOG_SLICE_FILE_SIZE, 0, OBS_XLOG_SLICE_FILE_SIZE);
+    ReplicationSlot *archive_slot = NULL;
+    archive_slot = getObsReplicationSlot();
+    bool isObs = isObsSlot();
+    uint32 fileSize = isObs ? OBS_XLOG_SLICE_FILE_SIZE : NAS_XLOG_FILE_SIZE;
+    uint32 blockSize = isObs ? OBS_XLOG_SLICE_BLOCK_SIZE : NAS_XLOG_FILE_SIZE;
+    xlogBuff = (char *)palloc(fileSize);
+    rc = memset_s(xlogBuff, fileSize, 0, fileSize);
     securec_check(rc, "", "");
 
     /* generate xlog path */
@@ -423,24 +438,32 @@ int obs_replication_archive(const ArchiveXlogMessage *xlogInfo)
                         errmsg("Can not open file \"%s\": %s", xlogfpath, strerror(errno))));
     }
 
-    /* Align down to 2M */
-    offset = TYPEALIGN_DOWN(OBS_XLOG_SLICE_BLOCK_SIZE, ((xlogInfo->targetLsn) % XLogSegSize));
+    /* Align down to blockSize */
+    offset = TYPEALIGN_DOWN(blockSize, ((xlogInfo->targetLsn) % XLogSegSize));
     if (lseek(xlogreadfd, (off_t)offset, SEEK_SET) < 0) {
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED),
                         errmsg("Can not locate to offset[%u] of xlog file \"%s\": %s",
                                offset, xlogfpath, strerror(errno))));
     }
 
-    if (read(xlogreadfd, xlogBuff + OBS_XLOG_SLICE_HEADER_SIZE, OBS_XLOG_SLICE_BLOCK_SIZE)
-        != OBS_XLOG_SLICE_BLOCK_SIZE) {
+    uint64 readResult = 0;
+    if (isObs) {
+        readResult = read(xlogreadfd, xlogBuff + OBS_XLOG_SLICE_HEADER_SIZE, OBS_XLOG_SLICE_BLOCK_SIZE);
+    } else {
+        readResult = read(xlogreadfd, xlogBuff, NAS_XLOG_FILE_SIZE);
+    }
+    if (readResult != blockSize) {
         ereport(ERROR, (errcode(ERRCODE_FILE_READ_FAILED),
                         errmsg("Can not read local xlog file \"%s\": %s", xlogfpath, strerror(errno))));
     }
 
     /* Add xlog slice header for recording the actual xlog length */
-    actualXlogLen = (((uint32)((xlogInfo->targetLsn) % XLogSegSize)) & (OBS_XLOG_SLICE_BLOCK_SIZE - 1)) + 1;
-
-    *(uint32*)xlogBuff = htonl(actualXlogLen);
+    actualXlogLen = (((uint32)((xlogInfo->targetLsn) % XLogSegSize)) & (blockSize - 1));
+    if (isObs) {
+        /* Add xlog slice header for recording the actual xlog length */
+        actualXlogLen += 1;
+        *(uint32*)xlogBuff = htonl(actualXlogLen);
+    }
 
     close(xlogreadfd);
 
@@ -449,12 +472,16 @@ int obs_replication_archive(const ArchiveXlogMessage *xlogInfo)
     fileName = (char*)palloc0(MAX_PATH_LEN);
 
     /* {xlog_name}_{sliece_num}_01(version_num)_00000001{tli}_00000001{subTerm} */
-    rc = sprintf_s(fileName, MAX_PATH_LEN, "%s_%02d_%08u_%08u_%08d", fileNamePrefix, 
-        CUR_OBS_FILE_VERSION, xlogInfo->term, xlogInfo->tli, xlogInfo->sub_term);
+    if (isObs) {
+        rc = sprintf_s(fileName, MAX_PATH_LEN, "%s_%02d_%08u_%08u_%08d", fileNamePrefix,
+            CUR_OBS_FILE_VERSION, xlogInfo->term, xlogInfo->tli, xlogInfo->sub_term);
+    } else {
+        rc = sprintf_s(fileName, MAX_PATH_LEN, "%s", xlogfname);
+    }
     securec_check_ss(rc, "\0", "\0");
 
     /* Upload xlog slice file to OBS */
-    ret = obsWrite(fileName, xlogBuff, OBS_XLOG_SLICE_FILE_SIZE);
+    ret = ArchiveWrite(fileName, xlogBuff, fileSize, archive_slot->archive_obs);
 
     pfree(xlogBuff);
     pfree(fileNamePrefix);
@@ -486,7 +513,7 @@ int obs_replication_cleanup(XLogRecPtr recptr)
 
     fileNamePrefix = obs_replication_get_xlog_prefix(recptr, true);
 
-    object_list = obsList(fileNamePrefix);
+    object_list = ArchiveList(fileNamePrefix);
     if (object_list == NIL || object_list->length <= 0) {
         ereport(LOG, (errmsg("The OBS objects with the prefix %s cannot be found.", fileNamePrefix)));
 
@@ -510,7 +537,7 @@ int obs_replication_cleanup(XLogRecPtr recptr)
 
         if (strncmp(basename(key), xlogfname, len) < 0) {
             /* Ahead of the target lsn, need to delete */
-            ret = obsDelete(key);
+            ret = ArchiveDelete(key);
             if (ret != 0) {
                 ereport(WARNING, (errcode(ERRCODE_UNDEFINED_FILE),
                                errmsg("The OBS objects delete fail, ret=%d, key=%s", ret, key)));
@@ -556,12 +583,20 @@ int obs_replication_get_last_xlog(ArchiveXlogMessage *xlogInfo)
     fileBaseName = basename(filePath);
     ereport(DEBUG1, (errmsg("The last xlog on OBS: %s", filePath)));
 
-    rc = sscanf_s(fileBaseName, "%8X%8X%8X_%2u_%02d_%08u_%08u_%08d", &timeLine, &xlogSegId,
-                  &xlogSegOffset, &xlogInfo->slice, &version, &xlogInfo->term, &xlogInfo->tli, &xlogInfo->sub_term);
-    securec_check_for_sscanf_s(rc, 6, "\0", "\0");
+    if (isObsSlot()) {
+        rc = sscanf_s(fileBaseName, "%8X%8X%8X_%2u_%02d_%08u_%08u_%08d", &timeLine, &xlogSegId,
+                        &xlogSegOffset, &xlogInfo->slice, &version, &xlogInfo->term, &xlogInfo->tli, &xlogInfo->sub_term);
+        securec_check_for_sscanf_s(rc, 6, "\0", "\0");
 
-    ereport(DEBUG1, (errmsg("Parse xlog filename is %8X%8X%8X_%2u_%02d_%08u_%08u_%08d", timeLine, xlogSegId,
-                            xlogSegOffset, xlogInfo->slice, version, xlogInfo->term, xlogInfo->tli, xlogInfo->sub_term)));
+        ereport(DEBUG1, (errmsg("Parse xlog filename is %8X%8X%8X_%2u_%02d_%08u_%08u_%08d", timeLine, xlogSegId,
+                                xlogSegOffset, xlogInfo->slice, version, xlogInfo->term, xlogInfo->tli, xlogInfo->sub_term)));
+    } else {
+        rc = sscanf_s(fileBaseName, "%8X%8X%8X", &timeLine, &xlogSegId, &xlogSegOffset);
+        securec_check_for_sscanf_s(rc, 3, "\0", "\0");
+        ereport(DEBUG1, (errmsg("Parse xlog filename is %8X%8X%8X", timeLine, xlogSegId, xlogSegOffset)));
+    }
+
+    
 
     XLogSegNoOffsetToRecPtr(xlogSegId * XLogSegmentsPerXLogId + xlogSegOffset, 0, xlogInfo->targetLsn);
 

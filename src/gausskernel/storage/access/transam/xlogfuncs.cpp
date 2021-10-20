@@ -1146,9 +1146,14 @@ Datum gs_set_obs_delete_location(PG_FUNCTION_ARGS)
     }
 
     XLByteToSeg(locationpoint, xlogsegno);
-    errorno = snprintf_s(xlogfilename, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X_%02u", DEFAULT_TIMELINE_ID,
+    if (!isObsSlot()) {
+        errorno = snprintf_s(xlogfilename, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X", DEFAULT_TIMELINE_ID,
+                         (uint32)((xlogsegno) / XLogSegmentsPerXLogId), (uint32)((xlogsegno) % XLogSegmentsPerXLogId));
+    } else {
+        errorno = snprintf_s(xlogfilename, MAXFNAMELEN, MAXFNAMELEN - 1, "%08X%08X%08X_%02u", DEFAULT_TIMELINE_ID,
                          (uint32)((xlogsegno) / XLogSegmentsPerXLogId), (uint32)((xlogsegno) % XLogSegmentsPerXLogId),
                          (uint32)((locationpoint / OBS_XLOG_SLICE_BLOCK_SIZE) & OBS_XLOG_SLICE_NUM_MAX));
+    }
     securec_check_ss(errorno, "", "");    
 
     PG_RETURN_TEXT_P(cstring_to_text(xlogfilename));

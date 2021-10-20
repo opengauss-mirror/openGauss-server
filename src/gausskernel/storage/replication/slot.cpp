@@ -1737,34 +1737,59 @@ static char *trim_str(char *str, int str_len, char sep)
 
 char *formObsConfigStringFromStruct(ObsArchiveConfig *obs_config)
 {
-    if (obs_config == NULL) {
+    if (obs_config == NULL || obs_config->media_type == ARCHIVE_NONE) {
         return NULL;
     }
-    int length = 0;
+    int length = 4;
     char *result;
     int rc = 0;
     char encryptSecretAccessKeyStr[DEST_CIPHER_LENGTH] = {'\0'};
-    encryptKeyString(obs_config->obs_sk, encryptSecretAccessKeyStr, DEST_CIPHER_LENGTH);
-    length += strlen(obs_config->obs_address) + 1;
-    length += strlen(obs_config->obs_bucket) + 1;
-    length += strlen(obs_config->obs_ak) + 1;
+    
+    if (obs_config->media_type == ARCHIVE_OBS) {
+        encryptKeyString(obs_config->obs_sk, encryptSecretAccessKeyStr, DEST_CIPHER_LENGTH);
+        length += strlen(obs_config->obs_address) + 1;
+        length += strlen(obs_config->obs_bucket) + 1;
+        length += strlen(obs_config->obs_ak) + 1;
+        length += strlen(encryptSecretAccessKeyStr);
+    }
+    /* for archive_prefix */
     length += strlen(obs_config->obs_prefix) + 1;
-    length += strlen(encryptSecretAccessKeyStr);
+    /* for is_recovery */
+    length += 1 + 1;
+    /* for vote_replicate_first */
+    length += 1 + 1;
+
     result = (char *)palloc0(length + 1);
-    rc = snprintf_s(result, length + 1, length, "%s;%s;%s;%s;%s", obs_config->obs_address, 
-        obs_config->obs_bucket, obs_config->obs_ak, encryptSecretAccessKeyStr, obs_config->obs_prefix);
+
+    if (obs_config->media_type == ARCHIVE_OBS) {
+        rc = snprintf_s(result, length + 1, length, "OBS;%s;%s;%s;%s;%s;%s;%s",
+            obs_config->obs_address,
+            obs_config->obs_bucket,
+            obs_config->obs_ak,
+            encryptSecretAccessKeyStr, 
+            obs_config->obs_prefix);
+    } else {
+        // By default, is_recovery and vote_replicate are set to '0' for NAS archiving
+        rc = snprintf_s(result, length + 1, length, "NAS;%s;%s;%s", obs_config->obs_prefix, "0", "0");
+    }
+
     securec_check_ss_c(rc, "\0", "\0");
     return result;
 }
 
 ObsArchiveConfig* formObsConfigFromStr(char *content, bool encrypted)
 {
-    ObsArchiveConfig* obs_config = NULL;
+    ObsArchiveConfig* obs_config = NULL;    
+    char* media_type = NULL;
     errno_t rc = EOK;
     /* SplitIdentifierString will change origin string */
     char *content_copy = pstrdup(content);
+    char *tmp = NULL;
     List* elemlist = NIL;
     int param_num = 0;
+    size_t elem_index = 0;
+    bool is_recovery = false;
+    bool vote_replicate_first = false;
     obs_config = (ObsArchiveConfig *)palloc0(sizeof(ObsArchiveConfig));
     char decryptSecretAccessKeyStr[DEST_CIPHER_LENGTH] = {'\0'};
         /* Parse string into list of identifiers */
@@ -1772,23 +1797,51 @@ ObsArchiveConfig* formObsConfigFromStr(char *content, bool encrypted)
         goto FAILURE;
     }
     param_num = list_length(elemlist);
-    if (param_num != 5) {
+    /*
+     * The extra_content when create archive slot
+     * OBS: OBS;obs_server_ip;obs_bucket_name;obs_ak;obs_sk;archive_prefix;is_recovery;is_vote_replication_first
+     * NAS: NAS;archive_prefix;is_recovery;is_vote_replication_first
+     */
+    if (param_num != 7 && param_num != 4 && param_num != 8) {
         goto FAILURE;
     }
-    
-    obs_config->obs_address = pstrdup((char*)list_nth(elemlist, 0));
-    obs_config->obs_bucket = pstrdup((char*)list_nth(elemlist, 1));
-    obs_config->obs_ak = pstrdup((char*)list_nth(elemlist, 2));
-    if (encrypted == false) {
-        obs_config->obs_sk = pstrdup((char*)list_nth(elemlist, 3));
+
+    if (param_num == 7) {
+        obs_config->media_type = ARCHIVE_OBS;
     } else {
-        decryptKeyString((char*)list_nth(elemlist, 3), decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, NULL);
-        obs_config->obs_sk = pstrdup(decryptSecretAccessKeyStr);
-        rc = memset_s(decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
-        securec_check(rc, "\0", "\0");
+        media_type = pstrdup((char*)list_nth(elemlist, elem_index++));
+        if (strcmp(media_type, "OBS") == 0) {
+            obs_config->media_type = ARCHIVE_OBS;
+        } else if (strcmp(media_type, "NAS") == 0) {
+            obs_config->media_type = ARCHIVE_NAS;
+        } else {
+            goto FAILURE;
+        }
     }
-    obs_config->obs_prefix = pstrdup((char*)list_nth(elemlist, 4));
+
+    if (obs_config->media_type == ARCHIVE_OBS) {
+        obs_config->obs_address = pstrdup((char*)list_nth(elemlist, elem_index++));
+        obs_config->obs_bucket = pstrdup((char*)list_nth(elemlist, elem_index++));
+        obs_config->obs_ak = pstrdup((char*)list_nth(elemlist, elem_index++));
+        if (encrypted == false) {
+            obs_config->obs_sk = pstrdup((char*)list_nth(elemlist, elem_index++));
+        } else {
+            decryptKeyString((char*)list_nth(elemlist, elem_index++), decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH,
+                NULL);
+            obs_config->obs_sk = pstrdup(decryptSecretAccessKeyStr);
+            rc = memset_s(decryptSecretAccessKeyStr, DEST_CIPHER_LENGTH, 0, DEST_CIPHER_LENGTH);
+            securec_check(rc, "\0", "\0");
+        }
+    } 
+
+    obs_config->obs_prefix = pstrdup((char*)list_nth(elemlist, elem_index++));
+    tmp = (char*)list_nth(elemlist, elem_index++);
+    is_recovery = (tmp != NULL && tmp[0] != '\0' && tmp[0] == '1') ? true : false;
+    tmp = (char*)list_nth(elemlist, elem_index++);
+    vote_replicate_first = (tmp != NULL && tmp[0] != '\0' && tmp[0] == '1') ? true : false;
+
     pfree_ext(content_copy);
+    pfree_ext(media_type);
     list_free_ext(elemlist);
     return obs_config;
 FAILURE:
@@ -1801,6 +1854,7 @@ FAILURE:
     }
     pfree_ext(obs_config);
     pfree_ext(content_copy);
+    pfree_ext(media_type);
     list_free_ext(elemlist);
     ereport(ERROR,
         (errcode_for_file_access(), errmsg("message is inleagel  \"%s\"", content)));
@@ -1848,6 +1902,7 @@ ReplicationSlot *getObsReplicationSlot()
             g_instance.archive_obs_cxt.archive_slot->archive_obs->obs_ak = pstrdup_ext(slot->archive_obs->obs_ak);
             g_instance.archive_obs_cxt.archive_slot->archive_obs->obs_sk = pstrdup_ext(slot->archive_obs->obs_sk);
             g_instance.archive_obs_cxt.archive_slot->archive_obs->obs_prefix = pstrdup_ext(slot->archive_obs->obs_prefix);
+            g_instance.archive_obs_cxt.archive_slot->archive_obs->media_type = slot->archive_obs->media_type;
             MemoryContextSwitchTo(curr);
             SpinLockRelease(&slot->mutex);
             *slot_idx = slotno;

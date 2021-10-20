@@ -45,9 +45,12 @@ extern void obs_disconnect(void);
 #define OBS_XLOG_SLICE_HEADER_SIZE (sizeof(uint32))
 /* sizeof(uint32) + OBS_XLOG_SLICE_BLOCK_SIZE */
 #define OBS_XLOG_SLICE_FILE_SIZE (OBS_XLOG_SLICE_BLOCK_SIZE + OBS_XLOG_SLICE_HEADER_SIZE)
+#define NAS_XLOG_FILE_SIZE ((uint32)(16 * 1024 * 1024))
 #define OBS_XLOG_SAVED_FILES_NUM 25600 /* 100G*1024*1024*1024/OBS_XLOG_SLICE_BLOCK_SIZE */
+
+/* Currently, the openGauss does not support disaster recover. */
 #define IS_DISASTER_RECOVER_MODE \
-    (t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&  !XLogArchivingActive() && getObsReplicationSlot())
+    (false && t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&  !XLogArchivingActive() && getObsReplicationSlot())
 #define IS_CNDISASTER_RECOVER_MODE \
     (IS_PGXC_COORDINATOR &&  !XLogArchivingActive() && getObsReplicationSlot())
 
