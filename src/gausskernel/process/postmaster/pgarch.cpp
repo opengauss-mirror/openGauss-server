@@ -47,7 +47,6 @@
 #include "storage/latch.h"
 #include "storage/pg_shmem.h"
 #include "storage/pmsignal.h"
-#include "storage/proc.h"
 #include "utils/guc.h"
 #include "utils/ps_status.h"
 
@@ -60,7 +59,6 @@
 #include "pgxc/pgxc.h"
 #include "replication/obswalreceiver.h"
 #include "replication/walreceiver.h"
-#include "access/xlogreader.h"
 /* ----------
  * Timer definitions.
  * ----------
@@ -91,20 +89,6 @@
 
 #define ARCHIVE_BUF_SIZE (1024 * 1024)
 
-/* 
- * Timeout interval for sending the status of the archive thread on the standby node
- */
-#define UPDATE_STATUS_WAIT 3000
-
-/* the status of archiver on standby */
-#define ARCHIVE_ON true
-#define ARCHIVE_OFF false
-
-#define STANDBY_ARCHIVE_XLOG_UPGRADE_VERSION 92299
-
-/* the interval of sending archive status is 1s. */
-#define SEND_ARCHIVE_STATUS_INTERVAL 1000000L
-
 NON_EXEC_STATIC void PgArchiverMain();
 static void pgarch_exit(SIGNAL_ARGS);
 static void ArchSigHupHandler(SIGNAL_ARGS);
@@ -117,7 +101,6 @@ static bool pgarch_archiveXlog(char* xlog);
 static bool pgarch_readyXlog(char* xlog, int xlog_length);
 static void pgarch_archiveDone(const char* xlog);
 static void pgarch_archiveRoachForPitrStandby();
-static void CreateArchiveReadyFile();
 static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn);
 static bool pgarch_archiveRoachForCoordinator(XLogRecPtr targetLsn);
 static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn);
@@ -125,11 +108,6 @@ typedef bool(*doArchive)(XLogRecPtr);
 static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun);
 static void archKill(int code, Datum arg);
 static void initLastTaskLsn();
-static bool SendArchiveThreadStatusInternal(bool is_archive_activited);
-static void SendArchiveThreadStatus(bool status);
-static bool NotifyPrimaryArchiverActived(ThreadId* last_walrcv_pid, bool* sent_archive_status);
-static void NotifyPrimaryArchiverShutdown(bool sent_archive_status);
-static void ChangeArchiveTaskStatus2Done(const char* xlog);
 
 AlarmCheckResult DataInstArchChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
@@ -241,7 +219,6 @@ NON_EXEC_STATIC void PgArchiverMain()
      */
     init_ps_display("archiver process", "", "", "");
     setObsArchLatch(&t_thrd.arch.mainloop_latch);
-    SetStandbyArchLatch(&t_thrd.arch.mainloop_latch);
     initLastTaskLsn();
     pgarch_MainLoop();
 
@@ -337,8 +314,6 @@ static void pgarch_MainLoop(void)
     gettimeofday(&last_copy_time, NULL);
     bool time_to_stop = false;
     doArchive fun = NULL;
-    bool sent_archive_status = false;
-    ThreadId last_walrcv_pid = 0;
 
     /*
      * We run the copy loop immediately upon entry, in case there are
@@ -370,7 +345,6 @@ static void pgarch_MainLoop(void)
             t_thrd.arch.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
             if (!XLogArchivingActive()) {
-                NotifyPrimaryArchiverShutdown(sent_archive_status);
                 ereport(LOG, (errmsg("PgArchiver exit")));
                 return;
             }
@@ -393,25 +367,11 @@ static void pgarch_MainLoop(void)
         }
         load_server_mode();
         if (IsServerModeStandby()) {
-            /*
-             * this step was used by standby to notify primary the archive thread is actived
-             */
-            if (obs_archive_slot == NULL && t_thrd.proc->workingVersionNum >= STANDBY_ARCHIVE_XLOG_UPGRADE_VERSION &&
-                !NotifyPrimaryArchiverActived(&last_walrcv_pid, &sent_archive_status)) {
-                pg_usleep(SEND_ARCHIVE_STATUS_INTERVAL);
-                continue;
-            }
             /* if we should do pitr archive, for standby */
             volatile unsigned int *pitr_task_status = &g_instance.archive_obs_cxt.pitr_task_status;
             if (unlikely(pg_atomic_read_u32(pitr_task_status) == PITR_TASK_GET)) {
                 pgarch_archiveRoachForPitrStandby();
                 pg_atomic_write_u32(pitr_task_status, PITR_TASK_DONE);
-            }
-
-            /* if we should do archive by standby, we should create a .ready file*/
-            volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-            if (unlikely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_GET)) {
-                CreateArchiveReadyFile();
             }
         }
 
@@ -466,7 +426,7 @@ static void pgarch_MainLoop(void)
                 wait_interval = t_thrd.arch.task_wait_interval;
                 last_time = t_thrd.arch.last_arch_time;
             } else {
-                wait_interval = IsServerModeStandby() ? t_thrd.arch.task_wait_interval : PGARCH_AUTOWAKE_INTERVAL;
+                wait_interval = PGARCH_AUTOWAKE_INTERVAL;
                 last_time = TIME_GET_MILLISEC(last_copy_time);
             }
             gettimeofday(&curtime, NULL);
@@ -504,15 +464,6 @@ static void pgarch_MainLoop(void)
          * SIGUSR2.
          */
     } while (PostmasterIsAlive() && XLogArchivingActive() && !time_to_stop);
-
-    /* 
-     * This step don't need to check the version number, because we have checked the version in the loop.
-     * 
-     * If the version number is bigger than STANDBY_ARCHIVE_XLOG_UPGRADE_VERSION and we notify the primary successfully
-     * in the loop, the sent_archive_status will be set to true. We don't need to send the archive status when
-     * the sent_archive_status is false, so we don't need to check the version number in this step.
-     */
-    NotifyPrimaryArchiverShutdown(sent_archive_status);
 }
 
 /*
@@ -566,9 +517,6 @@ static void pgarch_ArchiverCopyLoop(void)
             if (pgarch_archiveXlog(xlog)) {
                 /* successful */
                 pgarch_archiveDone(xlog);
-
-                /* archive xlog on standby success, we need to change the status of archive task. */
-                ChangeArchiveTaskStatus2Done(xlog);
                 break; /* out of inner retry loop */
             } else {
                 if (++failures >= NUM_ARCHIVE_RETRIES) {
@@ -987,43 +935,6 @@ static void pgarch_archiveRoachForPitrStandby()
     }
 }
 
-static void CreateArchiveReadyFile()
-{
-    XLogRecPtr targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
-    if (!XlogFileIsExisted(t_thrd.proc_cxt.DataDir, targetLsn, DEFAULT_TIMELINE_ID)) {
-        ereport(WARNING, (errmsg("CreateArchiveReadyFile: the %X/%X is not exists, skipping",
-                                    (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-        volatile unsigned int* arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-        if (likely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_GET)) {
-            pg_memory_barrier();
-            g_instance.archive_standby_cxt.arch_finish_result = true;
-            pg_atomic_write_u32(arch_task_status, ARCH_TASK_DONE);
-        }
-        return;
-    }
-    char xlogfname[MAXFNAMELEN];
-    ereport(LOG, (errmsg("CreateArchiveReadyFile %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-    
-    XLogSegNo xlogSegno = 0;
-    XLByteToSeg(targetLsn, xlogSegno);
-    if (xlogSegno == InvalidXLogSegPtr) {
-        g_instance.archive_standby_cxt.arch_finish_result = false;
-        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("Invalid Lsn: %lu", targetLsn)));
-    }
-    XLogFileName(xlogfname, DEFAULT_TIMELINE_ID, xlogSegno);
-
-    char tempPath[PATH_MAX] = {0};
-    char srcPath[PATH_MAX + 1] = {0};
-    int rc = snprintf_s(tempPath, PATH_MAX, PATH_MAX - 1, XLOGDIR "/%s", xlogfname);
-    securec_check_ss(rc, "\0", "\0");
-    char* retVal = realpath(tempPath, srcPath);
-    if (retVal == NULL) {
-        ereport(WARNING, (errmsg_internal("realpath src %s failed:%m\n", tempPath)));
-    } else {
-        XLogArchiveNotify(xlogfname);
-    }
-}
-
 /*
  * pgarch_archiveRoachForPitrMaster
  * choose a walsender to send archive command
@@ -1179,90 +1090,5 @@ static void initLastTaskLsn()
         ereport(LOG,
             (errmsg("initLastTaskLsn update lsn to  %X/%X from local with not obs slot", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32), 
                 (uint32)(t_thrd.arch.pitr_task_last_lsn))));
-    }
-}
-
-/*
- * This function is used to send the status of archiver
- */
-static void SendArchiveThreadStatus(bool status)
-{
-    if (!WalRcvIsOnline()) {
-        return;
-    }
-    while(!SendArchiveThreadStatusInternal(status)) {
-        ereport(WARNING,
-                (errcode(ERRCODE_WARNING),
-                    errmsg("Notifing primary to update archive status is failed.")));
-        pg_usleep(SEND_ARCHIVE_STATUS_INTERVAL);
-    }
-    ereport(LOG, (errmsg("Notifing primary to update archive status is success.")));
-}
-
-static bool SendArchiveThreadStatusInternal(bool is_archive_activited)
-{
-    ResetLatch(&t_thrd.arch.mainloop_latch);
-    g_instance.archive_standby_cxt.archive_enabled = is_archive_activited;
-    (void)gs_signal_send(g_instance.pid_cxt.WalReceiverPID, SIGUSR2);
-    g_instance.archive_standby_cxt.arch_latch = &t_thrd.arch.mainloop_latch;
-    int rc = WaitLatch(&t_thrd.arch.mainloop_latch,
-                        WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-                        (long)(UPDATE_STATUS_WAIT));
-    if (rc & WL_POSTMASTER_DEATH) {
-        gs_thread_exit(1);
-    }
-    if (rc & WL_TIMEOUT) {
-        return false;
-    }
-    return true;
-}
-
-static bool NotifyPrimaryArchiverActived(ThreadId* last_walrcv_pid, bool* sent_archive_status)
-{
-    if (WalRcvIsOnline()) {
-        /* last_walrcv_pid is used to check whether the primary node is switched over. */
-        if (!(*sent_archive_status) || *last_walrcv_pid != g_instance.pid_cxt.WalReceiverPID) {
-            SendArchiveThreadStatus(ARCHIVE_ON);
-            *sent_archive_status = true;
-            *last_walrcv_pid = g_instance.pid_cxt.WalReceiverPID;
-            return true;
-        }
-        if (*sent_archive_status) {
-            return true;
-        }
-    }
-    *sent_archive_status = false;
-    return false;
-}
-
-static void NotifyPrimaryArchiverShutdown(bool sent_archive_status)
-{
-    if (sent_archive_status) {
-        SendArchiveThreadStatus(ARCHIVE_OFF);
-    }
-}
-
-static void ChangeArchiveTaskStatus2Done(const char* xlog)
-{
-    if (IsServerModeStandby()) {
-        char fname[MAXFNAMELEN];
-        int segno = 0;
-        XLogRecPtr targetLsn = g_instance.archive_standby_cxt.archive_task.targetLsn;
-        XLByteToSeg(targetLsn, segno);
-        XLogFileName(fname, DEFAULT_TIMELINE_ID, segno);
-        if (strcmp(xlog, fname) != 0) {
-            /* 
-             * The archived xlog is not the xlog required by the archive task.
-             * Therefore, the archived xlog cannot be returned to the primary.
-             */
-            ereport(LOG, (errmsg("\"%s\" is not archived target, no reply is sent", xlog)));
-            return;
-        }
-        volatile unsigned int *arch_task_status = &g_instance.archive_standby_cxt.arch_task_status;
-        if (unlikely(pg_atomic_read_u32(arch_task_status) == ARCH_TASK_GET)) {
-            pg_memory_barrier();
-            g_instance.archive_standby_cxt.arch_finish_result = true;
-            pg_atomic_write_u32(arch_task_status, ARCH_TASK_DONE);
-        }
     }
 }

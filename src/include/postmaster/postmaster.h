@@ -51,11 +51,6 @@ typedef enum ReplicationType {
 #define IS_DN_DUMMY_STANDYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITH_DUMMY_STANDBY)
 #define IS_DN_WITHOUT_STANDBYS_MODE() (g_instance.attr.attr_storage.replication_type == RT_WITHOUT_STANDBY)
 
-#define WalRcvIsOnline()                                                              \
-    ((g_instance.pid_cxt.WalReceiverPID != 0 && t_thrd.walreceiverfuncs_cxt.WalRcv && \
-        t_thrd.walreceiverfuncs_cxt.WalRcv->isRuning))
-
-
 /*
  * We use a simple state machine to control startup, shutdown, and
  * crash recovery (which is rather like shutdown followed by startup).

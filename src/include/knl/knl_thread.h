@@ -51,7 +51,6 @@
 #include "knl/knl_guc.h"
 #include "knl/knl_session.h"
 #include "nodes/pg_list.h"
-#include "replication/walprotocol.h"
 #include "storage/lock/s_lock.h"
 #include "utils/palloc.h"
 #include "storage/latch.h"

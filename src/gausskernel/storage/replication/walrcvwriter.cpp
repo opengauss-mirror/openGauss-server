@@ -140,6 +140,8 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
              * would otherwise have to reopen this file to fsync it later
              */
             if (recvFile >= 0) {
+                char xlogfname[MAXFNAMELEN];
+
                 /*
                  * XLOG segment files will be re-read by recovery in startup
                  * process soon, so we don't advise the OS to release cache
@@ -150,15 +152,12 @@ static void XLogWalRcvWrite(WalRcvCtlBlock *walrcb, char *buf, Size nbytes, XLog
                                     errmsg("could not close log file %s: %m",
                                            XLogFileNameP(t_thrd.xlog_cxt.ThisTimeLineID, recvSegNo))));
 
-#ifdef ENABLE_MULTIPLE_NODES
                 /*
                  * Create .done file forcibly to prevent the restored segment from
                  * being archived again later.
                  */
-                char xlogfname[MAXFNAMELEN];
                 XLogFileName(xlogfname, recvFileTLI, recvSegNo);
                 XLogArchiveForceDone(xlogfname);
-#endif
             }
             recvFile = -1;
 

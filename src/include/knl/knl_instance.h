@@ -737,25 +737,6 @@ typedef struct knl_g_archive_obs_context {
     int sync_walsender_term;
 } knl_g_archive_obs_context;
 
-typedef struct knl_g_archive_standby_context {
-    /*
-     * walreceiver set when get task from walsender
-     * 0 for no task
-     * 1 walreceive get task from walsender and set it for archive thread
-     * 2 archive thread set when task is done
-     */
-    volatile unsigned int arch_task_status;
-
-    /* archive thread set when archive done*/
-    bool arch_finish_result;
-
-    /* for standby */
-    ArchiveXlogMessage archive_task;
-    bool need_to_send_archive_status;
-    bool archive_enabled;
-    Latch* arch_latch;
-} knl_g_archive_standby_context;
-
 #ifdef ENABLE_MOT
 typedef struct knl_g_mot_context {
     JitExec::JitExecMode jitExecMode;
@@ -861,7 +842,6 @@ typedef struct knl_instance_context {
     knl_g_barrier_creator_context barrier_creator_cxt;
     knl_g_oid_nodename_mapping_cache oid_nodename_cache;
     knl_g_archive_obs_context archive_obs_cxt;
-    knl_g_archive_standby_context archive_standby_cxt;
     struct HTAB* ngroup_hash_table;
     knl_g_hypo_context hypo_cxt;
 } knl_instance_context;

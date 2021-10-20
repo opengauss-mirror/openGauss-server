@@ -116,8 +116,6 @@ long g_logical_slot_sleep_time = 0;
 
 #define AmWalSenderToDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_DUMMYSTANDBY)
 #define AmWalSenderOnDummyStandby() (t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_DUMMYSTANDBY_STANDBY)
-#define TIME_GET_MILLISEC(t) (((long)(t).tv_sec * 1000) + ((long)(t).tv_usec) / 1000)
-#define WAIT_FOR_ARCHIVE_TIME 10000L
 
 /*
  * calculate catchup late every 1000ms
@@ -219,14 +217,7 @@ static void WalSndSetPercentCountStartLsn(XLogRecPtr startLsn);
 static void WalSndRefreshPercentCountStartLsn(XLogRecPtr currentMaxLsn, XLogRecPtr currentDoneLsn);
 static void set_xlog_location(ServerMode local_role, XLogRecPtr* sndWrite, XLogRecPtr* sndFlush, XLogRecPtr* sndReplay);
 static void ProcessArchiveFeedbackMessage(void);
-static void ProcessStandbyArchiveFeedbackMessage(void);
 static void WalSndArchiveXlog(XLogRecPtr targetLsn, int sub_term);
-static void WalSndSendArchiveLsn2Standby(XLogRecPtr targetLsn);
-static void ArchiveXlogOnStandby(XLogRecPtr targetLsn);
-static void SendLsn2Standby(XLogRecPtr targetLsn);
-static void CheckStandbyFinishArchive(XLogRecPtr targetLsn);
-static void ProcessArchiveStatusMessage();
-static void ResponseArchiveStatusMessage();
 static void CalCatchupRate();
 
 char *DataDir = ".";
@@ -2108,15 +2099,6 @@ static void ProcessStandbyMessage(void)
         case 'a':
             ProcessArchiveFeedbackMessage();
             break;
-
-        case 'n':
-            ProcessStandbyArchiveFeedbackMessage();
-            break;
-
-        case 'S':
-            ProcessArchiveStatusMessage();
-            break;
-
         default:
             ereport(COMMERROR,
                     (errcode(ERRCODE_PROTOCOL_VIOLATION), errmsg("unexpected message type \"%d\"", msgtype)));
@@ -2553,9 +2535,9 @@ static void ProcessStandbySwitchRequestMessage(void)
 static void ProcessArchiveFeedbackMessage(void)
 {
     volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveXlogResponseMessage reply;
+    ArchiveXlogResponseMeeeage reply;
     /* Decipher the reply message */
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMessage));
+    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMeeeage));
     ereport(LOG,
         (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
             (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
@@ -2572,59 +2554,6 @@ static void ProcessArchiveFeedbackMessage(void)
         return ;
     }
     SetLatch(walsnd->arch_latch);
-}
-
-/*
- * Process the feedback to check is the standby archive successful
- */
-static void ProcessStandbyArchiveFeedbackMessage(void)
-{
-    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveXlogResponseMessage reply;
-    /* Decipher the reply message */
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMessage));
-    if (reply.pitr_result && reply.archive_result == ARCHIVE_SKIP) {
-        ereport(WARNING,
-                (errmsg("ProcessArchiveFeedbackMessage: %X/%X has been removed in the standby, skip it.", 
-                        (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
-    } else {
-        ereport(LOG,
-                (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
-                        (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
-    }
-    walsnd->arch_finish_result = reply.pitr_result;
-    walsnd->archive_target_lsn = reply.targetLsn;
-}
-
-static void ProcessArchiveStatusMessage()
-{
-    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    ArchiveStatusMessage message;
-    pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&message, sizeof(ArchiveStatusMessage));
-    walsnd->is_start_archive = message.is_archive_activied;
-    if (message.startLsn == 0) {
-        XLogRecPtr receivePtr;
-        XLogRecPtr writePtr;
-        XLogRecPtr flushPtr;
-        XLogRecPtr replayPtr;
-        bool amSync = false;
-        bool got_recptr = false;
-        got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
-        if (got_recptr) {
-            walsnd->arch_task_last_lsn = flushPtr;
-        } else {
-            ereport(ERROR,
-                    (errmsg("ProcessArchiveStatusMessage failed when call SyncRepGetSyncRecPtr")));
-        }
-    }
-
-    if (walsnd->arch_task_last_lsn < message.startLsn) {
-        walsnd->arch_task_last_lsn = message.startLsn;
-    }
-    ereport(LOG,
-            (errmsg("ProcessArchiveStatusMessage: reset last task lsn to %X/%X",
-                    (uint32)(walsnd->arch_task_last_lsn >> 32), (uint32)(walsnd->arch_task_last_lsn))));
-    ResponseArchiveStatusMessage();
 }
 
 /*
@@ -3209,42 +3138,6 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         /* Check for input from the client */
         ProcessRepliesIfAny();
 
-#ifdef ENABLE_MULTIPLE_NODES
-        /* Only the primary can send the archive lsn to standby */
-        load_server_mode();
-        if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE && IsValidArchiverStandby(t_thrd.walsender_cxt.MyWalSnd)) {
-            XLogRecPtr receivePtr;
-            XLogRecPtr writePtr;
-            XLogRecPtr flushPtr;
-            XLogRecPtr replayPtr;
-            bool amSync = false;
-            bool got_recptr = false;
-            List* sync_standbys = SyncRepGetSyncStandbys(&amSync);
-            int standby_nums = list_length(sync_standbys);
-            list_free(sync_standbys);
-            got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
-            if (got_recptr) {
-                ArchiveXlogOnStandby(flushPtr);
-            } else if (t_thrd.syncrep_cxt.SyncRepConfig == NULL || 
-                        u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH ||
-                        (t_thrd.walsender_cxt.WalSndCtl->most_available_sync && standby_nums == 0)) {
-                /*
-                 * This step is used to deal with the situation that synchronous standbys are not set.
-                 */
-                ArchiveXlogOnStandby(t_thrd.walsender_cxt.MyWalSnd->flush);
-            } else {
-                ereport(WARNING, (errcode(ERRCODE_WARNING),
-                                    errmsg("ArchiveXlogOnStandby failed when call SyncRepGetSyncRecPtr")));
-            }
-        }
-
-        volatile unsigned int *standby_archive_flag = &t_thrd.walsender_cxt.MyWalSnd->standby_archive_flag;
-        if (unlikely(pg_atomic_read_u32(standby_archive_flag) == 1)) {
-            WalSndSendArchiveLsn2Standby(t_thrd.walsender_cxt.MyWalSnd->arch_task_lsn);
-            pg_atomic_write_u32(standby_archive_flag, 0);
-        } 
-#endif
-
         /* Walsender first startup, send a keepalive to standby, no need reply. */
         if (first_startup) {
             WalSndKeepalive(false);
@@ -3719,12 +3612,6 @@ static void InitWalSnd(void)
             walsnd->replSender = false;
             walsnd->peer_role = UNKNOWN_MODE;
             walsnd->peer_state = NORMAL_STATE;
-            walsnd->is_start_archive = false;
-            walsnd->archive_target_lsn = 0;
-            walsnd->arch_task_last_lsn = 0;
-            walsnd->arch_finish_result = false;
-            walsnd->has_sent_arch_lsn = false;
-            walsnd->last_send_lsn_time = 0;
             walsnd->channel_get_replc = 0;
             rc = memset_s((void *)&walsnd->receive, sizeof(XLogRecPtr), 0, sizeof(XLogRecPtr));
             securec_check(rc, "", "");
@@ -5176,31 +5063,6 @@ static void WalSndArchiveXlog(XLogRecPtr targetLsn, int sub_term)
 }
 
 /*
- * send archive lsn to standby
- */
-static void WalSndSendArchiveLsn2Standby(XLogRecPtr targetLsn)
-{
-    ArchiveXlogMessage archive_message;
-    errno_t errorno = EOK;
-    ereport(LOG,
-        (errmsg("WalSndSendArchiveLsn2Standby %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-
-    archive_message.targetLsn = targetLsn;
-
-    /* Prepend with the message type and send it. */
-    t_thrd.walsender_cxt.output_xlog_message[0] = 'n';
-    errorno = memcpy_s(t_thrd.walsender_cxt.output_xlog_message + 1,
-        sizeof(ArchiveXlogMessage) + WS_MAX_SEND_SIZE,
-        &archive_message,
-        sizeof(ArchiveXlogMessage));
-    securec_check(errorno, "\0", "\0");
-    (void)pq_putmessage_noblock('d', t_thrd.walsender_cxt.output_xlog_message, sizeof(ArchiveXlogMessage) + 1);
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    t_thrd.walsender_cxt.MyWalSnd->last_send_lsn_time = TIME_GET_MILLISEC(tv);
-}
-
-/*
  * This isn't currently used for anything. Monitoring tools might be
  * interested in the future, and we'll need something like this in the
  * future for synchronous replication.
@@ -5639,106 +5501,6 @@ XLogSegNo WalGetSyncCountWindow(void)
     return (XLogSegNo)(uint32)u_sess->attr.attr_storage.wal_keep_segments;
 }
 
-static void ArchiveXlogOnStandby(XLogRecPtr flushLsn)
-{
-    /* Check whether the active node is connected to the standby node. */
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
-
-    /*
-     * Check whether the size of the newly archived xlog file is greater than that of the last archived xlog file.
-     * If the size is greater than the xlog size, the system sends an archive LSN to the standby node for archiving.
-     */
-    if ((flushLsn - walsnd->arch_task_last_lsn ) > XLogSegSize) {
-        XLogRecPtr targetLsn;
-        targetLsn = Min(walsnd->arch_task_last_lsn + XLogSegSize -
-                        (walsnd->arch_task_last_lsn % XLogSegSize) - 1,
-                        flushLsn);
-        if (walsnd->arch_task_last_lsn == targetLsn) {
-            targetLsn = Min(targetLsn + XLogSegSize, flushLsn);
-        }
-        if (!walsnd->has_sent_arch_lsn) {
-            SendLsn2Standby(targetLsn);
-        } else {
-            CheckStandbyFinishArchive(targetLsn);
-        }
-    }
-}
-
-/*
- * SendLsn2Standby
- * 
- * Sending the lsn which is need to be archived by standby.
- * It will return true if send archive lsn successful.
- */
-static void SendLsn2Standby(XLogRecPtr targetLsn)
-{
-    /* use volatile pointer to prevent code rearrangement */
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    if (walsnd == NULL) {
-        /* send failed, walsnd is null */
-        return;
-    }
-    ereport(LOG,
-            (errmsg("the lsn which is ready to be sent is: \"%X/%X\"",
-                    (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-    walsnd->has_sent_arch_lsn = true;
-    if (!XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush)) {
-        walsnd->arch_task_lsn = targetLsn;
-        pg_atomic_write_u32(&walsnd->standby_archive_flag, 1);
-    }
-}
-
-/*
- * CheckStandbyFinishArchive
- *
- * check the targetLsn and g_instance.archive_obs_cxt.archive_task.targetLsn for deal message with wrong order
- */
-static void CheckStandbyFinishArchive(XLogRecPtr targetLsn)
-{
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    volatile WalSnd* walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    long time_diff = (long)TIME_GET_MILLISEC(tv) - walsnd->last_send_lsn_time;
-    if (walsnd->arch_finish_result == false && time_diff > WAIT_FOR_ARCHIVE_TIME) {
-        walsnd->has_sent_arch_lsn = false;
-        ereport(WARNING,
-                (errcode(ERRCODE_WARNING),
-                    errmsg("transaction xlog file \"%X/%X\" could not be archived: try again", 
-                            (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-        return;
-    }
-    if (walsnd->arch_finish_result == true) {
-        /* reset result flag */
-        if (XLByteEQ(walsnd->archive_target_lsn, targetLsn)) {
-            walsnd->arch_finish_result = false;
-            walsnd->arch_task_last_lsn = targetLsn;
-            ereport(LOG, (errmsg("the archive time is %.2lf seconds,last archive lsn change to \"%X/%X\"",
-                                ((double)time_diff / 1000), (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-        }
-        walsnd->has_sent_arch_lsn = false;
-    }
-}
-
-static void ResponseArchiveStatusMessage()
-{
-    char msgbuf[sizeof(ArchiveStatusResponseMessage) + 1];
-    msgbuf[0] = 'S';
-    ArchiveStatusResponseMessage response;
-    volatile WalSnd *walsnd = t_thrd.walsender_cxt.MyWalSnd;
-    errno_t errorno = EOK;
-
-    if (walsnd == NULL)
-        return;
-
-    ereport(LOG,(errmsg("sending archive status response message")));
-
-    /* Prepend with the message type and send it. */
-    response.is_set_status_success = true;
-    errorno = memcpy_s(&msgbuf[1], sizeof(ArchiveStatusResponseMessage),
-                        &response, sizeof(ArchiveStatusResponseMessage));
-    securec_check(errorno, "\0", "\0");
-    (void)pq_putmessage_noblock('d', msgbuf, sizeof(ArchiveStatusResponseMessage) + 1);
-}
 /*
  * Calculate catchup rate of standby to estimate how long
  * the standby will be caught up with primary.
@@ -5768,18 +5530,4 @@ static void CalCatchupRate() {
         walsnd->lastCalTime = now;
     }
     SpinLockRelease(&walsnd->mutex);
-}
-
-/* Check whether the standby node corresponding to the walsnd is a valid standby node for xlog archiving. */
-bool IsValidArchiverStandby(WalSnd* walsnd)
-{
-    if (walsnd == NULL) {
-        return false;
-    }
-    if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) &&
-        walsnd->is_start_archive) {
-        return true;
-    } else {
-        return false;
-    }
 }
