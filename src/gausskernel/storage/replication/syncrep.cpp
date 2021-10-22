@@ -70,7 +70,6 @@
  */
 volatile bool most_available_sync = false;
 
-static volatile int SyncRepWaitMode = SYNC_REP_WAIT_FLUSH;
 const int MAX_SYNC_REP_RETRY_COUNT = 1000;
 const int SYNC_REP_SLEEP_DELAY = 1000;
 
@@ -155,7 +154,7 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
 {
     char *new_status = NULL;
     const char *old_status = NULL;
-    int mode = SyncRepWaitMode;
+    int mode = u_sess->attr.attr_storage.sync_rep_wait_mode;
 
     /*
      * Fast exit if user has not requested sync replication, or there are no
@@ -516,6 +515,7 @@ void SyncRepReleaseWaiters(void)
     int numreceive = 0;
     int numwrite = 0;
     int numflush = 0;
+    int numapply = 0;
     bool got_recptr = false;
     bool am_sync = false;
 
@@ -590,15 +590,16 @@ void SyncRepReleaseWaiters(void)
     }
     if (XLByteLT(walsndctl->lsn[SYNC_REP_WAIT_APPLY], replayPtr)) {
         walsndctl->lsn[SYNC_REP_WAIT_APPLY] = t_thrd.walsender_cxt.MyWalSnd->apply;
-        numflush = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
+        numapply = SyncRepWakeQueue(false, SYNC_REP_WAIT_APPLY);
     }
 
     LWLockRelease(SyncRepLock);
 
     ereport(DEBUG3,
-            (errmsg("released %d procs up to receive %X/%X, %d procs up to write %X/%X, %d procs up to flush %X/%X",
+            (errmsg("released %d procs up to receive %X/%X, %d procs up to write %X/%X, %d procs up to flush %X/%X, %d procs up to apply %X/%X",
                     numreceive, (uint32)(receivePtr >> 32), (uint32)receivePtr, numwrite, (uint32)(writePtr >> 32),
-                    (uint32)writePtr, numflush, (uint32)(flushPtr >> 32), (uint32)flushPtr)));
+                    (uint32)writePtr, numflush, (uint32)(flushPtr >> 32), (uint32)flushPtr,
+                    numapply, (uint32)(replayPtr >> 32), (uint32)replayPtr)));
 }
 
 /*
@@ -1821,19 +1822,19 @@ void assign_synchronous_commit(int newval, void *extra)
 {
     switch (newval) {
         case SYNCHRONOUS_COMMIT_REMOTE_RECEIVE:
-            SyncRepWaitMode = SYNC_REP_WAIT_RECEIVE;
+            u_sess->attr.attr_storage.sync_rep_wait_mode = SYNC_REP_WAIT_RECEIVE;
             break;
         case SYNCHRONOUS_COMMIT_REMOTE_WRITE:
-            SyncRepWaitMode = SYNC_REP_WAIT_WRITE;
+            u_sess->attr.attr_storage.sync_rep_wait_mode = SYNC_REP_WAIT_WRITE;
             break;
         case SYNCHRONOUS_COMMIT_REMOTE_FLUSH:
-            SyncRepWaitMode = SYNC_REP_WAIT_FLUSH;
+            u_sess->attr.attr_storage.sync_rep_wait_mode = SYNC_REP_WAIT_FLUSH;
             break;
         case SYNCHRONOUS_COMMIT_REMOTE_APPLY:
-            SyncRepWaitMode = SYNC_REP_WAIT_APPLY;
+            u_sess->attr.attr_storage.sync_rep_wait_mode = SYNC_REP_WAIT_APPLY;
             break;
         default:
-            SyncRepWaitMode = SYNC_REP_NO_WAIT;
+            u_sess->attr.attr_storage.sync_rep_wait_mode = SYNC_REP_NO_WAIT;
             break;
     }
 }
