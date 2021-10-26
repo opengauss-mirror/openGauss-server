@@ -824,7 +824,7 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         "gs_global_chain",
         GsGlobalChainRelationId_Rowtype_Id,
         false,
-        true,
+        false,
         Natts_gs_global_chain,
         Desc_gs_global_chain,
         false,

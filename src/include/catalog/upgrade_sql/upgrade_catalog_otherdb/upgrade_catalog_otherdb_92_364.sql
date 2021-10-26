@@ -75,10 +75,8 @@ CREATE TABLE pg_catalog.gs_global_chain
     relhash hash16 NOCOMPRESS not null,
     globalhash hash32 NOCOMPRESS not null,
     txcommand text NOCOMPRESS
-) WITH oids TABLESPACE pg_default;
+) TABLESPACE pg_default;
 
-SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 5510;
-CREATE UNIQUE INDEX gs_global_chain_oid_index ON pg_catalog.gs_global_chain USING BTREE(oid oid_ops);
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 5511;
 CREATE INDEX gs_global_chain_relid_index ON pg_catalog.gs_global_chain USING BTREE(relid oid_ops);
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;

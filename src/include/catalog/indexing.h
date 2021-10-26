@@ -420,8 +420,6 @@ DECLARE_UNIQUE_INDEX(pg_directory_name_index, 4350, on pg_directory using btree(
 #define PgDirectoryDirectoriesNameIndexId 4350
 
 /* Add index of table oid for gs_global_chain */
-DECLARE_UNIQUE_INDEX(gs_global_chain_oid_index, 5510, on gs_global_chain using btree(oid oid_ops));
-#define GsGlobalChainOidIndexId  5510
 DECLARE_INDEX(gs_global_chain_relid_index, 5511, on gs_global_chain using btree(relid oid_ops));
 #define GsGlobalChainRelidIndexId 5511
 
