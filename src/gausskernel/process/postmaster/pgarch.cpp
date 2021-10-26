@@ -36,6 +36,7 @@
 
 #include "access/xlog.h"
 #include "access/xlog_internal.h"
+#include "access/xact.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
 #include "postmaster/fork_process.h"
@@ -150,8 +151,14 @@ ThreadId pgarch_start(void)
     /*
      * Do nothing if no archiver needed
      */
-    if (!XLogArchivingActive())
+    if (!XLogArchivingActive() && !(getObsReplicationSlot()))
         return 0;
+    load_server_mode();
+    if (getObsReplicationSlot() != NULL &&
+        t_thrd.xlog_cxt.server_mode != PRIMARY_MODE &&
+        t_thrd.xlog_cxt.server_mode != STANDBY_MODE) {
+        return 0;
+    }
     /*
      * Do nothing if too soon since last archiver start.  This is a safety
      * valve to protect against continuous respawn attempts if the archiver is
@@ -303,6 +310,27 @@ static void VerifyDestDirIsEmptyOrCreate(char* dirname)
     return;
 }
 
+/* 
+ * 1. When synchronous_standby_names is NULL, no error is reported.
+ *
+ * 2. If the value of synchronous_standby_names is not NULL but no standby node is connected, a Warning log is reported.
+ *
+ * 3. When the standby node is connected to the synchronization but the error persists, an error-level log is reported.
+ *    As a result, the archiver is trapped in a loop of opening and exiting abnormally.
+ */
+static inline void getSyncRecPtrErrorHandler (bool* amSync) {
+    if (t_thrd.syncrep_cxt.SyncRepConfig == NULL) {
+        /* wait a bit before retrying */
+        pg_usleep(1000000L);
+        return;
+    }
+    List* syncStandbyList = SyncRepGetSyncStandbys(amSync);
+    int syncStandbyNums = list_length(syncStandbyList);
+    list_free(syncStandbyList);
+    int elevel = syncStandbyNums == 0 ? WARNING : ERROR;
+    ereport(elevel, (errmsg("pgarch_ArchiverObsCopyLoop failed when call SyncRepGetSyncRecPtr")));
+}
+
 /*
  * pgarch_MainLoop
  *
@@ -344,7 +372,7 @@ static void pgarch_MainLoop(void)
         if (t_thrd.arch.got_SIGHUP) {
             t_thrd.arch.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
-            if (!XLogArchivingActive()) {
+            if (!XLogArchivingActive() && getObsReplicationSlot() == NULL) {
                 ereport(LOG, (errmsg("PgArchiver exit")));
                 return;
             }
@@ -393,12 +421,23 @@ static void pgarch_MainLoop(void)
                 } else {
                     got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
                     if (got_recptr != true) {
-                        ereport(ERROR,
-                            (errmsg("pgarch_ArchiverObsCopyLoop failed when call SyncRepGetSyncRecPtr")));
+                        getSyncRecPtrErrorHandler(&amSync);
+                        continue;
                     }
                 }
+                if (t_thrd.arch.pitr_task_last_lsn == InvalidXLogRecPtr) {
+                    initLastTaskLsn();
+                }
+                uint32 size;
+                if (obs_archive_slot->archive_obs->media_type == ARCHIVE_OBS) {
+                    size = OBS_XLOG_SLICE_BLOCK_SIZE;
+                } else if (obs_archive_slot->archive_obs->media_type == ARCHIVE_NAS) {
+                    size = NAS_XLOG_FILE_SIZE;
+                } else {
+                    ereport(ERROR, (errmsg("unknown media type")));
+                }
                 if (time_diff >= t_thrd.arch.task_wait_interval 
-                    || XLByteDifference(flushPtr, t_thrd.arch.pitr_task_last_lsn) >= OBS_XLOG_SLICE_BLOCK_SIZE) {
+                    || XLByteDifference(flushPtr, t_thrd.arch.pitr_task_last_lsn) >= size) {
                     if (IS_PGXC_COORDINATOR) {
                         fun = &pgarch_archiveRoachForCoordinator;
                     } else {
@@ -463,7 +502,7 @@ static void pgarch_MainLoop(void)
          * or after completing one more archiving cycle after receiving
          * SIGUSR2.
          */
-    } while (PostmasterIsAlive() && XLogArchivingActive() && !time_to_stop);
+    } while (PostmasterIsAlive() && !time_to_stop && (XLogArchivingActive() || getObsReplicationSlot() != NULL));
 }
 
 /*
@@ -612,8 +651,6 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
  */
 static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
 {
-    ereport(LOG,
-        (errmsg("pgarch_ArchiverObsCopyLoop")));
     struct timeval tv;
     bool time_to_stop = false;
 
@@ -645,18 +682,19 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
          */
         if (t_thrd.arch.got_SIGHUP) {
             ProcessConfigFile(PGC_SIGHUP);
-            if (!XLogArchivingActive()) {
+            if (getObsReplicationSlot() == NULL) {
                 return;
             }
             t_thrd.arch.got_SIGHUP = false;
         }
-        targetLsn = Min(t_thrd.arch.pitr_task_last_lsn + OBS_XLOG_SLICE_BLOCK_SIZE -
-                        (t_thrd.arch.pitr_task_last_lsn % OBS_XLOG_SLICE_BLOCK_SIZE) - 1,
+
+        uint32 size = isObsSlot() ? OBS_XLOG_SLICE_BLOCK_SIZE : NAS_XLOG_FILE_SIZE;
+        targetLsn = Min(t_thrd.arch.pitr_task_last_lsn + size - (t_thrd.arch.pitr_task_last_lsn % size) - 1,
                         flushPtr);
 
         /* The previous slice has been archived, switch to the next. */
         if (t_thrd.arch.pitr_task_last_lsn == targetLsn) {
-            targetLsn = Min(targetLsn + OBS_XLOG_SLICE_BLOCK_SIZE, flushPtr);
+            targetLsn = Min(targetLsn + size, flushPtr);
         }
 
         if (fun(targetLsn) == false) {
@@ -942,8 +980,6 @@ static void pgarch_archiveRoachForPitrStandby()
 static bool pgarch_archiveRoachForPitrMaster(XLogRecPtr targetLsn)
 {
     ResetLatch(&t_thrd.arch.mainloop_latch);
-    ereport(LOG,
-        (errmsg("pgarch_archiveRoachForPitrMaster %X/%X", (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
     int rc;
     WalSnd* walsnd = pgarch_chooseWalsnd(targetLsn);
     if (walsnd == NULL) {

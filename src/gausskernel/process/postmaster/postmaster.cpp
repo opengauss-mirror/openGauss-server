@@ -2785,14 +2785,11 @@ static int ServerLoop(void)
         }
 
         /* If we have lost the archiver, try to start a new one */
-        if (XLogArchivingActive() && g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode){
-            if (pmState == PM_RUN) {
-                g_instance.pid_cxt.PgArchPID = pgarch_start();
-            } else if (pmState == PM_HOT_STANDBY) {
-                obs_slot = getObsReplicationSlot();
-                if (obs_slot != NULL) {
-                    g_instance.pid_cxt.PgArchPID = pgarch_start();
-                }
+        if (g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode) {
+            obs_slot = getObsReplicationSlot();
+            if ((XLogArchivingActive() && pmState == PM_RUN) ||
+                ((pmState == PM_RUN || pmState == PM_HOT_STANDBY) && obs_slot != NULL)) {
+                 g_instance.pid_cxt.PgArchPID = pgarch_start();
             }
         }
 
@@ -2859,6 +2856,7 @@ static int ServerLoop(void)
             g_instance.pid_cxt.CsnminSyncPID = initialize_util_thread(CSNMIN_SYNC);
         }
 
+#ifdef ENABLE_MULTIPLE_NODES
         /* If we have lost the barrier creator thread, try to start a new one */
         if (START_BARRIER_CREATOR && g_instance.pid_cxt.BarrierCreatorPID == 0 &&
             pmState == PM_RUN && XLogArchivingActive()) {
@@ -2867,7 +2865,7 @@ static int ServerLoop(void)
                 g_instance.pid_cxt.BarrierCreatorPID = initialize_util_thread(BARRIER_CREATOR);
             }
         }
-
+#endif
         /* If we need to signal the autovacuum launcher, do so now */
         if (t_thrd.postmaster_cxt.avlauncher_needs_signal) {
             t_thrd.postmaster_cxt.avlauncher_needs_signal = false;
@@ -5130,11 +5128,12 @@ static void reaper(SIGNAL_ARGS)
             if (NeedHeartbeat())
                 g_instance.pid_cxt.HeartbeatPID = initialize_util_thread(HEARTBEAT);
 
+#ifdef ENABLE_MULTIPLE_NODES
             if (START_BARRIER_CREATOR && g_instance.pid_cxt.BarrierCreatorPID == 0 &&
                 XLogArchivingActive() && getObsReplicationSlot() != NULL) {
                 g_instance.pid_cxt.BarrierCreatorPID = initialize_util_thread(BARRIER_CREATOR);
             }
-
+#endif
             if (GTM_LITE_CN && g_instance.pid_cxt.CsnminSyncPID == 0) {
                 g_instance.pid_cxt.CsnminSyncPID = initialize_util_thread(CSNMIN_SYNC);
             }
@@ -5417,14 +5416,12 @@ static void reaper(SIGNAL_ARGS)
             if (!EXIT_STATUS_0(exitstatus))
                 LogChildExit(LOG, _("archiver process"), pid, exitstatus);
 
-            if (XLogArchivingActive()) {
-                if (pmState == PM_RUN) {
+            /* If we have lost the archiver, try to start a new one */
+            if (g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode) {
+                obs_slot = getObsReplicationSlot();
+                if ((XLogArchivingActive() && pmState == PM_RUN) ||
+                    ((pmState == PM_RUN || pmState == PM_HOT_STANDBY) && obs_slot != NULL)) {
                     g_instance.pid_cxt.PgArchPID = pgarch_start();
-                }else if (pmState == PM_HOT_STANDBY) {
-                    obs_slot = getObsReplicationSlot();
-                    if (obs_slot != NULL) {
-                        g_instance.pid_cxt.PgArchPID = pgarch_start();
-                    }
                 }
             }
             continue;

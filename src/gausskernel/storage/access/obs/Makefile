@@ -33,6 +33,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = obs_am.o
+OBJS = obs_am.o nas_am.o archive_am.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

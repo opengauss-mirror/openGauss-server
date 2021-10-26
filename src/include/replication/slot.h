@@ -34,6 +34,12 @@ extern const uint32 EXTRA_SLOT_VERSION_NUM;
  */
 typedef enum ReplicationSlotPersistency { RS_PERSISTENT, RS_EPHEMERAL, RS_BACKUP } ReplicationSlotPersistency;
 
+typedef enum ArchiveMediaType {
+    ARCHIVE_NONE,
+    ARCHIVE_OBS,
+    ARCHIVE_NAS
+} ArchiveMediaType;
+
 /*
  * On-Disk data of a replication slot, preserved across restarts.
  */
@@ -97,6 +103,7 @@ typedef struct ObsArchiveConfig {
     char *obs_ak;
     char *obs_sk;
     char *obs_prefix;
+    ArchiveMediaType media_type;
 } ObsArchiveConfig;
 
 /*
@@ -151,7 +158,6 @@ typedef struct ReplicationSlot {
     ObsArchiveConfig* archive_obs;
     char* extra_content;
 } ReplicationSlot;
-
 
 #define ReplicationSlotPersistentDataConstSize sizeof(ReplicationSlotPersistentData)
 /* size of the part of the slot that is version independent */
@@ -258,5 +264,19 @@ extern ReplicationSlot *getObsReplicationSlot();
 extern void advanceObsSlot(XLogRecPtr restart_pos);
 extern void redo_slot_reset_for_backup(const ReplicationSlotPersistentData *xlrec);
 extern void markObsSlotOperate(int p_slot_num);
+
+inline bool isObsSlot() {
+    ReplicationSlot* slot = getObsReplicationSlot();
+    if (slot == NULL)
+        ereport(ERROR, (errmsg("cannot get the slot")));
+    if (slot->archive_obs->media_type == ARCHIVE_OBS) {
+        return true;
+    } else if (slot->archive_obs->media_type == ARCHIVE_NAS) {
+        return false;
+    } else {
+        ereport(ERROR, (errmsg("unknown media type")));
+    }
+    return false;
+}
 
 #endif /* SLOT_H */
