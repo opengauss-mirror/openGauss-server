@@ -1258,7 +1258,7 @@ uint32 get_curr_candidate_nums(bool segment)
 {
     uint32 currCandidates = 0;
 
-    if (segment) {
+    if (segment && SEGMENT_BGWRITER_ID >= 0) {
         BgWriterProc *curr_writer = &g_instance.bgwriter_cxt.bgwriter_procs[SEGMENT_BGWRITER_ID];
         if (curr_writer->proc != NULL) {
             currCandidates = get_thread_candidate_nums(SEGMENT_BGWRITER_ID);
