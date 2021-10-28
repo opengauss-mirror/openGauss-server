@@ -460,6 +460,28 @@ explain select id from test where rownum < 5 group by id;
 explain select id from student where rownum < 3 union select id from (select id from student order by 1)  where rownum < 5;
 select * from test where id < 2 union select * from (select * from test order by id desc) where rownum < 5;
 
+-- ROWNUM for Column-Oriented
+create table student_cstore1(id int, stuname varchar(10) ) WITH (orientation=column) ;
+create table student_cstore2(id int, stuname varchar(10) ) WITH (orientation=column) ;
+insert  into student_cstore1 select * from student;
+-- test rownum for cstorescan 
+select * from student_cstore1 where rownum < 5;
+select rownum, * from student_cstore1 where rownum < 1;
+select rownum, * from student_cstore1 where rownum <= 1;
+select rownum, * from student_cstore1 where rownum <= 10;
+select rownum, * from student_cstore1 where stuname = 'stu5' and rownum < 4;
+select rownum, stuname from student_cstore1 where stuname = 'stu5' or rownum < 8;
+-- test rownum for join 
+insert  into student_cstore2 select * from student;
+select * from student_cstore2 where rownum > 2;
+select * from student_cstore2 where rownum = 2;
+select rownum, sc1.stuname, sc2.id from  student_cstore2 as sc1, student_cstore2 as sc2 where sc1.id = sc2.id;
+
+-- test rownum for agg
+select * from (select rownum, max(id) as max_id from student_cstore1 group by rownum) as t order by max_id;
+
+drop table student_cstore1;
+drop table student_cstore2;
 drop table student;
 drop table test;
 

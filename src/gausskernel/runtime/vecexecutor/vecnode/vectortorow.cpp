@@ -157,6 +157,7 @@ TupleTableSlot* ExecVecToRow(VecToRowState* state) /* return: a tuple or NULL */
         state->m_currentRow = 0;
         // Convert the batch into row based tuple
         DevectorizeOneBatch(state);
+        outer_plan->ps_rownum += current_batch->m_rows;
     }
 
     // retrieve rows from current batch
