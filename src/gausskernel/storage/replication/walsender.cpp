@@ -3084,7 +3084,11 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
         }
 
         volatile unsigned int *pitr_archive_flag = &t_thrd.walsender_cxt.MyWalSnd->archive_flag;
-        if (unlikely(pg_atomic_read_u32(pitr_archive_flag) == 1)) {
+        /* standby can't parse the archive message when the standby is building,
+         * so we can't send the archive message.
+         */
+        if (unlikely(pg_atomic_read_u32(pitr_archive_flag) == 1) &&
+            t_thrd.walsender_cxt.MyWalSnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
             WalSndArchiveXlog(t_thrd.walsender_cxt.MyWalSnd->arch_task_lsn, 
                 t_thrd.walsender_cxt.MyWalSnd->archive_obs_subterm);
             pg_atomic_write_u32(pitr_archive_flag, 0);
