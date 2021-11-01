@@ -1,0 +1,110 @@
+--
+-- VARCHAR
+--
+CREATE TABLE NVARCHAR_TBL(f1 nvarchar(1));
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('a');
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('A');
+-- any of the following three input formats are acceptable
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('1');
+INSERT INTO NVARCHAR_TBL (f1) VALUES (2);
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('3');
+-- zero-length char
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('');
+-- try varchar's of greater than 1 length
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('cd');
+ERROR:  value too long for type nvarchar2(1)
+CONTEXT:  referenced column: f1
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('c     ');
+SELECT '' AS seven, * FROM NVARCHAR_TBL;
+ seven | f1 
+-------+----
+       | a
+       | A
+       | 1
+       | 2
+       | 3
+       | 
+       | c
+(7 rows)
+
+SELECT '' AS six, c.*
+   FROM NVARCHAR_TBL c
+   WHERE c.f1 <> 'a';
+ six | f1 
+-----+----
+     | A
+     | 1
+     | 2
+     | 3
+     | c
+(5 rows)
+
+SELECT '' AS one, c.*
+   FROM NVARCHAR_TBL c
+   WHERE c.f1 = 'a';
+ one | f1 
+-----+----
+     | a
+(1 row)
+
+SELECT '' AS five, c.*
+   FROM NVARCHAR_TBL c
+   WHERE c.f1 < 'a';
+ five | f1 
+------+----
+      | 1
+      | 2
+      | 3
+(3 rows)
+
+SELECT '' AS six, c.*
+   FROM NVARCHAR_TBL c
+   WHERE c.f1 <= 'a';
+ six | f1 
+-----+----
+     | a
+     | 1
+     | 2
+     | 3
+(4 rows)
+
+SELECT '' AS one, c.*
+   FROM NVARCHAR_TBL c
+   WHERE c.f1 > 'a';
+ one | f1 
+-----+----
+     | A
+     | c
+(2 rows)
+
+SELECT '' AS two, c.*
+   FROM NVARCHAR_TBL c
+   WHERE c.f1 >= 'a';
+ two | f1 
+-----+----
+     | a
+     | A
+     | c
+(3 rows)
+
+DROP TABLE NVARCHAR_TBL;
+--
+-- Now test longer arrays of char
+--
+CREATE TABLE NVARCHAR_TBL(f1 nvarchar(4));
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('a');
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('ab');
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('abcd');
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('abcde');
+ERROR:  value too long for type nvarchar2(4)
+CONTEXT:  referenced column: f1
+INSERT INTO NVARCHAR_TBL (f1) VALUES ('abcd    ');
+SELECT '' AS four, * FROM NVARCHAR_TBL;
+ four |  f1  
+------+------
+      | a
+      | ab
+      | abcd
+      | abcd
+(4 rows)
+
