@@ -52,6 +52,7 @@
 #include "postmaster/postmaster.h"
 #include "utils/builtins.h"
 
+#define TIME_GET_MILLISEC(t) (((long)(t).tv_sec * 1000) + ((long)(t).tv_usec) / 1000)
 
 extern bool PMstateIsRun(void);
 
@@ -1903,6 +1904,7 @@ ReplicationSlot *getObsReplicationSlot()
             g_instance.archive_obs_cxt.archive_slot->archive_obs->obs_sk = pstrdup_ext(slot->archive_obs->obs_sk);
             g_instance.archive_obs_cxt.archive_slot->archive_obs->obs_prefix = pstrdup_ext(slot->archive_obs->obs_prefix);
             g_instance.archive_obs_cxt.archive_slot->archive_obs->media_type = slot->archive_obs->media_type;
+            g_instance.archive_obs_cxt.archive_slot->data.restart_lsn = slot->data.restart_lsn;
             MemoryContextSwitchTo(curr);
             SpinLockRelease(&slot->mutex);
             *slot_idx = slotno;
@@ -1924,12 +1926,20 @@ void advanceObsSlot(XLogRecPtr restart_pos)
         SpinLockAcquire(&slot->mutex);
         if (slot->in_use == true && slot->archive_obs != NULL) {
             slot->data.restart_lsn = restart_pos;
+            SpinLockRelease(&slot->mutex);
+            struct timeval tv;
+            gettimeofday(&tv, NULL);
+            long diff = TIME_GET_MILLISEC(tv) - t_thrd.arch.last_advance_slot_time;
+            if (!RecoveryInProgress() && diff > t_thrd.arch.advance_slot_wait_interval) {
+                log_slot_advance(&slot->data);
+                t_thrd.arch.last_advance_slot_time = TIME_GET_MILLISEC(tv);
+            }
         } else {
             ereport(WARNING,
                 (errcode_for_file_access(), errmsg("slot idx not valid, obs slot %X/%X not advance ",
                     (uint32)(restart_pos >> 32), (uint32)(restart_pos))));
+            SpinLockRelease(&slot->mutex);
         }
-        SpinLockRelease(&slot->mutex);
     }
 }
 

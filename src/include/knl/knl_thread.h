@@ -1188,9 +1188,12 @@ typedef struct knl_t_arch_context {
     XLogRecPtr pitr_task_last_lsn;
     /* millsecond */
     int task_wait_interval;
+    long advance_slot_wait_interval;
     int sync_walsender_idx;
     /* for standby millsecond*/
     long last_arch_time;
+    /* for advance slot millsecond*/
+    long last_advance_slot_time;
 } knl_t_arch_context;
 
 /* Maximum length of a timezone name (not including trailing null) */

@@ -109,6 +109,7 @@ typedef bool(*doArchive)(XLogRecPtr);
 static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun);
 static void archKill(int code, Datum arg);
 static void initLastTaskLsn();
+static void initArchiveCxt();
 
 AlarmCheckResult DataInstArchChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
@@ -227,6 +228,7 @@ NON_EXEC_STATIC void PgArchiverMain()
     init_ps_display("archiver process", "", "", "");
     setObsArchLatch(&t_thrd.arch.mainloop_latch);
     initLastTaskLsn();
+    initArchiveCxt();
     pgarch_MainLoop();
 
     gs_thread_exit(0);
@@ -689,12 +691,26 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
         }
 
         uint32 size = isObsSlot() ? OBS_XLOG_SLICE_BLOCK_SIZE : NAS_XLOG_FILE_SIZE;
-        targetLsn = Min(t_thrd.arch.pitr_task_last_lsn + size - (t_thrd.arch.pitr_task_last_lsn % size) - 1,
-                        flushPtr);
+        if (flushPtr == InvalidXLogRecPtr) {
+            targetLsn = t_thrd.arch.pitr_task_last_lsn + size - (t_thrd.arch.pitr_task_last_lsn % size) - 1;
+        } else {
+            targetLsn = Min(t_thrd.arch.pitr_task_last_lsn + size - (t_thrd.arch.pitr_task_last_lsn % size) - 1,
+                            flushPtr);
+        }
 
         /* The previous slice has been archived, switch to the next. */
         if (t_thrd.arch.pitr_task_last_lsn == targetLsn) {
             targetLsn = Min(targetLsn + size, flushPtr);
+        }
+
+        if (!XlogFileIsExisted(t_thrd.proc_cxt.DataDir, targetLsn, DEFAULT_TIMELINE_ID)) {
+            ereport(WARNING,
+                (errmsg("transaction log file \"%X/%X\" does not existed, it may be archived by the old primary.", 
+                    (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+            gettimeofday(&tv, NULL);
+            t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
+            t_thrd.arch.pitr_task_last_lsn = targetLsn;
+            continue;
         }
 
         if (fun(targetLsn) == false) {
@@ -1102,14 +1118,14 @@ static void initLastTaskLsn()
     gettimeofday(&tv,NULL);
     XLogRecPtr targetLsn;
     t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
-    ReplicationSlot* obs_archive_slot = getObsReplicationSlot();
+    volatile ReplicationSlot* obs_archive_slot = getObsReplicationSlot();
     if (obs_archive_slot != NULL && !IsServerModeStandby()) {
-        ArchiveXlogMessage obs_archive_info;
-        if (obs_replication_get_last_xlog(&obs_archive_info) == 0) {
-            t_thrd.arch.pitr_task_last_lsn = obs_archive_info.targetLsn;
+        XLogRecPtr targetLsn = obs_archive_slot->data.restart_lsn;
+        if (targetLsn != InvalidXLogRecPtr) {
+            t_thrd.arch.pitr_task_last_lsn = targetLsn;
             advanceObsSlot(t_thrd.arch.pitr_task_last_lsn);
             ereport(LOG,
-                (errmsg("initLastTaskLsn update lsn to  %X/%X from obs", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32), 
+                (errmsg("initLastTaskLsn update lsn to  %X/%X from slot", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32), 
                     (uint32)(t_thrd.arch.pitr_task_last_lsn))));
         } else {
             targetLsn = GetFlushRecPtr();
@@ -1127,4 +1143,13 @@ static void initLastTaskLsn()
             (errmsg("initLastTaskLsn update lsn to  %X/%X from local with not obs slot", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32), 
                 (uint32)(t_thrd.arch.pitr_task_last_lsn))));
     }
+}
+
+/* 
+ * The global variables related to archiving tasks must be initialized before entering the mainloop.
+ */
+static void initArchiveCxt() {
+    g_instance.archive_obs_cxt.pitr_finish_result = false;
+    g_instance.archive_obs_cxt.archive_task.targetLsn = InvalidXLogRecPtr;
+    g_instance.archive_obs_cxt.pitr_task_status = PITR_TASK_NONE;
 }

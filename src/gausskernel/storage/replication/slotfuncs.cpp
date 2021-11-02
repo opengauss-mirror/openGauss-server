@@ -849,9 +849,11 @@ void redo_slot_advance(const ReplicationSlotPersistentData *slotInfo)
      * If logical replication slot is active on the current standby, the current
      * standby notify the primary to advance the logical replication slot.
      * Thus, we do not redo the slot_advance log.
+     * for logical replication slot, the Slot->data.database is VALID.
      */
 #ifndef ENABLE_MULTIPLE_NODES
-    if (IsReplicationSlotActive(NameStr(slotInfo->name))) {
+    if (IsReplicationSlotActive(NameStr(slotInfo->name)) && t_thrd.slot_cxt.MyReplicationSlot != NULL && 
+        t_thrd.slot_cxt.MyReplicationSlot->data.database != InvalidOid) {
         return;
     }
 #endif

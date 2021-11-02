@@ -626,7 +626,9 @@ static void knl_t_arch_init(knl_t_arch_context* arch)
     arch->last_sigterm_time = 0;
     arch->pitr_task_last_lsn = 0;
     arch->task_wait_interval = 1000;
+    arch->advance_slot_wait_interval = 1000;
     arch->last_arch_time = 0;
+    arch->last_advance_slot_time = 0;
     arch->sync_walsender_idx = -1;
 }
 
