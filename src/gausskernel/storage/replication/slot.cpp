@@ -1918,6 +1918,18 @@ ReplicationSlot *getObsReplicationSlot()
     return NULL;
 }
 
+static inline void flushSlot(long current)
+{
+    ReplicationSlotMarkDirty();
+    ReplicationSlotsComputeRequiredXmin(false);
+    ReplicationSlotsComputeRequiredLSN(NULL);
+    ReplicationSlotSave();
+    if (!RecoveryInProgress()) {
+        log_slot_advance(&t_thrd.slot_cxt.MyReplicationSlot->data);
+        t_thrd.arch.last_advance_slot_time = current;
+    }
+}
+
 void advanceObsSlot(XLogRecPtr restart_pos) 
 {
     volatile int *slot_idx = &g_instance.archive_obs_cxt.obs_slot_idx;
@@ -1929,10 +1941,11 @@ void advanceObsSlot(XLogRecPtr restart_pos)
             SpinLockRelease(&slot->mutex);
             struct timeval tv;
             gettimeofday(&tv, NULL);
-            long diff = TIME_GET_MILLISEC(tv) - t_thrd.arch.last_advance_slot_time;
-            if (!RecoveryInProgress() && diff > t_thrd.arch.advance_slot_wait_interval) {
-                log_slot_advance(&slot->data);
-                t_thrd.arch.last_advance_slot_time = TIME_GET_MILLISEC(tv);
+            long current = TIME_GET_MILLISEC(tv);
+            long diff = current - t_thrd.arch.last_advance_slot_time;
+            if (diff > t_thrd.arch.advance_slot_wait_interval) {
+                t_thrd.slot_cxt.MyReplicationSlot = slot;
+                flushSlot(current);
             }
         } else {
             ereport(WARNING,
