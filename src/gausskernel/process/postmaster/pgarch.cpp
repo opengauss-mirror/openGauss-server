@@ -682,9 +682,10 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
          * setting for archive_command as soon as possible, even if there
          * is a backlog of files to be archived.
          */
+        ReplicationSlot* slot = getObsReplicationSlot();
         if (t_thrd.arch.got_SIGHUP) {
             ProcessConfigFile(PGC_SIGHUP);
-            if (getObsReplicationSlot() == NULL) {
+            if (slot == NULL) {
                 return;
             }
             t_thrd.arch.got_SIGHUP = false;
@@ -701,6 +702,14 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
         /* The previous slice has been archived, switch to the next. */
         if (t_thrd.arch.pitr_task_last_lsn == targetLsn) {
             targetLsn = Min(targetLsn + size, flushPtr);
+        }
+
+        if (targetLsn < slot->data.restart_lsn) {
+            ereport(ERROR,
+                (errmsg("transaction log file \"%X/%X\" is invalid,"
+                        "it should be larger than the restart_lsn \"%X/%X\" of slot.", 
+                    (uint32)(targetLsn >> 32), (uint32)(targetLsn),
+                    (uint32)(slot->data.restart_lsn >> 32), (uint32)(slot->data.restart_lsn))));
         }
 
         if (!XlogFileIsExisted(t_thrd.proc_cxt.DataDir, targetLsn, DEFAULT_TIMELINE_ID)) {
