@@ -2359,4 +2359,3 @@ out catalog_version_no pg_catalog.int4,
 out system_identifier pg_catalog.int8,
 out pg_control_last_modified pg_catalog.timestamptz)
 RETURNS SETOF record LANGUAGE INTERNAL VOLATILE STRICT as 'pg_control_system';
-

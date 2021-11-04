@@ -2643,7 +2643,7 @@ extern void getSessionStatistics(Tuplestorestate* tupStore, TupleDesc tupDesc,
 extern Size sessionStatShmemSize(void);
 extern void sessionStatShmemInit(void);
 
-#define NUM_BUFFERCACHE_PAGES_ELEM 10
+#define NUM_BUFFERCACHE_PAGES_ELEM 12
 
 #define CONNECTIONINFO_LEN 8192 /* Maximum length of GUC parameter connection_info */
 
@@ -2653,7 +2653,7 @@ extern void sessionStatShmemInit(void);
 typedef struct {
     uint32 bufferid;
     Oid relfilenode;
-    int2 bucketnode;
+    int4 bucketnode;
     uint32 storage_type;
     Oid reltablespace;
     Oid reldatabase;
@@ -2662,6 +2662,7 @@ typedef struct {
     bool isvalid;
     bool isdirty;
     uint16 usagecount;
+    uint32 	pinning_backends;
 } BufferCachePagesRec;
 
 /*
