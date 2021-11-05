@@ -732,6 +732,10 @@ static void SyncRepGetOldestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* write
         XLogRecPtr apply;
 
         SpinLockAcquire(&walsnd->mutex);
+        if (walsnd == NULL || walsnd->pid == 0) {
+            SpinLockRelease(&walsnd->mutex);
+            continue;
+        }
         receive = walsnd->receive;
         write = walsnd->write;
         flush = walsnd->flush;
@@ -774,6 +778,10 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
         WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[lfirst_int(cell)];
 
         SpinLockAcquire(&walsnd->mutex);
+        if (walsnd == NULL || walsnd->pid == 0) {
+            SpinLockRelease(&walsnd->mutex);
+            continue;
+        }
         receive_array[i] = walsnd->receive;
         write_array[i] = walsnd->write;
         flush_array[i] = walsnd->flush;
