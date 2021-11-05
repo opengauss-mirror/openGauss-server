@@ -1015,6 +1015,11 @@ XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, b
         ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("version must be bigger than 92260")));
     }
 
+    volatile int *slot_num = &g_instance.archive_obs_cxt.obs_slot_num;
+    if (*slot_num != 0) {
+        ereport(ERROR, (errmsg("Cannot create an archive replication slot because there is already one")));
+    }
+
     check_permissions();
 
     /* create persistent replication slot with extra archive configuration */
