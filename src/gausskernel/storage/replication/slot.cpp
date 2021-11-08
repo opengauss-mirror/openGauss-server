@@ -1260,7 +1260,7 @@ static void SaveSlotToPath(ReplicationSlot *slot, const char *dir, int elevel)
 
         SpinLockRelease(&slot->mutex);
         COMP_CRC32C(cp.checksum, (char *)(&cp) + ReplicationSlotOnDiskConstantSize, ReplicationSlotOnDiskDynamicSize);
-        if (GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata) > 0) {
+        if (slot->extra_content && strlen(slot->extra_content) != 0 && GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata) > 0) {
             COMP_CRC32C(cp.checksum, slot->extra_content, GET_SLOT_EXTRA_DATA_LENGTH(cp.slotdata));
         }
         FIN_CRC32C(cp.checksum);

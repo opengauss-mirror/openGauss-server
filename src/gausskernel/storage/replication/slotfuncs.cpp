@@ -86,6 +86,10 @@ void log_slot_advance(const ReplicationSlotPersistentData *slotInfo)
 
     XLogBeginInsert();
     XLogRegisterData((char *)&xlrec, ReplicationSlotPersistentDataConstSize);
+    char* extra_content = t_thrd.slot_cxt.MyReplicationSlot->extra_content;
+    if (extra_content != NULL && strlen(extra_content) != 0) {
+        XLogRegisterData(extra_content, strlen(extra_content) + 1);
+    }
 
     Ptr = XLogInsert(RM_SLOT_ID, XLOG_SLOT_ADVANCE);
     XLogWaitFlush(Ptr);
@@ -969,8 +973,14 @@ void slot_redo(XLogReaderState *record)
         case XLOG_SLOT_ADVANCE:
             if (ReplicationSlotFind(xlrec->name.data))
                 redo_slot_advance(xlrec);
-            else
-                redo_slot_create(xlrec);
+            else {
+                char* extra_content = NULL;
+                if (GET_SLOT_EXTRA_DATA_LENGTH(*xlrec) != 0) {
+                    extra_content = (char*)XLogRecGetData(record) + ReplicationSlotPersistentDataConstSize;
+                    Assert(strlen(extra_content) == (uint32)(GET_SLOT_EXTRA_DATA_LENGTH(*xlrec)));
+                }
+                redo_slot_create(xlrec, extra_content);
+            }
             break;
         case XLOG_SLOT_DROP:
             if (ReplicationSlotFind(xlrec->name.data))
