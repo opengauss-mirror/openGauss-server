@@ -8614,14 +8614,16 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
         tupledesc = CreateTemplateTupleDesc(NUM_BUFFERCACHE_PAGES_ELEM, false, TAM_HEAP);
         TupleDescInitEntry(tupledesc, (AttrNumber)1, "bufferid", INT4OID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)2, "relfilenode", OIDOID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)3, "bucketid", INT2OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)3, "bucketid", INT4OID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)4, "storage_type", INT8OID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)5, "reltablespace", OIDOID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)6, "reldatabase", OIDOID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)7, "relforknumber", INT4OID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)8, "relblocknumber", OIDOID, -1, 0);
         TupleDescInitEntry(tupledesc, (AttrNumber)9, "isdirty", BOOLOID, -1, 0);
-        TupleDescInitEntry(tupledesc, (AttrNumber)10, "usage_count", INT2OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)10, "isvalid", BOOLOID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)11, "usage_count", INT2OID, -1, 0);
+        TupleDescInitEntry(tupledesc, (AttrNumber)12, "pinning_backends", INT4OID, -1, 0);
 
         fctx->tupdesc = BlessTupleDesc(tupledesc);
 
@@ -8667,6 +8669,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             fctx->record[i].forknum = bufHdr->tag.forkNum;
             fctx->record[i].blocknum = bufHdr->tag.blockNum;
             fctx->record[i].usagecount = BUF_STATE_GET_USAGECOUNT(buf_state);
+            fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
 
             if (buf_state & BM_DIRTY)
                 fctx->record[i].isdirty = true;
@@ -8719,11 +8722,14 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             nulls[6] = true;
             nulls[7] = true;
             nulls[8] = true;
-            nulls[9] = true;
+            values[9] = BoolGetDatum(fctx->record[i].isvalid);
+            nulls[9] = false;
+            nulls[10] = true;
+            nulls[11] = true;
         } else {
             values[1] = ObjectIdGetDatum(fctx->record[i].relfilenode);
             nulls[1] = false;
-            values[2] = Int16GetDatum(fctx->record[i].bucketnode);
+            values[2] = Int32GetDatum(fctx->record[i].bucketnode);
             nulls[2] = false;
             values[3] = Int32GetDatum(fctx->record[i].storage_type);
             nulls[3] = false;
@@ -8737,8 +8743,12 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             nulls[7] = false;
             values[8] = BoolGetDatum(fctx->record[i].isdirty);
             nulls[8] = false;
-            values[9] = Int16GetDatum(fctx->record[i].usagecount);
+            values[9] = BoolGetDatum(fctx->record[i].isvalid);
             nulls[9] = false;
+            values[10] = Int16GetDatum(fctx->record[i].usagecount);
+            nulls[10] = false;
+            values[11] = Int32GetDatum(fctx->record[i].pinning_backends);
+            nulls[11] = false;
         }
 
         /* Build and return the tuple. */
