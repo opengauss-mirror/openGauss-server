@@ -271,6 +271,7 @@ typedef struct AlteredTableInfo {
     List* changedConstraintDefs; /* string definitions of same */
     List* changedIndexOids;      /* OIDs of indexes to rebuild */
     List* changedIndexDefs;      /* string definitions of same */
+    bool isDeltaTable;                  /* delta table or not */
 } AlteredTableInfo;
 
 /* Struct describing one new constraint to check in Phase 3 scan */
@@ -451,7 +452,8 @@ static void createForeignKeyTriggers(
     Relation rel, Oid refRelOid, Constraint* fkconstraint, Oid constraintOid, Oid indexOid);
 static void ATController(Relation rel, List* cmds, bool recurse, LOCKMODE lockmode);
 static bool ATCheckLedgerTableCmd(Relation rel, AlterTableCmd* cmd);
-static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recurse, bool recursing, LOCKMODE lockmode);
+static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recurse, bool recursing, LOCKMODE lockmode,
+    bool isDeltaTable = false);
 static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode);
 static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode);
 static void ATRewriteTables(List** wqueue, LOCKMODE lockmode);
@@ -493,7 +495,7 @@ static void ExecChangeTableSpaceForRowPartition(AlteredTableInfo*, LOCKMODE);
 static void ExecChangeTableSpaceForCStoreTable(AlteredTableInfo*, LOCKMODE);
 static void ExecChangeTableSpaceForCStorePartition(AlteredTableInfo*, LOCKMODE);
 
-static AlteredTableInfo* ATGetQueueEntry(List** wqueue, Relation rel);
+static AlteredTableInfo* ATGetQueueEntry(List** wqueue, Relation rel, bool isDeltaTable = false);
 static void ATSimplePermissions(Relation rel, int allowed_targets);
 static void ATWrongRelkindError(Relation rel, int allowed_targets);
 static void ATSimpleRecursion(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recurse, LOCKMODE lockmode);
@@ -7070,13 +7072,14 @@ static void ATController(Relation rel, List* cmds, bool recurse, LOCKMODE lockmo
  * Caller must have acquired appropriate lock type on relation already.
  * This lock should be held until commit.
  */
-static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recurse, bool recursing, LOCKMODE lockmode)
+static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recurse, bool recursing, LOCKMODE lockmode,
+        bool isDeltaTable)
 {
     AlteredTableInfo* tab = NULL;
     int pass;
 
     /* Find or create work queue entry for this table */
-    tab = ATGetQueueEntry(wqueue, rel);
+    tab = ATGetQueueEntry(wqueue, rel, isDeltaTable);
 
     /*
      * Copy the original subcommand for each table.  This avoids conflicts
@@ -7511,7 +7514,7 @@ static void ATRewriteCatalogs(List** wqueue, LOCKMODE lockmode)
              * ATExecAlterColumnType since it should be done only once if
              * multiple columns of a table are altered).
              */
-            if (pass == AT_PASS_ALTER_TYPE)
+            if (pass == AT_PASS_ALTER_TYPE && !tab->isDeltaTable)
                 ATPostAlterTypeCleanup(wqueue, tab, lockmode);
 
             relation_close(rel, NoLock);
@@ -8506,8 +8509,8 @@ static void ATOnlyCheckCStoreTable(const AlteredTableInfo* tab, Relation rel)
         int attrNum = list_length(notnullAttrs);
         AttrNumber* colIdx = (AttrNumber*)palloc(sizeof(AttrNumber) * attrNum);
         int n = 0;
-        ListCell* cell;
-        ScalarVector *vec;
+        ListCell* cell = NULL;
+        ScalarVector *vec = NULL;
         foreach (cell, notnullAttrs) {
             colIdx[n++] = lfirst_int(cell) + 1;
         }
@@ -8547,7 +8550,7 @@ static void ATOnlyCheckCStoreTable(const AlteredTableInfo* tab, Relation rel)
 /*
  * ATGetQueueEntry: find or create an entry in the ALTER TABLE work queue
  */
-static AlteredTableInfo* ATGetQueueEntry(List** wqueue, Relation rel)
+static AlteredTableInfo* ATGetQueueEntry(List** wqueue, Relation rel, bool isDeltaTable)
 {
     Oid relid = RelationGetRelid(rel);
     AlteredTableInfo* tab = NULL;
@@ -8567,7 +8570,7 @@ static AlteredTableInfo* ATGetQueueEntry(List** wqueue, Relation rel)
     tab->relid = relid;
     tab->relkind = rel->rd_rel->relkind;
     tab->oldDesc = CreateTupleDescCopy(RelationGetDescr(rel));
-
+    tab->isDeltaTable = isDeltaTable;
     *wqueue = lappend(*wqueue, tab);
 
     return tab;
@@ -8701,16 +8704,17 @@ static void ATSimpleRecursion(List** wqueue, Relation rel, AlterTableCmd* cmd, b
         ListCell* child = NULL;
         List* children = NIL;
 
+        bool isDeltaStore = RelationIsCUFormat(rel);
 #ifdef ENABLE_MULTIPLE_NODES
-        if (g_instance.attr.attr_storage.enable_delta_store && RelationIsCUFormat(rel))
-#else
+        isDeltaStore = g_instance.attr.attr_storage.enable_delta_store && isDeltaStore;
+#endif
+        if (isDeltaStore)
+
         /*
          * Under centrailzed mode, there may be unique index on delta table. When checking unique
          * constraint, unique index on delta will be used. So we ignore enable_delta_store here
          * and alter delta table at the same time.
          */
-        if (RelationIsCUFormat(rel))
-#endif
             children = find_cstore_delta(rel, lockmode);
         else
             children = find_all_inheritors(relid, lockmode, NULL);
@@ -8729,7 +8733,7 @@ static void ATSimpleRecursion(List** wqueue, Relation rel, AlterTableCmd* cmd, b
             /* find_all_inheritors already got lock */
             childrel = relation_open(childrelid, NoLock);
             CheckTableNotInUse(childrel, "ALTER TABLE");
-            ATPrepCmd(wqueue, childrel, cmd, false, true, lockmode);
+            ATPrepCmd(wqueue, childrel, cmd, false, true, lockmode, isDeltaStore);
             relation_close(childrel, NoLock);
         }
     }

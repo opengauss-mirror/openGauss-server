@@ -142,3 +142,10 @@ insert into col_part_t1 values (106, 106), (206, 206), (306, 306);
 insert into col_part_t1 values (105, 105), (205, 205), (305, 305);
 
 drop table col_part_t1;
+
+create schema schema_column_pk_unique;
+create table schema_column_pk_unique.tab012_01(col01 smallint primary key, col02 integer unique, col03 bigint) with(orientation=column);
+alter table schema_column_pk_unique.tab012_01 alter col01 type int;
+alter table schema_column_pk_unique.tab012_01 alter col02 type smallint;
+alter table schema_column_pk_unique.tab012_01 alter col03 type smallint;
+drop schema schema_column_pk_unique cascade;
