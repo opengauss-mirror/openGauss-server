@@ -1778,6 +1778,21 @@ void index_drop(Oid indexId, bool concurrent)
 
         freePartList(partIndexlist);
     }
+#ifndef ENABLE_MULTIPLE_NODES
+    /* if index is a `unique` index of `cstore` table, drop index of delta table */
+    if (!RELATION_IS_PARTITIONED(userHeapRelation) && RelationIsCUFormat(userHeapRelation) &&
+        userIndexRelation->rd_index != NULL && userIndexRelation->rd_index->indisunique) {
+        /* Delete index on delta. */
+        Oid objectId = GetDeltaIdxFromCUIdx(indexId, false, true);
+        if (objectId != InvalidOid) {
+            ObjectAddress obj;
+            obj.classId = RelationRelationId;
+            obj.objectId = objectId;
+            obj.objectSubId = 0;
+            performDeletion(&obj, DROP_RESTRICT, PERFORM_DELETION_INTERNAL);
+        }
+    }
+#endif
 
 #ifdef ENABLE_MOT
     /* Forward drop stmt to MOT FDW. */

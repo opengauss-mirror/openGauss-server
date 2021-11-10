@@ -899,6 +899,7 @@ void CStoreInsert::InsertDeltaTable(bulkload_rows* batchRowPtr, int options)
                     &(tuple->t_self),
                     m_delta_relation,
                     UNIQUE_CHECK_YES);
+                CheckUniqueOnOtherIdx(m_idxRelation[idxNum], m_relation, idxValues, idxIsNull);
             }
         }
     }
@@ -949,6 +950,7 @@ void CStoreInsert::InsertNotPsortIdx(int indice)
                  * It will check unique constraint in CU index insertion implicitly.
                  */
                 (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_YES);
+                CheckUniqueOnOtherIdx(deltaIdxRel, m_delta_relation, values, isnull);
             } else {
                 (void)index_insert(indexRel, values, isnull, tupleid, m_relation, UNIQUE_CHECK_NO);
             }

@@ -467,9 +467,10 @@ static Oid GetCUIdxFromDeltaIdx(Relation deltaIdx, bool isPartition)
  * @Description: Get delta index oid from its corresponding CU index.
  * @IN CUIndexOid: CU index
  * @IN isPartitioned: indicates whether CU index is a partitioned index.
+ * @IN suppressMiss: return InvalidOid if true when delta index is not found
  * @Reture: the delta index oid
  */
-Oid GetDeltaIdxFromCUIdx(Oid CUIndexOid, bool isPartitioned)
+Oid GetDeltaIdxFromCUIdx(Oid CUIndexOid, bool isPartitioned, bool suppressMiss)
 {
     char deltaIdxName[NAMEDATALEN] = {'\0'};
     Relation pgclass = NULL;
@@ -495,6 +496,11 @@ Oid GetDeltaIdxFromCUIdx(Oid CUIndexOid, bool isPartitioned)
     if (HeapTupleIsValid(tup)) {
         deltaIdxOid = HeapTupleGetOid(tup);
     } else {
+        if (suppressMiss) {
+            systable_endscan(scan);
+            heap_close(pgclass, AccessShareLock);
+            return InvalidOid;
+        }
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" does not exist", deltaIdxName)));
     }

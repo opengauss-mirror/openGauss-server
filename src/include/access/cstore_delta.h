@@ -40,7 +40,7 @@ extern void BuildIndexOnNewDeltaTable(Oid oldColTable, Oid newColTable, Oid pare
 extern void ReindexDeltaIndex(Oid indexId, Oid indexPartId);
 extern void ReindexPartDeltaIndex(Oid indexOid, Oid partOid);
 
-extern Oid GetDeltaIdxFromCUIdx(Oid CUIndexOid, bool isPartitioned);
+extern Oid GetDeltaIdxFromCUIdx(Oid CUIndexOid, bool isPartitioned, bool suppressMiss = false);
 extern char* GetCUIdxNameFromDeltaIdx(Relation deltaIdx);
 
 #endif
