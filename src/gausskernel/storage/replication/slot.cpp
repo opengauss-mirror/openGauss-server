@@ -834,8 +834,8 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
         in_use = true;
         restart_lsn = vslot->data.restart_lsn;
 
-        /* ignore restart lsn of slot not active. backup slot is always considered. */
-        if (!s->active && s->data.database == InvalidOid && GET_SLOT_PERSISTENCY(vslot->data) != RS_BACKUP) {
+        /* ignore restart lsn of slot not active. backup slot and archive slot are always considered. */
+        if (s->archive_obs == NULL && !s->active && s->data.database == InvalidOid && GET_SLOT_PERSISTENCY(vslot->data) != RS_BACKUP) {
             goto lock_release;
         }
 
@@ -1944,7 +1944,6 @@ void advanceObsSlot(XLogRecPtr restart_pos)
             long current = TIME_GET_MILLISEC(tv);
             long diff = current - t_thrd.arch.last_advance_slot_time;
             if (diff > t_thrd.arch.advance_slot_wait_interval) {
-                t_thrd.slot_cxt.MyReplicationSlot = slot;
                 flushSlot(current);
             }
         } else {
