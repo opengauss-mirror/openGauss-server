@@ -1157,7 +1157,7 @@ static void initLastTaskLsn()
     t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
     volatile ReplicationSlot* obs_archive_slot = getObsReplicationSlot();
     if (obs_archive_slot != NULL && !IsServerModeStandby()) {
-        XLogRecPtr targetLsn = getRestartLsnFromSlot();
+        targetLsn = getRestartLsnFromSlot();
         if (targetLsn != InvalidXLogRecPtr) {
             t_thrd.arch.pitr_task_last_lsn = targetLsn;
             advanceObsSlot(t_thrd.arch.pitr_task_last_lsn);

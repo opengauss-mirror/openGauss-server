@@ -260,6 +260,14 @@ void StartupProcessMain(void)
         StartupXLOG();
     }
 
+    /* 
+     * If the archiver is still alive, we need to restart the archiver in startup.
+     */
+    if (g_instance.pid_cxt.PgArchPID != 0 && getObsReplicationSlot() != NULL) {
+        gs_signal_send(g_instance.pid_cxt.PgArchPID, SIGTERM);
+        gs_signal_send(g_instance.pid_cxt.PgArchPID, SIGUSR2);
+    }
+
     /*
      * Exit normally. Exit code 0 tells postmaster that we completed recovery
      * successfully.

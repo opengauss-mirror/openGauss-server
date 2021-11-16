@@ -856,8 +856,7 @@ void redo_slot_advance(const ReplicationSlotPersistentData *slotInfo)
      * for logical replication slot, the Slot->data.database is VALID.
      */
 #ifndef ENABLE_MULTIPLE_NODES
-    if (IsReplicationSlotActive(NameStr(slotInfo->name)) && t_thrd.slot_cxt.MyReplicationSlot != NULL && 
-        t_thrd.slot_cxt.MyReplicationSlot->data.database != InvalidOid) {
+    if (IsReplicationSlotActive(NameStr(slotInfo->name)) && slotInfo->database != InvalidOid) {
         return;
     }
 #endif
