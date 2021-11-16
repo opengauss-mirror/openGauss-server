@@ -1943,7 +1943,7 @@ void advanceObsSlot(XLogRecPtr restart_pos)
             gettimeofday(&tv, NULL);
             long current = TIME_GET_MILLISEC(tv);
             long diff = current - t_thrd.arch.last_advance_slot_time;
-            if (diff > t_thrd.arch.advance_slot_wait_interval) {
+            if (diff > t_thrd.arch.advance_slot_wait_interval && t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) {
                 flushSlot(current);
             }
         } else {
