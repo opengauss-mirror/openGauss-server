@@ -152,12 +152,11 @@ ThreadId pgarch_start(void)
     /*
      * Do nothing if no archiver needed
      */
-    if (!XLogArchivingActive() && !(getObsReplicationSlot()))
+    ReplicationSlot* slot = getObsReplicationSlot();
+    if (!XLogArchivingActive() && slot == NULL)
         return 0;
     load_server_mode();
-    if (getObsReplicationSlot() != NULL &&
-        t_thrd.xlog_cxt.server_mode != PRIMARY_MODE &&
-        t_thrd.xlog_cxt.server_mode != STANDBY_MODE) {
+    if (slot != NULL && t_thrd.xlog_cxt.server_mode != PRIMARY_MODE && t_thrd.xlog_cxt.server_mode != STANDBY_MODE) {
         return 0;
     }
     /*
@@ -227,9 +226,17 @@ NON_EXEC_STATIC void PgArchiverMain()
      */
     init_ps_display("archiver process", "", "", "");
     setObsArchLatch(&t_thrd.arch.mainloop_latch);
+    ReplicationSlot* slot = getObsReplicationSlot();
+    if (slot != NULL) {
+        load_server_mode();
+        if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE) {
+            ReplicationSlotAcquire(NameStr(slot->data.name), slot->data.isDummyStandby);
+        }
+    }
     initLastTaskLsn();
     initArchiveCxt();
     pgarch_MainLoop();
+    ReplicationSlotRelease();
 
     gs_thread_exit(0);
 }
