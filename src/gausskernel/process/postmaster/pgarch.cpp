@@ -328,16 +328,15 @@ static void VerifyDestDirIsEmptyOrCreate(char* dirname)
  *    As a result, the archiver is trapped in a loop of opening and exiting abnormally.
  */
 static inline void getSyncRecPtrErrorHandler (bool* amSync) {
-    if (t_thrd.syncrep_cxt.SyncRepConfig == NULL) {
-        /* wait a bit before retrying */
-        pg_usleep(1000000L);
-        return;
+    /* wait a bit before retrying */
+    pg_usleep(1000000L);
+    if (t_thrd.syncrep_cxt.SyncRepConfig != NULL) {
+        List* syncStandbyList = SyncRepGetSyncStandbys(amSync);
+        int syncStandbyNums = list_length(syncStandbyList);
+        list_free(syncStandbyList);
+        int elevel = syncStandbyNums == 0 ? WARNING : ERROR;
+        ereport(elevel, (errmsg("pgarch_ArchiverObsCopyLoop failed when call SyncRepGetSyncRecPtr")));
     }
-    List* syncStandbyList = SyncRepGetSyncStandbys(amSync);
-    int syncStandbyNums = list_length(syncStandbyList);
-    list_free(syncStandbyList);
-    int elevel = syncStandbyNums == 0 ? WARNING : ERROR;
-    ereport(elevel, (errmsg("pgarch_ArchiverObsCopyLoop failed when call SyncRepGetSyncRecPtr")));
 }
 
 /*
