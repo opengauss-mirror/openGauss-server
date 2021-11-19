@@ -1807,6 +1807,11 @@ ObsArchiveConfig* formObsConfigFromStr(char *content, bool encrypted)
         goto FAILURE;
     }
 
+    /* cannot create archive slot when the version number is not larger than the standby archive version */
+    if ((param_num == 4 || param_num == 8) && t_thrd.proc->workingVersionNum < STANDBY_ARCHIVING_VERSION_NUM) {
+        goto FAILURE;
+    }
+
     if (param_num == 7) {
         obs_config->media_type = ARCHIVE_OBS;
     } else {
