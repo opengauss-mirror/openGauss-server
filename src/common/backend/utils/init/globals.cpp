@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92299;
+const uint32 GRAND_VERSION_NUM = 92300;
 
 const uint32 MATVIEW_VERSION_NUM = 92213;
 const uint32 PARTIALPUSH_VERSION_NUM = 92087;
@@ -77,7 +77,7 @@ const uint32 RANGE_LIST_DISTRIBUTION_VERSION_NUM = 92272;
 const uint32 BACKUP_SLOT_VERSION_NUM = 92282;
 const uint32 ML_OPT_MODEL_VERSION_NUM = 92284;
 const uint32 FIX_SQL_ADD_RELATION_REF_COUNT = 92291;
-const uint32 STANDBY_ARCHIVING_VERSION_NUM = 92299;
+const uint32 STANDBY_ARCHIVING_VERSION_NUM = 92300;
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;
 
