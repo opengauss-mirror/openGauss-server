@@ -735,6 +735,11 @@ typedef struct knl_g_archive_obs_context {
     struct ReplicationSlot* archive_slot;
     volatile int obs_slot_num;
     int sync_walsender_term;
+
+    /* used to show the archive status */
+    volatile int sync_walsender_idx;
+    volatile long last_arch_time;
+    volatile XLogRecPtr pitr_task_last_lsn;
 } knl_g_archive_obs_context;
 
 #ifdef ENABLE_MOT

@@ -24,6 +24,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "funcapi.h"
 #include "postgres.h"
 #include "knl/knl_variable.h"
 
@@ -39,6 +40,7 @@
 #include "access/xact.h"
 #include "libpq/pqsignal.h"
 #include "miscadmin.h"
+#include "nodes/execnodes.h"
 #include "postmaster/fork_process.h"
 #include "postmaster/pgarch.h"
 #include "postmaster/postmaster.h"
@@ -50,6 +52,7 @@
 #include "storage/pmsignal.h"
 #include "utils/guc.h"
 #include "utils/ps_status.h"
+#include "utils/builtins.h"
 
 #include "gssignal/gs_signal.h"
 #include "alarm/alarm.h"
@@ -668,6 +671,16 @@ static XLogRecPtr getRestartLsnFromSlot()
     return result;
 }
 
+static inline void pgarch_UpdateArchiveLastLsn(XLogRecPtr targetLsn)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
+    t_thrd.arch.pitr_task_last_lsn = targetLsn;
+    g_instance.archive_obs_cxt.pitr_task_last_lsn = t_thrd.arch.pitr_task_last_lsn;
+    g_instance.archive_obs_cxt.last_arch_time = t_thrd.arch.last_arch_time;
+}
+
 /*
  * pgarch_ArchiverObsCopyLoop
  *
@@ -675,7 +688,6 @@ static XLogRecPtr getRestartLsnFromSlot()
  */
 static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
 {
-    struct timeval tv;
     bool time_to_stop = false;
 
     /*
@@ -743,9 +755,7 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
             ereport(WARNING,
                 (errmsg("transaction log file \"%X/%X\" does not existed, it may be archived by the old primary.", 
                     (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
-            gettimeofday(&tv, NULL);
-            t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
-            t_thrd.arch.pitr_task_last_lsn = targetLsn;
+            pgarch_UpdateArchiveLastLsn(targetLsn);
             continue;
         }
 
@@ -755,9 +765,7 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
                     (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
             pg_usleep(1000000L); /* wait a bit before retrying */
         } else {
-            gettimeofday(&tv, NULL);
-            t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
-            t_thrd.arch.pitr_task_last_lsn = targetLsn;
+            pgarch_UpdateArchiveLastLsn(targetLsn);
             ResetLatch(&t_thrd.arch.mainloop_latch);
             ereport(LOG,
                 (errmsg("pgarch_ArchiverObsCopyLoop time change to %ld", t_thrd.arch.last_arch_time)));
@@ -1127,6 +1135,7 @@ static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
                 SpinLockRelease(&walsnd->mutex);
                 walsnd->arch_task_lsn = targetLsn;
                 t_thrd.arch.sync_walsender_idx = i;
+                g_instance.archive_obs_cxt.sync_walsender_idx = i;
                 g_instance.archive_obs_cxt.sync_walsender_term++;
                 ereport(LOG,
                     (errmsg("pgarch_chooseWalsnd has change from %d to %d , sub_term:%d", 
@@ -1188,4 +1197,78 @@ static void initArchiveCxt() {
     g_instance.archive_obs_cxt.pitr_finish_result = false;
     g_instance.archive_obs_cxt.archive_task.targetLsn = InvalidXLogRecPtr;
     g_instance.archive_obs_cxt.pitr_task_status = PITR_TASK_NONE;
+}
+
+Datum gs_get_archive_status(PG_FUNCTION_ARGS)
+{
+#define ARCHIVE_STATUS_COLS 4
+#define MAX_LSN_LENGTH 18
+    ReplicationSlot* slot = getObsReplicationSlot();
+    ReturnSetInfo* rsinfo = (ReturnSetInfo*) fcinfo->resultinfo;
+    MemoryContext oldcontext = MemoryContextSwitchTo(rsinfo->econtext->ecxt_per_query_memory);
+
+    int col_number = 0;
+    bool nulls[ARCHIVE_STATUS_COLS];
+    nulls[col_number++] = false;
+    nulls[col_number++] = false;
+    nulls[col_number++] = false;
+    nulls[col_number++] = false;
+
+    col_number = 0;
+    TupleDesc tupdesc = CreateTemplateTupleDesc(ARCHIVE_STATUS_COLS, false);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++col_number, "archive_standby", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++col_number, "archive_lsn", TEXTOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++col_number, "last_arch_time", TIMESTAMPTZOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++col_number, "archive_path", TEXTOID, -1, 0);
+    rsinfo->returnMode = SFRM_Materialize;
+    rsinfo->setResult = tuplestore_begin_heap(true, false, u_sess->attr.attr_memory.work_mem);
+    rsinfo->setDesc = BlessTupleDesc(tupdesc);
+
+    MemoryContextSwitchTo(oldcontext);
+    volatile WalSnd* walsnd = NULL;
+    int sync_walsender_idx = g_instance.archive_obs_cxt.sync_walsender_idx;
+    if (slot != NULL && sync_walsender_idx >= 0) {
+        walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[sync_walsender_idx];
+        SpinLockAcquire(&walsnd->mutex);
+        if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole)
+            && !XLogRecPtrIsInvalid(walsnd->flush)) {
+            int ret = 0;
+            Datum values[ARCHIVE_STATUS_COLS];
+            XLogRecPtr last_arch_lsn = g_instance.archive_obs_cxt.pitr_task_last_lsn;
+            long last_arch_time = g_instance.archive_obs_cxt.last_arch_time;
+            /* get the ip address of standby */
+            char remoteip[IP_LEN] = {0};
+            errno_t rc = strncpy_s(remoteip, IP_LEN, (char *)walsnd->wal_sender_channel.remotehost, IP_LEN - 1);
+            securec_check(rc, "\0", "\0");
+            remoteip[IP_LEN - 1] = '\0';
+
+            /* Construct the standby node identifier. The format is "remoteip_remoteport". */
+            char archive_standby[MAXFNAMELEN] = {0};
+            char archive_path[MAXFNAMELEN] = {0};
+            int localport = walsnd->wal_sender_channel.localport;
+            ret = snprintf_s(archive_standby, sizeof(archive_standby), sizeof(archive_standby) - 1, "%s:%d",
+                                remoteip, localport);
+            securec_check_ss(ret, "\0", "\0");
+
+            /* get the path of archiving xlog files */
+            ret = snprintf_s(archive_path, sizeof(archive_path), sizeof(archive_path) - 1, "%s",
+                                slot->archive_obs->obs_prefix);
+            securec_check_ss(ret, "\0", "\0");
+
+            char archive_lsn[MAX_LSN_LENGTH];
+            ret = snprintf_s(archive_lsn, sizeof(archive_lsn), sizeof(archive_lsn) - 1, "%X/%X",
+                                (uint32)(last_arch_lsn >> 32), (uint32)(last_arch_lsn));
+            securec_check_ss(ret, "\0", "\0");
+
+            col_number = 0;
+            values[col_number++] = CStringGetTextDatum(archive_standby);
+            values[col_number++] = CStringGetTextDatum(archive_lsn);
+            values[col_number++] = TimestampTzGetDatum(last_arch_time);
+            values[col_number++] = CStringGetTextDatum(archive_path);
+            tuplestore_putvalues(rsinfo->setResult, rsinfo->setDesc, values, nulls);
+        }
+        SpinLockRelease(&walsnd->mutex);
+    }
+    tuplestore_donestoring(rsinfo->setResult);
+    return (Datum)0;
 }

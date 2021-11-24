@@ -1,0 +1,1 @@
+CREATE OR REPLACE VIEW pg_catalog.gs_archive_status AS SELECT * FROM gs_get_archive_status();

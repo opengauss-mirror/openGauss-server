@@ -1,0 +1,1 @@
+DROP VIEW IF EXISTS pg_catalog.gs_archive_status;

@@ -18,6 +18,7 @@
  * ----------
  */
 extern ThreadId pgarch_start(void);
+extern Datum gs_get_archive_status(PG_FUNCTION_ARGS);
 #ifdef EXEC_BACKEND
 extern void PgArchiverMain();
 #endif
