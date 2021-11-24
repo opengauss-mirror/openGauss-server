@@ -3453,3 +3453,4 @@ CREATE unlogged table statement_history(
 );
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
+CREATE OR REPLACE VIEW pg_catalog.gs_archive_status AS SELECT * FROM gs_get_archive_status();

@@ -2192,6 +2192,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  3793 | zhprs_getlexeme
  3794 | zhprs_end
  3795 | zhprs_lextype
+ 3796 | gs_get_archive_status
  3798 | pound_start
  3799 | pound_nexttoken
  3800 | pound_end
