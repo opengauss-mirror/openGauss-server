@@ -1018,18 +1018,29 @@ static void pgarch_archiveDone(const char* xlog)
 */
 static void pgarch_archiveRoachForPitrStandby()
 {
+    XLogRecPtr targetLsn = g_instance.archive_obs_cxt.archive_task.targetLsn;
+    if (!XlogFileIsExisted(t_thrd.proc_cxt.DataDir, targetLsn, DEFAULT_TIMELINE_ID)) {
+        g_instance.archive_obs_cxt.pitr_result_type = ARCH_SKIP;
+        g_instance.archive_obs_cxt.pitr_finish_result = true;
+        ereport(WARNING,
+            (errmsg("pgarch_archiveRoachForPitrStandby %X/%X is not exists, skip the process of archiving",
+                (uint32)(targetLsn >> 32), (uint32)(targetLsn))));
+        return;
+    }
     ereport(LOG,
         (errmsg("pgarch_archiveRoachForPitrStandby %X/%X, term:%d, subterm:%d", 
-            (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn >> 32), (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn), 
+            (uint32)(targetLsn >> 32), (uint32)(targetLsn), 
             g_instance.archive_obs_cxt.archive_task.term, g_instance.archive_obs_cxt.archive_task.sub_term)));
     if (obs_replication_archive(&g_instance.archive_obs_cxt.archive_task) == 0) {
         g_instance.archive_obs_cxt.pitr_finish_result = true;
+        g_instance.archive_obs_cxt.pitr_result_type = ARCH_SUCCESS;
     } else {
         ereport(WARNING,
             (errmsg("error when pgarch_archiveRoachForPitrStandby %X/%X, term:%d, subterm:%d", 
-                (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn >> 32), (uint32)(g_instance.archive_obs_cxt.archive_task.targetLsn), 
+                (uint32)(targetLsn >> 32), (uint32)(targetLsn), 
                 g_instance.archive_obs_cxt.archive_task.term, g_instance.archive_obs_cxt.archive_task.sub_term)));
         g_instance.archive_obs_cxt.pitr_finish_result = false;
+        g_instance.archive_obs_cxt.pitr_result_type = ARCH_FAILED;
     }
 }
 

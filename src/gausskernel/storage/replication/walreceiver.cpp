@@ -1919,7 +1919,7 @@ static void WalRecvSendArchiveXlogResponse()
     errno_t errorno = EOK;
     reply.pitr_result = g_instance.archive_obs_cxt.pitr_finish_result;
     reply.targetLsn = g_instance.archive_obs_cxt.archive_task.targetLsn;
-
+    reply.result_type = g_instance.archive_obs_cxt.pitr_result_type;
     buf[0] = 'a';
     errorno = memcpy_s(&buf[1],
         sizeof(ArchiveXlogResponseMeeeage),
