@@ -439,7 +439,7 @@ static void pgarch_MainLoop(void)
                 if (t_thrd.arch.pitr_task_last_lsn == InvalidXLogRecPtr) {
                     initLastTaskLsn();
                 }
-                uint32 size;
+                uint32 size = 0;
                 if (obs_archive_slot->archive_obs->media_type == ARCHIVE_OBS) {
                     size = OBS_XLOG_SLICE_BLOCK_SIZE;
                 } else if (obs_archive_slot->archive_obs->media_type == ARCHIVE_NAS) {
