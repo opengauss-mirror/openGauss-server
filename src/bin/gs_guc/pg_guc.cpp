@@ -1188,6 +1188,16 @@ static void CheckLastValidReplconninfo(char** opt_lines, int idx)
             "the host role will be changed to Normal if the local_role is primary now.\n");
     }
 }
+
+static void CheckKeepSyncWindow(char** opt_lines, int idx)
+{
+    /* Give a warning if keep_sync_window is set */
+    if (strcmp(config_param[idx], "keep_sync_window") == 0) {
+        write_stderr("\nWARNING: If the primary server fails during keep_sync_window, the transactions which "
+            "were blocked during keep_sync_window will be lost and can't get recovered. This will affect RPO.\n");
+    }
+}
+
 #endif
 
 /*
@@ -1285,6 +1295,7 @@ do_gucset(const char *action_type, const char *data_dir)
 
 #ifndef ENABLE_MULTIPLE_NODES
         CheckLastValidReplconninfo(opt_lines, i);
+        CheckKeepSyncWindow(opt_lines, i);
 #endif
 
         /* find the line where guc parameter in */

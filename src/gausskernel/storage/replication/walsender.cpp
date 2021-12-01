@@ -4349,6 +4349,7 @@ void WalSndShmemInit(void)
         }
         t_thrd.walsender_cxt.WalSndCtl->most_available_sync = false;
         t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone = false;
+        t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time = 0;
         t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
         SpinLockInit(&t_thrd.walsender_cxt.WalSndCtl->mutex);
     }

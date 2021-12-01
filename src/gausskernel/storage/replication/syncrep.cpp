@@ -155,6 +155,9 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
     char *new_status = NULL;
     const char *old_status = NULL;
     int mode = u_sess->attr.attr_storage.sync_rep_wait_mode;
+    TimestampTz now_time;
+    TimestampTz now_time_dynamical;
+    bool sync_master_standalone_window = false;
 
     /*
      * Fast exit if user has not requested sync replication, or there are no
@@ -182,9 +185,21 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      * condition but we'll be fetching that cache line anyway so its likely to
      * be a low cost check. We don't wait for sync rep if no sync standbys alive
      */
+    now_time = GetCurrentTimestamp();
+    long diff_sec;
+    int diff_microsec;
+
+    if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone) {
+        TimestampDifference(t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time, now_time, &diff_sec, 
+                            &diff_microsec);
+        if(diff_sec >= (long)u_sess->attr.attr_storage.keep_sync_window) {
+            sync_master_standalone_window = true;
+        }
+    }
+
     if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined ||
         XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode]) ||
-        t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone ||
+        sync_master_standalone_window ||
         !SynRepWaitCatchup(XactCommitLSN)) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
@@ -312,8 +327,17 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         /*
          * If we  modify the syncmode dynamically, we'll stop wait
          */
-        if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone ||
-            synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        now_time_dynamical = GetCurrentTimestamp();
+        long diff_sec_dynamical;
+        int diff_microsec_dynamical;
+        if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone) {
+            TimestampDifference(t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time, now_time_dynamical, 
+                                &diff_sec_dynamical, &diff_microsec_dynamical);
+        }
+        if (sync_master_standalone_window ||
+            synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH  ||
+            (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && 
+            diff_sec_dynamical >= (long)u_sess->attr.attr_storage.keep_sync_window)) {
             ereport(WARNING,
                     (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
@@ -1364,10 +1388,11 @@ void SyncRepCheckSyncStandbyAlive(void)
 
     if (!sync_standby_alive && !t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone &&
         t_thrd.walsender_cxt.WalSndCtl->most_available_sync) {
+        
         ereport(LOG, (errmsg("synchronous master is now standalone")));
 
         t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone = true;
-
+        t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time = GetCurrentTimestamp();
         /*
          * If there is any waiting sender, then wake-up them as
          * master has switched to standalone mode
