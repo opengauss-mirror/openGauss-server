@@ -1651,10 +1651,10 @@ void exec_simple_plan(PlannedStmt* plan)
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(DEBUG1, (errmsg("duration: %s ms, debugid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms, debugid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2:
-            ereport(DEBUG1,
+            ereport(LOG,
                 (errmsg("duration: %s ms, debug id %ld unique id %lu statement: %s", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id, "TODO: deparse plan"),  // vam query_string),
                     errhidestmt(true)
                     // vam errdetail_execute(parsetree_list)
@@ -2756,13 +2756,13 @@ static void exec_simple_query(const char* query_string, MessageType messageType,
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, query_string);
-            ereport(DEBUG1,
+            ereport(LOG,
                 (errmsg("duration: %s ms queryid %ld unique id %ld statement: %s", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id,mask_string),
                     errhidestmt(true),
                     errdetail_execute(parsetree_list)));
@@ -3582,13 +3582,13 @@ pass_parsing:
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* cur_mask_string = NULL;
 
             MASK_PASSWORD_START(cur_mask_string, query_string);
-            ereport(DEBUG1, (errmsg(
+            ereport(LOG, (errmsg(
                      "duration: %s ms queryid %ld unique id %ld parse %s: %s", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id, *stmt_name ? stmt_name : "<unnamed>", cur_mask_string),
                     errhidestmt(true)));
             MASK_PASSWORD_END(cur_mask_string, query_string);
@@ -4711,13 +4711,13 @@ static void exec_bind_message(StringInfo input_message)
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld, unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms, queryid %ld, unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, psrc->query_string);
-            ereport(DEBUG1,
+            ereport(LOG,
                 (errmsg("duration: %s ms queryid %ld unique id %ld bind %s%s%s: %s",
                      msec_str,
                      u_sess->debug_query_id,
@@ -4976,13 +4976,13 @@ static void exec_execute_message(const char* portal_name, long max_rows)
      */
     switch (check_log_duration(msec_str, was_logged)) {
         case 1:
-            ereport(DEBUG1, (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, sourceText);
-            ereport(DEBUG1,
+            ereport(LOG,
                 (errmsg("duration: %s ms queryid %ld unique id %ld %s %s%s%s: %s",
                      msec_str,
                      u_sess->debug_query_id,
@@ -11344,13 +11344,13 @@ static void exec_batch_bind_execute(StringInfo input_message)
      */
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms, queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
             char* mask_string = NULL;
 
             MASK_PASSWORD_START(mask_string, psrc->query_string);
-            ereport(DEBUG1,
+            ereport(LOG,
                 (errmsg("duration: %s ms  queryid %ld unique id %ld batch bind-execute %s%s%s: %s",
                      msec_str,
                      u_sess->debug_query_id,
