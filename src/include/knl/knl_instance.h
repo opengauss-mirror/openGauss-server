@@ -740,6 +740,14 @@ typedef struct knl_g_archive_obs_context {
     volatile int sync_walsender_idx;
     volatile long last_arch_time;
     volatile XLogRecPtr pitr_task_last_lsn;
+
+    /*
+     * walreceiver set the archiving result type
+     * 0 for archiving failed
+     * 1 for archiving success
+     * 2 is skipping the archiving becasuse of the xlog does not exists
+     */
+    volatile unsigned int pitr_result_type;
 } knl_g_archive_obs_context;
 
 #ifdef ENABLE_MOT

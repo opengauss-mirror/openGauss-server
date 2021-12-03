@@ -147,6 +147,7 @@ typedef struct ArchiveXlogMessage {
 typedef struct ArchiveXlogResponseMeeeage {
     bool pitr_result;
     XLogRecPtr targetLsn;
+    uint32 result_type;
 } ArchiveXlogResponseMeeeage;
 
 /*
@@ -172,6 +173,12 @@ typedef enum {
     PITR_TASK_GET,
     PITR_TASK_DONE
 } PITR_TASK_STATUS;
+
+typedef enum {
+    ARCH_FAILED = 0,
+    ARCH_SUCCESS,
+    ARCH_SKIP
+} PITR_RESULT_TYPE;
 
 /*
  * switchover response message from primary (message type 'p').  This is wrapped within

@@ -2538,9 +2538,16 @@ static void ProcessArchiveFeedbackMessage(void)
     ArchiveXlogResponseMeeeage reply;
     /* Decipher the reply message */
     pq_copymsgbytes(t_thrd.walsender_cxt.reply_message, (char*)&reply, sizeof(ArchiveXlogResponseMeeeage));
-    ereport(LOG,
-        (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
-            (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    if (reply.pitr_result && reply.result_type == ARCH_SKIP) {
+        ereport(WARNING,
+                (errmsg("ProcessArchiveFeedbackMessage %X/%X is not exists in the standby, skip it", 
+                        (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    } else {
+        ereport(LOG,
+                (errmsg("ProcessArchiveFeedbackMessage %d %X/%X", reply.pitr_result, 
+                        (uint32)(reply.targetLsn >> 32), (uint32)(reply.targetLsn))));
+    }
+    
     g_instance.archive_obs_cxt.pitr_finish_result = reply.pitr_result;
     g_instance.archive_obs_cxt.archive_task.targetLsn = reply.targetLsn;
     if (walsnd->arch_latch == NULL) {
