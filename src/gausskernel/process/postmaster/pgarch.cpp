@@ -88,6 +88,7 @@
 #define MIN_XFN_CHARS 16
 #define MAX_XFN_CHARS 40
 #define VALID_XFN_CHARS "0123456789ABCDEF.history.backup"
+#define CHOOSE_WALSND_RETRY_COUNT 3
 
 #define NUM_ARCHIVE_RETRIES 3
 
@@ -113,6 +114,7 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun);
 static void archKill(int code, Datum arg);
 static void initLastTaskLsn();
 static void initArchiveCxt();
+static volatile WalSnd* getWalSndByIdx(XLogRecPtr targetLsn);
 
 AlarmCheckResult DataInstArchChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
@@ -1117,22 +1119,43 @@ static bool pgarch_archiveRoachForCoordinator(XLogRecPtr targetLsn)
     return g_instance.archive_obs_cxt.pitr_finish_result;
 }
 
+static volatile WalSnd* getWalSndByIdx(XLogRecPtr targetLsn)
+{
+    int tryCount = 1;
+    while (tryCount <= CHOOSE_WALSND_RETRY_COUNT) {
+        volatile WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[t_thrd.arch.sync_walsender_idx];
+        SpinLockAcquire(&walsnd->mutex);
+        if (walsnd->pid == 0 || ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) != walsnd->sendRole) ||
+            XLogRecPtrIsInvalid(walsnd->flush)) {
+            SpinLockRelease(&walsnd->mutex);
+            break;
+        }
+        if (XLByteLE(targetLsn, walsnd->flush)) {
+            walsnd->arch_task_lsn = targetLsn;
+            walsnd->archive_obs_subterm = g_instance.archive_obs_cxt.sync_walsender_term;
+            SpinLockRelease(&walsnd->mutex);
+            return walsnd;
+        }
+        ereport(LOG, (errmsg("the archPtr is larger than the flushPtr of walsnd, wait a second and try again.\n"
+                            "archPtr is %X/%X, flushPtr is %X/%X.\n"
+                            "current try count: %d, the max try count is: %d",
+                            (uint32)(targetLsn >> 32), (uint32)(targetLsn),
+                            (uint32)(walsnd->flush >> 32), (uint32)(walsnd->flush),
+                            tryCount, CHOOSE_WALSND_RETRY_COUNT)));
+        SpinLockRelease(&walsnd->mutex);
+        tryCount++;
+        pg_usleep(1000000L);
+    }
+    return NULL;
+}
+
 /* check if there is any wal sender alive. */
 static WalSnd* pgarch_chooseWalsnd(XLogRecPtr targetLsn)
 {
     int i;
     volatile WalSnd* walsnd = NULL;
-    if (t_thrd.arch.sync_walsender_idx >= 0) {
-        walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[t_thrd.arch.sync_walsender_idx];
-        SpinLockAcquire(&walsnd->mutex);
-        if (walsnd->pid != 0 && ((walsnd->sendRole & SNDROLE_PRIMARY_STANDBY) == walsnd->sendRole) 
-            && !XLogRecPtrIsInvalid(walsnd->flush) && XLByteLE(targetLsn, walsnd->flush)) {
-            walsnd->arch_task_lsn = targetLsn;
-            walsnd->archive_obs_subterm = g_instance.archive_obs_cxt.sync_walsender_term;
-            SpinLockRelease(&walsnd->mutex);
-            return (WalSnd*)walsnd;
-        }
-        SpinLockRelease(&walsnd->mutex);
+    if (t_thrd.arch.sync_walsender_idx >= 0 && (walsnd = getWalSndByIdx(targetLsn)) != NULL) {
+        return (WalSnd*)walsnd;
     }
 
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
