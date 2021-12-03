@@ -300,7 +300,7 @@ static void pgarch_waken_stop(SIGNAL_ARGS)
     /* set flag to do a final cycle and shut down afterwards */
     t_thrd.arch.ready_to_stop = true;
     SetLatch(&t_thrd.arch.mainloop_latch);
-
+    ereport(LOG, (errmsg("pgarch_waken_stop")));
     errno = save_errno;
 }
 
@@ -419,6 +419,15 @@ static void pgarch_MainLoop(void)
             t_thrd.arch.wakened = false;
             obs_archive_slot = getObsReplicationSlot();
             if (obs_archive_slot != NULL && !IsServerModeStandby()) {
+                /* 
+                 * When the value of time_to_stop is true, the SIGUSR2 signal is received,
+                 * that is, the archiving thread is required to exit.
+                 * In this case, the primary node should not send the archive task to the standby node,
+                 * and the restart_lsn of the replication slot should not be refreshed.
+                 */
+                if (time_to_stop) {
+                    continue;
+                }
                 gettimeofday(&curtime, NULL);
                 const long time_diff = TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
                 XLogRecPtr receivePtr;
