@@ -8713,7 +8713,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
          * Set all fields except the bufferid to null if the buffer is unused
          * or not valid.
          */
-        if (fctx->record[i].blocknum == InvalidBlockNumber || fctx->record[i].isvalid == false) {
+        if (fctx->record[i].blocknum == InvalidBlockNumber) {
             nulls[1] = true;
             nulls[2] = true;
             nulls[3] = true;
