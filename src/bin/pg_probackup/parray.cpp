@@ -13,6 +13,8 @@
 #include "parray.h"
 #include "pgut.h"
 
+static size_t qsort_size = 100000; /* 100000 = default size */
+
 /* members of struct parray are hidden from client. */
 struct parray
 {
@@ -191,10 +193,60 @@ parray_num(const parray *array)
     return array->used;
 }
 
+static void HeapAdjust(void **array, size_t size, size_t index,
+                       int(*compare)(const void *, const void *))
+{
+    size_t parent = index;
+    size_t child = 2 * parent + 1; /* 2 * n + 1 :left child */
+    while (child < size) {
+        if (child + 1 < size && compare(&array[child + 1], &array[child]) > 0) {
+            child = child + 1;
+        }
+
+        if (compare(&array[child], &array[parent]) > 0) {
+            void *tmp = array[child];
+            array[child] = array[parent];
+            array[parent] = tmp;
+        } else {
+            break;
+        }
+
+        parent = child;
+        child = 2 * parent + 1;  /* 2 * n + 1 :left child */
+    }
+}
+
+static void HeapPop(void **array, size_t size,
+                    int(*compare)(const void *, const void *))
+{
+    void *tmp = array[0];
+    array[0] = array[size - 1];
+    array[size - 1] = tmp;
+
+    HeapAdjust(array, size - 1, 0, compare);
+}
+
+static void HeapSort(void **array, size_t size,
+                     int(*compare)(const void *, const void *))
+{
+    for (int64 i = (size - 2) / 2; i >= 0; i--) { /* parent node:(size -2) / 2 */
+        HeapAdjust(array, size, i, compare);
+    }
+
+    for (size_t i = 0; i < size; i++) {
+        HeapPop(array, size - i, compare);
+    }
+}
+
 void
 parray_qsort(parray *array, int(*compare)(const void *, const void *))
 {
-    qsort(array->data, array->used, sizeof(void *), compare);
+    Assert(array->used < (PG_UINT64_MAX / 1024));
+    if (array->used <= qsort_size) {
+        qsort(array->data, array->used, sizeof(void *), compare);
+    } else {
+        HeapSort(array->data, array->used, compare);
+    }
 }
 
 void

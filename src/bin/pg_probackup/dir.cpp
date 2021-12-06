@@ -479,8 +479,8 @@ pgFileCompareLinked(const void *f1, const void *f2)
 int
 pgFileCompareSize(const void *f1, const void *f2)
 {
-    pgFile *f1p = (pgFile *)const_cast<void*>(f1);
-    pgFile *f2p = (pgFile *)const_cast<void*>(f2);
+    pgFile *f1p = *(pgFile **)f1;
+    pgFile *f2p = *(pgFile **)f2;
 
     if (f1p->size > f2p->size)
         return 1;
@@ -493,7 +493,7 @@ pgFileCompareSize(const void *f1, const void *f2)
 static int
 pgCompareString(const void *str1, const void *str2)
 {
-    return strcmp((char *)const_cast<void*>( str1), (char *)const_cast<void*>(str2));
+    return strcmp(*(char **) str1, *(char **) str2);
 }
 
 /* Compare two Oids */
@@ -1037,7 +1037,7 @@ opt_externaldir_map(ConfigOption *opt, const char *arg)
  * Enforce permissions from backup_content.control. The only
  * problem now is with PGDATA itself.
  * TODO: we must preserve PGDATA permissions somewhere. Is it actually a problem?
- * Shouldn`t starting postgres force correct permissions on PGDATA?
+ * Shouldn`t starting openGauss force correct permissions on PGDATA?
  *
  * TODO: symlink handling. If user located symlink in PG_TBLSPC_DIR, it will
  * be restored as directory.
