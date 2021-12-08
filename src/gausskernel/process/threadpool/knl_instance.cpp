@@ -489,7 +489,7 @@ static void knl_g_archive_obs_init(knl_g_archive_obs_context *archive_obs_cxt)
     archive_obs_cxt->archive_slot = (ReplicationSlot*)MemoryContextAllocZero(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(ReplicationSlot));
     archive_obs_cxt->sync_walsender_idx = -1;
-    archive_obs_cxt->last_arch_time = 0;
+    archive_obs_cxt->last_arch_timestamp = 0;
     archive_obs_cxt->pitr_task_last_lsn = InvalidXLogRecPtr;
 }
 
