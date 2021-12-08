@@ -57,6 +57,7 @@
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
+#include "storage/page_compression.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
 #include "catalog/storage.h"
@@ -233,6 +234,47 @@ static Partition AllocatePartitionDesc(Form_pg_partition partp)
     return partition;
 }
 
+void SetupPageCompressForPartition(RelFileNode* node, PageCompressOpts* compress_options, const char* relationName)
+{
+    uint1 algorithm = compress_options->compressType;
+    if (algorithm == COMPRESS_TYPE_NONE) {
+        node->opt = 0;
+    } else {
+        if (!SUPPORT_PAGE_COMPRESSION) {
+            ereport(ERROR, (errmsg("unsupported page compression on this platform")));
+        }
+
+        uint1 compressLevel;
+        bool symbol = false;
+        if (compress_options->compressLevel >= 0) {
+            symbol = true;
+            compressLevel = compress_options->compressLevel;
+        } else {
+            symbol = false;
+            compressLevel = -compress_options->compressLevel;
+        }
+        bool success = false;
+        uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
+        if (!success) {
+            ereport(ERROR, (errmsg("invalid compress_chunk_size %d , must be one of %d, %d, %d or %d for %s",
+                                   compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
+                                   relationName)));
+
+        }
+
+        uint1 preallocChunks;
+        if (compress_options->compressPreallocChunks >= BLCKSZ / compress_options->compressChunkSize) {
+            preallocChunks = (uint1)(BLCKSZ / compress_options->compressChunkSize - 1);
+        } else {
+            preallocChunks = (uint1)(compress_options->compressPreallocChunks);
+        }
+        Assert(preallocChunks <= MAX_PREALLOC_CHUNKS);
+        node->opt = 0;
+        SET_COMPRESS_OPTION((*node), compress_options->compressByteConvert, compress_options->compressDiffConvert,
+            preallocChunks, symbol, compressLevel, algorithm, chunkSize);
+    }
+}
+
 StorageType PartitionGetStorageType(Oid parentOid)
 {
     HeapTuple  pg_class_tuple;
@@ -376,6 +418,12 @@ static void PartitionInitPhysicalAddr(Partition partition)
                         partition->pd_id)));
         }
     }
+
+    partition->pd_node.opt = 0;
+    if (partition->rd_options) {
+        SetupPageCompressForPartition(&partition->pd_node, &((StdRdOptions*)(partition->rd_options))->compress,
+                                      PartitionGetPartitionName(partition));
+    }
 }
 
 /*
@@ -464,7 +512,7 @@ void PartitionClose(Partition partition)
 }
 
 Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid partfilenode, Oid parttablespace,
-    StorageType storage_type)
+    StorageType storage_type, Datum reloptions)
 {
     Partition part;
     MemoryContext oldcxt;
@@ -513,6 +561,11 @@ Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid part
 
     if (partfilenode != InvalidOid) {
         PartitionInitPhysicalAddr(part);
+        /* compressed option was set by PartitionInitPhysicalAddr if part->rd_options != NULL */
+        if (part->rd_options == NULL && reloptions) {
+            StdRdOptions* options = (StdRdOptions*)default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
+            SetupPageCompressForPartition(&part->pd_node, &options->compress, PartitionGetPartitionName(part));
+        }
     }
 
     if (storage_type == SEGMENT_PAGE) {

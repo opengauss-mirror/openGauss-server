@@ -59,6 +59,7 @@ typedef void (*relasexlogreadstate)(void* record);
 #define XLogBlockHeadGetForkNum(blockhead) ((blockhead)->forknum)
 #define XLogBlockHeadGetBlockNum(blockhead) ((blockhead)->blkno)
 #define XLogBlockHeadGetBucketId(blockhead) ((blockhead)->bucketNode)
+#define XLogBlockHeadGetCompressOpt(blockhead) ((blockhead)->opt)
 #define XLogBlockHeadGetValidInfo(blockhead) ((blockhead)->block_valid)
 #define XLogBlockHeadGetPhysicalBlock(blockhead) ((blockhead)->pblk)
 /* for common blockhead end  */
@@ -492,7 +493,8 @@ typedef struct {
     TransactionId xl_xid; /* xact id */
     Oid spcNode;          /* tablespace */
     Oid dbNode;           /* database */
-    int4 bucketNode;      /* bucket   */
+    int2 bucketNode; /* bucket   */
+    uint2 opt;
     XLogPhyBlock pblk;
 } XLogBlockHead;
 

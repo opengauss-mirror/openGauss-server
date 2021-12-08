@@ -114,6 +114,7 @@ bool gs_memory_enjection(void)
 }
 #endif
 
+
 /*
  * check if the node is on heavy memory status now?
  * is strict is true, we'll do some pre-judgement.
@@ -905,6 +906,36 @@ int MemoryProtectFunctions::gs_posix_memalign(void** memptr, Size alignment, Siz
     gs_memprot_failed<true>(sz, mem_type);
 
     return ENOMEM; /* insufficient memory */
+}
+
+/**
+ * reseve memory for mmap of compressed table
+ * @tparam mem_type MEM_SHRD is supported only
+ * @param sz reserved size(bytes)
+ * @param needProtect
+ * @return success or not
+ */
+template <MemType type>
+bool MemoryProtectFunctions::gs_memprot_reserve(Size sz, bool needProtect)
+{
+    if (type != MEM_SHRD) {
+        return false;
+    }
+    return memTracker_ReserveMem<type>(sz, needProtect);
+}
+
+/**
+ * release the momery allocated by gs_memprot_reserve
+ * @tparam type MEM_SHRD is supported only
+ * @param sz free size(bytes)
+ */
+template <MemType type>
+void MemoryProtectFunctions::gs_memprot_release(Size sz)
+{
+    if (type != MEM_SHRD) {
+        return;
+    }
+    memTracker_ReleaseMem<type>(sz);
 }
 
 /* thread level initialization */

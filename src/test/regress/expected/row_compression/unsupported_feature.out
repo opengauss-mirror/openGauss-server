@@ -1,0 +1,66 @@
+create schema unspported_feature;
+-- unspport compressType: 3
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compresstype=3, compress_chunk_size=1024);
+ERROR:  value 3 out of bounds for option "compresstype"
+DETAIL:  Valid values are between "0" and "2".
+-- unspport compress_chunk_size: 2000
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=2000);
+ERROR:  invalid compress_chunk_size 2000 , must be one of 512, 1024, 2048 or 4096 for compressed_table_1024
+-- unspport compress_prealloc_chunks: -1
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_prealloc_chunks=-1);
+ERROR:  value -1 out of bounds for option "compress_prealloc_chunks"
+DETAIL:  Valid values are between "0" and "7".
+-- unspport compress_prealloc_chunks: 8
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_prealloc_chunks=8);
+ERROR:  value 8 out of bounds for option "compress_prealloc_chunks"
+DETAIL:  Valid values are between "0" and "7".
+-- unspport compress_level: 128
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compresstype=2, compress_level=128);
+ERROR:  value 128 out of bounds for option "compress_level"
+DETAIL:  Valid values are between "-31" and "31".
+-- compresstype cant be used with column table
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(ORIENTATION = 'column', compresstype=2);
+ERROR:  only row orientation table support compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.
+-- compresstype cant be used with temp table
+CREATE TEMP TABLE compressed_temp_table_1024(id int) WITH(compresstype=2);
+ERROR:  only row orientation table support compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.
+-- compresstype cant be used with unlogged table
+CREATE unlogged TABLE compressed_unlogged_table_1024(id int) WITH(compresstype=2);
+ERROR:  only row orientation table support compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.
+-- use compress_prealloc_chunks\compress_chunk_size\compress_level without compresstype
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_prealloc_chunks=5);
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level should be used with compresstype.
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_chunk_size=1024);
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level should be used with compresstype.
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_level=5);
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level should be used with compresstype.
+-- unspport exchange
+CREATE TABLE unspported_feature.exchange_table(id int) WITH(compresstype=2);
+CREATE TABLE unspported_feature.alter_table(id int) partition by range(id)
+(
+    partition p0 values less than(5000),
+    partition p1 values less than(10000),
+    partition p2 values less than(20000),
+    partition p3 values less than(30000),
+    partition p4 values less than(40000),
+    partition p5 values less than(50000),
+    partition p6 values less than(60000),
+    partition p7 values less than(70000)
+);
+ALTER TABLE unspported_feature.alter_table EXCHANGE PARTITION FOR(2500) WITH TABLE unspported_feature.exchange_table;
+ERROR:  tables in ALTER TABLE EXCHANGE PARTITION must have the same type of compress
+-- unspport alter compress_chunk_size
+create TABLE unspported_feature.alter_table_option(id int) WITH(compresstype=2);
+\d+ unspported_feature.alter_table_option
+            Table "unspported_feature.alter_table_option"
+ Column |  Type   | Modifiers | Storage | Stats target | Description 
+--------+---------+-----------+---------+--------------+-------------
+ id     | integer |           | plain   |              | 
+Has OIDs: no
+Options: orientation=row, compresstype=2
+
+ALTER TABLE unspported_feature.alter_table_option SET(compresstype=0); -- fail
+ERROR:  change compresstype OPTION is not supported
+ALTER TABLE unspported_feature.alter_table_option SET(compress_chunk_size=2048); -- fail
+ERROR:  change compress_chunk_size OPTION is not supported
+ALTER TABLE unspported_feature.alter_table_option SET(compress_level=2, compress_prealloc_chunks=0);

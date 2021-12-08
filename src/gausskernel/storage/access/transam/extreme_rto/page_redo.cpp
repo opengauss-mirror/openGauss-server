@@ -1364,6 +1364,7 @@ void RedoPageWorkerRedoBcmBlock(XLogRecParseState *procState)
         node.dbNode = procState->blockparse.blockhead.dbNode;
         node.relNode = procState->blockparse.blockhead.relNode;
         node.bucketNode = procState->blockparse.blockhead.bucketNode;
+        node.opt = procState->blockparse.blockhead.opt;
         XLogBlockNewCuParse *newCuParse = &(procState->blockparse.extra_rec.blocknewcu);
         uint8 info = XLogBlockHeadGetInfo(&procState->blockparse.blockhead) & ~XLR_INFO_MASK;
         switch (info & XLOG_HEAP_OPMASK) {

@@ -79,12 +79,14 @@ extern Relation heap_create(const char *relname,
                                 bool mapped_relation,
                                 bool allow_system_table_mods,
                                 int8 row_compress,
+                                Datum reloptions,
                                 Oid ownerid,
                                 bool skip_create_storage,
                                 TableAmType tam_type,
                                 int8 relindexsplit = 0,
                                 StorageType storage_type = HEAP_DISK,
-                                bool newcbi = false);
+                                bool newcbi = false,
+                                Oid accessMethodObjectId = 0);
 
 extern bool heap_is_matview_init_state(Relation rel);
 
@@ -97,7 +99,9 @@ heapCreatePartition(const char* part_name,
                           Oid bucketOid,
                           Oid ownerid,
                           StorageType storage_type,
-                          bool newcbi = false);
+                          bool newcbi = false,
+                          Datum reloptions = Datum(0));
+
 
 extern Oid heap_create_with_catalog(const char *relname,
                          Oid relnamespace,
@@ -119,7 +123,7 @@ extern Oid heap_create_with_catalog(const char *relname,
 						 bool use_user_acl,
 						 bool allow_system_table_mods,
 						 PartitionState *partTableState,
-						 int8 row_compress,					 
+						 int8 row_compress,
 						 HashBucketInfo *bucketinfo,
 						 bool record_dependce = true,
 						 List* ceLst = NULL,
@@ -192,7 +196,7 @@ extern void CheckAttributeType(const char *attname, Oid atttypid, Oid attcollati
 #ifdef PGXC
 /* Functions related to distribution data of relations */
 extern void AddRelationDistribution(const char *relname, Oid relid, DistributeBy *distributeby, 
-	PGXCSubCluster *subcluster, List *parentOids, TupleDesc descriptor, bool isinstallationgroup, 
+	PGXCSubCluster *subcluster, List *parentOids, TupleDesc descriptor, bool isinstallationgroup,
         bool isbucket = false, int bucketmaplen = 0);
 extern void GetRelationDistributionItems(Oid relid, DistributeBy *distributeby, TupleDesc descriptor, char *locatortype,
     int *hashalgorithm, int *hashbuckets, AttrNumber *attnum);

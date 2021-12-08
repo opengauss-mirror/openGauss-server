@@ -33,7 +33,7 @@
 extern int RemoteGetCU(char* remote_address, uint32 spcnode, uint32 dbnode, uint32 relnode, int32 colid,
     uint64 offset, int32 size, uint64 lsn, char* cu_data);
 
-extern int RemoteGetPage(char* remote_address, uint32 spcnode, uint32 dbnode, uint32 relnode, int4 bucketnode,
+extern int RemoteGetPage(char* remote_address, uint32 spcnode, uint32 dbnode, uint32 relnode, int2 bucketnode, uint2 opt,
     int32 forknum, uint32 blocknum, uint32 blocksize, uint64 lsn, char* page_data);
 
 #endif /* REMOTE_READ_CLIENT_H */

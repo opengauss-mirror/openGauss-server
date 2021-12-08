@@ -8,8 +8,6 @@ drop table if exists test_trigger_src_tbl;
 NOTICE:  table "test_trigger_src_tbl" does not exist, skipping
 drop package if exists trigger_test;
 NOTICE:  package trigger_test() does not exist, skipping
-drop table if exists test1;
-NOTICE:  table "test1" does not exist, skipping
 drop table if exists dams_ci.test1;
 ERROR:  schema "dams_ci" does not exist
 drop table if exists dams_ci.DB_LOG;

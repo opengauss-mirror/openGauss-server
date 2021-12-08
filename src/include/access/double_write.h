@@ -31,7 +31,8 @@
 
 typedef enum BufTagVer {
     ORIGIN_TAG = 0,
-    HASHBUCKET_TAG
+    HASHBUCKET_TAG,
+    PAGE_COMPRESS_TAG
 } BufTagVer;
 
 typedef struct st_dw_batch {

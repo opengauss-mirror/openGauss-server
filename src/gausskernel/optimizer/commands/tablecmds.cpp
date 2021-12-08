@@ -120,6 +120,7 @@
 #include "storage/freespace.h"
 #include "storage/lmgr.h"
 #include "storage/lock/lock.h"
+#include "storage/page_compression.h"
 #include "storage/predicate.h"
 #include "storage/remote_read.h"
 #include "storage/smgr/segment.h"
@@ -1046,10 +1047,10 @@ static bool isOrientationSet(List* options, bool* isCUFormat, bool isDfsTbl)
  * @Param [IN] relkind: table's kind(ordinary table or other database object).
  * @return: option with defalut options.
  */
-static List* AddDefaultOptionsIfNeed(List* options, const char relkind, int8 relcmprs, Oid relnamespace)
+static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateStmt* stmt, Oid relnamespace)
 {
     List* res = options;
-
+    int8 relcmprs = stmt->row_compress;
     ListCell* cell = NULL;
     bool isCStore = false;
     bool isTsStore = false;
@@ -1058,6 +1059,10 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, int8 rel
     bool isUstore = false;
     bool assignedStorageType = false;
 
+    bool hasRowCompressType = false;
+    bool hasRowCompressChunk = false;
+    bool hasRowCompressPre = false;
+    bool hasRowCompressLevel = false;
     (void)isOrientationSet(options, NULL, false);
     foreach (cell, options) {
         DefElem* def = (DefElem*)lfirst(cell);
@@ -1087,6 +1092,14 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, int8 rel
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("It is not allowed to assign version option for non-dfs table.")));
+        } else if (pg_strcasecmp(def->defname, "compresstype") == 0) {
+            hasRowCompressType = true;
+        } else if (pg_strcasecmp(def->defname, "compress_chunk_size") == 0) {
+            hasRowCompressChunk = true;
+        } else if (pg_strcasecmp(def->defname, "compress_prealloc_chunks") == 0) {
+            hasRowCompressPre = true;
+        } else if (pg_strcasecmp(def->defname, "compress_level") == 0) {
+            hasRowCompressLevel = true;
         }
 
         if (pg_strcasecmp(def->defname, "orientation") == 0 && pg_strcasecmp(defGetString(def), ORIENTATION_ORC) == 0) {
@@ -1110,6 +1123,25 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, int8 rel
     if (isCStore && !hasCompression) {
         DefElem* def = makeDefElem("compression", (Node*)makeString(COMPRESSION_LOW));
         res = lappend(options, def);
+    }
+
+
+    if ((isCStore || isTsStore || relkind != RELKIND_RELATION ||
+         stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
+         stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
+         stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) &&
+        (hasRowCompressType || hasRowCompressChunk || hasRowCompressPre || hasRowCompressLevel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPTION),
+                errmsg("only row orientation table support "
+                       "compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.")));
+    }
+    if (!hasRowCompressType && (hasRowCompressChunk || hasRowCompressPre || hasRowCompressLevel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_OPTION),
+                errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level "
+                       "should be used with compresstype.")));
+
     }
 
     if (isUstore && !isCStore && !hasCompression) {
@@ -1147,7 +1179,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, int8 rel
                 DefElem *def1 = makeDefElem("orientation", (Node *)makeString(ORIENTATION_ROW));
                 res = lcons(def1, options);
             }
-            if (!hasCompression) {
+            if (!hasCompression  && !hasRowCompressType) {
                 DefElem *def2 = makeDefElem("compression", (Node *)rowCmprOpt);
                 res = lappend(options, def2);
             }
@@ -1986,7 +2018,7 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
     /* Add default options for relation if need. */
     if (!dfsTablespace) {
         if (!u_sess->attr.attr_common.IsInplaceUpgrade) {
-            stmt->options = AddDefaultOptionsIfNeed(stmt->options, relkind, stmt->row_compress, namespaceId);
+            stmt->options = AddDefaultOptionsIfNeed(stmt->options, relkind, stmt, namespaceId);
         }
     } else {
         checkObjectCreatedinHDFSTblspc(stmt, relkind);
@@ -2221,10 +2253,13 @@ Oid DefineRelation(CreateStmt* stmt, char relkind, Oid ownerId, bool isCTAS)
                 ereport(LOG, (errmodule(MOD_TIMESERIES), errmsg("use implicit distribution column method.")));
             }
         } else if (pg_strcasecmp(storeChar, TABLE_ACCESS_METHOD_USTORE) == 0) {
-            if (pg_strcasecmp(COMPRESSION_NO, StdRdOptionsGetStringData(std_opt, compression, COMPRESSION_NO)) != 0 ||
+            auto compression = StdRdOptionsGetStringData(std_opt, compression, COMPRESSION_NO);
+            auto orientation = StdRdOptionsGetStringData(std_opt, orientation, ORIENTATION_ROW);
+            if ((pg_strcasecmp(COMPRESSION_NO, compression) != 0 &&
+                 pg_strcasecmp(ORIENTATION_COLUMN, orientation) == 0) ||
                 IsCompressedByCmprsInPgclass((RelCompressType)stmt->row_compress)) {
                 ereport(ERROR,
-                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support compression.")));
+                        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("UStore tables do not support compression.")));
             }
             ForbidToSetOptionsForRowTbl(stmt->options);
             ForbidToSetOptionsForUstoreTbl(stmt->options);
@@ -14160,6 +14195,50 @@ static void ATExecSetRelOptionsToast(Oid toastid, List* defList, AlterTableType 
     heap_close(pgclass, RowExclusiveLock);
 }
 
+/**
+ * Do not modify compression parameters.
+ */
+void static CheckSupportModifyCompression(Relation rel, bytea* relOoption)
+{
+    if (!relOoption || !REL_SUPPORT_COMPRESSED(rel)) {
+        return;
+    }
+    PageCompressOpts* newCompressOpt = &(((StdRdOptions*)relOoption)->compress);
+    RelFileCompressOption current;
+    TransCompressOptions(rel->rd_node, &current);
+    if (newCompressOpt) {
+        int1 algorithm = newCompressOpt->compressType;
+        if (algorithm != current.compressAlgorithm) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("change compresstype OPTION is not supported")));
+        }
+        if (current.compressAlgorithm != COMPRESS_TYPE_NONE &&
+            newCompressOpt->compressChunkSize != CHUNK_SIZE_LIST[current.compressChunkSize]) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("change compress_chunk_size OPTION is not supported")));
+        }
+    } else {
+        if (current.compressAlgorithm != COMPRESS_TYPE_NONE) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("change compresstype OPTION is not supported")));
+        }
+    }
+
+    /*
+     * forbid modify partition CompressOption
+     */
+    if (HEAP_IS_PARTITIONED(rel)) {
+        if ((int)current.compressLevel != newCompressOpt->compressLevel) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("change partition compressLevel OPTION is not supported")));
+        }
+        if ((int)current.compressPreallocChunks != newCompressOpt->compressPreallocChunks) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("change partition compress_prealloc_chunks OPTION is not supported")));
+        }
+    }
+}
+
 /*
  * Set, reset, or replace reloptions.
  */
@@ -14297,6 +14376,7 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
     }
 
     /* Validate */
+    bytea* relOpt = NULL;
     switch (rel->rd_rel->relkind) {
         case RELKIND_RELATION: {
             /* this options only can be used when define a new relation.
@@ -14305,6 +14385,7 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
             ForbidUserToSetDefinedOptions(defList);
 
             bytea* heapRelOpt = heap_reloptions(rel->rd_rel->relkind, newOptions, true);
+            relOpt = heapRelOpt;
             const char* algo = RelationGetAlgo(rel);
             if (RelationIsColStore(rel)) {
                 /* un-supported options. dont care its values */
@@ -14338,17 +14419,20 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
             break;
         }
         case RELKIND_INDEX:
-        case RELKIND_GLOBAL_INDEX:
+        case RELKIND_GLOBAL_INDEX: {
             ForbidUserToSetDefinedIndexOptions(defList);
-            (void)index_reloptions(rel->rd_am->amoptions, newOptions, true);
+            relOpt = index_reloptions(rel->rd_am->amoptions, newOptions, true);
             break;
+        }
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("\"%s\" is not a table, view, materialized view, index, or TOAST table", RelationGetRelationName(rel))));
             break;
     }
-
+    
+    CheckSupportModifyCompression(rel, relOpt);
+    
     /*
      * All we need do here is update the pg_class row; the new options will be
      * propagated into relcaches during post-commit cache inval.
@@ -21062,6 +21146,11 @@ static void checkCompressForExchange(Relation partTableRel, Relation ordTableRel
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("tables in ALTER TABLE EXCHANGE PARTITION must have the same type of compress")));
     }
+    if (partTableRel->rd_node.opt != ordTableRel->rd_node.opt) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("tables in ALTER TABLE EXCHANGE PARTITION must have the same type of compress")));
+    }
 }
 
 // Description : Check number, type of column
@@ -22705,9 +22794,16 @@ static char* GenTemporaryPartitionName(Relation partTableRel, int sequence)
     return pstrdup(tmpName);
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
 static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *partDef, Oid bucketOid,
     bool *isTimestamptz, StorageType stype, Datum new_reloptions)
 {
+#else
+static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *partDef,
+    Oid bucketOid, bool *isTimestamptz, StorageType stype)
+{
+    Datum new_reloptions = (Datum)0;
+#endif
     Oid newPartOid = InvalidOid;
     switch (nodeTag(partDef)) {
         case T_RangePartitionDefState:
@@ -22729,7 +22825,7 @@ static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *p
                 bucketOid,
                 (ListPartitionDefState *)partDef,
                 partTableRel->rd_rel->relowner,
-                (Datum)0,
+                new_reloptions,
                 isTimestamptz,
                 stype);
             break;
@@ -22740,7 +22836,7 @@ static Oid GetNewPartitionOid(Relation pgPartRel, Relation partTableRel, Node *p
                 bucketOid,
                 (HashPartitionDefState *)partDef,
                 partTableRel->rd_rel->relowner,
-                (Datum)0,
+                new_reloptions,
                 isTimestamptz,
                 stype);
             break;
@@ -22793,8 +22889,13 @@ static Oid AddTemporaryPartition(Relation partTableRel, Node* partDef)
     }
 
     /* Temporary tables do not use segment-page */
+#ifndef ENABLE_MULTIPLE_NODES
     newPartOid = GetNewPartitionOid(pgPartRel, partTableRel, partDef, bucketOid,
         isTimestamptz, RelationGetStorageType(partTableRel), new_reloptions);
+#else
+    newPartOid = GetNewPartitionOid(
+        pgPartRel, partTableRel, partDef, bucketOid, isTimestamptz, RelationGetStorageType(partTableRel));
+#endif
 
     // We must bump the command counter to make the newly-created
     // partition tuple visible for opening.
@@ -23054,7 +23155,7 @@ static void fastAddPartition(Relation partTableRel, List* destPartDefList, List*
     bucketOid = RelationGetBucketOid(partTableRel);
 
     pgPartRel = relation_open(PartitionRelationId, RowExclusiveLock);
-
+#ifndef ENABLE_MULTIPLE_NODES
     bool isNull = false;
     HeapTuple tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(partTableRel->rd_id));
     Datum relOptions = SysCacheGetAttr(RELOID, tuple, Anum_pg_class_reloptions, &isNull);
@@ -23062,6 +23163,7 @@ static void fastAddPartition(Relation partTableRel, List* destPartDefList, List*
     Datum newRelOptions = transformRelOptions((Datum)0, oldRelOptions, NULL, NULL, false, false);
     ReleaseSysCache(tuple);
     list_free_ext(oldRelOptions);
+#endif
 
     foreach (cell, destPartDefList) {
         RangePartitionDefState* partDef = (RangePartitionDefState*)lfirst(cell);
@@ -23072,7 +23174,11 @@ static void fastAddPartition(Relation partTableRel, List* destPartDefList, List*
             bucketOid,
             partDef,
             partTableRel->rd_rel->relowner,
+#ifndef ENABLE_MULTIPLE_NODES
             (Datum)newRelOptions,
+#else
+            (Datum)0,
+#endif
             isTimestamptz,
             RelationGetStorageType(partTableRel),
             AccessExclusiveLock);

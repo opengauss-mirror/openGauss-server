@@ -45,6 +45,9 @@ typedef int ForkNumber;
 #define VISIBILITYMAP_FORKNUM 2
 #define BCM_FORKNUM 3
 #define INIT_FORKNUM 4
+// used for data file cache, you can modify than as you like
+#define PCA_FORKNUM 5
+#define PCD_FORKNUM 6
 
 /*
  * NOTE: if you add a new fork, change MAX_FORKNUM below and update the
@@ -97,8 +100,17 @@ typedef struct RelFileNode {
     Oid spcNode; /* tablespace */
     Oid dbNode;  /* database */
     Oid relNode; /* relation */
-    int4 bucketNode; /* bucketid */
+    int2 bucketNode; /* bucketid */
+    uint2 opt;
 } RelFileNode;
+
+typedef struct RelFileNodeV2 {
+    Oid spcNode; /* tablespace */
+    Oid dbNode;  /* database */
+    Oid relNode; /* relation */
+    int4 bucketNode; /* bucketid */
+} RelFileNodeV2;
+
 
 #define IsSegmentFileNode(rnode) ((rnode).bucketNode > InvalidBktId)
 #define IsHeapFileNode(rnode)  (!IsSegmentFileNode(rnode))
@@ -129,6 +141,14 @@ typedef struct RelFileNodeOld
         (relFileNode).relNode = (relFileNodeRel).relNode; \
         (relFileNode).bucketNode = (bucketid); \
     } while(0)
+
+#define RelFileNodeV2Copy(relFileNodeV2, relFileNode)          \
+    do {                                                       \
+        (relFileNodeV2).spcNode = (relFileNode).spcNode;       \
+        (relFileNodeV2).dbNode = (relFileNode).dbNode;         \
+        (relFileNodeV2).relNode = (relFileNode).relNode;       \
+        (relFileNodeV2).bucketNode = (relFileNode).bucketNode; \
+    } while (0)
 
 /*This struct used for remove duplicated file list where we scan part of BCM files*/
 typedef struct RelFileNodeKey {

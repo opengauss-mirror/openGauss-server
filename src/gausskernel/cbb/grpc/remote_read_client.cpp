@@ -183,6 +183,8 @@ int RemoteGetCU(char* remoteAddress, uint32 spcnode, uint32 dbnode, uint32 relno
  * @IN spcnode: tablespace id
  * @IN dbnode: database id
  * @IN relnode: relfilenode
+ * @IN bucketnode: bucketnode
+ * @IN opt: compressed table options
  * @IN/OUT forknum: forknum
  * @IN/OUT blocknum: block number
  * @IN/OUT blocksize: block size
@@ -190,7 +192,7 @@ int RemoteGetCU(char* remoteAddress, uint32 spcnode, uint32 dbnode, uint32 relno
  * @IN/OUT page_data: pointer of page data
  * @Return: remote read error code
  */
-extern int RemoteGetPage(char* remoteAddress, uint32 spcnode, uint32 dbnode, uint32 relnode, int4 bucketnode,
+int RemoteGetPage(char* remoteAddress, uint32 spcnode, uint32 dbnode, uint32 relnode, int2 bucketnode, uint2 opt,
     int32 forknum, uint32 blocknum, uint32 blocksize, uint64 lsn, char* pageData)
 {
     PGconn* conGet = NULL;
@@ -244,8 +246,9 @@ extern int RemoteGetPage(char* remoteAddress, uint32 spcnode, uint32 dbnode, uin
     }
 
     tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
-        "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, '%lu', %u, '%lu', false);",
-        spcnode, dbnode, relnode, bucketnode, forknum, blocknum, blocksize, lsn);
+                       "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %u, '%lu', false);", spcnode,
+                       dbnode, relnode, bucketnode, opt, forknum, blocknum, blocksize, lsn);
+
     securec_check_ss(tnRet, "", "");
 
     res = PQexecParams(conGet, (const char*)sqlCommands, 0, NULL, NULL, NULL, NULL, 1);

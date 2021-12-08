@@ -2743,6 +2743,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4764 | ubtoptions
  4765 | ubtcostestimate
  4767 | gs_read_block_from_remote
+ 4768 | gs_read_block_from_remote
  4789 | remote_rto_stat
  4800 | job_cancel
  4801 | job_finish
@@ -2939,6 +2940,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  7998 | set_working_grand_version_num_manually
  8001 | get_paxos_replication_info
  8050 | datalength
+ 8413 | pg_read_binary_file_blocks
  8642 | gs_txid_oldestxmin
  9004 | smalldatetime_in
  9006 | smalldatetime_out

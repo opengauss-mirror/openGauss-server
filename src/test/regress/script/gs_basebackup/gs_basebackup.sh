@@ -2,8 +2,9 @@ abs_bindir=$1
 abs_srcdir=$2
 abs_port=$3
 dataNode=$4
-x_option=${5-}
-format=${6-}
+validate_sql=$5
+x_option=${6-}
+format=${7-}
 # backup 
 if [ 'x'${x_option} == 'x' ]
 then
@@ -54,8 +55,7 @@ sleep 10s
 $abs_bindir/gs_ctl status -D $abs_bindir/../$dataNode
 
 #validate
-$abs_bindir/gsql -dgs_basebackup -p$gs_basebackup_port -f "$abs_srcdir/sql/gs_basebackup/validate/tablespace.sql";
-$abs_bindir/gsql -dgs_basebackup -p$gs_basebackup_port -f "$abs_srcdir/sql/gs_basebackup/validate/mot.sql";
+$abs_bindir/gsql -dgs_basebackup -p$gs_basebackup_port -f "$abs_srcdir/sql/gs_basebackup/validate/$validate_sql";
 
 
 #stop node

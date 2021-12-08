@@ -1389,6 +1389,7 @@ static void UHeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
                 rnode.dbNode = blockhead->dbNode;
                 rnode.relNode = blockhead->relNode;
                 rnode.bucketNode = blockhead->bucketNode;
+                rnode.opt = blockhead->opt;
                 XLogRecordPageWithFreeSpace(rnode, bufferinfo->blockinfo.blkno, freespace);
             }
         } else {

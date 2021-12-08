@@ -37,7 +37,7 @@
 extern int StandbyReadCUforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int32 colid, uint64 offset,
     int32 size, uint64 lsn, bytea** cudata);
 
-extern int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int16 bucketnode, int32 forknum, uint32 blocknum,
+extern int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int16 bucketnode, uint16 opt, int32 forknum, uint32 blocknum,
     uint32 blocksize, uint64 lsn, bytea** pagedata);
 
 #endif /* REMOTE_ADAPTER_H */

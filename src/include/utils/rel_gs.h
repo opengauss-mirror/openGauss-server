@@ -636,6 +636,11 @@ extern void PartitionDecrementReferenceCount(Partition part);
     ((PARTTYPE_VALUE_PARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
         (RELKIND_RELATION == (relation)->rd_rel->relkind))
 
+#define HEAP_IS_PARTITIONED(relation)                                         \
+    ((PARTTYPE_PARTITIONED_RELATION == (relation)->rd_rel->parttype ||        \
+      PARTTYPE_VALUE_PARTITIONED_RELATION == (relation)->rd_rel->parttype) && \
+     (RELKIND_RELATION == (relation)->rd_rel->relkind || RELKIND_INDEX == (relation)->rd_rel->relkind))
+
 /*  
  *   type  bucketOid     bucketKey     meaning
  *    N      INV           INV         relation has no bucket
