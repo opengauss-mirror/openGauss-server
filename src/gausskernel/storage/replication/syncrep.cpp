@@ -256,6 +256,22 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN)
             break;
 
         /*
+         * This loop cannot detect that the archive thread receives the SIGUSR2 signal.
+         * Therefore, special processing is performed for the archive thread.
+         * 
+         * In the archiving thread process, if the SIGUSR2 signal is received,
+         * the archiving thread is about to be released. 
+         * In this case, the archiving thread sets its thread variable ready_to_stop to true.
+         * Therefore, if ready_to_stop is set to true, the loop should be exited.
+         */
+        if (t_thrd.role == ARCH && t_thrd.arch.ready_to_stop) {
+            ereport(WARNING, (errmsg("the archiver should be quitting.")));
+            if (SyncRepCancelWait()) {
+                break;
+            }
+        }
+
+        /*
          * If a wait for synchronous replication is pending, we can neither
          * acknowledge the commit nor raise ERROR or FATAL.  The latter would
          * lead the client to believe that the transaction aborted, which
