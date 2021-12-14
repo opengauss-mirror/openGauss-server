@@ -430,6 +430,15 @@ static void pgarch_MainLoop(void)
                 if (time_to_stop) {
                     continue;
                 }
+
+                /* 
+                 * cannot send archive task if we don't acquire an archive slot.
+                 */
+                if (t_thrd.slot_cxt.MyReplicationSlot == NULL) {
+                    ereport(LOG, (errmsg("there is no slot to flush, exit the archvier")));
+                    break;
+                }
+
                 gettimeofday(&curtime, NULL);
                 const long time_diff = TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
                 XLogRecPtr receivePtr;
