@@ -430,6 +430,29 @@ extern void ExplainNodeFinish(PlanState* result_plan, PlannedStmt* pstmt, Timest
 extern void ExecCopyDataFromDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* target_cursor);
 extern void ExecCopyDataToDatum(PLpgSQL_datum** datums, int dno, Cursor_Data* target_cursor);
 
+/*
+ * prototypes from functions in execReplication.cpp
+ */
+/* Record the fake relation for heap and index */
+typedef struct FakeRelationPartition {
+    Relation partRel;
+    Partition part;
+    List *partList;
+    Oid partOid;
+    bool needRleaseDummyRel;
+} FakeRelationPartition;
+
+extern bool RelationFindReplTuple(EState *estate, Relation rel, Oid idxoid, LockTupleMode lockmode, TupleTableSlot *searchslot,
+    TupleTableSlot *outslot, FakeRelationPartition *fakeRelInfo);
+
+extern void ExecSimpleRelationInsert(EState *estate, TupleTableSlot *slot, FakeRelationPartition *relAndPart);
+extern void ExecSimpleRelationUpdate(EState *estate, EPQState *epqstate, TupleTableSlot *searchslot,
+    TupleTableSlot *slot, FakeRelationPartition *relAndPart);
+extern void ExecSimpleRelationDelete(EState *estate, EPQState *epqstate, TupleTableSlot *searchslot,
+    FakeRelationPartition *relAndPart);
+extern void CheckCmdReplicaIdentity(Relation rel, CmdType cmd);
+extern void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeRelationPartition *relAndPart);
+
 // AutoMutexLock
 //		Auto object for non-recursive pthread_mutex_t lock
 //

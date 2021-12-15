@@ -1,0 +1,218 @@
+--
+-- SUBSCRIPTION
+--
+--- prepare
+CREATE ROLE regress_subscription_user LOGIN SYSADMIN PASSWORD 'Abcdef@123';
+SET SESSION AUTHORIZATION 'regress_subscription_user' PASSWORD 'Abcdef@123';
+DROP SUBSCRIPTION IF EXISTS testsub;
+NOTICE:  subscription "testsub" does not exist, skipping
+--- create subscription
+-- fail - syntax error, no publications
+CREATE SUBSCRIPTION testsub CONNECTION 'foo';
+ERROR:  syntax error at or near ";"
+LINE 1: CREATE SUBSCRIPTION testsub CONNECTION 'foo';
+                                                    ^
+-- fail - syntax error, no connection
+CREATE SUBSCRIPTION testsub PUBLICATION foo;
+ERROR:  syntax error at or near "PUBLICATION"
+LINE 1: CREATE SUBSCRIPTION testsub PUBLICATION foo;
+                                    ^
+-- fail - could not connect to the publisher
+create subscription testsub2 connection 'host=abc' publication pub;
+WARNING:  apply worker could not connect to the remote server : could not translate host name "abc" to address: Name or service not known
+
+ERROR:  could not connect to the publisher
+set client_min_messages to error;
+-- fail - syntax error, invalid connection string syntax: missing "="
+CREATE SUBSCRIPTION testsub CONNECTION 'testconn' PUBLICATION testpub;
+ERROR:  invalid connection string syntax: missing "=" after "testconn" in connection info string
+
+-- fail - unrecognized subscription parameter: create_slot
+CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (create_slot=false);
+ERROR:  unrecognized subscription parameter: create_slot
+CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
+reset client_min_messages;
+select subname, pg_get_userbyid(subowner) as Owner, subenabled, subconninfo, subpublications from pg_subscription where subname='testsub';
+ subname |           owner           | subenabled |     subconninfo      | subpublications 
+---------+---------------------------+------------+----------------------+-----------------
+ testsub | regress_subscription_user | f          | dbname=doesnotexist  | {testpub}
+(1 row)
+
+--- alter subscription
+------ set publication
+ALTER SUBSCRIPTION testsub SET PUBLICATION testpub2, testpub3;
+select subname, subenabled, subpublications from pg_subscription  where subname='testsub';
+ subname | subenabled |   subpublications   
+---------+------------+---------------------
+ testsub | f          | {testpub2,testpub3}
+(1 row)
+
+------ modify conninfo
+ALTER SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist2';
+select subname, subenabled, subconninfo from pg_subscription  where subname='testsub';
+ subname | subenabled |      subconninfo      
+---------+------------+-----------------------
+ testsub | f          | dbname=doesnotexist2 
+(1 row)
+
+ALTER SUBSCRIPTION testsub SET (conninfo='dbname=doesnotexist3');
+select subname, subenabled, subconninfo from pg_subscription  where subname='testsub';
+ subname | subenabled |      subconninfo      
+---------+------------+-----------------------
+ testsub | f          | dbname=doesnotexist3 
+(1 row)
+
+------ modify synchronous_commit
+ALTER SUBSCRIPTION testsub SET (synchronous_commit=on);
+select subname, subenabled, subsynccommit from pg_subscription  where subname='testsub';
+ subname | subenabled | subsynccommit 
+---------+------------+---------------
+ testsub | f          | on
+(1 row)
+
+------ modify slot_name to non-null value
+------ fail - Currently enabled=false, cannot change slot_name to a non-null value.
+ALTER SUBSCRIPTION testsub SET (slot_name='testsub');
+ERROR:  Currently enabled=false, cannot change slot_name to a non-null value.
+--- inside a transaction block
+------ CREATE SUBSCRIPTION ... WITH (enabled = true)
+------ fail - ERROR:  CREATE SUBSCRIPTION ... WITH (enabled = true) cannot run inside a transaction block
+BEGIN;
+CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (ENABLED=true);
+ERROR:  CREATE SUBSCRIPTION ... WITH (enabled = true) cannot run inside a transaction block
+COMMIT;
+-- -- active SUBSCRIPTION
+BEGIN;
+ALTER SUBSCRIPTION testsub ENABLE;
+WARNING:  apply worker could not connect to the remote server : connect to server failed: No such file or directory
+
+ERROR:  could not connect to the publisher
+select subname, subenabled from pg_subscription  where subname='testsub';
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ALTER SUBSCRIPTION testsub SET (ENABLED=false);
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+select subname, subenabled from pg_subscription  where subname='testsub';
+ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+COMMIT;
+--- drop subscription
+DROP SUBSCRIPTION IF EXISTS testsub;
+--- cleanup
+RESET SESSION AUTHORIZATION;
+DROP ROLE regress_subscription_user;
+-- built-in function test
+select pg_replication_origin_create('origin_test');
+ pg_replication_origin_create 
+------------------------------
+                            1
+(1 row)
+
+select pg_replication_origin_oid('origin_test');
+ pg_replication_origin_oid 
+---------------------------
+                         1
+(1 row)
+
+select * from pg_replication_origin_status;
+ local_id | external_id | remote_lsn | local_lsn 
+----------+-------------+------------+-----------
+(0 rows)
+
+select pg_replication_origin_session_is_setup();
+ pg_replication_origin_session_is_setup 
+----------------------------------------
+ f
+(1 row)
+
+select pg_replication_origin_session_setup('origin_test');
+ pg_replication_origin_session_setup 
+-------------------------------------
+ 
+(1 row)
+
+select pg_replication_origin_session_is_setup();
+ pg_replication_origin_session_is_setup 
+----------------------------------------
+ t
+(1 row)
+
+create table t_origin_test(a int);
+begin;
+insert into t_origin_test values(1);
+select pg_replication_origin_xact_setup('1/12345678', now());
+ pg_replication_origin_xact_setup 
+----------------------------------
+ 
+(1 row)
+
+commit;
+select local_id,external_id,remote_lsn from pg_replication_origin_status;
+ local_id | external_id | remote_lsn 
+----------+-------------+------------
+        1 | origin_test | 1/12345678
+(1 row)
+
+select * from pg_replication_origin_progress('origin_test', false);
+ pg_replication_origin_progress 
+--------------------------------
+ 1/12345678
+(1 row)
+
+select * from pg_replication_origin_session_progress(false);
+ pg_replication_origin_session_progress 
+----------------------------------------
+ 1/12345678
+(1 row)
+
+select local_id,external_id,remote_lsn from pg_show_replication_origin_status();
+ local_id | external_id | remote_lsn 
+----------+-------------+------------
+        1 | origin_test | 1/12345678
+(1 row)
+
+select pg_replication_origin_session_reset();
+ pg_replication_origin_session_reset 
+-------------------------------------
+ 
+(1 row)
+
+select pg_replication_origin_advance('origin_test', '1/87654321');
+ pg_replication_origin_advance 
+-------------------------------
+ 
+(1 row)
+
+select pg_replication_origin_session_setup('origin_test');
+ pg_replication_origin_session_setup 
+-------------------------------------
+ 
+(1 row)
+
+select * from pg_replication_origin_session_progress(false);
+ pg_replication_origin_session_progress 
+----------------------------------------
+ 1/87654321
+(1 row)
+
+select pg_replication_origin_xact_reset();
+ pg_replication_origin_xact_reset 
+----------------------------------
+ 
+(1 row)
+
+select pg_replication_origin_session_reset();
+ pg_replication_origin_session_reset 
+-------------------------------------
+ 
+(1 row)
+
+select pg_replication_origin_drop('origin_test');
+ pg_replication_origin_drop 
+----------------------------
+ 
+(1 row)
+
+-- error
+select pg_replication_origin_session_setup('origin_test');
+ERROR:  could not find tuple for replication origin 'origin_test'
+CONTEXT:  referenced column: pg_replication_origin_session_setup
+drop table t_origin_test;

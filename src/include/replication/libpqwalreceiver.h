@@ -25,6 +25,17 @@
 #ifndef LIBPQWALRECEIVER_H
 #define LIBPQWALRECEIVER_H
 
+typedef struct LibpqrcvConnectParam {
+     XLogRecPtr startpoint;
+     char* slotname;
+     int channel_identifier;
+
+    /* for logical replication slot */
+    bool logical;
+    uint32 protoVersion;    /* Logical protocol version */
+    List *publicationNames; /* String list of publications */
+}LibpqrcvConnectParam;
+
 extern int32 pg_atoi(char* s, int size, int c);
 extern int32 pg_strtoint32(const char* s);
 /* Prototypes for interface functions */
@@ -35,5 +46,11 @@ extern void libpqrcv_send(const char* buffer, int nbytes);
 extern void libpqrcv_disconnect(void);
 extern void HaSetRebuildRepInfoError(HaRebuildReason reason);
 extern void SetObsRebuildReason(HaRebuildReason reason);
+extern void libpqrcv_check_conninfo(const char *conninfo);
+extern bool libpqrcv_command(const char *cmd, char **err);
+
+extern void IdentifyRemoteSystem(bool checkRemote);
+extern void CreateRemoteReplicationSlot(XLogRecPtr startpoint, const char* slotname, bool isLogical);
+extern void StartRemoteStreaming(const LibpqrcvConnectParam *options);
 
 #endif

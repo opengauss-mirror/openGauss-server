@@ -96,7 +96,11 @@ typedef enum ObjectType {
     OBJECT_VIEW,
     OBJECT_DIRECTORY,
     OBJECT_GLOBAL_SETTING,
-    OBJECT_COLUMN_SETTING
+    OBJECT_COLUMN_SETTING,
+	OBJECT_PUBLICATION,
+	OBJECT_PUBLICATION_NAMESPACE,
+	OBJECT_PUBLICATION_REL,
+	OBJECT_SUBSCRIPTION
 } ObjectType;
 
 typedef enum DropBehavior {
@@ -1992,6 +1996,56 @@ typedef struct PredictByFunction{ // DB4AI
     List* model_args;
     int model_args_location; // Only for parser
 } PredictByFunction;
+
+
+typedef struct CreatePublicationStmt
+{
+	NodeTag		type;
+	char	   *pubname;		/* Name of of the publication */
+	List	   *options;		/* List of DefElem nodes */
+	List	   *tables;			/* Optional list of tables to add */
+	bool		for_all_tables;	/* Special publication for all tables in db */
+} CreatePublicationStmt;
+
+typedef struct AlterPublicationStmt
+{
+	NodeTag		type;
+	char	   *pubname;		/* Name of of the publication */
+
+	/* parameters used for ALTER PUBLICATION ... WITH */
+	List	   *options;		/* List of DefElem nodes */
+
+	/* parameters used for ALTER PUBLICATION ... ADD/DROP TABLE */
+	List	   *tables;			/* List of tables to add/drop */
+	bool		for_all_tables;	/* Special publication for all tables in db */
+	DefElemAction	tableAction; /* What action to perform with the tables */
+} AlterPublicationStmt;
+
+typedef struct CreateSubscriptionStmt
+{
+	NodeTag		type;
+	char	   *subname;		/* Name of of the subscription */
+	char	   *conninfo;		/* Connection string to publisher */
+	List	   *publication;	/* One or more publication to subscribe to */
+	List	   *options;		/* List of DefElem nodes */
+} CreateSubscriptionStmt;
+
+typedef struct AlterSubscriptionStmt
+{
+	NodeTag		type;
+	char	   *subname;		/* Name of of the subscription */
+	List	   *options;		/* List of DefElem nodes */
+} AlterSubscriptionStmt;
+
+typedef struct DropSubscriptionStmt
+{
+	NodeTag		type;
+	char	   *subname;		/* Name of of the subscription */
+	bool		missing_ok;		/* Skip error if missing? */
+    DropBehavior behavior;		/* RESTRICT or CASCADE behavior */
+} DropSubscriptionStmt;
+
+
 
 
 #endif /* PARSENODES_COMMONH */

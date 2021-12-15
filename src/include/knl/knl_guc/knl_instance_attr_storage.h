@@ -146,6 +146,7 @@ typedef struct knl_instance_attr_storage {
     char* num_internal_lock_partitions_str;
     int wal_insert_status_entries_power;
     int undo_zone_count;
+    int max_logical_replication_workers;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

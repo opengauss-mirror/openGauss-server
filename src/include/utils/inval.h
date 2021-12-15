@@ -95,4 +95,6 @@ extern void CacheInvalidatePartcacheByPartid(Oid partid);
 
 extern void InvalidateSystemCaches(void);
 
+extern void CacheInvalidateRelcacheAll(void);
+
 #endif /* INVAL_H */

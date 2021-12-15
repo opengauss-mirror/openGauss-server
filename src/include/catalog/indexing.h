@@ -594,6 +594,31 @@ DECLARE_UNIQUE_INDEX(gs_model_oid_index, 3992, on gs_model_warehouse using btree
 DECLARE_UNIQUE_INDEX(gs_model_name_index, 3993, on gs_model_warehouse using btree(modelname name_ops));
 #define GsModelNameIndexId   3993
 
+DECLARE_UNIQUE_INDEX(pg_publication_oid_index, 6120, on pg_publication using btree(oid oid_ops));
+#define PublicationObjectIndexId 6120
+
+DECLARE_UNIQUE_INDEX(pg_publication_pubname_index, 6121, on pg_publication using btree(pubname name_ops));
+#define PublicationNameIndexId 6121
+
+DECLARE_UNIQUE_INDEX(pg_publication_rel_oid_index, 6122, on pg_publication_rel using btree(oid oid_ops));
+#define PublicationRelObjectIndexId 6122
+
+DECLARE_UNIQUE_INDEX(pg_publication_rel_map_index, 6123, on pg_publication_rel using btree(prrelid oid_ops, prpubid oid_ops));
+#define PublicationRelMapIndexId 6123
+
+DECLARE_UNIQUE_INDEX(pg_subscription_oid_index, 6124, on pg_subscription using btree(oid oid_ops));
+#define SubscriptionObjectIndexId 6124
+
+DECLARE_UNIQUE_INDEX(pg_subscription_subname_index, 6125, on pg_subscription using btree(subdbid oid_ops, subname name_ops));
+#define SubscriptionNameIndexId 6125
+
+DECLARE_UNIQUE_INDEX(pg_replication_origin_roident_index, 6136, on pg_replication_origin using btree(roident oid_ops));
+#define ReplicationOriginIdentIndex 6136
+
+DECLARE_UNIQUE_INDEX(pg_replication_origin_roname_index, 6137, on pg_replication_origin using btree(roname text_pattern_ops));
+#define ReplicationOriginNameIndex 6137
+
+
 /* last step of initialization script: build the indexes declared above */
 BUILD_INDICES
 

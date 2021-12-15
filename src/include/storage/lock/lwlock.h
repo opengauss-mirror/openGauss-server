@@ -238,6 +238,7 @@ enum BuiltinTrancheIds
     LWTRANCHE_SEGHEAD_PARTITION,
     LWTRANCHE_TWOPHASE_STATE,
     LWTRANCHE_ROLEID_PARTITION,
+    LWTRANCHE_REPLICATION_ORIGIN,
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;
      */

@@ -75,4 +75,5 @@ PG_RMGR(RM_UBTREE_ID, "UBtree", UBTreeRedo, UBTreeDesc, UBTreeXlogStartup, UBTre
 NULL, NULL)
 PG_RMGR(RM_UBTREE2_ID, "UBtree2", UBTree2Redo, UBTree2Desc, NULL, NULL, NULL, NULL, NULL)
 PG_RMGR(RM_SEGPAGE_ID, "SegpageStorage", segpage_smgr_redo, segpage_smgr_desc, NULL, NULL, NULL, NULL, NULL)
+PG_RMGR(RM_REPLORIGIN_ID, "ReplicationOrigin", replorigin_redo, replorigin_desc, NULL, NULL, NULL, NULL, NULL)
 

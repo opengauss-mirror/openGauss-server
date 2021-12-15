@@ -492,6 +492,11 @@ typedef enum NodeTag {
     T_CreatePackageStmt,
     T_CreatePackageBodyStmt,
     T_AddTableIntoCBIState,
+	T_CreatePublicationStmt,
+	T_AlterPublicationStmt,
+	T_CreateSubscriptionStmt,
+	T_AlterSubscriptionStmt,
+	T_DropSubscriptionStmt,
     
     /*
      * TAGS FOR PARSE TREE NODES (parsenodes.h)

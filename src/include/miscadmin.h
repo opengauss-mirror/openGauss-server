@@ -73,6 +73,7 @@ extern bool contain_backend_version(uint32 version_number);
 extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
 extern const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM;
+extern const uint32 PUBLICATION_VERSION_NUM;
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
 
@@ -299,7 +300,7 @@ extern bool InLocalUserIdChange(void);
 extern bool InSecurityRestrictedOperation(void);
 extern void GetUserIdAndContext(Oid* userid, bool* sec_def_context);
 extern void SetUserIdAndContext(Oid userid, bool sec_def_context);
-extern void InitializeSessionUserId(const char* rolename);
+extern void InitializeSessionUserId(const char* rolename, Oid useroid = InvalidOid);
 extern void InitializeSessionUserIdStandalone(void);
 extern void SetSessionAuthorization(Oid userid, bool is_superuser);
 extern Oid GetCurrentRoleId(void);

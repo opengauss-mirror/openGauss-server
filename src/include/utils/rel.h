@@ -36,6 +36,7 @@
 #include "utils/reltrigger.h"
 #include "utils/partitionmap.h"
 #include "catalog/pg_hashbucket_fn.h"
+#include "catalog/pg_publication.h"
 
 
 #ifndef HDFS
@@ -163,12 +164,16 @@ typedef struct RelationData {
     /* data managed by RelationGetIndexList: */
     List* rd_indexlist; /* list of OIDs of indexes on relation */
     Oid rd_oidindex;    /* OID of unique index on OID, if any */
+    Oid	rd_pkindex;		/* OID of primary key, if any */
     Oid rd_refSynOid;   /* OID of referenced synonym Oid, if mapping indeed. */
 
     /* data managed by RelationGetIndexAttrBitmap: */
     Bitmapset* rd_indexattr; /* identifies columns used in indexes */
     Bitmapset* rd_keyattr;   /* cols that can be ref'd by foreign keys */
+    Bitmapset* rd_pkattr;    /* cols included in primary key */
     Bitmapset* rd_idattr;    /* included in replica identity index */
+
+    PublicationActions* rd_pubactions;  /* publication actions */
 
     /*
      * The index chosen as the relation's replication identity or
@@ -781,7 +786,15 @@ extern void RelationDecrementReferenceCount(Oid relationId);
 #define RelationGetAlgo(relation) \
         StdRdOptionsGetStringData((relation)->rd_options, encrypt_algo, NULL)
 
+/*
+ * RelationIsPermanent
+ *		True if relation is permanent.
+ */
+#define RelationIsPermanent(relation) \
+	((relation)->rd_rel->relpersistence == RELPERSISTENCE_PERMANENT)
+
 extern void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info);
+extern char RelationGetRelReplident(Relation r);
 
 #endif /* REL_H */
 

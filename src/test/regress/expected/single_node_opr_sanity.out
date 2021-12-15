@@ -1559,6 +1559,13 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2624 | pg_read_file
  2625 | pg_ls_dir
  2626 | pg_sleep
+ 2634 | pg_replication_origin_advance
+ 2635 | pg_replication_origin_create
+ 2636 | pg_replication_origin_drop
+ 2637 | pg_replication_origin_oid
+ 2638 | pg_replication_origin_progress
+ 2639 | pg_replication_origin_session_is_setup
+ 2640 | pg_replication_origin_session_progress
  2641 | var_samp
  2642 | var_samp
  2643 | var_samp
@@ -1609,6 +1616,9 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2743 | ginarrayextract
  2744 | ginarrayconsistent
  2746 | int8_avg_accum
+ 2750 | pg_replication_origin_session_reset
+ 2751 | pg_replication_origin_session_setup
+ 2752 | pg_replication_origin_xact_reset
  2758 | pg_stat_get_db_tuples_returned
  2759 | pg_stat_get_db_tuples_fetched
  2760 | pg_stat_get_db_tuples_inserted
@@ -1644,6 +1654,10 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  2796 | tidsmaller
  2797 | max
  2798 | min
+ 2799 | pg_replication_origin_xact_setup
+ 2800 | pg_show_replication_origin_status
+ 2801 | pg_get_publication_tables
+ 2802 | pg_stat_get_subscription
  2803 | count
  2804 | int8inc_any
  2805 | int8inc_float8_float8

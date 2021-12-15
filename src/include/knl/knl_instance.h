@@ -180,6 +180,7 @@ typedef struct knl_g_pid_context {
     ThreadId UndoRecyclerPID;
     ThreadId TsCompactionPID;
     ThreadId TsCompactionAuxiliaryPID;
+    ThreadId ApplyLauncerPID;
 } knl_g_pid_context;
 
 typedef struct {

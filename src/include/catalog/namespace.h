@@ -169,7 +169,7 @@ extern void DeconstructQualifiedName(const List *names,
 
 						 char **pkgname_p = NULL);
 extern Oid	LookupNamespaceNoError(const char *nspname);
-extern Oid	LookupExplicitNamespace(const char *nspname);
+extern Oid	LookupExplicitNamespace(const char *nspname, bool missing_ok = false);
 extern Oid	get_namespace_oid(const char *nspname, bool missing_ok);
 extern Oid	SchemaNameGetSchemaOid(const char *schemaname, bool missing_ok = false);
 extern Oid GetOidBySchemaName(bool missing_ok = false);
