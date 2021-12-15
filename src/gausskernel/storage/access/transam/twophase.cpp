@@ -163,7 +163,6 @@ int PendingPreparedXactsCount = 0;
  * typedef struct GlobalTransactionData *GlobalTransaction appears in
  * twophase.h
  */
-static int read_library(char *bufptr, int nlibrary);
 static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, TransactionId *children, int nrels,
                                             ColFileNodeRel *rels, int ninvalmsgs, SharedInvalidationMessage *invalmsgs,
                                             int nlibrary, char *librarys, int libraryLen, bool initfileinval);
@@ -2766,31 +2765,6 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
 
     pfree(buf);
     buf = NULL;
-}
-
-/*
- * @Description: Read library file length.
- * @in bufptr: Library ptr head.
- * @in nlibrary: Library number.
- * @return: Library length.
- */
-static int read_library(char *bufptr, int nlibrary)
-{
-    int nlib = nlibrary;
-    int over_length = 0;
-    char *ptr = bufptr;
-
-    while (nlib > 0) {
-        int libraryLen = 0;
-        errno_t rc = memcpy_s(&libraryLen, sizeof(int), ptr, sizeof(int));
-        securec_check_c(rc, "", "");
-
-        over_length += (sizeof(int) + libraryLen);
-        ptr += (sizeof(int) + libraryLen);
-        nlib--;
-    }
-
-    return over_length;
 }
 
 /*

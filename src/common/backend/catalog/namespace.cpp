@@ -2933,7 +2933,7 @@ Oid LookupNamespaceNoError(const char* nspname)
  *
  * Returns the namespace OID.  Raises ereport if any problem.
  */
-Oid LookupExplicitNamespace(const char* nspname)
+Oid LookupExplicitNamespace(const char* nspname, bool missing_ok)
 {
     Oid namespaceId;
     AclResult aclresult;
@@ -2966,7 +2966,10 @@ Oid LookupExplicitNamespace(const char* nspname)
          */
     }
 
-    namespaceId = get_namespace_oid(nspname, false);
+    namespaceId = get_namespace_oid(nspname, missing_ok);
+    if (missing_ok && !OidIsValid(namespaceId)) {
+        return InvalidOid;
+    }
 
     if (!(u_sess->analyze_cxt.is_under_analyze || (IS_PGXC_DATANODE && IsConnFromCoord())) ||
         u_sess->exec_cxt.is_exec_trigger_func) {

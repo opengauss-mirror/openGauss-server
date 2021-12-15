@@ -640,11 +640,8 @@ void fix_merge_stmt_for_insert_update(ParseState* pstate, MergeStmt* stmt)
     fill_join_expr(pstate, stmt);
 }
 
-void setExtraUpdatedCols(ParseState* pstate)
+void setExtraUpdatedCols(RangeTblEntry* target_rte, TupleDesc tupdesc)
 {
-    TupleDesc tupdesc = pstate->p_target_relation->rd_att;
-    RangeTblEntry* target_rte = pstate->p_target_rangetblentry;
-
     /*
      * Record in extraUpdatedCols generated columns referencing updated base
      * columns.
@@ -748,7 +745,7 @@ static List* transformUpdateTargetList(ParseState* pstate, List* origTlist)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("UPDATE target count mismatch --- internal error")));
     }
 
-    setExtraUpdatedCols(pstate);
+    setExtraUpdatedCols(pstate->p_target_rangetblentry, pstate->p_target_relation->rd_att);
 
     return tlist;
 }

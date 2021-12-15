@@ -181,7 +181,8 @@ static const char *BuiltinTrancheNames[] = {
     "WALInitSegment",
     "SegmentHeadPartitionLock",
     "TwoPhaseStatePartLock",
-    "RoleIdPartLock"
+    "RoleIdPartLock",
+    "ReplicationOriginLock"
 };
 
 static void RegisterLWLockTranches(void);

@@ -1531,7 +1531,7 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("cannot change ledger relation \"%s\"", RelationGetRelationName(resultRel))));
             }
-            /* OK */
+            CheckCmdReplicaIdentity(resultRel, operation);
             break;
         case RELKIND_SEQUENCE:
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),

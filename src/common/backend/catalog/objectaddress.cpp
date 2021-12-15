@@ -38,8 +38,11 @@
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_publication.h"
+#include "catalog/pg_publication_rel.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_rewrite.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pg_rlspolicy.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
@@ -135,7 +138,19 @@ static THR_LOCAL const ObjectPropertyType ObjectProperty[] = {{CastRelationId, C
         Anum_pg_ts_template_tmplnamespace,
     },
     {TypeRelationId, TypeOidIndexId, TYPEOID, Anum_pg_type_typnamespace},
-    {RlsPolicyRelationId, PgRlspolicyOidIndex, -1, InvalidAttrNumber}};
+    {RlsPolicyRelationId, PgRlspolicyOidIndex, -1, InvalidAttrNumber},
+    {
+        PublicationRelationId,
+        PublicationObjectIndexId,
+        PUBLICATIONOID,
+        InvalidAttrNumber
+    },
+    {
+        SubscriptionRelationId,
+        SubscriptionObjectIndexId,
+        SUBSCRIPTIONOID,
+        InvalidAttrNumber
+    }};
 
 static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qualname, bool missing_ok);
 static ObjectAddress get_relation_by_qualified_name(
@@ -146,6 +161,9 @@ static ObjectAddress get_object_address_attribute(
 static ObjectAddress get_object_address_type(ObjectType objtype, List* objname, bool missing_ok);
 static ObjectAddress get_object_address_opcf(ObjectType objtype, List* objname, List* objargs, bool missing_ok);
 static const ObjectPropertyType* get_object_property_data(Oid class_id);
+static ObjectAddress get_object_address_publication_rel(List *objname, List *objargs,
+    Relation *relation, bool missing_ok);
+
 
 /*
  * Translate an object name and arguments (as passed by the parser) to an
@@ -219,6 +237,8 @@ ObjectAddress get_object_address(
             case OBJECT_FDW:
             case OBJECT_FOREIGN_SERVER:
             case OBJECT_DATA_SOURCE:
+            case OBJECT_PUBLICATION:
+            case OBJECT_SUBSCRIPTION:
                 address = get_object_address_unqualified(objtype, objname, missing_ok);
                 break;
             case OBJECT_TYPE:
@@ -315,6 +335,8 @@ ObjectAddress get_object_address(
             case OBJECT_DIRECTORY:
                 address = get_object_address_unqualified(objtype, objname, missing_ok);
                 break;
+            case OBJECT_PUBLICATION_REL:
+                address = get_object_address_publication_rel(objname, objargs, &relation, missing_ok);
             default:
                 ereport(
                     ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized objtype: %d", (int)objtype)));
@@ -441,6 +463,12 @@ static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qu
             case OBJECT_DIRECTORY:
                 msg = gettext_noop("directory name cannot be qualified");
                 break;
+            case OBJECT_PUBLICATION:
+                msg = gettext_noop("publication name cannot be qualified");
+                break;
+            case OBJECT_SUBSCRIPTION:
+                msg = gettext_noop("subscription name cannot be qualified");
+                break;
             default:
                 ereport(
                     ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized objtype: %d", (int)objtype)));
@@ -508,6 +536,16 @@ static ObjectAddress get_object_address_unqualified(ObjectType objtype, List* qu
         case OBJECT_DIRECTORY:
             address.classId = PgDirectoryRelationId;
             address.objectId = get_directory_oid(name, missing_ok);
+            address.objectSubId = 0;
+            break;
+        case OBJECT_PUBLICATION:
+            address.classId = PublicationRelationId;
+            address.objectId = get_publication_oid(name, missing_ok);
+            address.objectSubId = 0;
+            break;
+        case OBJECT_SUBSCRIPTION:
+            address.classId = SubscriptionRelationId;
+            address.objectId = get_subscription_oid(name, missing_ok);
             address.objectSubId = 0;
             break;
         default:
@@ -773,6 +811,47 @@ static ObjectAddress get_object_address_type(ObjectType objtype, List* objname, 
 }
 
 /*
+ * Find the ObjectAddress for a publication relation.  The objname parameter
+ * is the relation name; objargs contains the publication name.
+ */
+static ObjectAddress get_object_address_publication_rel(List *objname, List *objargs, Relation *relation,
+    bool missing_ok)
+{
+    ObjectAddress address;
+    char *pubname;
+    Publication *pub;
+
+    address.classId = PublicationRelRelationId;
+    address.objectId = InvalidOid;
+    address.objectSubId = InvalidOid;
+
+    *relation = relation_openrv_extended(makeRangeVarFromNameList(objname), AccessShareLock, missing_ok);
+    if (!relation)
+        return address;
+
+    /* fetch publication name from input list */
+    pubname = strVal(linitial(objargs));
+
+    /* Now look up the pg_publication tuple */
+    pub = GetPublicationByName(pubname, missing_ok);
+    if (!pub)
+        return address;
+
+    /* Find the publication relation mapping in syscache. */
+    address.objectId =
+        GetSysCacheOid2(PUBLICATIONRELMAP, ObjectIdGetDatum(RelationGetRelid(*relation)), ObjectIdGetDatum(pub->oid));
+    if (!OidIsValid(address.objectId)) {
+        if (!missing_ok)
+            ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                errmsg("publication relation \"%s\" in publication \"%s\" does not exist",
+                RelationGetRelationName(*relation), pubname)));
+        return address;
+    }
+
+    return address;
+}
+
+/*
  * Find the ObjectAddress for an opclass or opfamily.
  */
 static ObjectAddress get_object_address_opcf(ObjectType objtype, List* objname, List* objargs, bool missing_ok)
@@ -969,6 +1048,16 @@ void check_object_ownership(
         case OBJECT_DIRECTORY:
             if (!pg_directory_ownercheck(address.objectId, roleid))
                 aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, NameListToString(objname));
+            break;
+        case OBJECT_PUBLICATION:
+            if (!pg_publication_ownercheck(address.objectId, roleid)) {
+                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PUBLICATION, NameListToString(objname));
+            }
+            break;
+        case OBJECT_SUBSCRIPTION:
+            if (!pg_subscription_ownercheck(address.objectId, roleid)) {
+                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_SUBSCRIPTION, NameListToString(objname));
+            }
             break;
         default:
             ereport(

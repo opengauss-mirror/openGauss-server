@@ -63,9 +63,10 @@ static void desc_library(StringInfo buf, char *filename, int nlibrary)
     }
 }
 
-static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec)
+static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec, RepOriginId origin_id)
 {
     int i;
+    int nsubxacts = xlrec->nsubxacts;
     TransactionId *subxacts = NULL;
 
     subxacts = (TransactionId *)&xlrec->xnodes[xlrec->nrels];
@@ -135,15 +136,24 @@ static void xact_desc_commit(StringInfo buf, xl_xact_commit *xlrec)
     SharedInvalidationMessage* msgs = (SharedInvalidationMessage*)&subxacts[xlrec->nsubxacts];
     TransactionId* recentXmin = (TransactionId *)&(msgs[xlrec->nmsgs]);
     appendStringInfo(buf, "; RecentXmin:%lu", *recentXmin);
+    nsubxacts++;
 #endif
 
     if (xlrec->nlibrary > 0) {
         char *filename = NULL;
 
         filename = (char *)xlrec->xnodes + (xlrec->nrels * sizeof(ColFileNodeRel)) +
-                   (xlrec->nsubxacts * sizeof(TransactionId)) + (xlrec->nmsgs * sizeof(SharedInvalidationMessage));
+                   (nsubxacts * sizeof(TransactionId)) + (xlrec->nmsgs * sizeof(SharedInvalidationMessage));
 
         desc_library(buf, filename, xlrec->nlibrary);
+    }
+
+    if (xlrec->xinfo & XACT_HAS_ORIGIN) {
+        xl_xact_origin *origin = (xl_xact_origin *)GetRepOriginPtr((char *)xlrec->xnodes, xlrec->xinfo,
+            xlrec->nsubxacts, xlrec->nmsgs, xlrec->nrels, xlrec->nlibrary);
+        appendStringInfo(buf, "; origin: node %u, lsn %X/%X, at %s", origin_id,
+            (uint32)(origin->origin_lsn >> BITS_PER_INT),
+            (uint32)origin->origin_lsn, timestamptz_to_str(origin->origin_timestamp));
     }
 }
 
@@ -231,7 +241,7 @@ void xact_desc(StringInfo buf, XLogReaderState *record)
         xl_xact_commit *xlrec = (xl_xact_commit *)rec;
 
         appendStringInfo(buf, "XLOG_XACT_COMMIT commit: ");
-        xact_desc_commit(buf, xlrec);
+        xact_desc_commit(buf, xlrec, XLogRecGetOrigin(record));
     } else if (info == XLOG_XACT_ABORT) {
         xl_xact_abort *xlrec = (xl_xact_abort *)rec;
 
@@ -248,7 +258,7 @@ void xact_desc(StringInfo buf, XLogReaderState *record)
         xl_xact_commit_prepared *xlrec = (xl_xact_commit_prepared *)rec;
 
         appendStringInfo(buf, "commit prepared " XID_FMT ": ", xlrec->xid);
-        xact_desc_commit(buf, &xlrec->crec);
+        xact_desc_commit(buf, &xlrec->crec, XLogRecGetOrigin(record));
     } else if (info == XLOG_XACT_ABORT_PREPARED) {
         xl_xact_abort_prepared *xlrec = (xl_xact_abort_prepared *)rec;
 

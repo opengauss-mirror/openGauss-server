@@ -510,6 +510,7 @@ static const pgsql_thing_t words_after_create[] = {
     {"POLICY", NULL, NULL, 0},
     {"PROCEDURAL", NULL, NULL, 0},
     {"PROCEDURE", NULL, Query_for_list_of_procedures, 0},
+    {"PUBLICATION", NULL, NULL, 0},
     {"ROLE", Query_for_list_of_roles, NULL, 0},
     {"RULE",
         "SELECT pg_catalog.quote_ident(rulename) FROM pg_catalog.pg_rules WHERE "
@@ -520,6 +521,7 @@ static const pgsql_thing_t words_after_create[] = {
     {"SCHEMA", Query_for_list_of_schemas, NULL, 0},
     {"SEQUENCE", NULL, &Query_for_list_of_sequences, 0},
     {"SERVER", Query_for_list_of_servers, NULL, 0},
+    {"SUBSCRIPTION", NULL, NULL, 0},
     {"TABLE", NULL, &Query_for_list_of_tables, 0},
     {"TABLESPACE", Query_for_list_of_tablespaces, NULL, 0},
     {"TEMP", NULL, NULL, THING_NO_DROP}, /* for CREATE TEMP TABLE ... */
@@ -807,8 +809,8 @@ static char** PsqlCompletion(const char *text, int start, int end)
             "AGGREGATE", "APP WORKLOAD GROUP", "APP WORKLOAD GROUP MAPPING", "COLLATION", "CONVERSION",
             "DATABASE", "DEFAULT PRIVILEGES", "DOMAIN", "EXTENSION", "FOREIGN DATA WRAPPER",
             "FOREIGN TABLE", "FUNCTION", "GROUP", "INDEX", "LANGUAGE", "LARGE OBJECT",
-            "MATERIALIZED VIEW", "OPERATOR", "POLICY", "PROCEDURE", "ROLE", "ROW LEVEL SECURITY POLICY",
-            "RULE", "SCHEMA", "SERVER", "SESSION", "SEQUENCE", "SYSTEM", "TABLE", "TABLESPACE",
+            "MATERIALIZED VIEW", "OPERATOR", "POLICY", "PROCEDURE", "PUBLICATION", "ROLE", "ROW LEVEL SECURITY POLICY",
+            "RULE", "SCHEMA", "SERVER", "SESSION", "SEQUENCE", "SUBSCRIPTION", "SYSTEM", "TABLE", "TABLESPACE",
             "TEXT SEARCH", "TRIGGER", "TYPE", "USER", "USER MAPPING FOR", "VIEW", NULL
         };
 
@@ -834,6 +836,41 @@ static char** PsqlCompletion(const char *text, int start, int end)
             COMPLETE_WITH_QUERY(tmpBuf);
             free(tmpBuf);
         }
+    }
+    /* ALTER PUBLICATION <name> ... */
+    else if (pg_strcasecmp(PREV2_WD, "ALTER") == 0 && pg_strcasecmp(PREV_WD, "PUBLICATION") == 0) {
+        static const char * const listAlterPub[] = {"ADD TABLE", "DROP TABLE", "OWNER TO", "RENAME TO", "SET", NULL};
+        COMPLETE_WITH_LIST(listAlterPub);
+    }
+    /* ALTER PUBLICATION <name> SET */
+    else if (pg_strcasecmp(PREV4_WD, "ALTER") == 0 && pg_strcasecmp(PREV3_WD, "PUBLICATION") == 0 &&
+        pg_strcasecmp(PREV_WD, "SET") == 0) {
+        static const char * const listAlterPubSet[] = {"(", "TABLE", NULL};
+        COMPLETE_WITH_LIST(listAlterPubSet);
+    }
+    /* ALTER PUBLICATION <name> SET ( */
+    else if (pg_strcasecmp(PREV5_WD, "ALTER") == 0 && pg_strcasecmp(PREV4_WD, "PUBLICATION") == 0 &&
+        pg_strcasecmp(PREV2_WD, "SET") == 0 && pg_strcasecmp(PREV_WD, "(") == 0) {
+        static const char * const listAlterPubSet2[] = {"publish", NULL};
+        COMPLETE_WITH_LIST(listAlterPubSet2);
+    }
+    /* ALTER SUBSCRIPTION <name> */
+    else if (pg_strcasecmp(PREV2_WD, "ALTER") == 0 && pg_strcasecmp(PREV_WD, "SUBSCRIPTION") == 0) {
+        static const char * const listAlterSub[] = {"CONNECTION", "ENABLE", "DISABLE", "OWNER TO", "RENAME TO",
+            "SET", NULL};
+        COMPLETE_WITH_LIST(listAlterSub);
+    }
+    /* ALTER SUBSCRIPTION <name> SET */
+    else if (pg_strcasecmp(PREV4_WD, "ALTER") == 0 && pg_strcasecmp(PREV3_WD, "SUBSCRIPTION") == 0 &&
+        pg_strcasecmp(PREV_WD, "SET") == 0) {
+        static const char * const listAlterSubSet[] = {"(", "PUBLICATION", NULL};
+        COMPLETE_WITH_LIST(listAlterSubSet);
+    }
+    /* ALTER SUBSCRIPTION <name> SET ( */
+    else if (pg_strcasecmp(PREV5_WD, "ALTER") == 0 && pg_strcasecmp(PREV4_WD, "SUBSCRIPTION") == 0 &&
+        pg_strcasecmp(PREV2_WD, "SET") == 0 && pg_strcasecmp(PREV_WD, "(") == 0) {
+        static const char * const listAlterSubSet2[] = {"slot_name", "synchronous_commit", NULL};
+        COMPLETE_WITH_LIST(listAlterSubSet2);
     }
 
     /* ALTER SESSION */
@@ -1867,6 +1904,27 @@ static char** PsqlCompletion(const char *text, int start, int end)
         COMPLETE_WITH_CONST("(");
     }
 
+    /* CREATE PUBLICATION */
+    else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "PUBLICATION") == 0) {
+        static const char * const createPub[] = {"FOR TABLE", "FOR ALL TABLES", "WITH (", NULL};
+        COMPLETE_WITH_LIST(createPub);
+    }
+    /* CREATE PUBLICATION <name> FOR */
+    else if (pg_strcasecmp(PREV4_WD, "CREATE") == 0 && pg_strcasecmp(PREV3_WD, "PUBLICATION") == 0 &&
+        pg_strcasecmp(PREV_WD, "FOR") == 0) {
+        static const char * const createPub2[] = {"TABLE", "ALL TABLES", NULL};
+        COMPLETE_WITH_LIST(createPub2);
+    }
+    /* CREATE PUBLICATION <name> FOR TABLE <table>, ... */
+    else if (pg_strcasecmp(PREV5_WD, "CREATE") == 0 && pg_strcasecmp(PREV4_WD, "PUBLICATION") == 0 &&
+        pg_strcasecmp(PREV2_WD, "FOR") == 0 && pg_strcasecmp(PREV_WD, "TABLE") == 0) {
+        COMPLETE_WITH_SCHEMA_QUERY(Query_for_list_of_tables, NULL);
+    }
+    /* CREATE SUBSCRIPTION */
+    else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "SUBSCRIPTION") == 0) {
+        COMPLETE_WITH_CONST("CONNECTION");
+    }
+
     /* CREATE RULE */
     /* Complete "CREATE RULE <sth>" with "AS" */
     else if (pg_strcasecmp(PREV3_WD, "CREATE") == 0 && pg_strcasecmp(PREV2_WD, "RULE") == 0)
@@ -2197,8 +2255,10 @@ static char** PsqlCompletion(const char *text, int start, int end)
              pg_strcasecmp(PREV2_WD, "CONVERSION") == 0 || pg_strcasecmp(PREV2_WD, "DOMAIN") == 0 ||
              pg_strcasecmp(PREV2_WD, "EXTENSION") == 0 || pg_strcasecmp(PREV2_WD, "FUNCTION") == 0 ||
              pg_strcasecmp(PREV2_WD, "INDEX") == 0 || pg_strcasecmp(PREV2_WD, "LANGUAGE") == 0 ||
+             pg_strcasecmp(PREV2_WD, "PUBLICATION") == 0 ||
              pg_strcasecmp(PREV2_WD, "SCHEMA") == 0 || pg_strcasecmp(PREV2_WD, "SEQUENCE") == 0 ||
-             pg_strcasecmp(PREV2_WD, "SERVER") == 0 || pg_strcasecmp(PREV2_WD, "TABLE") == 0 ||
+             pg_strcasecmp(PREV2_WD, "SERVER") == 0 || pg_strcasecmp(PREV2_WD, "SUBSCRIPTION") == 0 ||
+             pg_strcasecmp(PREV2_WD, "TABLE") == 0 ||
              pg_strcasecmp(PREV2_WD, "TYPE") == 0 || pg_strcasecmp(PREV2_WD, "VIEW") == 0 ||
              pg_strcasecmp(PREV2_WD, "USER") == 0)) ||
              (pg_strcasecmp(PREV4_WD, "DROP") == 0 && pg_strcasecmp(PREV3_WD, "AGGREGATE") == 0 &&

@@ -1130,11 +1130,12 @@ PostgresInitializer::~PostgresInitializer()
     m_username = NULL;
 }
 
-void PostgresInitializer::SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username)
+void PostgresInitializer::SetDatabaseAndUser(const char* in_dbname, Oid dboid, const char* username, Oid useroid)
 {
     m_indbname = in_dbname;
     m_dboid = dboid;
     m_username = username;
+    m_useroid = useroid;
 }
 
 void PostgresInitializer::InitFencedSysCache()
@@ -1427,6 +1428,66 @@ void PostgresInitializer::InitCsnminSync()
     InitDatabase();
 
     InitPGXCPort();
+
+    InitSettings();
+
+    FinishInit();
+
+    return;
+}
+
+void PostgresInitializer::InitApplyLauncher()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    SetSuperUserAndDatabase();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
+
+    InitSettings();
+
+    FinishInit();
+
+    return;
+}
+
+void PostgresInitializer::InitApplyWorker()
+{
+    InitThread();
+
+    InitSysCache();
+
+    /* Initialize stats collection --- must happen before first xact */
+    pgstat_initialize();
+
+    SetProcessExitCallback();
+
+    StartXact();
+
+    InitUser();
+
+    CheckConnPermission();
+
+    SetDatabase();
+
+    LoadSysCache();
+
+    InitDatabase();
 
     InitSettings();
 
@@ -2072,7 +2133,7 @@ void PostgresInitializer::SetSuperUserAndDatabase()
 
 void PostgresInitializer::InitUser()
 {
-    InitializeSessionUserId(m_username);
+    InitializeSessionUserId(m_username, m_useroid);
     m_isSuperUser = superuser();
     u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
 #ifndef ENABLE_MULTIPLE_NODES

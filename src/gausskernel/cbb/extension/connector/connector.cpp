@@ -252,7 +252,7 @@ static void read_one_key_value(const char* key, const char* value)
             return;
 
         /* Decrypt username */
-        decryptECString(value, plainuid, EC_CIPHER_TEXT_LENGTH);
+        decryptECString(value, plainuid, EC_CIPHER_TEXT_LENGTH, SOURCE_MODE);
         GetKeyValueByString(NAME_USERNAME, t_thrd.conn_cxt.value_username, plainuid, len);
 
         /* Clear buffer */
@@ -267,7 +267,7 @@ static void read_one_key_value(const char* key, const char* value)
             return;
 
         /* Decrypt password */
-        decryptECString(value, plainpwd, EC_CIPHER_TEXT_LENGTH);
+        decryptECString(value, plainpwd, EC_CIPHER_TEXT_LENGTH, SOURCE_MODE);
         GetKeyValueByString(NAME_PASSWORD, t_thrd.conn_cxt.value_password, plainpwd, len);
 
         /* Clear buffer */

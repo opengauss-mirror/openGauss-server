@@ -74,6 +74,8 @@
 #include "postmaster/autovacuum.h"
 #include "postmaster/postmaster.h"
 #include "postmaster/snapcapturer.h"
+#include "replication/logicallauncher.h"
+#include "replication/logicalworker.h"
 #include "replication/dataqueue.h"
 #include "replication/datasender.h"
 #include "replication/walsender.h"
@@ -6016,11 +6018,18 @@ void ProcessInterrupts(void)
                 t_thrd.postgres_cxt.whereToSendOutput = DestNone;
             }
         }
-        if (IsAutoVacuumWorkerProcess())
+        if (IsAutoVacuumWorkerProcess()) {
             ereport(FATAL,
                 (errcode(ERRCODE_ADMIN_SHUTDOWN),
                     errmsg("terminating autovacuum process due to administrator command")));
-        else if (IsTxnSnapCapturerProcess()) {
+#ifndef ENABLE_MULTIPLE_NODES
+        } else if (IsLogicalLauncher()) {
+            ereport(DEBUG1, (errmsg("logical replication launcher shutting down")));
+
+            /* The logical replication launcher can be stopped at any time. */
+            proc_exit(0);
+#endif
+        } else if (IsTxnSnapCapturerProcess()) {
             ereport(FATAL,
                 (errcode(ERRCODE_ADMIN_SHUTDOWN),
                     errmsg("terminating txnsnapcapturer process due to administrator command")));

@@ -22,6 +22,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_largeobject.h"
 #include "catalog/pg_namespace.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pg_synonym.h"
 #include "commands/alter.h"
 #include "commands/collationcmds.h"
@@ -31,7 +32,9 @@
 #include "commands/directory.h"
 #include "commands/extension.h"
 #include "commands/proclang.h"
+#include "commands/publicationcmds.h"
 #include "commands/schemacmds.h"
+#include "commands/subscriptioncmds.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
@@ -106,6 +109,14 @@ void ExecRenameStmt(RenameStmt* stmt)
 
         case OBJECT_PARTITION_INDEX:
             renamePartitionIndex(stmt);
+            break;
+        
+        case OBJECT_PUBLICATION:
+            RenamePublication(stmt->object, stmt->newname);
+            break;
+
+        case OBJECT_SUBSCRIPTION:
+            RenameSubscription(stmt->object, stmt->newname);
             break;
 
         case OBJECT_RLSPOLICY:
@@ -579,6 +590,14 @@ void ExecAlterOwnerStmt(AlterOwnerStmt* stmt)
 
         case OBJECT_SYNONYM:
             AlterSynonymOwner(stmt->object, newowner);
+            break;
+
+        case OBJECT_PUBLICATION:
+            AlterPublicationOwner(strVal(linitial(stmt->object)), newowner);
+            break;
+
+        case OBJECT_SUBSCRIPTION:
+            AlterSubscriptionOwner(strVal(linitial(stmt->object)), newowner);
             break;
 
         default:

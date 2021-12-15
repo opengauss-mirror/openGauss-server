@@ -796,6 +796,21 @@ bool gs_decrypt_aes_speed(
     }
 }
 
+static inline const char* GetCipherPrefix(KeyMode mode)
+{
+    switch (mode) {
+        case SOURCE_MODE:
+            return "datasource";
+        case USER_MAPPING_MODE:
+            return "usermapping";
+        case SUBSCRIPTION_MODE:
+            return "subscription";
+        default:
+            ereport(ERROR, (errmsg("unknown key mode: %d", mode)));
+            return NULL;
+    }
+}
+
 /*
  * getECKeyString:
  * 	Get Extension Connector(EC) key string
@@ -805,12 +820,13 @@ bool gs_decrypt_aes_speed(
  */
 static GS_UCHAR* getECKeyString(KeyMode mode)
 {
-    Assert(mode == SOURCE_MODE || mode == USER_MAPPING_MODE);
+    Assert(mode == SOURCE_MODE || mode == USER_MAPPING_MODE || mode == SUBSCRIPTION_MODE);
     GS_UCHAR* plainkey = NULL;
     char* gshome = NULL;
     char cipherdir[MAXPGPATH] = {0};
     char cipherfile[MAXPGPATH] = {0};
-    const char *cipherPrefix = ((mode == SOURCE_MODE) ? "datasource" : "usermapping");
+    const char *cipherPrefix = GetCipherPrefix(mode);
+
     int ret = 0;
 
     /*
@@ -865,9 +881,10 @@ static GS_UCHAR* getECKeyString(KeyMode mode)
  * @OUT dest_cipher_text: dest buffer to be filled with encrypted string, this buffer
  * 	should be given by caller
  * @IN dest_cipher_length: dest buffer length which is given by the caller
+ * @IN mode: key mode
  * @RETURN: void
  */
-void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length, bool isDataSource)
+void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_cipher_length, KeyMode mode)
 {
     GS_UINT32 ciphertextlen = 0;
     GS_UCHAR ciphertext[1024];
@@ -880,7 +897,7 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
     }
 
     /* First, get encrypt key */
-    cipherkey = getECKeyString(isDataSource ? SOURCE_MODE : USER_MAPPING_MODE);
+    cipherkey = getECKeyString(mode);
 
     /* Clear cipher buffer which will be used later */
     ret = memset_s(ciphertext, sizeof(ciphertext), 0, sizeof(ciphertext));
@@ -963,10 +980,11 @@ void encryptECString(char* src_plain_text, char* dest_cipher_text, uint32 dest_c
  * @OUT dest_plain_text: dest buffer to be filled with plain text, this buffer
  * 	should be given by caller
  * @IN dest_plain_length: dest buffer length which is given by the caller
+ * @IN mode: key mode
  * @RETURN: bool, true if encrypt success, false if not
  */
 bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                          uint32 dest_plain_length, bool isDataSource)
+                          uint32 dest_plain_length, KeyMode mode)
 {
     GS_UCHAR* ciphertext = NULL;
     GS_UINT32 ciphertextlen = 0;
@@ -980,7 +998,7 @@ bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
     }
 
     /* Get key string */
-    cipherkey = getECKeyString(isDataSource ? SOURCE_MODE : USER_MAPPING_MODE);
+    cipherkey = getECKeyString(mode);
 
     /* Step-1: Decode */
     ciphertext = (GS_UCHAR*)(SEC_decodeBase64((char*)(src_cipher_text + strlen(EC_ENCRYPT_PREFIX)), &ciphertextlen));
@@ -1068,7 +1086,7 @@ bool IsECEncryptedString(const char* src_cipher_text)
  * @IN src_options: source options to be encrypted
  * @RETURN: void
  */
-void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, int arrayLength, bool isDataSource)
+void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, int arrayLength, KeyMode mode)
 {
     int i;
     char* srcString = NULL;
@@ -1102,14 +1120,14 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
                                 errmsg("Using probably encrypted option (prefix='encryptOpt') directly and it is not "
                                        "recommended."),
                                 errhint("The %s object can't be used if the option is not encrypted correctly.",
-                                        isDataSource ? "DATA SOURCE" : "USER MAPPING")));
+                                        GetCipherPrefix(mode))));
                         isPrint = true;
                     }
                     break;
                 }
 
                 /* Encrypt the src string */
-                encryptECString(srcString, encryptString, EC_CIPHER_TEXT_LENGTH, isDataSource);
+                encryptECString(srcString, encryptString, EC_CIPHER_TEXT_LENGTH, mode);
 
                 /* Substitute the src */
                 def->arg = (Node*)makeString(pstrdup(encryptString));
@@ -1123,6 +1141,58 @@ void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray, in
                 securec_check(ret, "\0", "\0");
                 pfree_ext(srcString);
                 pfree_ext(arg);
+
+                break;
+            }
+        }
+    }
+}
+
+/*
+ * DecryptOptions:
+ * 	Decrypt generic options, before transformation
+ *
+ * @IN options: source options to be decrypted
+ * @IN sensitiveOptionsArray: options name to be decrypted
+ * @IN arrayLength: array length of sensitiveOptionsArray
+ * @IN mode: key mode
+ * @RETURN: void
+ */
+void DecryptOptions(List *options, const char** sensitiveOptionsArray, int arrayLength, KeyMode mode)
+{
+    if (options == NULL) {
+        return;
+    }
+
+    ListCell *cell = NULL;
+    foreach(cell, options) {
+        DefElem* def = (DefElem*)lfirst(cell);
+        if (def->defname == NULL || def->arg == NULL || !IsA(def->arg, String)) {
+            continue;
+        }
+
+        char *str = strVal(def->arg);
+        if (str == NULL || strlen(str) == 0) {
+            continue;
+        }
+
+        for (int i = 0; i < arrayLength; i++) {
+            if (pg_strcasecmp(def->defname, sensitiveOptionsArray[i]) == 0) {
+                char plainText[EC_CIPHER_TEXT_LENGTH] = {0};
+
+                /*
+                 * If decryptECString return false, it means the stored values is not encrypted.
+                 * This happened when user mapping was created in old gaussdb version.
+                 */
+                if (decryptECString(str, plainText, EC_CIPHER_TEXT_LENGTH, mode)) {
+                    pfree_ext(str);
+                    pfree_ext(def->arg);
+                    def->arg = (Node*)makeString(pstrdup(plainText));
+                    
+                    /* Clear buffer */
+                    errno_t errCode = memset_s(plainText, EC_CIPHER_TEXT_LENGTH, 0, EC_CIPHER_TEXT_LENGTH);
+                    securec_check(errCode, "\0", "\0");
+                }
 
                 break;
             }

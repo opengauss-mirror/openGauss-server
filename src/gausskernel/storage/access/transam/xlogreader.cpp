@@ -1807,3 +1807,43 @@ void CloseXlogFile(void)
     }
     return;
 }
+
+/*
+ * @Description: Read library file length.
+ * @in bufptr: Library ptr head.
+ * @in nlibrary: Library number.
+ * @return: Library length.
+ */
+int read_library(char *bufptr, int nlibrary)
+{
+    int nlib = nlibrary;
+    int over_length = 0;
+    char *ptr = bufptr;
+
+    while (nlib > 0) {
+        int libraryLen = 0;
+        errno_t rc = memcpy_s(&libraryLen, sizeof(int), ptr, sizeof(int));
+        securec_check_c(rc, "", "");
+
+        over_length += (sizeof(int) + libraryLen);
+        ptr += (sizeof(int) + libraryLen);
+        nlib--;
+    }
+
+    return over_length;
+}
+
+char *GetRepOriginPtr(char *xnodes, uint64 xinfo, int nsubxacts, int nmsgs, int nrels, int nlibrary)
+{
+    if (!(xinfo & XACT_HAS_ORIGIN)) {
+        return NULL;
+    }
+#ifndef ENABLE_MULTIPLE_NODES
+    /* One more recent_xmin for single node */
+    nsubxacts++;
+#endif
+    char *libPtr = xnodes + (nrels * sizeof(ColFileNodeRel)) +
+                   (nsubxacts * sizeof(TransactionId)) + (nmsgs * sizeof(SharedInvalidationMessage));
+    int libLen = read_library(libPtr, nlibrary);
+    return (libPtr + libLen);
+}

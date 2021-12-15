@@ -179,7 +179,7 @@ void CreateDataSource(CreateDataSourceStmt* stmt)
     check_source_generic_options(stmt->options);
 
     /* Encrypt sensitive options before any operations */
-    EncryptGenericOptions(stmt->options, SensitiveOptionsArray, lengthof(SensitiveOptionsArray), true);
+    EncryptGenericOptions(stmt->options, SensitiveOptionsArray, lengthof(SensitiveOptionsArray), SOURCE_MODE);
 
     /* Add source options */
     srcoptions = transformGenericOptions(DataSourceRelationId, PointerGetDatum(NULL), stmt->options, InvalidOid);
@@ -291,7 +291,7 @@ void AlterDataSource(AlterDataSourceStmt* stmt)
         check_source_generic_options((const List*)stmt->options);
 
         /* Encrypt sensitive options before any operations */
-        EncryptGenericOptions(stmt->options, SensitiveOptionsArray, lengthof(SensitiveOptionsArray), true);
+        EncryptGenericOptions(stmt->options, SensitiveOptionsArray, lengthof(SensitiveOptionsArray), SOURCE_MODE);
 
         /* Prepare the options array */
         datum = transformGenericOptions(DataSourceRelationId, datum, stmt->options, InvalidOid);

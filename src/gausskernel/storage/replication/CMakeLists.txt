@@ -61,6 +61,7 @@ set(TGT_replication_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/walsender.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/repl_gram.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/syncrep_gram.cpp 
+    ${CMAKE_CURRENT_SOURCE_DIR}/subscription_walreceiver.cpp
 )
 
 set(TGT_replication_INC 
@@ -82,9 +83,11 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/heartbeat
     ${CMAKE_CURRENT_SOURCE_DIR}/dcf
     ${CMAKE_CURRENT_SOURCE_DIR}/logical
+    ${CMAKE_CURRENT_SOURCE_DIR}/pgoutput
 )
 
 add_subdirectory(heartbeat)
 add_subdirectory(dcf)
 add_subdirectory(logical)
+add_subdirectory(pgoutput)
 

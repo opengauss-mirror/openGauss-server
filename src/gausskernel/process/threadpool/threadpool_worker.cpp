@@ -710,6 +710,9 @@ void ThreadPoolWorker::AddBackend(Backend* bn)
 static void init_session_share_memory()
 {
     TableSpaceUsageManager::Init();
+#ifndef ENABLE_MULTIPLE_NODES
+    ReplicationOriginShmemInit();
+#endif
 }
 
 static bool InitSession(knl_session_context* session)

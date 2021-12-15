@@ -88,6 +88,16 @@ KnlUUstoreInit(knl_u_ustore_context *ustoreCxt)
     ustoreCxt->tdSlotWaitActive = false;
 }
 
+static void KnlURepOriginInit(knl_u_rep_origin_context* repOriginCxt)
+{
+    repOriginCxt->curRepState = NULL;
+    repOriginCxt->originId = InvalidRepOriginId;
+    repOriginCxt->originLsn = InvalidXLogRecPtr;
+    repOriginCxt->originTs = 0;
+    repOriginCxt->repStatesShm = NULL;
+    repOriginCxt->registeredCleanup = false;
+}
+
 static void knl_u_analyze_init(knl_u_analyze_context* anl_cxt)
 {
     anl_cxt->is_under_analyze = false;
@@ -1339,6 +1349,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_mot_init(&sess_cxt->mot_cxt);
 #endif
     KnlUUstoreInit(&sess_cxt->ustore_cxt);
+    KnlURepOriginInit(&sess_cxt->reporigin_cxt);
 
     MemoryContextSeal(sess_cxt->top_mem_cxt);
 }

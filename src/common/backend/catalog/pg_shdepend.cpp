@@ -36,7 +36,9 @@
 #include "catalog/pg_opclass.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_publication.h"
 #include "catalog/pg_shdepend.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_ts_dict.h"
 #include "catalog/pg_type.h"
@@ -46,7 +48,9 @@
 #include "commands/defrem.h"
 #include "commands/extension.h"
 #include "commands/proclang.h"
+#include "commands/publicationcmds.h"
 #include "commands/schemacmds.h"
+#include "commands/subscriptioncmds.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/tablecmds.h"
 #include "commands/typecmds.h"
@@ -1349,6 +1353,14 @@ void shdepReassignOwned(List* roleids, Oid newrole)
 
                 case TSDictionaryRelationId:
                     AlterTSDictionaryOwner_oid(sdepForm->objid, newrole);
+                    break;
+
+                case PublicationRelationId:
+                    AlterPublicationOwner_oid(sdepForm->objid, newrole);
+                    break;
+
+                case SubscriptionRelationId:
+                    AlterSubscriptionOwner_oid(sdepForm->objid, newrole);
                     break;
 
                 default:

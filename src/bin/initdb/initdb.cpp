@@ -3594,7 +3594,8 @@ int main(int argc, char* argv[])
         "pg_llog/snapshots",
         "pg_llog/mappings",
         "pg_errorinfo",
-        "undo"};
+        "undo",
+        "pg_logical"};
 
     progname = get_progname(argv[0]);
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_initdb"));

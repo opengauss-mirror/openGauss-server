@@ -70,6 +70,8 @@
 
 #define DIRECTORY_LOCK_FILE "postmaster.pid"
 
+#define INIT_SESSION_MAX_INT32_BUFF 20
+
 Alarm alarmItemTooManyDbUserConn[1] = {ALM_AI_Unknown, ALM_AS_Normal, 0, 0, 0, 0, {0}, {0}, NULL};
 
 /* ----------------------------------------------------------------
@@ -789,7 +791,7 @@ bool has_rolvcadmin(Oid roleid)
 /*
  * Initialize user identity during normal backend startup
  */
-void InitializeSessionUserId(const char* rolename)
+void InitializeSessionUserId(const char* rolename, Oid useroid)
 {
     HeapTuple roleTup;
     Form_pg_authid rform;
@@ -814,12 +816,17 @@ void InitializeSessionUserId(const char* rolename)
             AssertState(false);
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("Abnormal process. UserOid has been reseted. Current userOid[%u], reset username is %s.",
-                        u_sess->misc_cxt.AuthenticatedUserId, rolename)));
+                    errmsg("Abnormal process. UserOid has been reseted. Current userOid[%u], reset username is %s,"
+                           "useroid is %u",
+                        u_sess->misc_cxt.AuthenticatedUserId, rolename, useroid)));
         }
     }
 
-    roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+    if (rolename != NULL) {
+        roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(rolename));
+    } else {
+        roleTup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(useroid));
+    }
 
 #ifndef ENABLE_MULTIPLE_NODES
     /*
@@ -841,6 +848,12 @@ void InitializeSessionUserId(const char* rolename)
 #endif
 
     if (!HeapTupleIsValid(roleTup)) {
+        char roleIdStr[INIT_SESSION_MAX_INT32_BUFF] = {0};
+        if (rolename == NULL) {
+            int rc = sprintf_s(roleIdStr, INIT_SESSION_MAX_INT32_BUFF, "%u", useroid);
+            securec_check_ss(rc, "", "");
+            rolename = roleIdStr;
+        }
         /* 
          * Audit user login 
          * it's unsafe to deal with plugins hooks as dynamic lib may be released 
@@ -862,6 +875,9 @@ void InitializeSessionUserId(const char* rolename)
 
     rform = (Form_pg_authid)GETSTRUCT(roleTup);
     roleid = HeapTupleGetOid(roleTup);
+    if (rolename == NULL) {
+        rolename = NameStr(rform->rolname);
+    }
 
     u_sess->misc_cxt.AuthenticatedUserId = roleid;
     u_sess->misc_cxt.AuthenticatedUserIsSuperuser = rform->rolsuper;

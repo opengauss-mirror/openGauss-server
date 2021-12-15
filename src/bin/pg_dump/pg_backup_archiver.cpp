@@ -2520,6 +2520,16 @@ static teReqs _tocEntryRequired(TocEntry* te, teSection curSection, RestoreOptio
     if (ropt->no_security_labels && strcmp(te->desc, "SECURITY LABEL") == 0)
         return (teReqs)0;
 
+    /* If it's a subcription, maybe ignore it */
+    if (ropt->no_subscriptions && strcmp(te->desc, "SUBSCRIPTION") == 0) {
+        return (teReqs)0;
+    }
+
+    /* If it's a publication, maybe ignore it */
+    if (ropt->no_publications && strcmp(te->desc, "PUBLICATION") == 0) {
+        return (teReqs)0;
+    }
+
     /* Ignore it if section is not to be dumped/restored */
     switch (curSection) {
         case SECTION_PRE_DATA:
@@ -3003,7 +3013,7 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
     /* objects named by just a name */
     if (strcmp(type, "DATABASE") == 0 || strcmp(type, "PROCEDURAL LANGUAGE") == 0 || strcmp(type, "SCHEMA") == 0 ||
         strcmp(type, "DIRECTORY") == 0 || strcmp(type, "FOREIGN DATA WRAPPER") == 0 || strcmp(type, "SERVER") == 0 ||
-        strcmp(type, "USER MAPPING") == 0) {
+        strcmp(type, "USER MAPPING") == 0 || strcmp(type, "PUBLICATION") == 0 || strcmp(type, "SUBSCRIPTION") == 0) {
         (void)appendPQExpBuffer(buf, "%s %s", type, fmtId(te->tag));
         return;
     }
@@ -3252,7 +3262,9 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
                 || strcmp(te->desc, "TEXT SEARCH DICTIONARY") == 0 
                 || strcmp(te->desc, "TEXT SEARCH CONFIGURATION") == 0 
                 || strcmp(te->desc, "FOREIGN DATA WRAPPER") == 0 
-                || strcmp(te->desc, "SERVER") == 0) {
+                || strcmp(te->desc, "SERVER") == 0 ||
+                strcmp(te->desc, "PUBLICATION") == 0 ||
+                strcmp(te->desc, "SUBSCRIPTION") == 0) {
             PQExpBuffer temp = createPQExpBuffer();
             (void)appendPQExpBuffer(temp, "ALTER ");
             _getObjectDescription(temp, te, AH);
