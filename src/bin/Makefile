@@ -53,7 +53,8 @@ SUBDIRS = \
 	gs_cgroup \
 	gsqlerr \
 	pg_basebackup \
-	pg_probackup
+	pg_probackup \
+	gs_plan_simulator
 
 endif
 
