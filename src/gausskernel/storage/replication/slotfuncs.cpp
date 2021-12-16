@@ -117,7 +117,9 @@ void log_slot_drop(const char *name)
     XLogRecPtr Ptr;
     ReplicationSlotPersistentData xlrec;
 
-    int rc = memcpy_s(xlrec.name.data, NAMEDATALEN, name, NAMEDATALEN);
+    errno_t rc = memset_s(xlrec.name.data, NAMEDATALEN, 0, NAMEDATALEN);
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(xlrec.name.data, NAMEDATALEN, name, strlen(name));
     securec_check(rc, "\0", "\0");
     START_CRIT_SECTION();
     XLogBeginInsert();
