@@ -911,7 +911,7 @@ create table sche1.pg_class(id int);
 set search_path=sche1;
 insert into pg_class values(1);
 ERROR:  null value in column "relnamespace" violates not-null constraint
-DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
 select * from sche1.pg_class;
  id 
 ----
@@ -922,7 +922,7 @@ set search_path=sche1, pg_catalog;
 WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
 insert into pg_class values(1);
 ERROR:  null value in column "relnamespace" violates not-null constraint
-DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
 select * from sche1.pg_class;
  id 
 ----
@@ -945,7 +945,7 @@ end;
 $$ LANGUAGE plpgsql;
 select sche1.fun_001();
 ERROR:  null value in column "relnamespace" violates not-null constraint
-DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
 CONTEXT:  SQL statement "insert into pg_class values(1)"
 PL/pgSQL function fun_001() line 4 at SQL statement
 referenced column: fun_001
@@ -958,7 +958,7 @@ set search_path=sche1, pg_catalog;
 WARNING:  It is invalid to set pg_temp or pg_catalog behind other schemas in search path explicitly. The priority order is pg_temp, pg_catalog and other schemas.
 select sche1.fun_001();
 ERROR:  null value in column "relnamespace" violates not-null constraint
-DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
+DETAIL:  Failing row contains (1, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null).
 CONTEXT:  SQL statement "insert into pg_class values(1)"
 PL/pgSQL function fun_001() line 4 at SQL statement
 referenced column: fun_001

@@ -654,10 +654,18 @@ static ForeignScan *postgresGetForeignPlan(PlannerInfo *root, RelOptInfo *basere
              * complete information about, and (b) it wouldn't work anyway on
              * older remote servers.  Likewise, we don't worry about NOWAIT.
              */
-            if (rc->forUpdate) {
-                appendStringInfoString(&sql, " FOR UPDATE");
-            } else {
-                appendStringInfoString(&sql, " FOR SHARE");
+            switch (rc->strength) {
+                case LCS_FORKEYSHARE:
+                case LCS_FORSHARE:
+                    appendStringInfoString(&sql, " FOR SHARE");
+                    break;
+                case LCS_FORNOKEYUPDATE:
+                case LCS_FORUPDATE:
+                    appendStringInfoString(&sql, " FOR UPDATE");
+                    break;
+                default:
+                    ereport(ERROR, (errmsg("unknown lock type: %d", rc->strength)));
+                    break;
             }
         }
     }

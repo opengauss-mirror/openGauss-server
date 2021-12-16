@@ -194,8 +194,9 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
 #define HEAP_COMBOCID 0x0020         /* t_cid is a combo cid */
 #define HEAP_XMAX_EXCL_LOCK 0x0040   /* xmax is exclusive locker */
 #define HEAP_XMAX_SHARED_LOCK 0x0080 /* xmax is shared locker */
-/* if either LOCK bit is set, xmax hasn't deleted the tuple, only locked it */
-#define HEAP_IS_LOCKED (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK)
+/* xmax is a key-shared locker */
+#define HEAP_XMAX_KEYSHR_LOCK (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK)
+#define HEAP_LOCK_MASK (HEAP_XMAX_EXCL_LOCK | HEAP_XMAX_SHARED_LOCK | HEAP_XMAX_KEYSHR_LOCK)
 #define HEAP_XMIN_COMMITTED 0x0100 /* t_xmin committed */
 #define HEAP_XMIN_INVALID 0x0200   /* t_xmin invalid/aborted */
 #define HEAP_XMIN_FROZEN (HEAP_XMIN_INVALID | HEAP_XMIN_COMMITTED)
@@ -219,12 +220,13 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
  * information stored in t_infomask2:
  */
 #define HEAP_NATTS_MASK 0x07FF /* 11 bits for number of attributes */
-/* bits 0x1800 are available */
+#define HEAP_XMAX_LOCK_ONLY 0x0800 /* xmax, if valid, is only a locker */
+#define HEAP_KEYS_UPDATED 0x1000 /* tuple was updated and key cols modified, or tuple deleted */
 #define HEAP_HAS_REDIS_COLUMNS 0x2000 /* tuple has hidden columns added by redis */
 #define HEAP_HOT_UPDATED 0x4000 /* tuple was HOT-updated */
 #define HEAP_ONLY_TUPLE 0x8000  /* this is heap-only tuple */
 
-#define HEAP2_XACT_MASK 0xC000 /* visibility-related bits */
+#define HEAP2_XACT_MASK 0xD800 /* visibility-related bits */
 
 /*
  * HEAP_TUPLE_HAS_MATCH is a temporary flag used during hash joins.  It is
@@ -233,6 +235,28 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
  * instead of using up a dedicated bit.
  */
 #define HEAP_TUPLE_HAS_MATCH HEAP_ONLY_TUPLE /* tuple has a join match */
+
+/*
+ * A tuple is only locked (i.e. not updated by its Xmax) if it the
+ * HEAP_XMAX_LOCK_ONLY bit is set.
+ *
+ * See also HeapTupleIsOnlyLocked, which also checks for a possible
+ * aborted updater transaction.
+ */
+#define HEAP_XMAX_IS_LOCKED_ONLY(infomask, infomask2) \
+    (((infomask2) & HEAP_XMAX_LOCK_ONLY) ||           \
+     ((infomask) & HEAP_XMAX_SHARED_LOCK) ||          \
+     (((infomask) & (HEAP_XMAX_IS_MULTI | HEAP_LOCK_MASK)) == HEAP_XMAX_EXCL_LOCK))
+
+/*
+ * Use these to test whether a particular lock is applied to a tuple
+ */
+#define HEAP_XMAX_IS_SHR_LOCKED(infomask) (((infomask) & HEAP_LOCK_MASK) == HEAP_XMAX_SHARED_LOCK)
+#define HEAP_XMAX_IS_EXCL_LOCKED(infomask) (((infomask) & HEAP_LOCK_MASK) == HEAP_XMAX_EXCL_LOCK)
+#define HEAP_XMAX_IS_KEYSHR_LOCKED(infomask) (((infomask) & HEAP_LOCK_MASK) == HEAP_XMAX_KEYSHR_LOCK)
+
+/* turn these all off when Xmax is to change */
+#define HEAP_XMAX_BITS (HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | HEAP_XMAX_IS_MULTI | HEAP_LOCK_MASK)
 
 /*
  * HeapTupleHeader accessor macros
@@ -301,6 +325,27 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
         ((tup)->t_data->t_choice.t_heap.t_xmax)                                                     \
     ))
 
+/*
+ * HeapTupleGetRawXmax gets you the raw Xmax field.  To find out the Xid
+ * that updated a tuple, you might need to resolve the MultiXactId if certain
+ * bits are set.  HeapTupleGetUpdateXid checks those bits and takes care
+ * to resolve the MultiXactId if necessary.  This might involve multixact I/O,
+ * so it should only be used if absolutely necessary.
+ */
+#define HeapTupleGetUpdateXid(tup)                              \
+    ((!((tup)->t_data->t_infomask & HEAP_XMAX_INVALID) &&       \
+      ((tup)->t_data->t_infomask & HEAP_XMAX_IS_MULTI) &&       \
+      !((tup)->t_data->t_infomask2 & HEAP_XMAX_LOCK_ONLY)) ?    \
+        HeapTupleMultiXactGetUpdateXid(tup) :                   \
+        HeapTupleGetRawXmax(tup))
+
+#define HeapTupleHeaderGetUpdateXid(page, tup)                  \
+    ((!((tup)->t_infomask & HEAP_XMAX_INVALID) &&               \
+      ((tup)->t_infomask & HEAP_XMAX_IS_MULTI) &&               \
+      !((tup)->t_infomask2 & HEAP_XMAX_LOCK_ONLY)) ?            \
+        HeapTupleHeaderMultiXactGetUpdateXid(page, tup) :       \
+        HeapTupleHeaderGetRawXmax(page, tup))
+
 #define HeapTupleHeaderGetXmax(page, tup)                                                                          \
     (ShortTransactionIdToNormal(((tup)->t_infomask & HEAP_XMAX_IS_MULTI)                                           \
                                     ? (PageIs8BXidHeapVersion(page) ? ((HeapPageHeader)(page))->pd_multi_base : 0) \
@@ -319,10 +364,10 @@ typedef HeapTupleHeaderData* HeapTupleHeader;
 
 #define HeapTupleSetXmax(tup, xid)                                       \
     ((tup)->t_data->t_choice.t_heap.t_xmax = NormalTransactionIdToShort( \
-         ((tup)->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ? tup->t_multi_base : tup->t_xid_base, (xid)))
+         ((tup)->t_data->t_infomask & HEAP_XMAX_IS_MULTI) ? (tup)->t_multi_base : (tup)->t_xid_base, (xid)))
 
 #define HeapTupleSetXmin(tup, xid) \
-    ((tup)->t_data->t_choice.t_heap.t_xmin = NormalTransactionIdToShort(tup->t_xid_base, (xid)))
+    ((tup)->t_data->t_choice.t_heap.t_xmin = NormalTransactionIdToShort((tup)->t_xid_base, (xid)))
 
 /*
  * HeapTupleHeaderGetRawCommandId will give you what's in the header whether
@@ -671,6 +716,10 @@ inline HeapTuple heaptup_alloc(Size size)
  * or MULTI_INSERT, we can (and we do) restore entire page in redo
  */
 #define XLOG_HEAP_INIT_PAGE 0x80
+
+/* Upgrade support for enhanced tupl lock mode */
+#define XLOG_TUPLE_LOCK_UPGRADE_FLAG 0x01
+
 /*
  * We ran out of opcodes, so heapam.c now has a second RmgrId.	These opcodes
  * are associated with RM_HEAP2_ID, but are not logically different from
@@ -744,9 +793,12 @@ inline HeapTuple heaptup_alloc(Size size)
 typedef struct xl_heap_delete {
     OffsetNumber offnum; /* deleted tuple's offset */
     uint8 flags;
+    TransactionId xmax;  /* xmax of the deleted tuple */
+    uint8 infobits_set;  /* infomask bits */
 } xl_heap_delete;
 
-#define SizeOfHeapDelete (offsetof(xl_heap_delete, flags) + sizeof(bool))
+#define SizeOfOldHeapDelete (offsetof(xl_heap_delete, flags) + sizeof(uint8))
+#define SizeOfHeapDelete (offsetof(xl_heap_delete, infobits_set) + sizeof(uint8))
 
 /*
  * We don't store the whole fixed part (HeapTupleHeaderData) of an inserted
@@ -829,9 +881,13 @@ typedef struct xl_heap_update {
     OffsetNumber old_offnum; /* old tuple's offset */
     OffsetNumber new_offnum; /* new tuple's offset */
     uint8 flags;             /* NEW TUPLE xl_heap_header AND TUPLE DATA FOLLOWS AT END OF STRUCT */
+    TransactionId old_xmax;  /* xmax of the old tuple */
+    TransactionId new_xmax;  /* xmax of the new tuple */
+    uint8 old_infobits_set;  /* infomask bits to set on old tuple */
 } xl_heap_update;
 
-#define SizeOfHeapUpdate (offsetof(xl_heap_update, flags) + sizeof(uint8))
+#define SizeOfOldHeapUpdate (offsetof(xl_heap_update, flags) + sizeof(uint8))
+#define SizeOfHeapUpdate (offsetof(xl_heap_update, old_infobits_set) + sizeof(uint8))
 /*
  * This is what we need to know about vacuum page cleanup/redirect
  *
@@ -879,15 +935,25 @@ typedef struct xl_heap_logical_newpage {
 
 #define SizeOfHeapLogicalNewPage (offsetof(xl_heap_logical_newpage, blockSize) + sizeof(int32))
 
+/* flags for infobits_set */
+#define XLHL_XMAX_IS_MULTI      0x01
+#define XLHL_XMAX_LOCK_ONLY     0x02
+#define XLHL_XMAX_EXCL_LOCK     0x04
+#define XLHL_XMAX_KEYSHR_LOCK   0x08
+#define XLHL_KEYS_UPDATED       0x10
+
 /* This is what we need to know about lock */
 typedef struct xl_heap_lock {
     TransactionId locking_xid; /* might be a MultiXactId not xid */
     OffsetNumber offnum;       /* locked tuple's offset on page */
     bool xid_is_mxact;         /* is it? */
     bool shared_lock;          /* shared or exclusive row lock? */
+    uint8 infobits_set;        /* infomask and infomask2 bits to set */
+    bool lock_updated;         /* lock an updated version of a row */
 } xl_heap_lock;
 
-#define SizeOfHeapLock (offsetof(xl_heap_lock, shared_lock) + sizeof(bool))
+#define SizeOfOldHeapLock (offsetof(xl_heap_lock, shared_lock) + sizeof(bool))
+#define SizeOfHeapLock (offsetof(xl_heap_lock, lock_updated) + sizeof(bool))
 
 /* This is what we need to know about in-place update */
 typedef struct xl_heap_inplace {
@@ -905,10 +971,12 @@ typedef struct xl_heap_inplace {
  */
 typedef struct xl_heap_freeze {
     TransactionId cutoff_xid;
+    MultiXactId cutoff_multi;
     /* TUPLE OFFSET NUMBERS FOLLOW AT THE END */
 } xl_heap_freeze;
 
-#define SizeOfHeapFreeze (offsetof(xl_heap_freeze, cutoff_xid) + sizeof(TransactionId))
+#define SizeOfOldHeapFreeze (offsetof(xl_heap_freeze, cutoff_xid) + sizeof(TransactionId))
+#define SizeOfHeapFreeze (offsetof(xl_heap_freeze, cutoff_multi) + sizeof(MultiXactId))
 
 typedef struct xl_heap_freeze_tuple {
     TransactionId xmax;
@@ -988,6 +1056,8 @@ extern CommandId HeapTupleHeaderGetCmin(HeapTupleHeader tup, Page page);
 extern CommandId HeapTupleHeaderGetCmax(HeapTupleHeader tup, Page page);
 extern bool CheckStreamCombocid(HeapTupleHeader tup, CommandId current_cid, Page page);
 extern void HeapTupleHeaderAdjustCmax(HeapTupleHeader tup, CommandId* cmax, bool* iscombo, Buffer buffer);
+extern TransactionId HeapTupleMultiXactGetUpdateXid(HeapTuple tuple);
+extern TransactionId HeapTupleHeaderMultiXactGetUpdateXid(Page page, HeapTupleHeader tuple);
 
 /* ----------------
  *		fastgetattr && fastgetattr_with_dict

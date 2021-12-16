@@ -423,7 +423,8 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
 
     if (!node->isPartTbl) {
         /* add qual for redis */
-        TransactionId relfrozenxid64 = getRelationRelfrozenxid(current_relation);
+        TransactionId relfrozenxid64 = InvalidTransactionId;
+        getRelationRelxids(current_relation, &relfrozenxid64);
         current_scan_desc = BeginScanRelation(node, current_relation, relfrozenxid64, eflags);
     } else {
         plan = (SeqScan*)node->ps.plan;
@@ -491,7 +492,8 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
             node->ss_currentPartition = current_part_rel;
 
             /* add qual for redis */
-            TransactionId relfrozenxid64 = getPartitionRelfrozenxid(current_part_rel);
+            TransactionId relfrozenxid64 = InvalidTransactionId;
+            getPartitionRelxids(current_part_rel, &relfrozenxid64);
             current_scan_desc = BeginScanRelation(node, current_part_rel, relfrozenxid64, eflags);
         } else {
             node->ss_currentPartition = NULL;

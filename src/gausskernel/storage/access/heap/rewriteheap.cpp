@@ -160,6 +160,8 @@ typedef struct RewriteStateData {
     bool rs_use_wal;              /* must we WAL-log inserts? */
     TransactionId rs_oldest_xmin; /* oldest xmin used by caller to determine tuple visibility */
     TransactionId rs_freeze_xid;  /* Xid that will be used as freeze cutoff point */
+    MultiXactId	rs_freeze_multi;  /* MultiXactId that will be used as freeze
+                                   * cutoff point for multixacts */
 
     MemoryContext rs_cxt;        /* for hash tables and entries and tuples in them */
     HTAB *rs_unresolved_tups;    /* unmatched A tuples */
@@ -212,7 +214,7 @@ typedef OldToNewMappingData *OldToNewMapping;
 static void raw_heap_insert(RewriteState state, HeapTuple tup);
 static void RawUHeapInsert(RewriteState state, UHeapTuple tup);
 static void RawHeapCmprAndMultiInsert(RewriteState state, bool is_last);
-static void copyHeapTupleInfo(HeapTuple dest_tup, HeapTuple src_tup, TransactionId freeze_xid);
+static void copyHeapTupleInfo(HeapTuple dest_tup, HeapTuple src_tup, TransactionId freeze_xid, MultiXactId freeze_mxid);
 static void rewrite_page_list_write(RewriteState state);
 static void rewrite_flush_page(RewriteState state, Page page);
 static void rewrite_end_flush_page(RewriteState state);
@@ -457,11 +459,11 @@ static bool CanWriteUpdatedTuple(RewriteState state, HeapTuple old_tuple, HeapTu
     /*
      * If the tuple has been updated, check the old-to-new mapping hash table.
      */
-    if (!(old_tuple->t_data->t_infomask & (HEAP_XMAX_INVALID | HEAP_IS_LOCKED)) &&
+    if (!((old_tuple->t_data->t_infomask & HEAP_XMAX_INVALID) || HeapTupleIsOnlyLocked(old_tuple)) &&
         !(ItemPointerEquals(&(old_tuple->t_self), &(old_tuple->t_data->t_ctid)))) {
         OldToNewMapping mapping = NULL;
 
-        hashkey.xmin = HeapTupleGetRawXmax(old_tuple);
+        hashkey.xmin = HeapTupleGetUpdateXid(old_tuple);
         hashkey.tid = old_tuple->t_data->t_ctid;
 
         mapping = (OldToNewMapping)hash_search(state->rs_old_new_tid_map, &hashkey, HASH_FIND, NULL);
@@ -520,7 +522,7 @@ void rewrite_heap_tuple(RewriteState state, HeapTuple old_tuple, HeapTuple new_t
 
     old_cxt = MemoryContextSwitchTo(state->rs_cxt);
 
-    copyHeapTupleInfo(new_tuple, old_tuple, state->rs_freeze_xid);
+    copyHeapTupleInfo(new_tuple, old_tuple, state->rs_freeze_xid, state->rs_freeze_multi);
 
     if (!CanWriteUpdatedTuple<true>(state, old_tuple, new_tuple)) {
         /*
@@ -660,7 +662,7 @@ MemoryContext get_heap_rewrite_memcxt(RewriteState state)
     return state->rs_cxt;
 }
 
-static void copyHeapTupleInfo(HeapTuple dest_tup, HeapTuple src_tup, TransactionId freeze_xid)
+static void copyHeapTupleInfo(HeapTuple dest_tup, HeapTuple src_tup, TransactionId freeze_xid, MultiXactId freeze_mxid)
 {
     /*
      * Copy the original tuple's visibility information into new_tuple.
@@ -683,7 +685,7 @@ static void copyHeapTupleInfo(HeapTuple dest_tup, HeapTuple src_tup, Transaction
      * While we have our hands on the tuple, we may as well freeze any
      * very-old xmin or xmax, so that future VACUUM effort can be saved.
      */
-    (void)heap_freeze_tuple(dest_tup, freeze_xid);
+    (void)heap_freeze_tuple(dest_tup, freeze_xid, freeze_mxid);
 
     /*
      * Invalid ctid means that ctid should point to the tuple itself. We'll
@@ -857,7 +859,7 @@ void RewriteAndCompressTup(RewriteState state, HeapTuple old_tuple, HeapTuple ne
     errno_t rc = EOK;
 
     Assert(CurrentMemoryContext == state->rs_cxt);
-    copyHeapTupleInfo(new_tuple, old_tuple, state->rs_freeze_xid);
+    copyHeapTupleInfo(new_tuple, old_tuple, state->rs_freeze_xid, state->rs_freeze_multi);
 
     /*
      * Step 1: deal with updated tuples chain.

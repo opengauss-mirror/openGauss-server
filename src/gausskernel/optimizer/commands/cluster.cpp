@@ -30,6 +30,7 @@
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "access/sysattr.h"
+#include "access/reloptions.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/heap.h"
@@ -75,6 +76,7 @@
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/commands_gstrace.h"
 #include "parser/parse_utilcmd.h"
+#include "access/multixact.h"
 #ifdef ENABLE_MULTIPLE_NODES
 #include "tsdb/storage/part_merge.h"
 #include "tsdb/utils/ts_relcache.h"
@@ -125,7 +127,8 @@ extern DfsSrvOptions* GetDfsSrvOptions(Oid spcNode);
 static void swap_relation_names(Oid r1, Oid r2);
 
 static void swapCascadeHeapTables(
-    Oid relId1, Oid relId2, Oid tempTableOid, bool swapByContent, TransactionId frozenXid, Oid* mappedTables);
+    Oid relId1, Oid relId2, Oid tempTableOid, bool swapByContent, TransactionId frozenXid,
+    MultiXactId multiXid, Oid* mappedTables);
 
 static void SwapCStoreTables(Oid relId1, Oid relId2, Oid parentOid, Oid tempTableOid);
 
@@ -139,7 +142,7 @@ static void rebuildPartition(Relation partTableRel, Oid partitionOid, Oid indexO
 
 static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexOid, PlannerInfo* root,
     RelOptInfo* relOptInfo, int freezeMinAge, int freezeTableAge, bool verbose, bool* pSwapToastByContent,
-    TransactionId* pFreezeXid, AdaptMem* mem_info, double* ptrDeleteTupleNum = NULL);
+    TransactionId* pFreezeXid, MultiXactId* pFreezeMulti, AdaptMem* mem_info, double* ptrDeleteTupleNum = NULL);
 static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age, int freeze_table_age, bool verbose,
     bool* pSwapToastByContent, TransactionId* pFreezeXid, AdaptMem* mem_info);
 static void DoCopyPaxFormatData(Relation oldRel, Relation newRel);
@@ -148,7 +151,8 @@ static void DoCopyCUFormatData(Relation oldRel, Relation newRel, TupleDesc oldTu
 static List* FindMergedDescs(Relation oldRel, Relation newRel);
 extern ValuePartitionMap* buildValuePartitionMap(Relation relation, Relation pg_partition, HeapTuple partitioned_tuple);
 static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int freeze_min_age, int freeze_table_age,
-    bool verbose, bool* pSwapToastByContent, TransactionId* pFreezeXid, double* ptrDeleteTupleNum, AdaptMem* mem_info);
+    bool verbose, bool* pSwapToastByContent, TransactionId* pFreezeXid, MultiXactId *pFreezeMulti,
+    double* ptrDeleteTupleNum, AdaptMem* mem_info);
 static List* get_tables_to_cluster(MemoryContext cluster_context);
 static void reform_and_rewrite_tuple(HeapTuple tuple, TupleDesc oldTupDesc, TupleDesc newTupDesc, Datum* values,
     bool* isnull, bool newRelHasOids, RewriteState rwstate);
@@ -163,8 +167,8 @@ static void RebuildCStoreRelation(
 extern void Start_Prefetch(TableScanDesc scan, SeqScanAccessor* pAccessor, ScanDirection dir);
 extern void SeqScan_Init(TableScanDesc Scan, SeqScanAccessor* pAccessor, Relation relation);
 
-static void swap_partition_relfilenode(
-    Oid partitionOid1, Oid partitionOid2, bool swapToastByContent, TransactionId frozenXid, Oid* mappedTables);
+static void swap_partition_relfilenode( Oid partitionOid1, Oid partitionOid2, bool swapToastByContent,
+    TransactionId frozenXid, MultiXactId multiXid, Oid* mappedTables);
 static void partition_relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch);
 static void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -775,6 +779,7 @@ static void rebuild_relation(
     TransactionId frozenXid = InvalidTransactionId;
     double deleteTupleNum = 0;
     bool is_shared = OldHeap->rd_rel->relisshared;
+    MultiXactId multiXid;
 
     /* Mark the correct index as clustered */
     if (OidIsValid(indexOid))
@@ -798,6 +803,7 @@ static void rebuild_relation(
         verbose,
         &swap_toast_by_content,
         &frozenXid,
+        &multiXid,
         &deleteTupleNum,
         memUsage);
 
@@ -814,7 +820,8 @@ static void rebuild_relation(
      * Swap the physical files of the target and transient tables, then
      * rebuild the target's indexes and throw away the transient table.
      */
-    finish_heap_swap(tableOid, OIDNewHeap, is_system_catalog, swap_toast_by_content, false, frozenXid, memUsage);
+    finish_heap_swap(tableOid, OIDNewHeap, is_system_catalog, swap_toast_by_content,
+                     false, frozenXid, multiXid, memUsage);
 
     /* report vacuum full stat to PgStatCollector */
     pgstat_report_vacuum(tableOid, InvalidOid, is_shared, deleteTupleNum);
@@ -822,10 +829,8 @@ static void rebuild_relation(
     clearAttrInitDefVal(tableOid);
 }
 
-TransactionId getPartitionRelfrozenxid(Relation ordTableRel)
+void getPartitionRelxids(Relation ordTableRel, TransactionId* frozenXid, MultiXactId* multiXid)
 {
-    bool relfrozenxid_isNull = true;
-    TransactionId relfrozenxid = InvalidTransactionId;
     Relation rel = heap_open(PartitionRelationId, AccessShareLock);
     HeapTuple tuple = SearchSysCacheCopy1(PARTRELID, ObjectIdGetDatum(RelationGetRelid(ordTableRel)));
     if (!HeapTupleIsValid(tuple)) {
@@ -833,28 +838,35 @@ TransactionId getPartitionRelfrozenxid(Relation ordTableRel)
             (errcode(ERRCODE_UNDEFINED_TABLE),
                 errmsg("cache lookup failed for relation %u", RelationGetRelid(ordTableRel))));
     }
+    bool isNull = true;
     Datum xid64datum =
-        tableam_tops_tuple_getattr(tuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &relfrozenxid_isNull);
-    heap_close(rel, AccessShareLock);
-    heap_freetuple(tuple);
+        tableam_tops_tuple_getattr(tuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
 
-    if (relfrozenxid_isNull) {
-        relfrozenxid = ordTableRel->rd_rel->relfrozenxid;
+    if (isNull) {
+        *frozenXid = ordTableRel->rd_rel->relfrozenxid;
 
-        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, relfrozenxid) ||
-            !TransactionIdIsNormal(relfrozenxid))
-            relfrozenxid = FirstNormalTransactionId;
+        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, *frozenXid) ||
+            !TransactionIdIsNormal(*frozenXid))
+            *frozenXid = FirstNormalTransactionId;
     } else {
-        relfrozenxid = DatumGetTransactionId(xid64datum);
+        *frozenXid = DatumGetTransactionId(xid64datum);
     }
 
-    return relfrozenxid;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (multiXid != NULL) {
+        xid64datum =
+            tableam_tops_tuple_getattr(tuple, Anum_pg_partition_relminmxid, RelationGetDescr(rel), &isNull);
+        *multiXid = isNull ? InvalidMultiXactId : DatumGetTransactionId(xid64datum);
+    }
+#endif
+
+    heap_close(rel, AccessShareLock);
+    heap_freetuple(tuple);
 }
 
-TransactionId getRelationRelfrozenxid(Relation ordTableRel)
+void getRelationRelxids(Relation ordTableRel, TransactionId* frozenXid, MultiXactId* multiXid)
 {
-    bool relfrozenxid_isNull = true;
-    TransactionId relfrozenxid = InvalidTransactionId;
+    bool isNull = true;
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
     HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(RelationGetRelid(ordTableRel)));
     if (!HeapTupleIsValid(tuple)) {
@@ -862,21 +874,27 @@ TransactionId getRelationRelfrozenxid(Relation ordTableRel)
             (errcode(ERRCODE_UNDEFINED_TABLE),
                 errmsg("cache lookup failed for relation %u", RelationGetRelid(ordTableRel))));
     }
-    Datum xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &relfrozenxid_isNull);
-    heap_close(rel, AccessShareLock);
-    heap_freetuple(tuple);
+    Datum xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
 
-    if (relfrozenxid_isNull) {
-        relfrozenxid = ordTableRel->rd_rel->relfrozenxid;
+    if (isNull) {
+        *frozenXid = ordTableRel->rd_rel->relfrozenxid;
 
-        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, relfrozenxid) ||
-            !TransactionIdIsNormal(relfrozenxid))
-            relfrozenxid = FirstNormalTransactionId;
+        if (TransactionIdPrecedes(t_thrd.xact_cxt.ShmemVariableCache->nextXid, *frozenXid) ||
+            !TransactionIdIsNormal(*frozenXid))
+            *frozenXid = FirstNormalTransactionId;
     } else {
-        relfrozenxid = DatumGetTransactionId(xid64datum);
+        *frozenXid = DatumGetTransactionId(xid64datum);
     }
 
-    return relfrozenxid;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (multiXid != NULL) {
+        xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relminmxid, RelationGetDescr(rel), &isNull);
+        *multiXid = isNull ? InvalidMultiXactId : DatumGetTransactionId(xid64datum);
+    }
+#endif
+
+    heap_close(rel, AccessShareLock);
+    heap_freetuple(tuple);
 }
 
 /*
@@ -895,6 +913,7 @@ static void rebuildPartitionedTable(
     Oid OIDNewHeap = InvalidOid;
     bool swapToastByContent = false;
     TransactionId* frozenXid = NULL;
+    MultiXactId* multiXid = NULL;
 
     TupleDesc partTabHeapDesc;
     HeapTuple tuple = NULL;
@@ -922,6 +941,7 @@ static void rebuildPartitionedTable(
     int OIDNewHeapArrayLen = 0;
     int pos = 0;
     int loc = 0;
+    int temp = 0;
 
     /* Mark the correct index as clustered */
     if (OidIsValid(indexOid)) {
@@ -976,6 +996,7 @@ static void rebuildPartitionedTable(
     OIDNewHeapArrayLen = list_length(partitions);
     OIDNewHeapArray = (Oid*)palloc(sizeof(Oid) * OIDNewHeapArrayLen);
     frozenXid = (TransactionId*)palloc(sizeof(TransactionId) * OIDNewHeapArrayLen);
+    multiXid = (MultiXactId*)palloc(sizeof(MultiXactId) * OIDNewHeapArrayLen);
     foreach (cell, partitions) {
         partition = (Partition)lfirst(cell);
         partRel = partitionGetRelation(partTableRel, partition);
@@ -1022,7 +1043,8 @@ static void rebuildPartitionedTable(
                 &swapToastByContent,
                 &frozenXid[loc++],
                 memUsage);
-        else
+        else {
+            temp = loc++;
             copyPartitionHeapData(newHeap,
                 partRel,
                 indexOid,
@@ -1032,9 +1054,11 @@ static void rebuildPartitionedTable(
                 freezeTableAge,
                 verbose,
                 &swapToastByContent,
-                &frozenXid[loc++],
+                &frozenXid[temp],
+                &multiXid[temp],
                 memUsage,
                 &deleteTuplesNum);
+        }
 
         heap_close(newHeap, NoLock);
         releaseDummyRelation(&partRel);
@@ -1060,8 +1084,10 @@ static void rebuildPartitionedTable(
         partRel = partitionGetRelation(partTableRel, partition);
         OIDNewHeap = OIDNewHeapArray[pos++];
 
+        temp = loc++;
         /* swap the temp table and partition */
-        finishPartitionHeapSwap(partRel->rd_id, OIDNewHeap, swapToastByContent, frozenXid[loc++]);
+        finishPartitionHeapSwap(partRel->rd_id, OIDNewHeap, swapToastByContent, frozenXid[temp],
+                                isCStore ? InvalidMultiXactId : multiXid[temp]);
 
         /* release this partition relation. */
         releaseDummyRelation(&partRel);
@@ -1106,6 +1132,7 @@ static void rebuildPartition(Relation partTableRel, Oid partitionOid, Oid indexO
     Oid OIDNewHeap = InvalidOid;
     bool swapToastByContent = false;
     TransactionId frozenXid = InvalidTransactionId;
+    MultiXactId multiXid = InvalidMultiXactId;
     bool isCStore = RelationIsColStore(partTableRel);
 
     TupleDesc partTabHeapDesc;
@@ -1234,6 +1261,7 @@ static void rebuildPartition(Relation partTableRel, Oid partitionOid, Oid indexO
             verbose,
             &swapToastByContent,
             &frozenXid,
+            &multiXid,
             memUsage,
             &deleteTuplesNum);
     }
@@ -1266,7 +1294,7 @@ static void rebuildPartition(Relation partTableRel, Oid partitionOid, Oid indexO
          */
         TransferPredicateLocksToHeapRelation(partRel);
         /* swap the temp table and partition */
-        finishPartitionHeapSwap(partRel->rd_id, OIDNewHeap, swapToastByContent, frozenXid);
+        finishPartitionHeapSwap(partRel->rd_id, OIDNewHeap, swapToastByContent, frozenXid, multiXid);
         /* rebuild index of partition table */
         reindexFlags = REINDEX_REL_SUPPRESS_INDEX_USE;
         (void)reindexPartition(RelationGetRelid(partTableRel), partitionOid, reindexFlags, REINDEX_ALL_INDEX);
@@ -2049,7 +2077,7 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
                  * case we had better copy it.
                  */
                 if (!is_system_catalog &&
-                    !TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmin(page, tuple->t_data)))
+                    !TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(tuple)))
                     ereport(messageLevel, (errcode(ERRCODE_OBJECT_IN_USE),
                             errmsg("concurrent insert in progress within table \"%s\"",
                                 RelationGetRelationName(OldHeap))));
@@ -2180,11 +2208,13 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
  * *pFreezeXid receives the TransactionId used as freeze cutoff point.
  */
 static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int freeze_min_age, int freeze_table_age,
-    bool verbose, bool* pSwapToastByContent, TransactionId* pFreezeXid, double* ptrDeleteTupleNum, AdaptMem* memUsage)
+    bool verbose, bool* pSwapToastByContent, TransactionId* pFreezeXid, MultiXactId *pFreezeMulti,
+    double* ptrDeleteTupleNum, AdaptMem* memUsage)
 {
     Relation NewHeap, OldHeap, OldIndex;
     TransactionId OldestXmin;
     TransactionId FreezeXid;
+    MultiXactId	MultiXactFrzLimit;
     bool use_sort = false;
     double tups_vacuumed = 0;
     bool isGtt = false;
@@ -2259,7 +2289,8 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
          * freeze_min_age to avoid having CLUSTER freeze tuples earlier than a
          * plain VACUUM would.
          */
-        vacuum_set_xid_limits(OldHeap, 0, freeze_table_age, &OldestXmin, &FreezeXid, NULL);
+
+        vacuum_set_xid_limits(OldHeap, 0, freeze_table_age, &OldestXmin, &FreezeXid, NULL, &MultiXactFrzLimit);
 
         /*
          * FreezeXid will become the table's new relfrozenxid, and that mustn't go
@@ -2272,6 +2303,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
         } else {
             bool isNull = false;
             TransactionId relfrozenxid;
+            MultiXactId relminmxid;
             Relation rel = heap_open(RelationRelationId, AccessShareLock);
             HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(OIDOldHeap));
             if (!HeapTupleIsValid(tuple)) {
@@ -2280,8 +2312,6 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
                         errmsg("cache lookup failed for relation %u", RelationGetRelid(OldHeap))));
             }
             Datum xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
-            heap_close(rel, AccessShareLock);
-            heap_freetuple(tuple);
 
             if (isNull) {
                 relfrozenxid = OldHeap->rd_rel->relfrozenxid;
@@ -2300,6 +2330,16 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
             if (TransactionIdPrecedes(FreezeXid, relfrozenxid)) {
                 FreezeXid = relfrozenxid;
             }
+#ifndef ENABLE_MULTIPLE_NODES
+            Datum minmxidDatum = tableam_tops_tuple_getattr(tuple, Anum_pg_class_relminmxid, RelationGetDescr(rel), &isNull);
+            relminmxid = isNull ? InvalidMultiXactId : DatumGetTransactionId(minmxidDatum);
+
+            if (MultiXactIdPrecedes(MultiXactFrzLimit, relminmxid)) {
+                MultiXactFrzLimit = relminmxid;
+            }
+#endif
+            heap_close(rel, AccessShareLock);
+            heap_freetuple(tuple);
         }
     } else {
         /* We will eventually freeze all tuples of ustore tables here.
@@ -2310,6 +2350,7 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
 
     /* return selected value to caller */
     *pFreezeXid = FreezeXid;
+    *pFreezeMulti = MultiXactFrzLimit;
 
     /*
      * Decide whether to use an indexscan or seqscan-and-optional-sort to scan
@@ -2414,15 +2455,17 @@ static Relation GetPartitionIndexRel(
  */
 static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexOid, PlannerInfo* root,
     RelOptInfo* relOptInfo, int freezeMinAge, int freezeTableAge, bool verbose, bool* pSwapToastByContent,
-    TransactionId* pFreezeXid, AdaptMem* memUsage, double* ptrDeleteTupleNum)
+    TransactionId* pFreezeXid, MultiXactId* pFreezeMulti, AdaptMem* memUsage, double* ptrDeleteTupleNum)
 {
     Relation oldIndex = NULL;
     TransactionId oldestXmin = 0;
     TransactionId freezeXid = 0;
+    MultiXactId freezeMulti = 0;
     bool useSort = false;
     Relation partTabIndexRel = NULL;
     Partition partIndexRel = NULL;
     TransactionId relfrozenxid = InvalidTransactionId;
+    MultiXactId relfrozenmxid = InvalidMultiXactId;
     double tups_vacuumed = 0;
     *pSwapToastByContent = false;
 
@@ -2448,25 +2491,30 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
         /*
          * compute xids used to freeze and weed out dead tuples.
          */
-        vacuum_set_xid_limits(oldHeap, 0, freezeTableAge, &oldestXmin, &freezeXid, NULL);
+        vacuum_set_xid_limits(oldHeap, 0, freezeTableAge, &oldestXmin, &freezeXid, NULL, &freezeMulti);
 
         /*
          * FreezeXid will become the table's new relfrozenxid, and that mustn't go
          * backwards, so take the max.
          */
-        relfrozenxid = getPartitionRelfrozenxid(oldHeap);
+        getPartitionRelxids(oldHeap, &relfrozenxid, &relfrozenmxid);
 
         if (TransactionIdPrecedes(freezeXid, relfrozenxid))
             freezeXid = relfrozenxid;
+
+        if (MultiXactIdPrecedes(freezeMulti, relfrozenmxid))
+            freezeMulti = relfrozenmxid;
     } else {
         /* We will eventually freeze all tuples of ustore tables here.
          * Hence freeze xid should be CurrentTransactionId
          */
         freezeXid = GetCurrentTransactionId();
+        freezeMulti = GetOldestMultiXactId();
     }
 
     /* return selected value to caller */
     *pFreezeXid = freezeXid;
+    *pFreezeMulti = freezeMulti;
 
     /*
      * Decide whether to use an indexscan or seqscan-and-optional-sort to scan
@@ -2546,7 +2594,8 @@ static void copyPartitionHeapData(Relation newHeap, Relation oldHeap, Oid indexO
  * having to look the information up again later in finish_heap_swap.
  */
 static void swap_relation_files(
-    Oid r1, Oid r2, bool target_is_pg_class, bool swap_toast_by_content, TransactionId frozenXid, Oid* mapped_tables)
+    Oid r1, Oid r2, bool target_is_pg_class, bool swap_toast_by_content, TransactionId frozenXid,
+    MultiXactId frozenMulti, Oid* mapped_tables)
 {
     Relation relRelation;
     HeapTuple reltup1, reltup2;
@@ -2675,7 +2724,7 @@ static void swap_relation_files(
      * mapped catalog, because it's possible that we'll commit the map change
      * and then fail to commit the pg_class update.
      *
-     * set rel1's frozen Xid
+     * set rel1's frozen Xid and minimum MultiXid
      */
     nctup = NULL;
     if (relform1->relkind != RELKIND_INDEX && relform1->relkind != RELKIND_GLOBAL_INDEX) {
@@ -2696,6 +2745,11 @@ static void swap_relation_files(
 
         replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
         values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenXid);
+
+#ifndef ENABLE_MULTIPLE_NODES
+        replaces[Anum_pg_class_relminmxid - 1] = true;
+        values[Anum_pg_class_relminmxid - 1] = TransactionIdGetDatum(frozenMulti);
+#endif
 
         nctup = (HeapTuple) tableam_tops_modify_tuple(reltup1, RelationGetDescr(relRelation), values, nulls, replaces);
 
@@ -2761,6 +2815,7 @@ static void swap_relation_files(
                     target_is_pg_class,
                     swap_toast_by_content,
                     frozenXid,
+                    frozenMulti,
                     mapped_tables);
             } else {
                 /* caller messed up */
@@ -2851,6 +2906,7 @@ static void swap_relation_files(
             target_is_pg_class,
             swap_toast_by_content,
             InvalidTransactionId,
+            InvalidMultiXactId,
             mapped_tables);
     /* Clean up. */
     if (nctup)
@@ -2929,7 +2985,8 @@ static void swap_relation_names(Oid r1, Oid r2)
  * Output       : NA
  */
 static void swapPartitionfiles(
-    Oid partitionOid, Oid tempTableOid, bool swapToastByContent, TransactionId frozenXid, Oid* mappedTables)
+    Oid partitionOid, Oid tempTableOid, bool swapToastByContent, TransactionId frozenXid,
+    MultiXactId multiXid, Oid* mappedTables)
 {
     Relation relRelation1 = NULL;
     Relation relRelation2 = NULL;
@@ -3010,6 +3067,11 @@ static void swapPartitionfiles(
         replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
         values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenXid);
 
+#ifndef ENABLE_MULTIPLE_NODES
+        replaces[Anum_pg_partition_relminmxid - 1] = true;
+        values[Anum_pg_partition_relminmxid - 1] = TransactionIdGetDatum(multiXid);
+#endif
+
         ntup = (HeapTuple) tableam_tops_modify_tuple(reltup1, RelationGetDescr(relRelation1), values, nulls, replaces);
 
         relform1 = (Form_pg_partition)GETSTRUCT(ntup);
@@ -3057,7 +3119,8 @@ static void swapPartitionfiles(
      * deal with them too.
      */
     swapCascadeHeapTables(
-        relform1->reltoastrelid, relform2->reltoastrelid, tempTableOid, swapToastByContent, frozenXid, mappedTables);
+        relform1->reltoastrelid, relform2->reltoastrelid, tempTableOid, swapToastByContent, frozenXid,
+        multiXid, mappedTables);
     SwapCStoreTables(relform1->relcudescrelid, relform2->relcudescrelid, InvalidOid, tempTableOid);
     SwapCStoreTables(relform1->reldeltarelid, relform2->reldeltarelid, InvalidOid, tempTableOid);
 
@@ -3071,6 +3134,7 @@ static void swapPartitionfiles(
             false,
             swapToastByContent,
             InvalidTransactionId,
+            InvalidMultiXactId,
             mappedTables);
 
     /* Clean up. */
@@ -3090,13 +3154,14 @@ static void swapPartitionfiles(
 }
 
 static void swapCascadeHeapTables(
-    Oid relId1, Oid relId2, Oid tempTableOid, bool swapByContent, TransactionId frozenXid, Oid* mappedTables)
+    Oid relId1, Oid relId2, Oid tempTableOid, bool swapByContent, TransactionId frozenXid,
+    MultiXactId multiXid, Oid* mappedTables)
 {
     if (relId1 || relId2) {
         if (swapByContent) {
             if (relId1 && relId2) {
                 /* Recursively swap the contents of the toast tables */
-                swap_relation_files(relId1, relId2, false, swapByContent, frozenXid, mappedTables);
+                swap_relation_files(relId1, relId2, false, swapByContent, frozenXid, multiXid, mappedTables);
             } else {
                 /* caller messed up */
                 ereport(ERROR,
@@ -3219,7 +3284,7 @@ static void SwapCStoreTables(Oid relId1, Oid relId2, Oid parentOid, Oid tempTabl
  * cleaning up (including rebuilding all indexes on the old heap).
  */
 void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bool swap_toast_by_content,
-    bool checkConstraints, TransactionId frozenXid, AdaptMem* memInfo)
+    bool checkConstraints, TransactionId frozenXid, MultiXactId frozenMulti, AdaptMem* memInfo)
 {
     ObjectAddress object;
     Oid mapped_tables[4];
@@ -3240,7 +3305,7 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
         GttSwapRelationFiles(OIDOldHeap, OIDNewHeap);
     } else {
         swap_relation_files(OIDOldHeap, OIDNewHeap, (OIDOldHeap == RelationRelationId), 
-            swap_toast_by_content, frozenXid, mapped_tables);
+            swap_toast_by_content, frozenXid, frozenMulti, mapped_tables);
     }
 
     /*
@@ -3351,7 +3416,8 @@ void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bo
  * Output       : NA
  */
 void finishPartitionHeapSwap(
-    Oid partitionOid, Oid tempTableOid, bool swapToastByContent, TransactionId frozenXid, bool tempTableIsPartition)
+    Oid partitionOid, Oid tempTableOid, bool swapToastByContent, TransactionId frozenXid,
+    MultiXactId multiXid, bool tempTableIsPartition)
 {
     Oid mapped_tables[4];
     int i = 0;
@@ -3367,10 +3433,10 @@ void finishPartitionHeapSwap(
      */
     if (tempTableIsPartition) {
         /* For redistribution, exchange meta info between two partitions */
-        swap_partition_relfilenode(partitionOid, tempTableOid, swapToastByContent, frozenXid, mapped_tables);
+        swap_partition_relfilenode(partitionOid, tempTableOid, swapToastByContent, frozenXid, multiXid, mapped_tables);
     } else {
         /* For alter table exchange, between partition and a normal table */
-        swapPartitionfiles(partitionOid, tempTableOid, swapToastByContent, frozenXid, mapped_tables);
+        swapPartitionfiles(partitionOid, tempTableOid, swapToastByContent, frozenXid, multiXid, mapped_tables);
     }
 
     /*
@@ -3782,6 +3848,7 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
     Oid OIDNewHeap = InvalidOid;
     bool swapToastByContent = false;
     TransactionId frozenXid = InvalidTransactionId;
+    MultiXactId multiXid = InvalidMultiXactId;
     TupleDesc partTabHeapDesc;
     HeapTuple tuple = NULL;
     Datum partTabRelOptions = 0;
@@ -3860,6 +3927,7 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
             verbose,
             &swapToastByContent,
             &frozenXid,
+            &multiXid,
             &vacstmt->memUsage,
             &deleteTupleNum);
     }
@@ -3872,7 +3940,7 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
      * Swap the physical files of the target and transient tables, then
      * rebuild the target's indexes and throw away the transient table.
      */
-    finishPartitionHeapSwap(partRel->rd_id, OIDNewHeap, swapToastByContent, frozenXid);
+    finishPartitionHeapSwap(partRel->rd_id, OIDNewHeap, swapToastByContent, frozenXid, multiXid);
 
     /* Close relcache entry, but keep lock until transaction commit */
     releaseDummyRelation(&partRel);
@@ -3906,7 +3974,7 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
      */
     partTable = try_relation_open(tableOid, AccessShareLock);
     /* Update reltuples and relpages in pg_class for partitioned table. */
-    vac_update_pgclass_partitioned_table(partTable, partTable->rd_rel->relhasindex, frozenXid);
+    vac_update_pgclass_partitioned_table(partTable, partTable->rd_rel->relhasindex, frozenXid, multiXid);
     /*
      * report vacuum full stat to PgStatCollector.
      * For CStore table, we delete all invisible tuple, so dead tuple should be 0; and
@@ -4000,7 +4068,7 @@ static void CopyCStoreData(Relation oldRel, Relation newRel, int freeze_min_age,
      * freeze_min_age to avoid having CLUSTER freeze tuples earlier than a
      * plain VACUUM would.
      **/
-    vacuum_set_xid_limits(oldRel, freeze_min_age, freeze_table_age, &OldestXmin, &FreezeXid, NULL);
+    vacuum_set_xid_limits(oldRel, freeze_min_age, freeze_table_age, &OldestXmin, &FreezeXid, NULL, NULL);
     bool isNull = false;
     TransactionId relfrozenxid = InvalidTransactionId;
     Relation rel;
@@ -4406,7 +4474,7 @@ static void RebuildCStoreRelation(
     LockRelationOid(tableOid, AccessExclusiveLock);
 
     /* swap relation files */
-    finish_heap_swap(tableOid, oidNewHeap, false, swapToastByContent, false, frozenXid, mem_info);
+    finish_heap_swap(tableOid, oidNewHeap, false, swapToastByContent, false, frozenXid, InvalidMultiXactId, mem_info);
 
     /*
      * Report vacuum full stat to PgStatCollector.
@@ -5293,7 +5361,8 @@ static Datum pgxc_parallel_execution(const char* query, ExecNodes* exec_nodes)
  * @return      : None
  */
 static void swap_partition_relfilenode(
-    Oid partitionOid1, Oid partitionOid2, bool swapToastByContent, TransactionId frozenXid, Oid* mappedTables)
+    Oid partitionOid1, Oid partitionOid2, bool swapToastByContent, TransactionId frozenXid,
+    MultiXactId multiXid, Oid* mappedTables)
 {
     Relation relRelation = NULL;
     HeapTuple reltup1 = NULL;
@@ -5373,6 +5442,11 @@ static void swap_partition_relfilenode(
         replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
         values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenXid);
 
+#ifndef ENABLE_MULTIPLE_NODES
+        replaces[Anum_pg_partition_relminmxid - 1] = true;
+        values[Anum_pg_partition_relminmxid - 1] = TransactionIdGetDatum(multiXid);
+#endif
+
         ntup = (HeapTuple) tableam_tops_modify_tuple(reltup1, RelationGetDescr(relRelation), values, nulls, replaces);
 
         relform1 = (Form_pg_partition)GETSTRUCT(ntup);
@@ -5433,6 +5507,7 @@ static void swap_partition_relfilenode(
             false,
             swapToastByContent,
             InvalidTransactionId,
+            InvalidMultiXactId,
             mappedTables);
 
     /* Clean up. */
@@ -5641,11 +5716,13 @@ static void PartitionRelfilenodeSwap(
         }
         Relation old_partRel = partitionGetRelation(oldHeap, old_partition);
         Relation new_partRel = partitionGetRelation(newHeap, new_partition);
-        TransactionId relfrozenxid = getPartitionRelfrozenxid(old_partRel);
+        TransactionId relfrozenxid = InvalidTransactionId;
+        MultiXactId relminmxid = InvalidMultiXactId;
+        getPartitionRelxids(old_partRel, &relfrozenxid, &relminmxid);
 
         /* Exchange two partition's meta information */
         if (RelationIsIndex(oldHeap)) {
-            finishPartitionHeapSwap(old_partRel->rd_id, new_partRel->rd_id, false, relfrozenxid, true);
+            finishPartitionHeapSwap(old_partRel->rd_id, new_partRel->rd_id, false, relfrozenxid, relminmxid, true);
         } else {
             List* old_part_idx_list = PartitionGetPartIndexList(old_partition, true);
             List* new_part_idx_list = PartitionGetPartIndexList(new_partition, true);
@@ -5771,6 +5848,7 @@ void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch)
         (OIDOldHeap == RelationRelationId),
         false,
         u_sess->utils_cxt.RecentGlobalXmin,
+        GetOldestMultiXactId(),
         mapped_tables);
     /*
      * Now we must remove any relation mapping entries that we set up for the

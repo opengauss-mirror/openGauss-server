@@ -1315,7 +1315,7 @@ ldelete:
                             errmsg("concurrent update under Stream mode is not yet supported")));
                     }
                     TupleTableSlot *epqslot = EvalPlanQual(estate, epqstate, fake_relation,
-                        result_rel_info->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax, false);
+                        result_rel_info->ri_RangeTableIndex, LockTupleExclusive, &tmfd.ctid, tmfd.xmax, false);
                     if (!TupIsNull(epqslot)) {
                         *tupleid = tmfd.ctid;
                         goto ldelete;
@@ -1652,6 +1652,7 @@ TupleTableSlot* ExecUpdate(ItemPointer tupleid,
         tuple = tableam_tslot_get_tuple_from_slot(result_relation_desc, slot);
     } else {
         bool update_indexes = false;
+        LockTupleMode lockmode;
 
         /*
          * Compute stored generated columns
@@ -1721,7 +1722,8 @@ lreplace:
                     /* add para 2 for heap_update */
                     result = tableam_tuple_update(fake_relation, parent_relation, tupleid, tuple, estate->es_output_cid,
                         estate->es_crosscheck_snapshot, estate->es_snapshot, true, // wait for commit
-                        &oldslot, &tmfd, &update_indexes, &modifiedIdxAttrs, allow_update_self, allowInplaceUpdate);
+                        &oldslot, &tmfd, &update_indexes, &modifiedIdxAttrs, allow_update_self,
+                        allowInplaceUpdate, &lockmode);
                     switch (result) {
                         case TM_SelfUpdated:
                         case TM_SelfModified:
@@ -1794,7 +1796,7 @@ lreplace:
                             }
 
                             TupleTableSlot *epq_slot = EvalPlanQual(estate, epqstate, fake_relation,
-                                result_rel_info->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax, false);
+                                result_rel_info->ri_RangeTableIndex, lockmode, &tmfd.ctid, tmfd.xmax, false);
                             if (!TupIsNull(epq_slot)) {
                                 *tupleid = tmfd.ctid;
 
@@ -1977,7 +1979,8 @@ lreplace:
                             &update_indexes,
                             &modifiedIdxAttrs,
                             allow_update_self,
-                            allowInplaceUpdate);
+                            allowInplaceUpdate,
+                            &lockmode);
                         switch (result) {
                             case TM_SelfUpdated:
                             case TM_SelfModified:
@@ -2036,7 +2039,7 @@ lreplace:
                                 }
 
                                 TupleTableSlot *epq_slot = EvalPlanQual(estate, epqstate, fake_relation,
-                                    result_rel_info->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax,
+                                    result_rel_info->ri_RangeTableIndex, lockmode, &tmfd.ctid, tmfd.xmax,
                                     result_relation_desc->rd_rel->relrowmovement);
 
                                 if (!TupIsNull(epq_slot)) {
@@ -2220,6 +2223,7 @@ ldelete:
                                         epqstate,
                                         old_fake_relation,
                                         result_rel_info->ri_RangeTableIndex,
+                                        LockTupleExclusive,
                                         &tmfd.ctid,
                                         tmfd.xmax,
                                         result_relation_desc->rd_rel->relrowmovement);

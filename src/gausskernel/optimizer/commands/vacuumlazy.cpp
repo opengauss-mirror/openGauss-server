@@ -47,6 +47,7 @@
 #include "access/transam.h"
 #include "access/visibilitymap.h"
 #include "access/xlog.h"
+#include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/storage.h"
 #include "catalog/pg_hashbucket_fn.h"
@@ -181,6 +182,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     double new_rel_tuples;
     BlockNumber new_rel_allvisible;
     TransactionId new_frozen_xid;
+    MultiXactId	new_min_multi;
     Relation* indexrel = NULL;
     Partition* indexpart = NULL;
     uint32 statFlag = onerel->parentId;
@@ -193,7 +195,8 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             vacstmt->freeze_table_age,
             &u_sess->cmd_cxt.OldestXmin,
             &u_sess->cmd_cxt.FreezeLimit,
-            &freezeTableLimit);
+            &freezeTableLimit,
+            &u_sess->cmd_cxt.MultiXactFrzLimit);
 
         new_frozen_xid = u_sess->cmd_cxt.FreezeLimit;
 
@@ -322,7 +325,8 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         vacstmt->freeze_table_age,
         &u_sess->cmd_cxt.OldestXmin,
         &u_sess->cmd_cxt.FreezeLimit,
-        &freezeTableLimit);
+        &freezeTableLimit,
+        &u_sess->cmd_cxt.MultiXactFrzLimit);
 
     bool isNull = false;
     TransactionId relfrozenxid;
@@ -488,10 +492,16 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         new_frozen_xid = InvalidTransactionId;
     }
 
+    new_min_multi = u_sess->cmd_cxt.MultiXactFrzLimit;
+    if (vacrelstats->scanned_pages < vacrelstats->rel_pages || vacrelstats->hasKeepInvisbleTuples) {
+        new_min_multi = InvalidMultiXactId;
+    }
+
     if (RelationIsPartition(onerel)) {
         Assert(vacstmt->onepart != NULL);
 
-        vac_update_partstats(vacstmt->onepart, new_rel_pages, new_rel_tuples, new_rel_allvisible, new_frozen_xid);
+        vac_update_partstats(vacstmt->onepart, new_rel_pages, new_rel_tuples,
+                             new_rel_allvisible, new_frozen_xid, new_min_multi);
         /*
          * when vacuum partition, do not change the relhasindex field in pg_class
          * for partitioned table, as some partition may be altered as "all local
@@ -500,7 +510,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
          * misdguge as hot update even if update indexes columns.
          */
         vac_update_pgclass_partitioned_table(
-            vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid);
+            vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid, new_min_multi);
 
         // update stats of local partition indexes
         for (int idx = 0; idx < nindexes - nindexesGlobal; idx++) {
@@ -512,9 +522,10 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                 vacrelstats->new_idx_pages[idx],
                 vacrelstats->new_idx_tuples[idx],
                 0,
-                InvalidTransactionId);
+                InvalidTransactionId,
+                InvalidMultiXactId);
 
-            vac_update_pgclass_partitioned_table(indexrel[idx], false, InvalidTransactionId);
+            vac_update_pgclass_partitioned_table(indexrel[idx], false, InvalidTransactionId, InvalidMultiXactId);
         }
 
         // update stats of global partition indexes
@@ -531,13 +542,15 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                 vacrelstats->new_idx_tuples[idx],
                 0,
                 false,
-                InvalidTransactionId);
+                InvalidTransactionId,
+                InvalidMultiXactId);
         }
         heap_close(classRel, RowExclusiveLock);
     } else {
         Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
         vac_update_relstats(
-            onerel, classRel, new_rel_pages, new_rel_tuples, new_rel_allvisible, vacrelstats->hasindex, new_frozen_xid);
+            onerel, classRel, new_rel_pages, new_rel_tuples, new_rel_allvisible,
+            vacrelstats->hasindex, new_frozen_xid, new_min_multi);
 
         for (int idx = 0; idx < nindexes; idx++) {
             /* update index status */
@@ -551,7 +564,8 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
                 vacrelstats->new_idx_tuples[idx],
                 0,
                 false,
-                InvalidTransactionId);
+                InvalidTransactionId,
+                InvalidMultiXactId);
         }
         heap_close(classRel, RowExclusiveLock);
     }
@@ -1032,6 +1046,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
         bool all_visible = false;
         bool has_dead_tuples = false;
         TransactionId visibility_cutoff_xid = InvalidTransactionId;
+        bool changedMultiXid;
 
         /* IO collector and IO scheduler for vacuum */
         if (ENABLE_WORKLOAD_CONTROL)
@@ -1266,6 +1281,7 @@ static IndexBulkDeleteResult** lazy_scan_heap(
         all_visible = true;
         has_dead_tuples = false;
         nfrozen = 0;
+        changedMultiXid = false;
         hastup = false;
         prev_dead_count = vacrelstats->num_dead_tuples;
         maxoff = PageGetMaxOffsetNumber(page);
@@ -1417,7 +1433,8 @@ static IndexBulkDeleteResult** lazy_scan_heap(
                  * Each non-removable tuple must be checked to see if it needs
                  * freezing.  Note we already have exclusive buffer lock.
                  */
-                if (heap_freeze_tuple(&tuple, u_sess->cmd_cxt.FreezeLimit))
+                if (heap_freeze_tuple(&tuple, u_sess->cmd_cxt.FreezeLimit, u_sess->cmd_cxt.MultiXactFrzLimit,
+                                      &changedMultiXid))
                     frozen[nfrozen++] = offnum;
             }
 
@@ -1435,7 +1452,9 @@ static IndexBulkDeleteResult** lazy_scan_heap(
             if (RelationNeedsWAL(onerel)) {
                 XLogRecPtr recptr;
 
-                recptr = log_heap_freeze(onerel, buf, u_sess->cmd_cxt.FreezeLimit, frozen, nfrozen);
+                recptr = log_heap_freeze(onerel, buf, u_sess->cmd_cxt.FreezeLimit,
+                                         changedMultiXid ?  u_sess->cmd_cxt.MultiXactFrzLimit : InvalidMultiXactId,
+                                         frozen, nfrozen);
                 PageSetLSN(page, recptr);
             }
             END_CRIT_SECTION();
@@ -1782,7 +1801,7 @@ static bool lazy_check_needs_freeze(Buffer buf)
         HeapTupleCopyBaseFromPage(&tuple, page);
         ItemPointerSet(&(tuple.t_self), BufferGetBlockNumber(buf), offnum);
 
-        if (heap_tuple_needs_freeze(&tuple, u_sess->cmd_cxt.FreezeLimit, buf))
+        if (heap_tuple_needs_freeze(&tuple, u_sess->cmd_cxt.FreezeLimit, u_sess->cmd_cxt.MultiXactFrzLimit, buf))
             return true;
     } /* scan along page */
 

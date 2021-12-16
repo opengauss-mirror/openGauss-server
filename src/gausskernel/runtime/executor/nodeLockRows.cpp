@@ -181,15 +181,34 @@ lnext:
             searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, target_rel, bucket_id, bucket_rel);
         }
         /* okay, try to lock the tuple */
-        if (erm->markType == ROW_MARK_EXCLUSIVE)
-            lock_mode = LockTupleExclusive;
-        else
-            lock_mode = LockTupleShared;
+        switch (erm->markType) {
+            case ROW_MARK_EXCLUSIVE:
+                lock_mode = LockTupleExclusive;
+                break;
+            case ROW_MARK_NOKEYEXCLUSIVE:
+                lock_mode = LockTupleNoKeyExclusive;
+                break;
+            case ROW_MARK_SHARE:
+                lock_mode = LockTupleShared;
+                break;
+            case ROW_MARK_KEYSHARE:
+                lock_mode = LockTupleKeyShare;
+                break;
+            default:
+                elog(ERROR, "unsupported rowmark type");
+                lock_mode = LockTupleNoKeyExclusive; /* keep compiler quiet */
+                break;
+        }
 
         /* Need to merge the ustore logic with AM logic */
         test = tableam_tuple_lock(bucket_rel, &tuple, &buffer, 
                                       estate->es_output_cid, lock_mode, erm->noWait, &tmfd,
+#ifdef ENABLE_MULTIPLE_NODES
                                       false, false, false, estate->es_snapshot, NULL, true);
+#else
+                                      false, true, false, estate->es_snapshot, NULL, true);
+#endif
+
         ReleaseBuffer(buffer);
 
         switch (test) {
@@ -262,8 +281,6 @@ lnext:
                             errmsg("could not serialize access due to concurrent update")));
 
                 /* Tuple was deleted, so don't return it */
-                Assert(ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
-
                 if (rowMovement) {
                     /*
                      * the may be a row movement update action which delete tuple from original

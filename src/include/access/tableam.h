@@ -452,7 +452,8 @@ typedef struct TableAmRoutine {
 
     TM_Result (*tuple_update)(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup, CommandId cid,
         Snapshot crosscheck, Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd,
-        bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self, bool allow_inplace_update);
+        LockTupleMode *mode, bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self,
+        bool allow_inplace_update);
 
     TM_Result (*tuple_lock)(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid, LockTupleMode mode,
         bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot,
@@ -583,7 +584,7 @@ extern TM_Result tableam_tuple_delete(Relation relation, ItemPointer tid, Comman
 extern TM_Result tableam_tuple_update(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup,
     CommandId cid, Snapshot crosscheck, Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd,
     bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self = false,
-    bool allow_inplace_update = true);
+    bool allow_inplace_update = true, LockTupleMode *lockmode = NULL);
 extern TM_Result tableam_tuple_lock(Relation relation, Tuple tuple, Buffer *buffer, CommandId cid,
     LockTupleMode mode, bool nowait, TM_FailureData *tmfd, bool allow_lock_self, bool follow_updates, bool eval,
     Snapshot snapshot, ItemPointer tid, bool isSelectForUpdate, bool isUpsert = false, 

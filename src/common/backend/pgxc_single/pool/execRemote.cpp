@@ -26,6 +26,7 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/relscan.h"
+#include "access/multixact.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
@@ -9457,7 +9458,8 @@ static void ReceivePageAndTuple(Oid relid, TupleTableSlot* slot, VacuumStmt* stm
     rel = relation_open(relid, ShareUpdateExclusiveLock);
     classRel = heap_open(RelationRelationId, RowExclusiveLock);
 
-    vac_update_relstats(rel, classRel, relpages, reltuples, relallvisible, hasindex, BootstrapTransactionId);
+    vac_update_relstats(rel, classRel, relpages, reltuples, relallvisible,
+        hasindex, BootstrapTransactionId, InvalidMultiXactId);
 
     /* Save the flag identify is there dirty data in the relation. */
     if (stmt != NULL) {
@@ -9871,7 +9873,9 @@ static void ReceivePartitionPageAndTuple(Oid relid, TupleTableSlot* slot)
     }
     partrel = partitionOpen(rel, partitionid, NoLock);
 
-    vac_update_partstats(partrel, (BlockNumber)relpages, reltuples, relallvisible, BootstrapTransactionId);
+    vac_update_partstats(partrel, (BlockNumber)relpages, reltuples, relallvisible,
+                         BootstrapTransactionId, RelationIsColStore(rel) ? InvalidMultiXactId : FirstMultiXactId);
+
     /*
      * we does not fetch dead tuples info from remote DN/CN, just set  deadtuples to 0. it does
      * not matter because we should fetch all deadtuples info from all datanodes to calculate a

@@ -226,7 +226,7 @@ extern void ExecConstraints(ResultRelInfo* resultRelInfo, TupleTableSlot* slot, 
 extern ExecRowMark* ExecFindRowMark(EState* estate, Index rti);
 extern ExecAuxRowMark* ExecBuildAuxRowMark(ExecRowMark* erm, List* targetlist);
 extern TupleTableSlot* EvalPlanQual(EState* estate, EPQState* epqstate, Relation relation, Index rti,
-    ItemPointer tid, TransactionId priorXmax, bool partRowMoveUpdate);
+    int lockmode, ItemPointer tid, TransactionId priorXmax, bool partRowMoveUpdate);
 extern HeapTuple heap_lock_updated(
     CommandId cid, Relation relation, int lockmode, ItemPointer tid, TransactionId priorXmax);
 extern TupleTableSlot* EvalPlanQualUHeap(EState* estate, EPQState* epqstate, Relation relation, Index rti, ItemPointer tid, TransactionId priorXmax);

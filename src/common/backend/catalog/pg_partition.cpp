@@ -36,6 +36,8 @@
 #include "utils/inval.h"
 #include "utils/syscache.h"
 #include "access/genam.h"
+#include "access/multixact.h"
+#include "access/reloptions.h"
 #include "utils/fmgroids.h"
 #include "access/heapam.h"
 #include "utils/snapmgr.h"
@@ -129,8 +131,19 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
 
     if (parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
         values[Anum_pg_partition_relfrozenxid64 - 1] = u_sess->utils_cxt.RecentXmin;
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (!is_cstore_option(RELKIND_RELATION, reloptions)) {
+            values[Anum_pg_partition_relminmxid - 1] = GetOldestMultiXactId();
+        } else {
+            values[Anum_pg_partition_relminmxid - 1] = InvalidMultiXactId;
+        }
+#endif
     } else {
         values[Anum_pg_partition_relfrozenxid64 - 1] = InvalidTransactionId;
+#ifndef ENABLE_MULTIPLE_NODES
+        values[Anum_pg_partition_relminmxid - 1] = InvalidMultiXactId;
+#endif
     }
 
     /* form a tuple using values and null array, and insert it */

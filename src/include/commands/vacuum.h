@@ -408,9 +408,10 @@ extern void vac_close_indexes(int nindexes, Relation* Irel, LOCKMODE lockmode);
 extern double vac_estimate_reltuples(
     Relation relation, BlockNumber total_pages, BlockNumber scanned_pages, double scanned_tuples);
 extern void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_pages, double num_tuples,
-    BlockNumber num_all_visible_pages, bool hasindex, TransactionId frozenxid);
+    BlockNumber num_all_visible_pages, bool hasindex, TransactionId frozenxid,
+    MultiXactId minmulti = InvalidMultiXactId);
 extern void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_table_age, TransactionId* oldestXmin,
-    TransactionId* freezeLimit, TransactionId* freezeTableLimit);
+    TransactionId* freezeLimit, TransactionId* freezeTableLimit, MultiXactId* multiXactFrzLimit);
 extern void vac_update_datfrozenxid(void);
 extern void vacuum_delay_point(void);
 
@@ -445,19 +446,20 @@ extern void delete_attstats_replication(Oid relid, VacuumStmt* stmt);
 extern int compute_attr_target(Form_pg_attribute attr);
 
 extern void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tuples,
-    BlockNumber num_all_visible_pages, TransactionId frozenxid);
+    BlockNumber num_all_visible_pages, TransactionId frozenxid, MultiXactId minmulti = InvalidMultiXactId);
 extern void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes, int* nindexesGlobal,
     Relation** Irel, Relation** indexrel, Partition** indexpart);
 extern void vac_close_part_indexes(
     int nindexes, int nindexesGlobal, Relation* Irel, Relation* indexrel, Partition* indexpart, LOCKMODE lockmode);
-extern void vac_update_pgclass_partitioned_table(Relation partitionRel, bool hasIndex, TransactionId newFrozenXid);
+extern void vac_update_pgclass_partitioned_table(Relation partitionRel, bool hasIndex, TransactionId newFrozenXid,
+                                                 MultiXactId newMultiXid);
 
 extern void CStoreVacUpdateNormalRelStats(Oid relid, TransactionId frozenxid, Relation pgclassRel);
 extern void CStoreVacUpdatePartitionRelStats(Relation partitionRel, TransactionId newFrozenXid);
 extern void CStoreVacUpdatePartitionStats(Oid relid, TransactionId frozenxid);
 extern void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation pgPartitionRel,
     _out_ BlockNumber* totalPages, _out_ BlockNumber* totalVisiblePages, _out_ double* totalTuples,
-    _out_ TransactionId* minFrozenXid);
+    _out_ TransactionId* minFrozenXid, _out_ MultiXactId* minMultiXid);
 
 extern bool IsToastRelationbyOid(Oid relid);
 extern Oid pg_toast_get_baseid(Oid relOid, bool* isPartToast);

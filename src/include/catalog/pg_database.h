@@ -48,6 +48,7 @@ CATALOG(pg_database,1262) BKI_SHARED_RELATION BKI_ROWTYPE_OID(1248) BKI_SCHEMA_M
     aclitem        datacl[1];        /* access permissions */
 #endif
     TransactionId datfrozenxid64; /* all Xids < this are frozen in this DB */
+    TransactionId datminmxid;	/* all multixacts in the DB are >= this */
 } FormData_pg_database;
 
 /* Size of fixed part of pg_database tuples, not counting var-length fields */
@@ -65,7 +66,7 @@ typedef FormData_pg_database *Form_pg_database;
  *        compiler constants for pg_database
  * ----------------
  */
-#define Natts_pg_database				14
+#define Natts_pg_database				15
 #define Anum_pg_database_datname		1
 #define Anum_pg_database_datdba			2
 #define Anum_pg_database_encoding		3
@@ -80,8 +81,9 @@ typedef FormData_pg_database *Form_pg_database;
 #define Anum_pg_database_compatibility	12
 #define Anum_pg_database_datacl			13
 #define Anum_pg_database_datfrozenxid64	14
+#define Anum_pg_database_datminmxid		15
 
-DATA(insert OID = 1 (  template1 PGUID ENCODING "LC_COLLATE" "LC_CTYPE" t t -1 0 0 1663 "DB_COMPATIBILITY" _null_ 3));
+DATA(insert OID = 1 (  template1 PGUID ENCODING "LC_COLLATE" "LC_CTYPE" t t -1 0 0 1663 "DB_COMPATIBILITY" _null_ 3 1));
 SHDESCR("unmodifiable empty database");
 #define TemplateDbOid            1
 

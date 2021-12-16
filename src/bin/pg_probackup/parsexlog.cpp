@@ -1819,7 +1819,7 @@ extractPageInfo(XLogReaderState *record, XLogReaderData *reader_data,
         * source system.
         */
     }
-    else if (info & XLR_SPECIAL_REL_UPDATE)
+    else if (rmid != RM_HEAP_ID && rmid != RM_HEAP2_ID && (info & XLR_SPECIAL_REL_UPDATE))
     {
         /*
         * This record type modifies a relation file in some special way, but

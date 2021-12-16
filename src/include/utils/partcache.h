@@ -82,7 +82,8 @@ extern Relation partitionGetRelation(Relation rel, Partition part);
 
 void releaseDummyRelation(Relation* relation);
 
-extern void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid);
+extern void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid,
+                                       MultiXactId freezeMultiXid);
 
 /*
  * Routines for global partition index open partition

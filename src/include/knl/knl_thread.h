@@ -1404,8 +1404,9 @@ typedef struct knl_t_autovacuum_context {
     volatile sig_atomic_t got_SIGUSR2;
     volatile sig_atomic_t got_SIGTERM;
 
-    /* Comparison point for determining whether freeze_max_age is exceeded */
+    /* Comparison points for determining whether freeze_max_age is exceeded */
     TransactionId recentXid;
+    MultiXactId recentMulti;
 
     /* Default freeze ages to use for autovacuum (varies by database) */
     int64 default_freeze_min_age;

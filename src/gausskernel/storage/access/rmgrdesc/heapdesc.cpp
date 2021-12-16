@@ -37,6 +37,25 @@ void heap_add_lock_info(StringInfo buf, xl_heap_lock *xlrec)
 }
 
 
+static void OutInfobits(StringInfo buf, uint8 infobits)
+{
+    if (infobits & XLHL_XMAX_IS_MULTI) {
+        appendStringInfo(buf, "IS_MULTI ");
+    }
+    if (infobits & XLHL_XMAX_LOCK_ONLY) {
+        appendStringInfo(buf, "LOCK_ONLY ");
+    }
+    if (infobits & XLHL_XMAX_EXCL_LOCK) {
+        appendStringInfo(buf, "EXCL_LOCK ");
+    }
+    if (infobits & XLHL_XMAX_KEYSHR_LOCK) {
+        appendStringInfo(buf, "KEYSHR_LOCK ");
+    }
+    if (infobits & XLHL_KEYS_UPDATED) {
+        appendStringInfo(buf, "KEYS_UPDATED ");
+    }
+}
+
 void heap3_new_cid(StringInfo buf, int bucket_id, xl_heap_new_cid *xlrec)
 {
     if (bucket_id == -1) {
@@ -56,6 +75,7 @@ void heap_desc(StringInfo buf, XLogReaderState *record)
 {
     char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool isTupleLockUPgrade = (XLogRecGetInfo(record) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) != 0;
 
     info &= XLOG_HEAP_OPMASK;
     if (info == XLOG_HEAP_INSERT) {
@@ -71,6 +91,10 @@ void heap_desc(StringInfo buf, XLogReaderState *record)
 
         appendStringInfo(buf, "delete: ");
         appendStringInfo(buf, "off %u", (uint32)xlrec->offnum);
+        if (isTupleLockUPgrade) {
+            appendStringInfoChar(buf, ' ');
+            OutInfobits(buf, xlrec->infobits_set);
+        }
     } else if (info == XLOG_HEAP_UPDATE) {
         xl_heap_update *xlrec = (xl_heap_update *)rec;
 
@@ -79,6 +103,10 @@ void heap_desc(StringInfo buf, XLogReaderState *record)
         else
             appendStringInfo(buf, "XLOG_HEAP_UPDATE update: ");
         appendStringInfo(buf, "off %u new off %u", (uint32)xlrec->old_offnum, (uint32)xlrec->new_offnum);
+        if (isTupleLockUPgrade) {
+            appendStringInfoChar(buf, ' ');
+            OutInfobits(buf, xlrec->old_infobits_set);
+        }
     } else if (info == XLOG_HEAP_HOT_UPDATE) {
         xl_heap_update *xlrec = (xl_heap_update *)rec;
 
@@ -87,6 +115,10 @@ void heap_desc(StringInfo buf, XLogReaderState *record)
         else
             appendStringInfo(buf, "XLOG_HEAP_HOT_UPDATE hot_update: ");
         appendStringInfo(buf, "off %u new off %u", (uint32)xlrec->old_offnum, (uint32)xlrec->new_offnum);
+        if (isTupleLockUPgrade) {
+            appendStringInfoChar(buf, ' ');
+            OutInfobits(buf, xlrec->old_infobits_set);
+        }
     } else if (info == XLOG_HEAP_NEWPAGE) {
         appendStringInfo(buf, "new page");
         /* no further information */
@@ -94,6 +126,10 @@ void heap_desc(StringInfo buf, XLogReaderState *record)
         xl_heap_lock *xlrec = (xl_heap_lock *)rec;
 
         heap_add_lock_info(buf, xlrec);
+        if (isTupleLockUPgrade) {
+            appendStringInfoChar(buf, ' ');
+            OutInfobits(buf, xlrec->infobits_set);
+        }
     } else if (info == XLOG_HEAP_INPLACE) {
         xl_heap_inplace *xlrec = (xl_heap_inplace *)rec;
 

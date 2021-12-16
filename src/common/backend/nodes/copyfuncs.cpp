@@ -3493,6 +3493,9 @@ static RowMarkClause* _copyRowMarkClause(const RowMarkClause* from)
     COPY_SCALAR_FIELD(forUpdate);
     COPY_SCALAR_FIELD(noWait);
     COPY_SCALAR_FIELD(pushedDown);
+    if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+        COPY_SCALAR_FIELD(strength);
+    }
 
     return newnode;
 }
@@ -3967,6 +3970,9 @@ static LockingClause* _copyLockingClause(const LockingClause* from)
     COPY_NODE_FIELD(lockedRels);
     COPY_SCALAR_FIELD(forUpdate);
     COPY_SCALAR_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+        COPY_SCALAR_FIELD(strength);
+    }
 
     return newnode;
 }

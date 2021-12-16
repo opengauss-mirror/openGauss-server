@@ -1448,18 +1448,27 @@ typedef struct GroupingSet {
 } GroupingSet;
 
 /*
- * LockingClause - raw representation of FOR UPDATE/SHARE options
+ * LockingClause - raw representation of FOR [NO KEY] UPDATE/[KEY] SHARE options
  *
  * Note: lockedRels == NIL means "all relations in query".  Otherwise it
  * is a list of RangeVar nodes.  (We use RangeVar mainly because it carries
  * a location field --- currently, parse analysis insists on unqualified
  * names in LockingClause.)
  */
+typedef enum LockClauseStrength {
+    /* order is important -- see applyLockingClause */
+    LCS_FORKEYSHARE,
+    LCS_FORSHARE,
+    LCS_FORNOKEYUPDATE,
+    LCS_FORUPDATE
+} LockClauseStrength;
+
 typedef struct LockingClause {
     NodeTag type;
-    List *lockedRels; /* FOR UPDATE or FOR SHARE relations */
-    bool forUpdate;   /* true = FOR UPDATE, false = FOR SHARE */
+    List *lockedRels; /* FOR [KEY] UPDATE/SHARE relations */
+    bool forUpdate;   /* for compatibility, we reserve this field but don't use it */
     bool noWait;      /* NOWAIT option */
+    LockClauseStrength strength;
 } LockingClause;
 
 /*
@@ -1682,7 +1691,7 @@ typedef struct Query {
     bool hasDistinctOn;   /* distinctClause is from DISTINCT ON */
     bool hasRecursive;    /* WITH RECURSIVE was specified */
     bool hasModifyingCTE; /* has INSERT/UPDATE/DELETE in WITH */
-    bool hasForUpdate;    /* FOR UPDATE or FOR SHARE was specified */
+    bool hasForUpdate;    /* FOR [KEY] UPDATE/SHARE was specified */
     bool hasRowSecurity;  /* rewriter has applied some RLS policy */
     bool hasSynonyms;     /* has synonym mapping in rtable */
 

@@ -497,7 +497,7 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
                  * This tuple may soon become DEAD.  Update the hint field so
                  * that the page is reconsidered for pruning in future.
                  */
-                heap_prune_record_prunable(prstate, HeapTupleGetRawXmax(&tup));
+                heap_prune_record_prunable(prstate, HeapTupleGetUpdateXid(&tup));
                 break;
 
             case HEAPTUPLE_DELETE_IN_PROGRESS:
@@ -506,7 +506,7 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
                  * This tuple may soon become DEAD.  Update the hint field so
                  * that the page is reconsidered for pruning in future.
                  */
-                heap_prune_record_prunable(prstate, HeapTupleGetRawXmax(&tup));
+                heap_prune_record_prunable(prstate, HeapTupleGetUpdateXid(&tup));
                 break;
 
             case HEAPTUPLE_LIVE:
@@ -554,7 +554,7 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
          */
         Assert(ItemPointerGetBlockNumber(&htup->t_ctid) == BufferGetBlockNumber(buffer));
         offnum = ItemPointerGetOffsetNumber(&htup->t_ctid);
-        prior_xmax = HeapTupleGetRawXmax(&tup);
+        prior_xmax = HeapTupleGetUpdateXid(&tup);
     }
 
     /*
@@ -714,7 +714,7 @@ void heap_get_root_tuples(Page page, OffsetNumber *root_offsets)
 
             /* Set up to scan the HOT-chain */
             nextoffnum = ItemPointerGetOffsetNumber(&htup->t_ctid);
-            prior_xmax = HeapTupleGetRawXmax(&tup);
+            prior_xmax = HeapTupleGetUpdateXid(&tup);
         } else {
             /* Must be a redirect item. We do not set its root_offsets entry */
             Assert(ItemIdIsRedirected(lp));
@@ -751,7 +751,7 @@ void heap_get_root_tuples(Page page, OffsetNumber *root_offsets)
                 break;
 
             nextoffnum = ItemPointerGetOffsetNumber(&htup->t_ctid);
-            prior_xmax = HeapTupleGetRawXmax(&tup);
+            prior_xmax = HeapTupleGetUpdateXid(&tup);
         }
     }
 }

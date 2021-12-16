@@ -115,9 +115,8 @@ CommandId HeapTupleGetCmax(HeapTuple tup)
     HeapTupleHeader htup = tup->t_data;
     CommandId cid = HeapTupleHeaderGetRawCommandId(htup);
 
-    /* We do not store cmax when locking a tuple */
-    Assert(!(htup->t_infomask & (HEAP_IS_LOCKED)));
-    Assert(TransactionIdIsCurrentTransactionId(HeapTupleGetRawXmax(tup)));
+    Assert(!(htup->t_infomask & HEAP_MOVED));
+    Assert(TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(tup)));
 
     if (htup->t_infomask & HEAP_COMBOCID)
         return GetRealCmax(cid);
@@ -129,9 +128,8 @@ CommandId HeapTupleHeaderGetCmax(HeapTupleHeader tup, Page page)
 {
     CommandId cid = HeapTupleHeaderGetRawCommandId(tup);
 
-    /* We do not store cmax when locking a tuple */
-    Assert(!(tup->t_infomask & (HEAP_MOVED | HEAP_IS_LOCKED)));
-    Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tup)));
+    Assert(!(tup->t_infomask & HEAP_MOVED));
+    Assert(TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetUpdateXid(page, tup)));
 
     if (tup->t_infomask & HEAP_COMBOCID)
         return GetRealCmax(cid);

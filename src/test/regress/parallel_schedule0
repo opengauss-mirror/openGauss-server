@@ -836,3 +836,5 @@ test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: sequence_cache_test
 test: pg_buffercache_pages
+
+test: test_astore_multixact

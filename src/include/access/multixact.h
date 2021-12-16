@@ -33,8 +33,8 @@
  * next two are used for update and delete modes.
  */
 typedef enum {
-        MultiXactStatusForKeyShare = 0x00,
-        MultiXactStatusForShare = 0x01,
+        MultiXactStatusForShare = 0x00,  /* set FOR_SHARE = 0 here for compatibility */
+        MultiXactStatusForKeyShare = 0x01,
         MultiXactStatusForNoKeyUpdate = 0x02,
         MultiXactStatusForUpdate = 0x03,
         /* an update that doesn't touch "key" columns */
@@ -54,6 +54,17 @@ typedef struct MultiXactMember {
         MultiXactStatus status;
 } MultiXactMember;
 
+/*
+ * In htup.h, we define MaxTransactionId, and first four bits are reserved.
+ * We use low 60 bits to record member xid and high 3 bits to record member status.
+ */
+#define MULTIXACT_MEMBER_XID_MASK UINT64CONST((UINT64CONST(1) << 60) - 1)
+#define GET_MEMBER_XID_FROM_SLRU_XID(xid) ((xid) & MULTIXACT_MEMBER_XID_MASK)
+#define GET_MEMBER_STATUS_FROM_SLRU_XID(xid) (MultiXactStatus((xid) >> 61))
+#define GET_SLRU_XID_FROM_MULTIXACT_MEMBER(member) \
+    (((TransactionId)((member)->status) << 61) | (((member)->xid) & MULTIXACT_MEMBER_XID_MASK))
+
+
 /* ----------------
  *		multixact-related XLOG entries
  * ----------------
@@ -71,20 +82,22 @@ typedef struct xl_multixact_create {
     MultiXactId mid;                           /* new MultiXact's ID */
     MultiXactOffset moff;                      /* its starting offset in members file */
     int32 nxids;                               /* number of member XIDs */
-    TransactionId xids[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
+    TransactionId xids[FLEXIBLE_ARRAY_MEMBER]; /* low 60 bits record member xid, high 3 bits record member status */
 } xl_multixact_create;
 
 #define MinSizeOfMultiXactCreate offsetof(xl_multixact_create, xids)
 
-extern MultiXactId MultiXactIdCreate(TransactionId xid1, TransactionId xid2);
-extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid);
+MultiXactId MultiXactIdCreate(TransactionId xid1, MultiXactStatus status1,
+    TransactionId xid2, MultiXactStatus status2);
+extern MultiXactId MultiXactIdExpand(MultiXactId multi, TransactionId xid, MultiXactStatus status);
 extern bool MultiXactIdIsRunning(MultiXactId multi);
 extern bool MultiXactIdIsCurrent(MultiXactId multi);
 extern MultiXactId ReadNextMultiXactId(void);
-extern void MultiXactIdWait(MultiXactId multi, bool allow_con_update = false);
-extern bool ConditionalMultiXactIdWait(MultiXactId multi);
+extern bool DoMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining, bool nowait);
+extern void MultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining);
+extern bool ConditionalMultiXactIdWait(MultiXactId multi, MultiXactStatus status, int *remaining);
 extern void MultiXactIdSetOldestMember(void);
-extern int GetMultiXactIdMembers(MultiXactId multi, TransactionId** xids);
+extern int GetMultiXactIdMembers(MultiXactId multi, MultiXactMember** members);
 
 extern void AtEOXact_MultiXact(void);
 extern void AtPrepare_MultiXact(void);
@@ -95,10 +108,14 @@ extern void MultiXactShmemInit(void);
 extern void BootStrapMultiXact(void);
 extern void StartupMultiXact(void);
 extern void ShutdownMultiXact(void);
+extern void SetMultiXactIdLimit(MultiXactId oldest_datminmxid, Oid oldest_datoid);
 extern void MultiXactGetCheckptMulti(bool is_shutdown, MultiXactId* nextMulti, MultiXactOffset* nextMultiOffset);
 extern void CheckPointMultiXact(void);
+extern MultiXactId GetOldestMultiXactId(void);
+extern void TruncateMultiXact(MultiXactId cutoff_multi = InvalidMultiXactId);
 extern void MultiXactSetNextMXact(MultiXactId nextMulti, MultiXactOffset nextMultiOffset);
 extern void MultiXactAdvanceNextMXact(MultiXactId minMulti, MultiXactOffset minMultiOffset);
+extern void MultiXactAdvanceOldest(MultiXactId oldestMulti, Oid oldestMultiDB);
 
 extern void multixact_twophase_recover(TransactionId xid, uint16 info, void* recdata, uint32 len);
 extern void multixact_twophase_postcommit(TransactionId xid, uint16 info, void* recdata, uint32 len);

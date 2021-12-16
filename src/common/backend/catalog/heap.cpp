@@ -39,6 +39,7 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/gs_obsscaninfo.h"
@@ -165,6 +166,8 @@ static bool CheckNestedGeneratedWalker(Node *node, ParseState *context);
 static bool CheckNestedGenerated(ParseState *pstate, Node *node);
 extern void getErrorTableFilePath(char* buf, int len, Oid databaseid, Oid reid);
 extern void make_tmptable_cache_key(Oid relNode);
+
+#define RELKIND_IN_RTM (relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE || relkind == RELKIND_MATVIEW)
 
 /* ----------------------------------------------------------------
  *				XXX UGLY HARD CODED BADNESS FOLLOWS XXX
@@ -1085,7 +1088,7 @@ void InsertPgClassTuple(
     else
         nulls[Anum_pg_class_reloptions - 1] = true;
 
-    if (relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE || relkind == RELKIND_MATVIEW)
+    if (RELKIND_IN_RTM)
         values[Anum_pg_class_relfrozenxid64 - 1] = u_sess->utils_cxt.RecentXmin;
     else
         values[Anum_pg_class_relfrozenxid64 - 1] = InvalidTransactionId;
@@ -1103,6 +1106,14 @@ void InsertPgClassTuple(
     } else {
         nulls[Anum_pg_class_relbucket - 1] = true;
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (RELKIND_IN_RTM && !is_cstore_option(relkind, reloptions)) {
+        values[Anum_pg_class_relminmxid - 1] = GetOldestMultiXactId();
+    } else {
+        values[Anum_pg_class_relminmxid - 1] = InvalidMultiXactId;
+    }
+#endif
     
     if (bucketcol != NULL)
         values[Anum_pg_class_relbucketkey - 1] = PointerGetDatum(bucketcol);
@@ -1170,7 +1181,7 @@ static void AddNewRelationTuple(Relation pg_class_desc, Relation new_rel_desc, O
     }
     
     /* Initialize relfrozenxid */
-    if (relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE || relkind == RELKIND_MATVIEW) {
+    if (RELKIND_IN_RTM) {
         /*
          * Initialize to the minimum XID that could put tuples in the table.
          * We know that no xacts older than RecentXmin are still running, so
@@ -2904,7 +2915,7 @@ Oid heap_create_with_catalog(const char *relname, Oid relnamespace, Oid reltable
         register_on_commit_action(relid, oncommit);
 
     if (relpersistence == RELPERSISTENCE_UNLOGGED) {
-        Assert(relkind == RELKIND_RELATION || relkind == RELKIND_TOASTVALUE || relkind == RELKIND_MATVIEW);
+        Assert(RELKIND_IN_RTM);
         heap_create_init_fork(new_rel_desc);
     }
 
@@ -6239,6 +6250,9 @@ static void addNewPartitionTupleForValuePartitionedTable(Relation pg_partition_r
         nulls[Anum_pg_partition_reloptions - 1] = true;
     }
     values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(InvalidTransactionId);
+#ifndef ENABLE_MULTIPLE_NODES
+    values[Anum_pg_partition_relminmxid - 1] = TransactionIdGetDatum(InvalidMultiXactId);
+#endif
     /*form a tuple using values and null array, and insert it*/
     tup = heap_form_tuple(RelationGetDescr(pg_partition_rel), values, nulls);
     HeapTupleSetOid(tup, InvalidOid);
@@ -6459,6 +6473,7 @@ void heap_truncate_one_part(Relation rel, Oid partOid)
     List* partIndexlist = NULL;
     Relation parentIndex = NULL;
     mySubid = GetCurrentSubTransactionId();
+    MultiXactId multiXid = GetOldestMultiXactId();
 
     partIndexlist = searchPartitionIndexesByblid(partOid);
 
@@ -6477,12 +6492,13 @@ void heap_truncate_one_part(Relation rel, Oid partOid)
 
     CheckTableForSerializableConflictIn(rel);
 
-    PartitionSetNewRelfilenode(rel, p, u_sess->utils_cxt.RecentXmin);
+    PartitionSetNewRelfilenode(rel, p, u_sess->utils_cxt.RecentXmin,
+                               RelationIsColStore(rel) ? InvalidMultiXactId : multiXid);
 
     /* truncate the toast table */
     if (toastOid != InvalidOid) {
         Relation toastRel = heap_open(toastOid, AccessExclusiveLock);
-        RelationSetNewRelfilenode(toastRel, u_sess->utils_cxt.RecentXmin);
+        RelationSetNewRelfilenode(toastRel, u_sess->utils_cxt.RecentXmin, multiXid);
         heap_close(toastRel, NoLock);
     }
 

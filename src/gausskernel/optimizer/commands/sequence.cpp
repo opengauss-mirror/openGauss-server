@@ -1059,7 +1059,7 @@ void ResetSequence(Oid seq_relid)
      * Create a new storage file for the sequence.	We want to keep the
      * sequence's relfrozenxid at 0, since it won't contain any unfrozen XIDs.
      */
-    RelationSetNewRelfilenode(seq_rel, InvalidTransactionId);
+    RelationSetNewRelfilenode(seq_rel, InvalidTransactionId, InvalidMultiXactId);
 
     /*
      * Insert the modified tuple into the new storage file.
@@ -1274,7 +1274,7 @@ void AlterSequence(AlterSeqStmt* stmt)
          * changes transactional.  We want to keep the sequence's relfrozenxid
          * at 0, since it won't contain any unfrozen XIDs.
          */
-        RelationSetNewRelfilenode(seqrel, InvalidTransactionId);
+        RelationSetNewRelfilenode(seqrel, InvalidTransactionId, InvalidMultiXactId);
         /*
          * Insert the modified tuple into the new storage file.
          */
@@ -1904,6 +1904,7 @@ static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, 
      * bit update, ie, don't bother to WAL-log it, since we can certainly do
      * this again if the update gets lost.
      */
+    Assert(!(seqtuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
     if (HeapTupleGetRawXmax(seqtuple) != InvalidTransactionId) {
         HeapTupleSetXmax(seqtuple, InvalidTransactionId);
         seqtuple->t_data->t_infomask &= ~HEAP_XMAX_COMMITTED;

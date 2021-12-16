@@ -2863,3 +2863,11 @@ bool is_contain_crossbucket(List *defList)
     return false;
 }
 
+bool is_cstore_option(char relkind, Datum reloptions)
+{
+    StdRdOptions* std_opt = (StdRdOptions*)heap_reloptions(relkind, reloptions, false);
+    bool result = std_opt == NULL && pg_strcasecmp(ORIENTATION_COLUMN,
+        StdRdOptionsGetStringData(std_opt, orientation, ORIENTATION_ROW)) == 0;
+    pfree_ext(std_opt);
+    return result;
+}

@@ -12,8 +12,8 @@ select gs_decrypt(gs_encrypt('along','1234@abc','sm4'),'1234@abc','sm4');
 (1 row)
 
 select gs_decrypt(gs_encrypt('world','1234@abc','sm4'),'abc@4321','sm4');           --difference key cause error
- gs_decrypt 
-------------
+--?
+--?
 --?
 (1 row)
 

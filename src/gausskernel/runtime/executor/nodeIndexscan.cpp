@@ -708,7 +708,8 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
                  * occured after taking the snapshot.
                  */
                 if (RelationIsUstoreFormat(index_state->ss.ss_currentPartition)) {
-                    TransactionId relfrozenxid64 = getPartitionRelfrozenxid(index_state->ss.ss_currentPartition);
+                    TransactionId relfrozenxid64 = InvalidTransactionId;
+                    getPartitionRelxids(index_state->ss.ss_currentPartition, &relfrozenxid64);
                     if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                         !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                         TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
@@ -733,7 +734,8 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
          * occured after taking the snapshot.
          */
         if (RelationIsUstoreFormat(current_relation)) {
-            TransactionId relfrozenxid64 = getRelationRelfrozenxid(current_relation);
+            TransactionId relfrozenxid64 = InvalidTransactionId;
+            getRelationRelxids(current_relation, &relfrozenxid64);
             if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                 !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                 TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {

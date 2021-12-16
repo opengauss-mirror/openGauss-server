@@ -388,10 +388,10 @@ TM_Result tableam_tuple_delete(Relation relation, ItemPointer tid, CommandId cid
 TM_Result tableam_tuple_update(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup,
     CommandId cid, Snapshot crosscheck, Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd,
     bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self,
-    bool allow_inplace_update)
+    bool allow_inplace_update, LockTupleMode *lockmode)
 {
     return g_tableam_routines[relation->rd_tam_type]->tuple_update(relation, parentRelation, otid, newtup, cid,
-        crosscheck, snapshot, wait, oldslot, tmfd, update_indexes, modifiedIdxAttrs, allow_update_self,
+        crosscheck, snapshot, wait, oldslot, tmfd, lockmode, update_indexes, modifiedIdxAttrs, allow_update_self,
         allow_inplace_update);
 }
 
@@ -845,10 +845,11 @@ TM_Result HeapamTupleDelete(Relation relation, ItemPointer tid,
 /* -------------------------------------------------------------------------- */
 TM_Result HeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup, CommandId cid,
     Snapshot crosscheck, Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd,
-    bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self, bool allow_inplace_update)
+    LockTupleMode* lockmode, bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self,
+    bool allow_inplace_update)
 {
     TM_Result result = heap_update(relation, parentRelation, otid, (HeapTuple)newtup,
-        cid, crosscheck, wait, tmfd, allow_update_self);
+        cid, crosscheck, wait, tmfd, lockmode, allow_update_self);
 
     /* make update_indexes optional */
     if(update_indexes) {
@@ -863,7 +864,8 @@ TM_Result HeapamTupleLock(Relation relation, Tuple tuple, Buffer *buffer,
                             bool allow_lock_self, bool follow_updates, bool eval, Snapshot snapshot, 
                             ItemPointer tid, bool isSelectForUpdate, bool isUpsert, TransactionId conflictXid)
 {
-    return heap_lock_tuple(relation, (HeapTuple)tuple, buffer, cid, mode, nowait, tmfd, allow_lock_self);
+    return heap_lock_tuple(relation, (HeapTuple)tuple, buffer, cid, mode, nowait, follow_updates, tmfd,
+        allow_lock_self);
 }
 
 Tuple HeapamTupleLockUpdated(CommandId cid, Relation relation, int lockmode, ItemPointer tid,
@@ -1598,7 +1600,8 @@ TM_Result UHeapamTupleDelete(Relation relation, ItemPointer tid, CommandId cid, 
 
 TM_Result UHeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPointer otid, Tuple newtup, CommandId cid,
     Snapshot crosscheck, Snapshot snapshot, bool wait, TupleTableSlot **oldslot, TM_FailureData *tmfd,
-    bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self, bool allow_inplace_update)
+    LockTupleMode *mode, bool *update_indexes, Bitmapset **modifiedIdxAttrs, bool allow_update_self,
+    bool allow_inplace_update)
 {
     TM_Result result = UHeapUpdate(relation, parentRelation, otid, (UHeapTuple)newtup, cid, crosscheck, snapshot, wait,
         oldslot, tmfd, update_indexes, modifiedIdxAttrs, allow_inplace_update);

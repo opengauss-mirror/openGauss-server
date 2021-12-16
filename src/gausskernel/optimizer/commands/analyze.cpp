@@ -80,6 +80,7 @@
 #include "utils/timestamp.h"
 #include "tcop/utility.h"
 #include "tcop/dest.h"
+#include "access/multixact.h"
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #endif
@@ -2884,7 +2885,7 @@ retry:
                     .* pre-image but not the post-image.  We also get sane
                     .* results if the concurrent transaction never commits.
                      */
-                    if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(targpage, targtuple.t_data)))
+                    if (TransactionIdIsCurrentTransactionId(HeapTupleGetUpdateXid(&targtuple)))
                         deadrows += 1;
                     else {
                         sample_it = true;
@@ -6775,7 +6776,8 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
         }
 
         Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-        vac_update_relstats(onerel, classRel, updrelpages, totalrows, mapCont, hasindex, InvalidTransactionId);
+        vac_update_relstats(onerel, classRel, updrelpages, totalrows, mapCont,
+            hasindex, InvalidTransactionId, InvalidMultiXactId);
         heap_close(classRel, RowExclusiveLock);
     }
 
@@ -6815,7 +6817,8 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
                 (0 != vacstmt->pstGlobalStatEx[vacstmt->tableidx].totalRowCnts)) {
                 nblocks = estimate_index_blocks(Irel[ind], totalindexrows, table_factor);
                 Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-                vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0, false, BootstrapTransactionId);
+                vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0,
+                    false, BootstrapTransactionId, InvalidMultiXactId);
                 heap_close(classRel, RowExclusiveLock);
                 continue;
             }
@@ -6827,7 +6830,8 @@ static void update_pages_and_tuples_pgclass(Relation onerel, VacuumStmt* vacstmt
             nblocks = GetOneRelNBlocks(onerel, Irel[ind], vacstmt, totalindexrows);
 
             Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-            vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0, false, InvalidTransactionId);
+            vac_update_relstats(Irel[ind], classRel, nblocks, totalindexrows, 0,
+                false, InvalidTransactionId, InvalidMultiXactId);
             heap_close(classRel, RowExclusiveLock);
         }
     }

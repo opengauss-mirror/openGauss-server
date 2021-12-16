@@ -1501,12 +1501,12 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
 
         // wait multixid
         if (nowait) {
-            if (!ConditionalMultiXactIdWait((MultiXactId)xwait)) {
+            if (!ConditionalMultiXactIdWait((MultiXactId)xwait, GetMXactStatusForLock(mode, false), NULL)) {
                 ereport(ERROR, (errcode(ERRCODE_LOCK_NOT_AVAILABLE),
                     errmsg("could not obtain lock on row in relation \"%s\"", RelationGetRelationName(relation))));
             }
         } else {
-            MultiXactIdWait(xwait, true);
+            MultiXactIdWait(xwait, GetMXactStatusForLock(mode, false), NULL);
         }
 
         // reacquire lock
@@ -1667,7 +1667,7 @@ static void UHeapExecuteLockTuple(Relation relation, Buffer buffer, UHeapTuple u
         if (SINGLE_LOCKER_XID_IS_SHR_LOCKED(oldinfomask) && TransactionIdIsInProgress(xidOnTup)) {
             // create a multixid
             MultiXactIdSetOldestMember();
-            xid = MultiXactIdCreate(xidOnTup, curxid);
+            xid = MultiXactIdCreate(xidOnTup, MultiXactStatusForShare, curxid, MultiXactStatusForShare);
             multi = true;
             utuple->disk_tuple->flag |= UHEAP_MULTI_LOCKERS;
             elog(DEBUG5, "locker %ld + locker %ld = multi %ld", curxid, xidOnTup, xid);
@@ -1677,7 +1677,7 @@ static void UHeapExecuteLockTuple(Relation relation, Buffer buffer, UHeapTuple u
              * expand multixid to contain the current transaction id.
              */
             MultiXactIdSetOldestMember();
-            xid = MultiXactIdExpand((MultiXactId)xidOnTup, curxid);
+            xid = MultiXactIdExpand((MultiXactId)xidOnTup, curxid, MultiXactStatusForShare);
             multi = true;
             utuple->disk_tuple->flag |= UHEAP_MULTI_LOCKERS;
             elog(DEBUG5, "locker %ld + multi %ld = multi %ld", curxid, xidOnTup, xid);
