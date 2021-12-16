@@ -1157,7 +1157,7 @@ void CreateUserMapping(CreateUserMappingStmt* stmt)
     values[Anum_pg_user_mapping_umuser - 1] = ObjectIdGetDatum(useId);
     values[Anum_pg_user_mapping_umserver - 1] = ObjectIdGetDatum(srv->serverid);
 
-    EncryptGenericOptions(stmt->options, g_sensitiveOptionsArray, g_sensitiveArrayLength, false);
+    EncryptGenericOptions(stmt->options, g_sensitiveOptionsArray, g_sensitiveArrayLength, USER_MAPPING_MODE);
 
     /* Add user options */
     useoptions =
@@ -1254,7 +1254,7 @@ void AlterUserMapping(AlterUserMappingStmt* stmt)
         if (isnull)
             datum = PointerGetDatum(NULL);
 
-        EncryptGenericOptions(stmt->options, g_sensitiveOptionsArray, g_sensitiveArrayLength, false);
+        EncryptGenericOptions(stmt->options, g_sensitiveOptionsArray, g_sensitiveArrayLength, USER_MAPPING_MODE);
 
         /* Prepare the options array */
         datum = transformGenericOptions(UserMappingRelationId, datum, stmt->options, fdw->fdwvalidator);

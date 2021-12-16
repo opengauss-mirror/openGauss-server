@@ -62,8 +62,11 @@ typedef struct registered_buffer {
     bool encrypt;
 } registered_buffer;
 
+#define SizeOfXlogOrigin (sizeof(RepOriginId) + sizeof(char))
+
 #define HEADER_SCRATCH_SIZE \
-    (SizeOfXLogRecord + MaxSizeOfXLogRecordBlockHeader * (XLR_MAX_BLOCK_ID + 1) + SizeOfXLogRecordDataHeaderLong)
+    (SizeOfXLogRecord + MaxSizeOfXLogRecordBlockHeader * (XLR_MAX_BLOCK_ID + 1) + \
+    SizeOfXLogRecordDataHeaderLong + SizeOfXlogOrigin)
 
 static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_info, XLogRecPtr *fpw_lsn,
                                        bool isupgrade = false, int bucket_id = -1);
@@ -903,11 +906,15 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(XLogRecPtr), &regbuf->lastLsn, remained_size);
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    int m_session_id = u_sess->reporigin_cxt.originId;
+#else
     int m_session_id = u_sess->attr.attr_storage.replorigin_sesssion_origin;
+#endif
     bool m_include_origin = t_thrd.xlog_cxt.include_origin;
 
     /* followed by the record's origin, if any */
-    if (m_session_id == 0 &&
+    if (m_session_id == InvalidRepOriginId &&
         (u_sess->attr.attr_sql.enable_cluster_resize || t_thrd.role == AUTOVACUUM_WORKER)) {
         m_include_origin = true;
         m_session_id = 1;

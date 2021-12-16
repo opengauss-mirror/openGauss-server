@@ -65,6 +65,7 @@
 #include "utils/palloc.h"
 #include "utils/memgroup.h"
 
+
 typedef void (*pg_on_exit_callback)(int code, Datum arg);
 
 /* all session level attribute which expose to user. */
@@ -2490,6 +2491,23 @@ typedef struct knl_u_hook_context {
     void *analyzerRoutineHook;
 } knl_u_hook_context;
 
+struct ReplicationState;
+struct ReplicationStateShmStruct;
+typedef struct knl_u_rep_origin_context {
+    RepOriginId originId;
+    XLogRecPtr originLsn;
+    TimestampTz originTs;
+    bool registeredCleanup;
+    /*
+     * Backend-local, cached element from ReplicationStates for use in a backend
+     * replaying remote commits, so we don't have to search ReplicationStates for
+     * the backends current RepOriginId.
+     */
+    ReplicationState *curRepState;
+
+    ReplicationStateShmStruct *repStatesShm;
+} knl_u_rep_origin_context;
+
 typedef struct knl_session_context {
     volatile knl_session_status status;
     Dlelem elem;
@@ -2603,6 +2621,7 @@ typedef struct knl_session_context {
     instr_time last_access_time;
 
     knl_u_hook_context hook_cxt;
+    knl_u_rep_origin_context reporigin_cxt;
 } knl_session_context;
 
 enum stp_xact_err_type {

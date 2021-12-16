@@ -131,6 +131,11 @@ typedef struct xl_xact_assignment {
     TransactionId xsub[1]; /* assigned subxids */
 } xl_xact_assignment;
 
+typedef struct xl_xact_origin {
+    XLogRecPtr  origin_lsn;
+    TimestampTz origin_timestamp;
+} xl_xact_origin;
+
 #define MinSizeOfXactAssignment offsetof(xl_xact_assignment, xsub)
 
 typedef struct xl_xact_commit_compact {
@@ -157,6 +162,7 @@ typedef struct xl_xact_commit {
     ColFileNodeRel xnodes[1]; /* VARIABLE LENGTH ARRAY */
                            /* ARRAY OF COMMITTED SUBTRANSACTION XIDs FOLLOWS */
                            /* ARRAY OF SHARED INVALIDATION MESSAGES FOLLOWS */
+                           /* xl_xact_origin if XACT_HAS_ORIGIN present */
 } xl_xact_commit;
 
 #define MinSizeOfXactCommit offsetof(xl_xact_commit, xnodes)
@@ -172,6 +178,7 @@ typedef struct xl_xact_commit {
 #define XACT_COMPLETION_UPDATE_RELCACHE_FILE 0x01
 #define XACT_COMPLETION_FORCE_SYNC_COMMIT 0x02
 #define XACT_MOT_ENGINE_USED 0x04
+#define XACT_HAS_ORIGIN 0x08
 
 /* Access macros for above flags */
 #define XactCompletionRelcacheInitFileInval(xinfo) (xinfo & XACT_COMPLETION_UPDATE_RELCACHE_FILE)

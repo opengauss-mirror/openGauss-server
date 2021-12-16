@@ -52,9 +52,12 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_publication.h"
+#include "catalog/pg_publication_rel.h"
 #include "catalog/gs_package.h"
 #include "catalog/pg_rewrite.h"
 #include "catalog/pg_rlspolicy.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_trigger.h"
@@ -85,6 +88,7 @@
 #include "commands/extension.h"
 #include "commands/matview.h"
 #include "commands/proclang.h"
+#include "commands/publicationcmds.h"
 #include "commands/schemacmds.h"
 #include "commands/seclabel.h"
 #include "commands/sec_rls_cmds.h"
@@ -146,7 +150,10 @@ static const Oid object_classes[MAX_OCLASS] = {
     DefaultAclRelationId,            /* OCLASS_DEFACL */
     ExtensionRelationId,             /* OCLASS_EXTENSION */
     PgDirectoryRelationId,           /* OCLASS_DIRECTORY */
-    PgJobRelationId                  /* OCLASS_PG_JOB */
+    PgJobRelationId,                 /* OCLASS_PG_JOB */
+    PublicationRelationId,           /* OCLASS_PUBLICATION */
+    PublicationRelRelationId,        /* OCLASS_PUBLICATION_REL */
+    SubscriptionRelationId           /* OCLASS_SUBSCRIPTION */
 #ifdef PGXC
     ,
     PgxcClassRelationId /* OCLASS_PGXCCLASS */
@@ -1447,6 +1454,13 @@ static void doDeletion(const ObjectAddress* object, int flags)
         case OCLASS_GS_CL_PROC:
             remove_encrypted_proc_by_id(object->objectId);
             break;
+        case OCLASS_PUBLICATION:
+            RemovePublicationById(object->objectId);
+            break;
+
+        case OCLASS_PUBLICATION_REL:
+            RemovePublicationRelById(object->objectId);
+            break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("unrecognized object class: %u", object->classId)));
@@ -2451,6 +2465,14 @@ ObjectClass getObjectClass(const ObjectAddress* object)
             return OCLASS_DB4AI_MODEL;
         case ClientLogicProcId:
             return OCLASS_GS_CL_PROC;
+        case PublicationRelationId:
+            return OCLASS_PUBLICATION;
+
+        case PublicationRelRelationId:
+            return OCLASS_PUBLICATION_REL;
+
+        case SubscriptionRelationId:
+            return OCLASS_SUBSCRIPTION;
         default:
             break;
     }
@@ -3094,6 +3116,34 @@ char* getObjectDescription(const ObjectAddress* object)
             }
 
             appendStringInfo(&buffer, _("synonym %s"), qualifiedSynname);
+            break;
+        }
+        case OCLASS_PUBLICATION: {
+            appendStringInfo(&buffer, _("publication %s"), get_publication_name(object->objectId, false));
+            break;
+        }
+
+        case OCLASS_PUBLICATION_REL: {
+            HeapTuple tup;
+            char *pubname;
+            Form_pg_publication_rel prform;
+
+            tup = SearchSysCache1(PUBLICATIONREL, ObjectIdGetDatum(object->objectId));
+            if (!HeapTupleIsValid(tup)) {
+                elog(ERROR, "cache lookup failed for publication table %u", object->objectId);
+            }
+
+            prform = (Form_pg_publication_rel)GETSTRUCT(tup);
+            pubname = get_publication_name(prform->prpubid, false);
+
+            appendStringInfo(&buffer, _("publication table %s in publication %s"), get_rel_name(prform->prrelid),
+                pubname);
+            ReleaseSysCache(tup);
+            break;
+        }
+
+        case OCLASS_SUBSCRIPTION: {
+            appendStringInfo(&buffer, _("subscription %s"), get_subscription_name(object->objectId, false));
             break;
         }
 

@@ -228,7 +228,7 @@ static char connected_node_type = 'N'; /* 'N' -- NONE
                                         */
 char* all_data_nodename_list = NULL;
 const uint32 USTORE_UPGRADE_VERSION = 92368;
-
+const uint32 SUBSCRIPTION_VERSION = 92425;
 
 #ifdef DUMPSYSLOG
 char* syslogpath = NULL;
@@ -299,6 +299,8 @@ static bool is_encrypt = false;
 static bool could_encrypt = false;
 static int exclude_function = 0;
 static bool is_pipeline = false;
+static int no_subscriptions = 0;
+static int no_publications = 0;
 
 /* Used to count the number of -t input */
 int gTableCount = 0;
@@ -392,6 +394,9 @@ static void dumpForeignServer(Archive* fout, ForeignServerInfo* srvinfo);
 static void dumpUserMappings(
     Archive* fout, const char* servername, const char* nmspace, const char* owner, CatalogId catalogId, DumpId dumpId);
 static void dumpDefaultACL(Archive* fout, DefaultACLInfo* daclinfo);
+static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo);
+static void dumpPublicationTable(Archive *fout, const PublicationRelInfo *pubrinfo);
+static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo);
 
 static void dumpACL(Archive* fout, CatalogId objCatId, DumpId objDumpId, const char* type, const char* name,
     const char* subname, const char* tag, const char* nspname, const char* owner, const char* acls);
@@ -554,8 +559,9 @@ int main(int argc, char** argv)
         {"section", required_argument, NULL, 5},
         {"serializable-deferrable", no_argument, &serializable_deferrable, 1},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
-        {"no-security-labels", no_argument, &no_security_labels, 1},
+        {"no-publications", no_argument, &no_publications, 1},
         {"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
+        {"no-subscriptions", no_argument, &no_subscriptions, 1},
         {"include-alter-table", no_argument, &include_alter_table, 1},
         {"exclude-self", no_argument, &exclude_self, 1},
         {"include-depend-objs", no_argument, &include_depend_objs, 1},
@@ -1021,6 +1027,8 @@ int main(int argc, char** argv)
     ropt->noTablespace = outputNoTablespaces;
     ropt->disable_triggers = disable_triggers;
     ropt->use_setsessauth = use_setsessauth;
+    ropt->no_subscriptions = no_subscriptions;
+    ropt->no_publications = no_publications;
 
     if (compressLevel == -1)
         ropt->compression = 0;
@@ -1704,7 +1712,10 @@ void help(const char* pchProgname)
     printf(_("  --exclude-table-data=TABLE                  do NOT dump data for the named table(s)\n"));
     printf(_("  --exclude-with                              do NOT dump WITH() of table(s)\n"));
     printf(_("  --inserts                                   dump data as INSERT commands, rather than COPY\n"));
+    printf(_("  --no-create-subscription-slots              do not create replication slots for subscriptions\n"));
+    printf(_("  --no-publications                           do not dump publications\n"));
     printf(_("  --no-security-labels                        do not dump security label assignments\n"));
+    printf(_("  --no-subscriptions                          do not dump subscriptions\n"));
     printf(_("  --no-tablespaces                            do not dump tablespace assignments\n"));
     printf(_("  --no-unlogged-table-data                    do not dump unlogged table data\n"));
     printf(_("  --include-alter-table                       dump the table delete column\n"));
@@ -2294,6 +2305,18 @@ static void selectDumpableExtension(ExtensionInfo* extinfo)
         extinfo->dobj.dump = false;
     else
         extinfo->dobj.dump = include_everything;
+}
+
+/*
+ * selectDumpablePublicationTable: policy-setting subroutine
+ *		Mark a publication table as to be dumped or not
+ *
+ * Publication tables have schemas, but those are ignored in decision making,
+ * because publications are only dumped when we are dumping everything.
+ */
+static void selectDumpablePublicationTable(DumpableObject *dobj)
+{
+    dobj->dump = include_everything;
 }
 
 /*
@@ -4015,6 +4038,437 @@ static int dumpBlobs(Archive* fout, void* arg)
     free(buf);
     buf = NULL;
     return 1;
+}
+
+/*
+ * getPublications
+ * 	  get information about publications
+ */
+void getPublications(Archive *fout)
+{
+    PQExpBuffer query;
+    PGresult *res;
+    PublicationInfo *pubinfo;
+    int i_tableoid;
+    int i_oid;
+    int i_pubname;
+    int i_rolname;
+    int i_puballtables;
+    int i_pubinsert;
+    int i_pubupdate;
+    int i_pubdelete;
+    int i, ntups;
+
+    if (no_publications || GetVersionNum(fout) < SUBSCRIPTION_VERSION) {
+        return;
+    }
+
+    query = createPQExpBuffer();
+
+    resetPQExpBuffer(query);
+
+    /* Get the publications. */
+    appendPQExpBuffer(query,
+        "SELECT p.tableoid, p.oid, p.pubname, "
+        "(%s p.pubowner) AS rolname, "
+        "p.puballtables, p.pubinsert, p.pubupdate, p.pubdelete "
+        "FROM pg_catalog.pg_publication p",
+        username_subquery);
+
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+    ntups = PQntuples(res);
+
+    i_tableoid = PQfnumber(res, "tableoid");
+    i_oid = PQfnumber(res, "oid");
+    i_pubname = PQfnumber(res, "pubname");
+    i_rolname = PQfnumber(res, "rolname");
+    i_puballtables = PQfnumber(res, "puballtables");
+    i_pubinsert = PQfnumber(res, "pubinsert");
+    i_pubupdate = PQfnumber(res, "pubupdate");
+    i_pubdelete = PQfnumber(res, "pubdelete");
+
+    pubinfo = (PublicationInfo *)pg_malloc(ntups * sizeof(PublicationInfo));
+
+    for (i = 0; i < ntups; i++) {
+        pubinfo[i].dobj.objType = DO_PUBLICATION;
+        pubinfo[i].dobj.catId.tableoid = atooid(PQgetvalue(res, i, i_tableoid));
+        pubinfo[i].dobj.catId.oid = atooid(PQgetvalue(res, i, i_oid));
+        AssignDumpId(&pubinfo[i].dobj);
+        pubinfo[i].dobj.name = gs_strdup(PQgetvalue(res, i, i_pubname));
+        pubinfo[i].rolname = gs_strdup(PQgetvalue(res, i, i_rolname));
+        pubinfo[i].puballtables = (strcmp(PQgetvalue(res, i, i_puballtables), "t") == 0);
+        pubinfo[i].pubinsert = (strcmp(PQgetvalue(res, i, i_pubinsert), "t") == 0);
+        pubinfo[i].pubupdate = (strcmp(PQgetvalue(res, i, i_pubupdate), "t") == 0);
+        pubinfo[i].pubdelete = (strcmp(PQgetvalue(res, i, i_pubdelete), "t") == 0);
+
+        if (strlen(pubinfo[i].rolname) == 0) {
+            write_msg(NULL, "WARNING: owner of publication \"%s\" appears to be invalid\n", pubinfo[i].dobj.name);
+        }
+
+        /* Decide whether we want to dump it */
+        selectDumpableObject(&(pubinfo[i].dobj), fout);
+    }
+    PQclear(res);
+
+    destroyPQExpBuffer(query);
+}
+
+/*
+ * dumpPublication
+ * 	  dump the definition of the given publication
+ */
+static void dumpPublication(Archive *fout, const PublicationInfo *pubinfo)
+{
+    PQExpBuffer delq;
+    PQExpBuffer query;
+    PQExpBuffer labelq;
+    bool first = true;
+
+    if (dataOnly || !pubinfo->dobj.dump) {
+        return;
+    }
+
+    delq = createPQExpBuffer();
+    query = createPQExpBuffer();
+    labelq = createPQExpBuffer();
+
+    appendPQExpBuffer(delq, "DROP PUBLICATION %s;\n", fmtId(pubinfo->dobj.name));
+
+    appendPQExpBuffer(query, "CREATE PUBLICATION %s", fmtId(pubinfo->dobj.name));
+
+    appendPQExpBuffer(labelq, "PUBLICATION %s", fmtId(pubinfo->dobj.name));
+
+    if (pubinfo->puballtables)
+        appendPQExpBufferStr(query, " FOR ALL TABLES");
+
+    appendPQExpBufferStr(query, " WITH (publish = '");
+    if (pubinfo->pubinsert) {
+        appendPQExpBufferStr(query, "insert");
+        first = false;
+    }
+
+    if (pubinfo->pubupdate) {
+        if (!first) {
+            appendPQExpBufferStr(query, ", ");
+        }
+        appendPQExpBufferStr(query, "update");
+        first = false;
+    }
+
+    if (pubinfo->pubdelete) {
+        if (!first) {
+            appendPQExpBufferStr(query, ", ");
+        }
+        appendPQExpBufferStr(query, "delete");
+        first = false;
+    }
+
+    appendPQExpBufferStr(query, "');\n");
+
+    ArchiveEntry(fout, pubinfo->dobj.catId, pubinfo->dobj.dumpId, pubinfo->dobj.name, NULL, NULL, pubinfo->rolname,
+        false, "PUBLICATION", SECTION_POST_DATA, query->data, delq->data, NULL, NULL, 0, NULL, NULL);
+
+    dumpComment(fout, labelq->data, NULL, pubinfo->rolname, pubinfo->dobj.catId, 0, pubinfo->dobj.dumpId);
+    dumpSecLabel(fout, labelq->data, NULL, pubinfo->rolname, pubinfo->dobj.catId, 0, pubinfo->dobj.dumpId);
+
+    destroyPQExpBuffer(delq);
+    destroyPQExpBuffer(query);
+}
+
+/*
+ * getPublicationTables
+ * 	  get information about publication membership for dumpable tables.
+ */
+void getPublicationTables(Archive *fout, TableInfo tblinfo[], int numTables)
+{
+    PQExpBuffer query;
+    PGresult *res;
+    PublicationRelInfo *pubrinfo;
+    int i_tableoid;
+    int i_oid;
+    int i_pubname;
+    int i, j, ntups;
+
+    if (no_publications || GetVersionNum(fout) < SUBSCRIPTION_VERSION) {
+        return;
+    }
+
+    query = createPQExpBuffer();
+
+    for (i = 0; i < numTables; i++) {
+        TableInfo *tbinfo = &tblinfo[i];
+
+        /* Only plain tables can be aded to publications. */
+        if (tbinfo->relkind != RELKIND_RELATION) {
+            continue;
+        }
+
+        if (g_verbose) {
+            write_msg(NULL, "reading publication membership for table \"%s.%s\"\n", tbinfo->dobj.nmspace->dobj.name,
+                tbinfo->dobj.name);
+        }
+
+        resetPQExpBuffer(query);
+
+        /* Get the publication memebership for the table. */
+        appendPQExpBuffer(query,
+            "SELECT pr.tableoid, pr.oid, p.pubname "
+            "FROM pg_catalog.pg_publication_rel pr,"
+            "     pg_catalog.pg_publication p "
+            "WHERE pr.prrelid = '%u'"
+            "  AND p.oid = pr.prpubid",
+            tbinfo->dobj.catId.oid);
+        res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+        ntups = PQntuples(res);
+        if (ntups == 0) {
+            /*
+             * Table is not member of any publications. Clean up and return.
+             */
+            PQclear(res);
+            continue;
+        }
+
+        i_tableoid = PQfnumber(res, "tableoid");
+        i_oid = PQfnumber(res, "oid");
+        i_pubname = PQfnumber(res, "pubname");
+
+        pubrinfo = (PublicationRelInfo *)pg_malloc(ntups * sizeof(PublicationRelInfo));
+        for (j = 0; j < ntups; j++) {
+            pubrinfo[j].dobj.objType = DO_PUBLICATION_REL;
+            pubrinfo[j].dobj.catId.tableoid = atooid(PQgetvalue(res, j, i_tableoid));
+            pubrinfo[j].dobj.catId.oid = atooid(PQgetvalue(res, j, i_oid));
+            AssignDumpId(&pubrinfo[j].dobj);
+            pubrinfo[j].dobj.nmspace = tbinfo->dobj.nmspace;
+            pubrinfo[j].dobj.name = tbinfo->dobj.name;
+            pubrinfo[j].pubname = gs_strdup(PQgetvalue(res, j, i_pubname));
+            pubrinfo[j].pubtable = tbinfo;
+
+            /* Decide whether we want to dump it */
+            selectDumpablePublicationTable(&(pubrinfo[j].dobj));
+        }
+        PQclear(res);
+    }
+    destroyPQExpBuffer(query);
+}
+
+/*
+ * dumpPublicationTable
+ * 	  dump the definition of the given publication table mapping
+ */
+static void dumpPublicationTable(Archive *fout, const PublicationRelInfo *pubrinfo)
+{
+    TableInfo *tbinfo = pubrinfo->pubtable;
+    PQExpBuffer query;
+    PQExpBuffer tag;
+
+    if (dataOnly || pubrinfo->dobj.dump) {
+        return;
+    }
+
+    tag = createPQExpBuffer();
+    appendPQExpBuffer(tag, "%s %s", pubrinfo->pubname, tbinfo->dobj.name);
+
+    query = createPQExpBuffer();
+    appendPQExpBuffer(query, "ALTER PUBLICATION %s ADD TABLE ONLY", fmtId(pubrinfo->pubname));
+    appendPQExpBuffer(query, " %s;", fmtId(tbinfo->dobj.name));
+
+    /*
+     * There is no point in creating drop query as drop query as the drop
+     * is done by table drop.
+     */
+    ArchiveEntry(fout, pubrinfo->dobj.catId, pubrinfo->dobj.dumpId, tag->data, tbinfo->dobj.nmspace->dobj.name, NULL,
+        "", false, "PUBLICATION TABLE", SECTION_POST_DATA, query->data, "", NULL, NULL, 0, NULL, NULL);
+
+    destroyPQExpBuffer(tag);
+    destroyPQExpBuffer(query);
+}
+
+/*
+ * Is the currently connected user a superuser?
+ */
+static bool is_superuser(Archive *fout)
+{
+    ArchiveHandle *AH = (ArchiveHandle *)fout;
+    const char *val;
+
+    val = PQparameterStatus(AH->connection, "is_sysadmin");
+
+    if (val && strcmp(val, "on") == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+/*
+ * getSubscriptions
+ * 	  get information about subscriptions
+ */
+void getSubscriptions(Archive *fout)
+{
+    PQExpBuffer query;
+    PGresult *res;
+    SubscriptionInfo *subinfo;
+    int i_tableoid;
+    int i_oid;
+    int i_subname;
+    int i_rolname;
+    int i_subconninfo;
+    int i_subslotname;
+    int i_subsynccommit;
+    int i_subpublications;
+    int i, ntups;
+
+    if (no_subscriptions || GetVersionNum(fout) < SUBSCRIPTION_VERSION) {
+        return;
+    }
+
+    if (!is_superuser(fout)) {
+        int n;
+
+        res = ExecuteSqlQuery(fout,
+            "SELECT count(*) FROM pg_subscription "
+            "WHERE subdbid = (SELECT oid FROM pg_catalog.pg_database"
+            "                 WHERE datname = current_database())",
+            PGRES_TUPLES_OK);
+        n = atoi(PQgetvalue(res, 0, 0));
+        if (n > 0) {
+            write_msg(NULL, "WARNING: subscriptions not dumped because current user is not a superuser\n");
+        }
+        PQclear(res);
+        return;
+    }
+
+    query = createPQExpBuffer();
+
+    resetPQExpBuffer(query);
+
+    /* Get the subscriptions in current database. */
+    appendPQExpBuffer(query,
+        "SELECT s.tableoid, s.oid, s.subname,"
+        "(%s s.subowner) AS rolname, "
+        " s.subconninfo, s.subslotname, s.subsynccommit, s.subpublications "
+        "FROM pg_catalog.pg_subscription s "
+        "WHERE s.subdbid = (SELECT oid FROM pg_catalog.pg_database"
+        "                   WHERE datname = current_database())",
+        username_subquery);
+    res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
+
+    ntups = PQntuples(res);
+
+    i_tableoid = PQfnumber(res, "tableoid");
+    i_oid = PQfnumber(res, "oid");
+    i_subname = PQfnumber(res, "subname");
+    i_rolname = PQfnumber(res, "rolname");
+    i_subconninfo = PQfnumber(res, "subconninfo");
+    i_subslotname = PQfnumber(res, "subslotname");
+    i_subsynccommit = PQfnumber(res, "subsynccommit");
+    i_subpublications = PQfnumber(res, "subpublications");
+
+    subinfo = (SubscriptionInfo *)pg_malloc(ntups * sizeof(SubscriptionInfo));
+
+    for (i = 0; i < ntups; i++) {
+        subinfo[i].dobj.objType = DO_SUBSCRIPTION;
+        subinfo[i].dobj.catId.tableoid = atooid(PQgetvalue(res, i, i_tableoid));
+        subinfo[i].dobj.catId.oid = atooid(PQgetvalue(res, i, i_oid));
+        AssignDumpId(&subinfo[i].dobj);
+        subinfo[i].dobj.name = gs_strdup(PQgetvalue(res, i, i_subname));
+        subinfo[i].rolname = gs_strdup(PQgetvalue(res, i, i_rolname));
+        subinfo[i].subconninfo = gs_strdup(PQgetvalue(res, i, i_subconninfo));
+        if (PQgetisnull(res, i, i_subslotname)) {
+            subinfo[i].subslotname = NULL;
+        } else {
+            subinfo[i].subslotname = gs_strdup(PQgetvalue(res, i, i_subslotname));
+        }
+        subinfo[i].subsynccommit = gs_strdup(PQgetvalue(res, i, i_subsynccommit));
+        subinfo[i].subpublications = gs_strdup(PQgetvalue(res, i, i_subpublications));
+
+        if (strlen(subinfo[i].rolname) == 0) {
+            write_msg(NULL, "WARNING: owner of subscription \"%s\" appears to be invalid\n", subinfo[i].dobj.name);
+        }
+
+        /* Decide whether we want to dump it */
+        selectDumpableObject(&(subinfo[i].dobj), fout);
+    }
+    PQclear(res);
+
+    destroyPQExpBuffer(query);
+}
+
+/*
+ * dumpSubscription
+ * 	  dump the definition of the given subscription
+ */
+static void dumpSubscription(Archive *fout, const SubscriptionInfo *subinfo)
+{
+    PQExpBuffer delq;
+    PQExpBuffer query;
+    PQExpBuffer labelq;
+    PQExpBuffer publications;
+    char **pubnames = NULL;
+    int npubnames = 0;
+    int i;
+
+    if (!subinfo->dobj.dump || dataOnly) {
+        return;
+    }
+
+    delq = createPQExpBuffer();
+    query = createPQExpBuffer();
+    labelq = createPQExpBuffer();
+
+    appendPQExpBuffer(delq, "DROP SUBSCRIPTION %s;\n", fmtId(subinfo->dobj.name));
+
+    appendPQExpBuffer(query, "CREATE SUBSCRIPTION %s CONNECTION ", fmtId(subinfo->dobj.name));
+    appendStringLiteralAH(query, subinfo->subconninfo, fout);
+
+    /* Build list of quoted publications and append them to query. */
+    if (!parsePGArray(subinfo->subpublications, &pubnames, &npubnames)) {
+        write_msg(NULL, "WARNING: could not parse subpublications array\n");
+        if (pubnames) {
+            free(pubnames);
+        }
+        pubnames = NULL;
+        npubnames = 0;
+    }
+
+    publications = createPQExpBuffer();
+    for (i = 0; i < npubnames; i++) {
+        if (i > 0) {
+            appendPQExpBufferStr(publications, ", ");
+        }
+
+        appendPQExpBufferStr(publications, fmtId(pubnames[i]));
+    }
+
+    appendPQExpBuffer(query, " PUBLICATION %s WITH (enabled = false, slot_name = ", publications->data);
+    if (subinfo->subslotname) {
+        appendStringLiteralAH(query, subinfo->subslotname, fout);
+    } else {
+        appendPQExpBufferStr(query, "NONE");
+    }
+
+    if (strcmp(subinfo->subsynccommit, "off") != 0) {
+        appendPQExpBuffer(query, ", synchronous_commit = %s", fmtId(subinfo->subsynccommit));
+    }
+
+    appendPQExpBufferStr(query, ");\n");
+    appendPQExpBuffer(labelq, "SUBSCRIPTION %s", fmtId(subinfo->dobj.name));
+    ArchiveEntry(fout, subinfo->dobj.catId, subinfo->dobj.dumpId, subinfo->dobj.name, NULL, NULL, subinfo->rolname,
+        false, "SUBSCRIPTION", SECTION_POST_DATA, query->data, delq->data, NULL, NULL, 0, NULL, NULL);
+
+    dumpComment(fout, labelq->data, NULL, subinfo->rolname, subinfo->dobj.catId, 0, subinfo->dobj.dumpId);
+    dumpSecLabel(fout, labelq->data, NULL, subinfo->rolname, subinfo->dobj.catId, 0, subinfo->dobj.dumpId);
+
+    destroyPQExpBuffer(publications);
+    if (pubnames) {
+        free(pubnames);
+    }
+
+    destroyPQExpBuffer(delq);
+    destroyPQExpBuffer(query);
 }
 
 static void binary_upgrade_set_type_oids_by_type_oid(
@@ -10045,6 +10499,15 @@ static void dumpDumpableObject(Archive* fout, DumpableObject* dobj)
             break;
         case DO_RLSPOLICY:
             dumpRlsPolicy(fout, (RlsPolicyInfo*)dobj);
+            break;
+        case DO_PUBLICATION:
+            dumpPublication(fout, (PublicationInfo *)dobj);
+            break;
+        case DO_PUBLICATION_REL:
+            dumpPublicationTable(fout, (PublicationRelInfo *)dobj);
+            break;
+        case DO_SUBSCRIPTION:
+            dumpSubscription(fout, (SubscriptionInfo *)dobj);
             break;
         case DO_PRE_DATA_BOUNDARY:
         case DO_POST_DATA_BOUNDARY:
@@ -20827,6 +21290,9 @@ static void addBoundaryDependencies(DumpableObject** dobjs, int numObjs, Dumpabl
             case DO_TRIGGER:
             case DO_DEFAULT_ACL:
             case DO_RLSPOLICY:
+            case DO_PUBLICATION:
+            case DO_PUBLICATION_REL:
+            case DO_SUBSCRIPTION:
                 /* Post-data objects: must come after the post-data boundary */
                 if (dobj->objType == DO_INDEX &&
                     ((IndxInfo*)dobj)->indextable && ((IndxInfo*)dobj)->indextable->isMOT) {

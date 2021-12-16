@@ -66,6 +66,9 @@
 #include "pgxc/barrier.h"
 #include "communication/commproxy_basic.h"
 #include "replication/replicainternal.h"
+#include "replication/worker_internal.h"
+#include "replication/origin.h"
+#include "catalog/pg_subscription.h"
 #include "port/pg_crc32c.h"
 #define MAX_PATH_LEN 1024
 
@@ -509,6 +512,9 @@ typedef struct knl_t_xlog_context {
     XLogRecPtr ProcLastRecPtr;
 
     XLogRecPtr XactLastRecEnd;
+
+    /* record end of last commit record, used for subscription */
+    XLogRecPtr XactLastCommitEnd;
 
     /*
      * RedoRecPtr is this backend's local copy of the REDO record pointer
@@ -3026,6 +3032,43 @@ typedef struct knl_t_dcf_context {
     DcfContextInfo* dcfCtxInfo;
 } knl_t_dcf_context;
 
+/* replication apply launcher, for subscription */
+typedef struct knl_t_apply_launcher_context {
+    /* Flags set by signal handlers */
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t got_SIGUSR2;
+    volatile sig_atomic_t got_SIGTERM;
+    bool onCommitLauncherWakeup;
+    ApplyLauncherShmStruct *applyLauncherShm;
+} knl_t_apply_launcher_context;
+
+/* replication apply worker, for subscription */
+typedef struct knl_t_apply_worker_context {
+    /* Flags set by signal handlers */
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t got_SIGTERM;
+    dlist_head lsnMapping;
+    HTAB *logicalRepRelMap;
+    TimestampTz sendTime;
+    XLogRecPtr lastRecvpos;
+    XLogRecPtr lastWritepos;
+    XLogRecPtr lastFlushpos;
+
+    Subscription *mySubscription;
+    bool mySubscriptionValid;
+    bool inRemoteTransaction;
+    LogicalRepWorker *curWorker;
+    MemoryContext messageContext;
+    MemoryContext logicalRepRelMapContext;
+    MemoryContext applyContext;
+} knl_t_apply_worker_context;
+
+typedef struct knl_t_publication_context {
+    bool publications_valid;
+    /* Map used to remember which relation schemas we sent. */
+    HTAB* RelationSyncCache;
+} knl_t_publication_context;
+
 /* thread context. */
 typedef struct knl_thrd_context {
     knl_thread_role role;
@@ -3157,6 +3200,9 @@ typedef struct knl_thrd_context {
     knl_t_proxy_context proxy_cxt;
     knl_t_dcf_context dcf_cxt;
     knl_t_bgworker_context bgworker_cxt;
+    knl_t_apply_launcher_context applylauncher_cxt;
+    knl_t_apply_worker_context applyworker_cxt;
+    knl_t_publication_context publication_cxt;
 } knl_thrd_context;
 
 #ifdef ENABLE_MOT

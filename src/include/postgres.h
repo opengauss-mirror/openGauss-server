@@ -113,6 +113,7 @@
 #define AUXILIARY_BACKENDS 20
 /* the maximum number of autovacuum launcher thread */
 #define AV_LAUNCHER_PROCS 2
+#define BITS_PER_INT (BITS_PER_BYTE * sizeof(int))
 
 #define STREAM_RESERVE_PROC_TIMES (16)
 /* this struct is used to store connection info got from pool */

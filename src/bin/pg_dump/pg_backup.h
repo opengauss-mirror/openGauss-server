@@ -102,6 +102,8 @@ typedef struct _restoreOptions {
     int use_setsessauth;    /* Use SET SESSION AUTHORIZATION commands
                              * instead of OWNER TO */
     int no_security_labels; /* Skip security label entries */
+    int no_subscriptions;   /* Skip subscription entries */
+    int no_publications;    /* Skip publication entries */
     char* superuser;        /* Username to use as superuser */
     char* use_role;         /* Issue SET ROLE to this */
     char* rolepassword;     /* password for use_role */

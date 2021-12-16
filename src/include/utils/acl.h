@@ -272,6 +272,8 @@ typedef enum AclObjectKind {
     ACL_KIND_COLUMN_SETTING,  /* column setting */
     ACL_KIND_GLOBAL_SETTING,  /* master client key */
     ACL_KIND_PACKAGE,         /* pg_package */
+    ACL_KIND_PUBLICATION,     /* pg_publication */
+    ACL_KIND_SUBSCRIPTION,    /* pg_subscription */
     MAX_ACL_KIND              /* MUST BE LAST */
 } AclObjectKind;
 
@@ -409,4 +411,6 @@ extern bool is_role_independent(Oid roleid);
 extern bool is_role_iamauth(Oid roleid);
 extern bool independent_priv_aclcheck(AclMode mask, char relkind);
 extern bool is_trust_language(Oid lang_oid);
+extern bool pg_publication_ownercheck(Oid pub_oid, Oid roleid);
+extern bool pg_subscription_ownercheck(Oid sub_oid, Oid roleid);
 #endif /* ACL_H */

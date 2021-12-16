@@ -23,6 +23,7 @@
 #include "replication/replicainternal.h"
 #include "replication/libpqwalreceiver.h"
 #include "replication/obswalreceiver.h"
+#include "replication/subscription_walreceiver.h"
 #include "storage/latch.h"
 #include "storage/spin.h"
 #include "pgxc/barrier.h"
@@ -87,7 +88,7 @@ typedef struct WalRcvCtlBlock {
     char walReceiverBuffer[FLEXIBLE_ARRAY_MEMBER];
 } WalRcvCtlBlock;
 
-typedef enum { REPCONNTARGET_DEFAULT, REPCONNTARGET_PRIMARY, REPCONNTARGET_DUMMYSTANDBY, REPCONNTARGET_STANDBY, REPCONNTARGET_OBS } ReplConnTarget;
+typedef enum { REPCONNTARGET_DEFAULT, REPCONNTARGET_PRIMARY, REPCONNTARGET_DUMMYSTANDBY, REPCONNTARGET_STANDBY, REPCONNTARGET_OBS, REPCONNTARGET_PUBLICATION } ReplConnTarget;
 
 /* Shared memory area for management of walreceiver process */
 typedef struct WalRcvData {
@@ -205,7 +206,15 @@ typedef struct WalReceiverFunc {
     bool (*walrcv_receive)(int timeout, unsigned char* type, char** buffer, int* len);
     void (*walrcv_send)(const char *buffer, int nbytes);
     void (*walrcv_disconnect)();
+    bool (*walrcv_command)(const char *cmd, char **err);
+    void (*walrcv_identify_system)();
+    void (*walrcv_startstreaming)(const LibpqrcvConnectParam *options);
+    void (*walrcv_create_slot)(const LibpqrcvConnectParam *options);
 } WalReceiverFunc;
+
+#define GET_FUNC_IDX \
+    (t_thrd.walreceiverfuncs_cxt.WalRcv->conn_target - REPCONNTARGET_STANDBY < 0 ?   \
+        0 : t_thrd.walreceiverfuncs_cxt.WalRcv->conn_target - REPCONNTARGET_STANDBY)
 
 extern const WalReceiverFunc WalReceiverFuncTable[];
 

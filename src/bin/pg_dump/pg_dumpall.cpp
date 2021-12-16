@@ -143,6 +143,8 @@ static bool dont_overwritefile = false;
 static bool dump_templatedb = false;
 static char* parallel_jobs = NULL;
 static bool is_pipeline = false;
+static int no_subscriptions = 0;
+static int no_publications = 0;
 
 GS_UCHAR init_rand[RANDOM_LEN + 1] = {0};
 #define RAND_COUNT 100
@@ -226,7 +228,9 @@ int main(int argc, char* argv[])
         {"with-key", required_argument, NULL, 7},
         {"dont-overwrite-file", no_argument, NULL, 8},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
+        {"no-publications", no_argument, &no_publications, 1},
         {"no-security-labels", no_argument, &no_security_labels, 1},
+        {"no-subscriptions", no_argument, &no_subscriptions, 1},
         {"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
         {"include-alter-table", no_argument, &include_alter_table, 1},
 #ifdef ENABLE_MULTIPLE_NODES
@@ -1159,6 +1163,10 @@ static void validate_dumpall_options(char** argv)
         appendPQExpBuffer(pgdumpopts, " --no-security-labels");
     if (no_unlogged_table_data)
         appendPQExpBuffer(pgdumpopts, " --no-unlogged-table-data");
+    if (no_subscriptions)
+        appendPQExpBuffer(pgdumpopts, " --no-subscriptions");
+    if (no_publications)
+        appendPQExpBuffer(pgdumpopts, " --no-publications");
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (include_nodes)
@@ -1193,8 +1201,10 @@ void help(void)
     printf(_("  --disable-dollar-quoting                    disable dollar quoting, use SQL standard quoting\n"));
     printf(_("  --disable-triggers                          disable triggers during data-only restore\n"));
     printf(_("  --inserts                                   dump data as INSERT commands, rather than COPY\n"));
+    printf(_("  --no-publications                           do not dump publications\n"));
     printf(_("  --no-security-labels                        do not dump security label assignments\n"));
     printf(_("  --no-tablespaces                            do not dump tablespace assignments\n"));
+    printf(_("  --no-subscriptions                          do not dump subscriptions\n"));
     printf(_("  --no-unlogged-table-data                    do not dump unlogged table data\n"));
     printf(_("  --include-alter-table                       dump the table delete column\n"));
     printf(_("  --quote-all-identifiers                     quote all identifiers, even if not key words\n"));

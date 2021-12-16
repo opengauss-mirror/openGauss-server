@@ -39,9 +39,11 @@
 #include "catalog/pg_pltemplate.h"
 #include "catalog/pg_db_role_setting.h"
 #include "catalog/pg_recyclebin.h"
+#include "catalog/pg_replication_origin.h"
 #include "catalog/pg_shdepend.h"
 #include "catalog/pg_shdescription.h"
 #include "catalog/pg_shseclabel.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_auth_history.h"
 #include "catalog/pg_user_status.h"
@@ -819,7 +821,8 @@ bool IsSharedRelation(Oid relationId)
         relationId == GsGlobalConfigRelationId ||
 #endif
         relationId == DbRoleSettingRelationId || relationId == PgJobRelationId || relationId == PgJobProcRelationId ||
-        relationId == DataSourceRelationId || relationId == GSObsScanInfoRelationId)
+        relationId == DataSourceRelationId || relationId == GSObsScanInfoRelationId ||
+        relationId == SubscriptionRelationId || relationId == ReplicationOriginRelationId)
         return true;
     /* These are their indexes (see indexing.h) */
     if (relationId == AuthIdRolnameIndexId || relationId == AuthIdOidIndexId || relationId == AuthMemRoleMemIndexId ||
@@ -843,7 +846,9 @@ bool IsSharedRelation(Oid relationId)
         relationId == DbRoleSettingDatidRolidIndexId ||
         /* Add job system table indexs */
         relationId == PgJobOidIndexId || relationId == PgJobIdIndexId || relationId == PgJobProcOidIndexId ||
-        relationId == PgJobProcIdIndexId || relationId == DataSourceOidIndexId || relationId == DataSourceNameIndexId)
+        relationId == PgJobProcIdIndexId || relationId == DataSourceOidIndexId || relationId == DataSourceNameIndexId ||
+        relationId == SubscriptionObjectIndexId || relationId == SubscriptionNameIndexId ||
+        relationId == ReplicationOriginIdentIndex || relationId == ReplicationOriginNameIndex)
         return true;
     /* These are their toast tables and toast indexes (see toasting.h) */
     if (relationId == PgShdescriptionToastTable || relationId == PgShdescriptionToastIndex ||

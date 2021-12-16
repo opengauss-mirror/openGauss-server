@@ -41,6 +41,7 @@ SUBDIRS = \
 	common \
 	lib/elog \
 	gausskernel $(dirs_in_central_mode) \
+	gausskernel/storage/replication/pgoutput/ \
 	bin \
 	common/backend/utils/mb/conversion_procs \
 	common/backend/snowball \

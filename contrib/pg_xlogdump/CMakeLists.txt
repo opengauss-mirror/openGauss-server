@@ -25,6 +25,7 @@ execute_process(
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/transam/xlogreader.cpp ${CMAKE_CURRENT_SOURCE_DIR}/xlogreader.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/uheapdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/uheapdesc.cpp
     COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/undologdesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/undologdesc.cpp
+    COMMAND ln -fs ${PROJECT_SRC_DIR}/gausskernel/storage/access/rmgrdesc/replorigindesc.cpp ${CMAKE_CURRENT_SOURCE_DIR}/replorigindesc.cpp
 )
 
 AUX_SOURCE_DIRECTORY(${CMAKE_CURRENT_SOURCE_DIR} TGT_xlogdump_SRC)

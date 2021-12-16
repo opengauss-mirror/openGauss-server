@@ -83,6 +83,7 @@
 #include "replication/datasender.h"
 #include "replication/dataqueue.h"
 #include "replication/dcf_data.h"
+#include "replication/origin.h"
 #include "replication/reorderbuffer.h"
 #include "replication/replicainternal.h"
 #include "replication/slot.h"
@@ -10674,6 +10675,13 @@ void StartupXLOG(void)
      * Perform end of recovery actions for any SLRUs that need it.
      */
     StartupMultiXact();
+
+    /*
+     * Recover knowledge about replay progress of known replication partners.
+     */
+#ifndef ENABLE_MULTIPLE_NODES
+    StartupReplicationOrigin();
+#endif
     TrimCLOG();
 
     /* Reload shared-memory state for prepared transactions */
@@ -12319,6 +12327,9 @@ static void CheckPointGuts(XLogRecPtr checkPointRedo, int flags, bool doFullChec
      * need wait pagewriter thread flush dirty page.
      */
     CheckPointBuffers(flags, doFullCheckpoint); /* performs all required fsyncs */
+#ifndef ENABLE_MULTIPLE_NODES
+    CheckPointReplicationOrigin();
+#endif
     /* We deliberately delay 2PC checkpointing as long as possible */
     CheckPointTwoPhase(checkPointRedo);
     undo::CheckPointUndoSystemMeta(checkPointRedo);

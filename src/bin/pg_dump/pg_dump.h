@@ -89,7 +89,10 @@ typedef enum {
     DO_PRE_DATA_BOUNDARY,
     DO_POST_DATA_BOUNDARY,
     DO_FTBL_CONSTRAINT, /* dump informational constraint info of the HDFS foreign table, also used for MOT table */
-    DO_RLSPOLICY        /* dump row level security policy of table */
+    DO_RLSPOLICY,       /* dump row level security policy of table */
+    DO_PUBLICATION,
+    DO_PUBLICATION_REL,
+    DO_SUBSCRIPTION
 } DumpableObjectType;
 
 typedef struct _dumpableObject {
@@ -463,6 +466,40 @@ typedef struct _blobInfo {
     char* blobacl;
 } BlobInfo;
 
+/*
+ * The PublicationInfo struct is used to represent publications.
+ */
+typedef struct _PublicationInfo {
+    DumpableObject dobj;
+    char *rolname;
+    bool puballtables;
+    bool pubinsert;
+    bool pubupdate;
+    bool pubdelete;
+} PublicationInfo;
+
+/*
+ * The PublicationRelInfo struct is used to represent publication table
+ * mapping.
+ */
+typedef struct _PublicationRelInfo {
+    DumpableObject dobj;
+    TableInfo *pubtable;
+    char *pubname;
+} PublicationRelInfo;
+
+/*
+ * The SubscriptionInfo struct is used to represent subscription.
+ */
+typedef struct _SubscriptionInfo {
+    DumpableObject dobj;
+    char *rolname;
+    char *subconninfo;
+    char *subslotname;
+    char *subsynccommit;
+    char *subpublications;
+} SubscriptionInfo;
+
 /* global decls */
 extern bool force_quotes; /* double-quotes for identifiers flag */
 extern bool g_verbose;    /* verbose flag */
@@ -544,6 +581,9 @@ extern void getExtensionMembership(Archive* fout, ExtensionInfo extinfo[], int n
 extern void help(const char* progname);
 extern bool IsRbObject(Archive* fout, Oid classid, Oid objid, const char* objname);
 extern uint32 GetVersionNum(Archive* fout);
+extern void getPublications(Archive *fout);
+extern void getPublicationTables(Archive *fout, TableInfo tblinfo[], int numTables);
+extern void getSubscriptions(Archive *fout);
 
 #ifdef GSDUMP_LLT
 void stopLLT();

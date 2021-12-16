@@ -1412,3 +1412,43 @@ void CallSyscacheCallbacks(int cacheid, uint32 hashvalue)
         }
     }
 }
+
+/*
+ * PrepareInvalidationState
+ * 		Initialize inval lists for the current (sub)transaction.
+ */
+static void PrepareInvalidationState(void)
+{
+    TransInvalidationInfo *myInfo;
+
+    if (u_sess->inval_cxt.transInvalInfo != NULL &&
+        u_sess->inval_cxt.transInvalInfo->my_level == GetCurrentTransactionNestLevel())
+        return;
+
+    myInfo =
+        (TransInvalidationInfo *)MemoryContextAllocZero(u_sess->top_transaction_mem_cxt, sizeof(TransInvalidationInfo));
+    myInfo->parent = u_sess->inval_cxt.transInvalInfo;
+    myInfo->my_level = GetCurrentTransactionNestLevel();
+
+    /*
+     * If there's any previous entry, this one should be for a deeper nesting
+     * level.
+     */
+    Assert(u_sess->inval_cxt.transInvalInfo == NULL || myInfo->my_level > u_sess->inval_cxt.transInvalInfo->my_level);
+
+    u_sess->inval_cxt.transInvalInfo = myInfo;
+}
+
+/*
+ * CacheInvalidateRelcacheAll
+ * 		Register invalidation of the whole relcache at the end of command.
+ *
+ * This is used by alter publication as changes in publications may affect
+ * large number of tables.
+ */
+void CacheInvalidateRelcacheAll(void)
+{
+    PrepareInvalidationState();
+
+    RegisterRelcacheInvalidation(InvalidOid, InvalidOid);
+}

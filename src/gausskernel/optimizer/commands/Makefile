@@ -21,8 +21,8 @@ OBJS = aggregatecmds.o alter.o analyze.o async.o cluster.o comment.o  \
 	dbcommands.o define.o discard.o dropcmds.o explain.o extension.o \
 	foreigncmds.o functioncmds.o \
 	indexcmds.o lockcmds.o matview.o operatorcmds.o opclasscmds.o \
-	portalcmds.o prepare.o proclang.o packagecmds.o\
-	schemacmds.o seclabel.o sec_rls_cmds.o sequence.o tablecmds.o tablespace.o trigger.o \
+	portalcmds.o prepare.o proclang.o packagecmds.o publicationcmds.o\
+	schemacmds.o seclabel.o sec_rls_cmds.o sequence.o subscriptioncmds.o tablecmds.o tablespace.o trigger.o \
 	tsearchcmds.o typecmds.o user.o vacuum.o vacuumlazy.o \
 	variable.o verify.o view.o gds_stream.o obs_stream.o formatter.o datasourcecmds.o \
 	directory.o auto_explain.o shutdown.o

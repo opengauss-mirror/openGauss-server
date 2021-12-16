@@ -6,6 +6,6 @@ include $(top_builddir)/src/Makefile.global
 
 override CPPFLAGS := -I$(srcdir) $(CPPFLAGS)
 
-OBJS = decode.o logical.o logicalfuncs.o reorderbuffer.o snapbuild.o
+OBJS = decode.o launcher.o logical.o logicalfuncs.o origin.o proto.o relation.o reorderbuffer.o snapbuild.o worker.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

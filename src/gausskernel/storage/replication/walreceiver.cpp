@@ -143,14 +143,11 @@ const char *g_reserve_param[RESERVE_SIZE] = {
 };
 
 const WalReceiverFunc WalReceiverFuncTable[] = {
-    { libpqrcv_connect, libpqrcv_receive, libpqrcv_send, libpqrcv_disconnect },
-    { obs_connect, obs_receive, obs_send, obs_disconnect },
+    { libpqrcv_connect, libpqrcv_receive, libpqrcv_send, libpqrcv_disconnect, NULL, NULL, NULL, NULL },
+    { obs_connect, obs_receive, obs_send, obs_disconnect, NULL, NULL, NULL, NULL },
+    { sub_connect, libpqrcv_receive, libpqrcv_send, libpqrcv_disconnect, libpqrcv_command, sub_identify_system,
+        sub_startstreaming, sub_create_slot}
 };
-
-const int FUNC_LIBPQ_IDX = 0;
-const int FUNC_OBS_IDX = 1;
-#define GET_FUNC_IDX \
-    (t_thrd.walreceiverfuncs_cxt.WalRcv->conn_target == REPCONNTARGET_OBS ? FUNC_OBS_IDX : FUNC_LIBPQ_IDX)
 
 /* Prototypes for private functions */
 static void EnableWalRcvImmediateExit(void);

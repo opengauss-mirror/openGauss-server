@@ -256,6 +256,21 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading row level security policies\n");
     getRlsPolicies(fout, tblinfo, numTables);
 
+    if (g_verbose) {
+        write_msg(NULL, "reading publications\n");
+    }
+    getPublications(fout);
+
+    if (g_verbose) {
+        write_msg(NULL, "reading publication membership\n");
+    }
+    getPublicationTables(fout, tblinfo, numTables);
+
+    if (g_verbose) {
+        write_msg(NULL, "reading subscriptions\n");
+    }
+    getSubscriptions(fout);
+
     *numTablesPtr = numTables;
     GS_FREE(inhinfo);
     return tblinfo;

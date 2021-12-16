@@ -5995,6 +5995,64 @@ static CreateModelStmt* _copyCreateModelStmt(const CreateModelStmt* from){
     return newnode;
 }
 
+static CreatePublicationStmt *_copyCreatePublicationStmt(const CreatePublicationStmt *from)
+{
+    CreatePublicationStmt *newnode = makeNode(CreatePublicationStmt);
+
+    COPY_STRING_FIELD(pubname);
+    COPY_NODE_FIELD(options);
+    COPY_NODE_FIELD(tables);
+    COPY_SCALAR_FIELD(for_all_tables);
+
+    return newnode;
+}
+
+static AlterPublicationStmt *_copyAlterPublicationStmt(const AlterPublicationStmt *from)
+{
+    AlterPublicationStmt *newnode = makeNode(AlterPublicationStmt);
+
+    COPY_STRING_FIELD(pubname);
+    COPY_NODE_FIELD(options);
+    COPY_NODE_FIELD(tables);
+    COPY_SCALAR_FIELD(for_all_tables);
+    COPY_SCALAR_FIELD(tableAction);
+
+    return newnode;
+}
+
+static CreateSubscriptionStmt *_copyCreateSubscriptionStmt(const CreateSubscriptionStmt *from)
+{
+    CreateSubscriptionStmt *newnode = makeNode(CreateSubscriptionStmt);
+
+    COPY_STRING_FIELD(subname);
+    COPY_STRING_FIELD(conninfo);
+    COPY_NODE_FIELD(publication);
+    COPY_NODE_FIELD(options);
+
+    return newnode;
+}
+
+static AlterSubscriptionStmt *_copyAlterSubscriptionStmt(const AlterSubscriptionStmt *from)
+{
+    AlterSubscriptionStmt *newnode = makeNode(AlterSubscriptionStmt);
+
+    COPY_STRING_FIELD(subname);
+    COPY_NODE_FIELD(options);
+
+    return newnode;
+}
+
+static DropSubscriptionStmt *_copyDropSubscriptionStmt(const DropSubscriptionStmt *from)
+{
+    DropSubscriptionStmt *newnode = makeNode(DropSubscriptionStmt);
+
+    COPY_STRING_FIELD(subname);
+    COPY_SCALAR_FIELD(missing_ok);
+    COPY_SCALAR_FIELD(behavior);
+
+    return newnode;
+}
+
 /* ****************************************************************
  *					pg_list.h copy functions
  * ****************************************************************
@@ -7574,6 +7632,22 @@ void* copyObject(const void* from)
            /* shutdown */
         case T_ShutdownStmt:
             retval = _copyShutdownStmt((ShutdownStmt*)from);
+            break;
+
+        case T_CreatePublicationStmt:
+            retval = _copyCreatePublicationStmt((CreatePublicationStmt *)from);
+            break;
+        case T_AlterPublicationStmt:
+            retval = _copyAlterPublicationStmt((AlterPublicationStmt *)from);
+            break;
+        case T_CreateSubscriptionStmt:
+            retval = _copyCreateSubscriptionStmt((CreateSubscriptionStmt *)from);
+            break;
+        case T_AlterSubscriptionStmt:
+            retval = _copyAlterSubscriptionStmt((AlterSubscriptionStmt *)from);
+            break;
+        case T_DropSubscriptionStmt:
+            retval = _copyDropSubscriptionStmt((DropSubscriptionStmt *)from);
             break;
 
         default:

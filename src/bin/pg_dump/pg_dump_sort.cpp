@@ -117,7 +117,10 @@ static const int newObjectTypePriority[] = {
     22, /* DO_PRE_DATA_BOUNDARY */
     25, /* DO_POST_DATA_BOUNDARY */
     31, /* DO_FTBL_CONSTRAINT */
-    33  /* DO_RLSPOLICY */
+    33, /* DO_RLSPOLICY */
+    34, /* DO_PUBLICATION */
+    35, /* DO_PUBLICATION_REL */
+    36  /* DO_SUBSCRIPTION */
 };
 
 static DumpId postDataBoundId;
@@ -1217,6 +1220,19 @@ static void describeDumpableObject(DumpableObject* obj, char* buf, int bufsize)
         case DO_RLSPOLICY:
             nRet = snprintf_s(
                 buf, bufsize, bufsize - 1, "ROW LEVEL SECURITY POLICY (ID %d OID %u)", obj->dumpId, obj->catId.oid);
+            return;
+        case DO_PUBLICATION:
+            nRet = snprintf_s(buf, bufsize, bufsize - 1, "PUBLICATION (ID %d OID %u)", obj->dumpId, obj->catId.oid);
+            securec_check_ss_c(nRet, "\0", "\0");
+            return;
+        case DO_PUBLICATION_REL:
+            nRet = snprintf_s(buf, bufsize, bufsize - 1, "PUBLICATION TABLE (ID %d OID %u)",
+                obj->dumpId, obj->catId.oid);
+            securec_check_ss_c(nRet, "\0", "\0");
+            return;
+        case DO_SUBSCRIPTION:
+            nRet = snprintf_s(buf, bufsize, bufsize - 1, "SUBSCRIPTION (ID %d OID %u)", obj->dumpId, obj->catId.oid);
+            securec_check_ss_c(nRet, "\0", "\0");
             return;
         default:
             break;

@@ -143,6 +143,8 @@
 #include "replication/walsender_private.h"
 #include "replication/walreceiver.h"
 #include "replication/dcf_replication.h"
+#include "replication/logicallauncher.h"
+#include "replication/logicalworker.h"
 #include "postmaster/bgwriter.h"
 #include "postmaster/cbmwriter.h"
 #include "postmaster/startup.h"
@@ -447,6 +449,7 @@ static void StartRbWorker(void);
 static void StartTxnSnapWorker(void);
 static void StartAutovacuumWorker(void);
 static void StartUndoWorker(void);
+static void StartApplyWorker(void);
 static ThreadId StartCatchupWorker(void);
 static void InitPostmasterDeathWatchHandle(void);
 static void NotifyShutdown(void);
@@ -2998,6 +3001,13 @@ static int ServerLoop(void)
             g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
         }
 
+#ifndef ENABLE_MULTIPLE_NODES
+        if (u_sess->attr.attr_common.upgrade_mode == 0 && g_instance.pid_cxt.ApplyLauncerPID == 0 &&
+            pmState == PM_RUN && !dummyStandbyMode) {
+            g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
+        }
+#endif
+
         /*
          * If we have lost the job scheduler, try to start a new one.
          *
@@ -4541,7 +4551,11 @@ static void SIGHUP_handler(SIGNAL_ARGS)
         if (g_instance.pid_cxt.UndoLauncherPID != 0) {
             signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGHUP);
         }
-
+#ifndef ENABLE_MULTIPLE_NODES
+        if (g_instance.pid_cxt.ApplyLauncerPID != 0) {
+            signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGHUP);
+        }
+#endif
         if (g_instance.pid_cxt.UndoRecyclerPID != 0) {
             signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGHUP);
         }
@@ -4780,7 +4794,11 @@ static void pmdie(SIGNAL_ARGS)
             if (g_instance.pid_cxt.UndoLauncherPID != 0) {
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
             }
-
+#ifndef ENABLE_MULTIPLE_NODES
+            if (g_instance.pid_cxt.ApplyLauncerPID != 0) {
+                signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
+            }
+#endif
             if (g_instance.pid_cxt.GlobalStatsPID != 0) {
                 signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
             }
@@ -5036,7 +5054,10 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.UndoLauncherPID != 0)
                     signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-
+#ifndef ENABLE_MULTIPLE_NODES
+                if (g_instance.pid_cxt.ApplyLauncerPID != 0)
+                    signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
+#endif
                 if (g_instance.pid_cxt.GlobalStatsPID != 0)
                     signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
 
@@ -5208,7 +5229,10 @@ static void ProcessDemoteRequest(void)
 
                 if (g_instance.pid_cxt.UndoLauncherPID != 0)
                     signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-
+#ifndef ENABLE_MULTIPLE_NODES
+                if (g_instance.pid_cxt.ApplyLauncerPID != 0)
+                    signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
+#endif
                 if (g_instance.pid_cxt.GlobalStatsPID != 0)
                     signal_child(g_instance.pid_cxt.GlobalStatsPID, SIGTERM);
 
@@ -5455,6 +5479,13 @@ static void reaper(SIGNAL_ARGS)
 
             if (g_instance.pid_cxt.GlobalStatsPID == 0 && !dummyStandbyMode)
                 g_instance.pid_cxt.GlobalStatsPID = initialize_util_thread(GLOBALSTATS_THREAD);
+
+#ifndef ENABLE_MULTIPLE_NODES
+            if (u_sess->attr.attr_common.upgrade_mode == 0 &&
+                g_instance.pid_cxt.ApplyLauncerPID == 0 && !dummyStandbyMode) {
+                g_instance.pid_cxt.ApplyLauncerPID = initialize_util_thread(APPLY_LAUNCHER);
+            }
+#endif
 
             if (XLogArchivingActive() && g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode && 
                     XLogArchiveCommandSet())
@@ -6175,7 +6206,15 @@ static void reaper(SIGNAL_ARGS)
                 LogChildExit(LOG, _("undo launcher process"), pid, exitstatus);
             continue;
         }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (pid == g_instance.pid_cxt.ApplyLauncerPID) {
+            g_instance.pid_cxt.ApplyLauncerPID = 0;
 
+            if (!EXIT_STATUS_0(exitstatus))
+                LogChildExit(LOG, _("apply launcher process"), pid, exitstatus);
+            continue;
+        }
+#endif
         if (pid == g_instance.pid_cxt.GlobalStatsPID) {
             g_instance.pid_cxt.GlobalStatsPID = 0;
 
@@ -6541,7 +6580,10 @@ static void PostmasterStateMachineReadOnly(void)
 
             if (g_instance.pid_cxt.UndoLauncherPID != 0)
                 signal_child(g_instance.pid_cxt.UndoLauncherPID, SIGTERM);
-
+#ifndef ENABLE_MULTIPLE_NODES
+            if (g_instance.pid_cxt.ApplyLauncerPID != 0)
+                signal_child(g_instance.pid_cxt.ApplyLauncerPID, SIGTERM);
+#endif
             if (g_instance.pid_cxt.UndoRecyclerPID != 0)
                 signal_child(g_instance.pid_cxt.UndoRecyclerPID, SIGTERM);
 
@@ -6621,7 +6663,10 @@ static void PostmasterStateMachine(void)
 #endif   /* ENABLE_MULTIPLE_NODES */
 
             g_instance.pid_cxt.UndoLauncherPID == 0 && g_instance.pid_cxt.UndoRecyclerPID == 0 &&
-            g_instance.pid_cxt.GlobalStatsPID == 0 && 
+            g_instance.pid_cxt.GlobalStatsPID == 0 &&
+#ifndef ENABLE_MULTIPLE_NODES
+            g_instance.pid_cxt.ApplyLauncerPID == 0 &&
+#endif
             IsAllPageWorkerExit() && IsAllBuildSenderExit()) {
             if (g_instance.fatal_error) {
                 /*
@@ -6781,6 +6826,9 @@ static void PostmasterStateMachine(void)
             Assert(g_instance.pid_cxt.UndoLauncherPID == 0);
             Assert(g_instance.pid_cxt.UndoRecyclerPID == 0);
             Assert(g_instance.pid_cxt.GlobalStatsPID == 0);
+#ifndef ENABLE_MULTIPLE_NODES
+            Assert(g_instance.pid_cxt.ApplyLauncerPID == 0);
+#endif
             Assert(IsAllPageWorkerExit() == true);
             Assert(IsAllBuildSenderExit() == true);
             /* syslogger is not considered here */
@@ -8153,6 +8201,13 @@ static void sigusr1_handler(SIGNAL_ARGS)
     }
 
     /* should not start a worker in shutdown or demotion procedure */
+    if (CheckPostmasterSignal(PMSIGNAL_START_APPLY_WORKER) &&
+        g_instance.status == NoShutdown &&
+        g_instance.demotion == NoDemote) {
+        StartApplyWorker();
+    }
+
+    /* should not start a worker in shutdown or demotion procedure */
     if (CheckPostmasterSignal(PMSIGNAL_START_CLEAN_STATEMENT) && g_instance.status == NoShutdown &&
         g_instance.demotion == NoDemote) {
         /* The statement flush thread wants us to start a clean statement worker process. */
@@ -8609,6 +8664,59 @@ static void StartAutovacuumWorker(void)
     if (g_instance.pid_cxt.AutoVacPID != 0) {
         AutoVacWorkerFailed();
         t_thrd.postmaster_cxt.avlauncher_needs_signal = true;
+    }
+}
+
+static void StartApplyWorker(void)
+{
+    Backend* bn = NULL;
+
+    /*
+     * If not in condition to run a process, don't try, but handle it like a
+     * fork failure.  This does not normally happen, since the signal is only
+     * supposed to be sent by apply launcher when it's OK to do it, but
+     * we have to check to avoid race-condition problems during DB state
+     * changes.
+     */
+    if (canAcceptConnections(false) == CAC_OK) {
+        int slot = AssignPostmasterChildSlot();
+        if (slot < 1) {
+            ereport(ERROR, (errmsg("no free slots in PMChildFlags array")));
+        }
+
+        bn = AssignFreeBackEnd(slot);
+
+        if (bn != NULL) {
+            /*
+             * Compute the cancel key that will be assigned to this session.
+             * We probably don't need cancel keys for workers, but
+             * we'd better have something random in the field to prevent
+             * unfriendly people from sending cancels to them.
+             */
+            GenerateCancelKey(false);
+            bn->cancel_key = t_thrd.proc_cxt.MyCancelKey;
+
+            /* ApplyWorkers need a child slot */
+            bn->child_slot = t_thrd.proc_cxt.MyPMChildSlot = slot;
+            bn->pid = initialize_util_thread(APPLY_WORKER, bn);
+            t_thrd.proc_cxt.MyPMChildSlot = 0;
+            if (bn->pid > 0) {
+                bn->is_autovacuum = false;
+                DLInitElem(&bn->elem, bn);
+                DLAddHead(g_instance.backend_list, &bn->elem);
+                /* all OK */
+                return;
+            }
+
+            /*
+             * fork failed, fall through to report -- actual error message was
+             * logged by initialize_util_thread
+             */
+            (void)ReleasePostmasterChildSlot(bn->child_slot);
+            bn->pid = 0;
+        } else {
+            ereport(LOG, (errcode(ERRCODE_OUT_OF_MEMORY), errmsg("out of memory")));
+        }
     }
 }
 
@@ -11643,6 +11751,22 @@ int GaussDbThreadMain(knl_thread_arg* arg)
             proc_exit(0);
         } break;
 
+        case APPLY_LAUNCHER: {
+            t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
+            if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
+                return STATUS_ERROR;
+            }
+            InitProcessAndShareMemory();
+            ApplyLauncherMain();
+            proc_exit(0);
+        } break;
+
+        case APPLY_WORKER: {
+            InitProcessAndShareMemory();
+            ApplyWorkerMain();
+            proc_exit(0);
+        } break;
+
         case UNDO_LAUNCHER: {
             t_thrd.proc_cxt.MyPMChildSlot = AssignPostmasterChildSlot();
             if (t_thrd.proc_cxt.MyPMChildSlot == -1) {
@@ -11794,6 +11918,8 @@ static ThreadMetaData GaussdbThreadGate[] = {
     { GaussDbThreadMain<BARRIER_CREATOR>, BARRIER_CREATOR, "barriercreator", "barrier creator" },
     { GaussDbThreadMain<BGWORKER>, BGWORKER, "bgworker", "background worker" },
     { GaussDbThreadMain<BARRIER_ARCH>, BARRIER_ARCH, "barrierarch", "barrier arch" },
+    { GaussDbThreadMain<APPLY_LAUNCHER>, APPLY_LAUNCHER, "applylauncher", "apply launcher" },
+    { GaussDbThreadMain<APPLY_WORKER>, APPLY_WORKER, "applyworker", "apply worker" },
 	/* Keep the block in the end if it may be absent !!! */
 #ifdef ENABLE_MULTIPLE_NODES
     { GaussDbThreadMain<TS_COMPACTION>, TS_COMPACTION, "TScompaction",

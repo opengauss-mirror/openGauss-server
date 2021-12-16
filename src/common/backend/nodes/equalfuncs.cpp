@@ -2776,6 +2776,54 @@ static bool _equalRownum(Rownum* a, Rownum* b)
     return true;
 }
 
+static bool _equalCreatePublicationStmt(const CreatePublicationStmt *a, const CreatePublicationStmt *b)
+{
+    COMPARE_STRING_FIELD(pubname);
+    COMPARE_NODE_FIELD(options);
+    COMPARE_NODE_FIELD(tables);
+    COMPARE_SCALAR_FIELD(for_all_tables);
+
+    return true;
+}
+
+static bool _equalAlterPublicationStmt(const AlterPublicationStmt *a, const AlterPublicationStmt *b)
+{
+    COMPARE_STRING_FIELD(pubname);
+    COMPARE_NODE_FIELD(options);
+    COMPARE_NODE_FIELD(tables);
+    COMPARE_SCALAR_FIELD(for_all_tables);
+    COMPARE_SCALAR_FIELD(tableAction);
+
+    return true;
+}
+
+static bool _equalCreateSubscriptionStmt(const CreateSubscriptionStmt *a, const CreateSubscriptionStmt *b)
+{
+    COMPARE_STRING_FIELD(subname);
+    COMPARE_STRING_FIELD(conninfo);
+    COMPARE_NODE_FIELD(publication);
+    COMPARE_NODE_FIELD(options);
+
+    return true;
+}
+
+static bool _equalAlterSubscriptionStmt(const AlterSubscriptionStmt *a, const AlterSubscriptionStmt *b)
+{
+    COMPARE_STRING_FIELD(subname);
+    COMPARE_NODE_FIELD(options);
+
+    return true;
+}
+
+static bool _equalDropSubscriptionStmt(const DropSubscriptionStmt *a, const DropSubscriptionStmt *b)
+{
+    COMPARE_STRING_FIELD(subname);
+    COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_SCALAR_FIELD(behavior);
+
+    return true;
+}
+
 /*
  * Stuff from pg_list.h
  */
@@ -3867,6 +3915,21 @@ bool equal(const void* a, const void* b)
             break;
         case T_Rownum:
             retval = _equalRownum((Rownum*)a, (Rownum*)b);
+            break;
+        case T_CreatePublicationStmt:
+            retval = _equalCreatePublicationStmt((CreatePublicationStmt *)a, (CreatePublicationStmt *)b);
+            break;
+        case T_AlterPublicationStmt:
+            retval = _equalAlterPublicationStmt((AlterPublicationStmt *)a, (AlterPublicationStmt *)b);
+            break;
+        case T_CreateSubscriptionStmt:
+            retval = _equalCreateSubscriptionStmt((CreateSubscriptionStmt *)a, (CreateSubscriptionStmt *)b);
+            break;
+        case T_AlterSubscriptionStmt:
+            retval = _equalAlterSubscriptionStmt((AlterSubscriptionStmt *)a, (AlterSubscriptionStmt *)b);
+            break;
+        case T_DropSubscriptionStmt:
+            retval = _equalDropSubscriptionStmt((DropSubscriptionStmt *)a, (DropSubscriptionStmt *)b);
             break;
 
         default:

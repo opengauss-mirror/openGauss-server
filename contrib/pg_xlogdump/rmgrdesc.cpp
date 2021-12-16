@@ -29,6 +29,7 @@
 #include "commands/sequence.h"
 #include "commands/tablespace.h"
 #include "replication/slot.h"
+#include "replication/origin.h"
 #ifdef PGXC
 #include "pgxc/barrier.h"
 #endif

@@ -1463,3 +1463,4 @@ int read_local_xlog_page(XLogReaderState *state, XLogRecPtr targetPagePtr, int r
     /* number of valid bytes in the buffer */
     return count;
 }
+

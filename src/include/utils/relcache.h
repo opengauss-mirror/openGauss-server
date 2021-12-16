@@ -63,6 +63,7 @@ extern List* RelationGetLocalCbiList(Relation relation);
 extern List* RelationGetIndexInfoList(Relation relation);
 extern int RelationGetIndexNum(Relation relation);
 extern Oid RelationGetOidIndex(Relation relation);
+extern Oid RelationGetPrimaryKeyIndex(Relation relation);
 extern Oid RelationGetReplicaIndex(Relation relation);
 extern List* RelationGetIndexExpressions(Relation relation);
 extern List* RelationGetIndexExpressions(Relation relation);
@@ -74,6 +75,7 @@ extern void AtEOXact_FreeTupleDesc();
 typedef enum IndexAttrBitmapKind {
     INDEX_ATTR_BITMAP_ALL,
     INDEX_ATTR_BITMAP_KEY,
+    INDEX_ATTR_BITMAP_PRIMARY_KEY,
     INDEX_ATTR_BITMAP_IDENTITY_KEY
 } IndexAttrBitmapKind;
 
@@ -94,6 +96,10 @@ extern void RelationGetExclusionInfo(Relation indexRelation, Oid** operators, Oi
 extern void RelationSetIndexList(Relation relation, List* indexIds, Oid oidIndex);
 
 extern void RelationInitIndexAccessInfo(Relation relation, HeapTuple index_tuple = NULL);
+
+/* caller must include pg_publication.h */
+struct PublicationActions;
+extern struct PublicationActions *GetRelationPublicationActions(Relation relation);
 
 /*
  * Routines for backend startup

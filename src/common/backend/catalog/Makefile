@@ -23,7 +23,7 @@ OBJS = catalog.o dependency.o heap.o index.o indexing.o namespace.o aclchk.o \
        pg_operator.o gs_package.o pg_proc.o pg_range.o pg_db_role_setting.o pg_shdepend.o pg_synonym.o\
        pg_type.o pgxc_class.o storage.o storage_gtt.o toasting.o pg_job.o pg_partition.o\
        pg_hashbucket.o cstore_ctlg.o dfsstore_ctlg.o pg_builtin_proc.o streaming_stream.o\
-       gs_matview.o pgxc_slice.o
+       gs_matview.o pgxc_slice.o pg_publication.o pg_subscription.o
 
 BKIFILES = postgres.bki postgres.description postgres.shdescription
 
@@ -58,7 +58,7 @@ POSTGRES_BKI_SRCS = $(addprefix $(top_srcdir)/src/include/catalog/,\
 	toasting.h indexing.h gs_obsscaninfo.h pg_directory.h pg_hashbucket.h gs_global_chain.h gs_global_config.h\
 	pg_streaming_stream.h pg_streaming_cont_query.h pg_streaming_reaper_status.h gs_matview.h\
 	gs_matview_dependency.h pgxc_slice.h gs_opt_model.h gs_model.h\
-	pg_recyclebin.h pg_snapshot.h \
+	pg_recyclebin.h pg_snapshot.h pg_replication_origin.h pg_publication.h pg_publication_rel.h pg_subscription.h\
     )
 
 # location of Catalog.pm

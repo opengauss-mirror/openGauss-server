@@ -500,7 +500,7 @@ static inline void ReleaseChildSlot(void)
         IsJobAspProcess() || t_thrd.role == STREAMING_BACKEND || IsStatementFlushProcess() || IsJobSnapshotProcess() ||
         t_thrd.postmaster_cxt.IsRPCWorkerThread || IsJobPercentileProcess() || t_thrd.role == ARCH ||
         IsTxnSnapCapturerProcess() || IsTxnSnapWorkerProcess() || IsRbCleanerProcess() || IsRbWorkerProcess() || t_thrd.role == GLOBALSTATS_THREAD ||
-        t_thrd.role == BARRIER_ARCH || t_thrd.role == BARRIER_CREATOR)) {
+        t_thrd.role == BARRIER_ARCH || t_thrd.role == BARRIER_CREATOR || t_thrd.role == APPLY_LAUNCHER)) {
         (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
     }
 }

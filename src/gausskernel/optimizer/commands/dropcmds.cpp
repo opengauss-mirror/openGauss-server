@@ -376,6 +376,10 @@ static void does_not_exist_skipping(ObjectType objtype, List* objname, List* obj
             name = pstrdup(strVal(llast(objname)));
             args = NameListToString(list_truncate(list_copy(objname), list_length(objname) - 1));
             break;
+        case OBJECT_PUBLICATION:
+            msg = gettext_noop("publication \"%s\" does not exist, skipping");
+            name = NameListToString(objname);
+            break;
         default:
             pfree_ext(message->data);
             pfree_ext(message);

@@ -83,5 +83,4 @@ bool ParseStateUseShareBuf();
 bool ParseStateUseLocalBuf();
 bool ParseStateWithoutCache();
 
-
 #endif

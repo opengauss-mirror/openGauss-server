@@ -39,6 +39,7 @@
 #include "replication/decode.h"
 #include "replication/logical.h"
 #include "replication/reorderbuffer.h"
+#include "replication/origin.h"
 #include "replication/snapbuild.h"
 
 #include "storage/standby.h"
@@ -72,7 +73,7 @@ static void DecodeMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
 static void DecodeUMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf);
 static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf, TransactionId xid, CommitSeqNo csn,
                          Oid dboid, TimestampTz commit_time, int nsubxacts, TransactionId *sub_xids, int ninval_msgs,
-                         SharedInvalidationMessage *msg);
+                         SharedInvalidationMessage *msg, xl_xact_origin *origin);
 static void DecodeAbort(LogicalDecodingContext *ctx, XLogRecPtr lsn, TransactionId xid, TransactionId *sub_xids,
                         int nsubxacts);
 
@@ -197,6 +198,7 @@ void LogicalDecodingProcessRecord(LogicalDecodingContext *ctx, XLogReaderState *
         case RM_SPGIST_ID:
         case RM_SLOT_ID:
         case RM_BARRIER_ID:
+        case RM_REPLORIGIN_ID:
             break;
         case RM_HEAP3_ID:
             DecodeHeap3Op(ctx, &buf);
@@ -285,14 +287,19 @@ static void DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             xl_xact_commit *xlrec = NULL;
             TransactionId *subxacts = NULL;
             SharedInvalidationMessage *invals = NULL;
+            xl_xact_origin *origin = NULL;
 
             xlrec = (xl_xact_commit *)buf->record_data;
 
             subxacts = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
             invals = (SharedInvalidationMessage *)&(subxacts[xlrec->nsubxacts]);
+            if (xlrec->xinfo | XACT_HAS_ORIGIN) {
+                origin = (xl_xact_origin*)GetRepOriginPtr((char*)xlrec->xnodes, xlrec->xinfo,
+                    xlrec->nsubxacts, xlrec->nmsgs, xlrec->nrels, xlrec->nlibrary);
+            }
 
             DecodeCommit(ctx, buf, XLogRecGetXid(r), xlrec->csn, xlrec->dbId, xlrec->xact_time, xlrec->nsubxacts,
-                         subxacts, xlrec->nmsgs, invals);
+                         subxacts, xlrec->nmsgs, invals, origin);
 
             break;
         }
@@ -301,6 +308,7 @@ static void DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             xl_xact_commit *xlrec = NULL;
             TransactionId *subxacts = NULL;
             SharedInvalidationMessage *invals = NULL;
+            xl_xact_origin *origin = NULL;
 
             /* Prepared commits contain a normal commit record... */
             prec = (xl_xact_commit_prepared *)buf->record_data;
@@ -309,8 +317,13 @@ static void DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             subxacts = (TransactionId *)&(xlrec->xnodes[xlrec->nrels]);
             invals = (SharedInvalidationMessage *)&(subxacts[xlrec->nsubxacts]);
 
+            if (xlrec->xinfo | XACT_HAS_ORIGIN) {
+                origin = (xl_xact_origin*)GetRepOriginPtr((char*)xlrec->xnodes, xlrec->xinfo,
+                    xlrec->nsubxacts, xlrec->nmsgs, xlrec->nrels, xlrec->nlibrary);
+            }
+
             DecodeCommit(ctx, buf, prec->xid, xlrec->csn, xlrec->dbId, xlrec->xact_time, xlrec->nsubxacts, subxacts,
-                         xlrec->nmsgs, invals);
+                         xlrec->nmsgs, invals, origin);
 
             break;
         }
@@ -320,7 +333,7 @@ static void DecodeXactOp(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             xlrec = (xl_xact_commit_compact *)buf->record_data;
 
             DecodeCommit(ctx, buf, XLogRecGetXid(r), xlrec->csn, InvalidOid, xlrec->xact_time, xlrec->nsubxacts,
-                         xlrec->subxacts, 0, NULL);
+                         xlrec->subxacts, 0, NULL, NULL);
             break;
         }
         case XLOG_XACT_ABORT: {
@@ -663,10 +676,11 @@ static inline bool FilterByOrigin(LogicalDecodingContext *ctx, RepOriginId origi
  */
 static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf, TransactionId xid, CommitSeqNo csn,
                          Oid dboid, TimestampTz commit_time, int nsubxacts, TransactionId *sub_xids, int ninval_msgs,
-                         SharedInvalidationMessage *msgs)
+                         SharedInvalidationMessage *msgs, xl_xact_origin *origin)
 {
     int i;
     XLogRecPtr origin_id = XLogRecGetOrigin(buf->record);
+    XLogRecPtr origin_lsn = origin == NULL ? InvalidXLogRecPtr : origin->origin_lsn;
 
     /*
      * Process invalidation messages, even if we're not interested in the
@@ -726,7 +740,7 @@ static void DecodeCommit(LogicalDecodingContext *ctx, XLogRecordBuffer *buf, Tra
     }
 
     /* replay actions of all transaction + subtransactions in order */
-    ReorderBufferCommit(ctx->reorder, xid, buf->origptr, buf->endptr, origin_id, csn, commit_time);
+    ReorderBufferCommit(ctx->reorder, xid, buf->origptr, buf->endptr, origin_id, origin_lsn, csn, commit_time);
 }
 
 /*

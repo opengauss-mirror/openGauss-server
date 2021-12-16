@@ -749,6 +749,7 @@
 ./lib/postgresql/pg_upgrade_support.so
 ./lib/postgresql/java/pljava.jar
 ./lib/postgresql/postgres_fdw.so
+./lib/postgresql/pgoutput.so
 ./lib/libpljava.so
 ./lib/libpq.a
 ./lib/libpq.so

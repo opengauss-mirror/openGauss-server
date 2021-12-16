@@ -99,6 +99,9 @@
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
 #include "catalog/pg_user_status.h"
+#include "catalog/pg_publication.h"
+#include "catalog/pg_publication_rel.h"
+#include "catalog/pg_replication_origin.h"
 
 /* ---------------------------------------------------------------------------
 
@@ -754,7 +757,73 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         PackageNameIndexId,
         2,
         {Anum_gs_package_pkgname, Anum_gs_package_pkgnamespace, 0, 0},
-        2048}
+        2048},
+    {PublicationRelationId, /* PUBLICATIONNAME */
+        PublicationNameIndexId,
+        1,
+        {
+            Anum_pg_publication_pubname,
+            0,
+            0,
+            0
+        },
+        8
+    },
+    {PublicationRelationId, /* PUBLICATIONOID */
+        PublicationObjectIndexId,
+        1,
+        {
+            ObjectIdAttributeNumber,
+            0,
+            0,
+            0
+        },
+        8
+    },
+    {PublicationRelRelationId, /* PUBLICATIONREL */
+        PublicationRelObjectIndexId,
+        1,
+        {
+            ObjectIdAttributeNumber,
+            0,
+            0,
+            0
+        },
+        64
+    },
+    {PublicationRelRelationId, /* PUBLICATIONRELMAP */
+        PublicationRelMapIndexId,
+        2,
+        {
+            Anum_pg_publication_rel_prrelid,
+            Anum_pg_publication_rel_prpubid,
+            0,
+            0
+        },
+        64
+    },
+    {SubscriptionRelationId, /* SUBSCRIPTIONNAME */
+        SubscriptionNameIndexId,
+        2,
+        {
+            Anum_pg_subscription_subdbid,
+            Anum_pg_subscription_subname,
+            0,
+            0
+        },
+        4
+    },
+    {SubscriptionRelationId, /* SUBSCRIPTIONOID */
+        SubscriptionObjectIndexId,
+        1,
+        {
+            ObjectIdAttributeNumber,
+            0,
+            0,
+            0
+        },
+        4
+    }
 };
 
 int SysCacheSize = lengthof(cacheinfo);
@@ -808,8 +877,18 @@ void InitCatalogCachePhase2(void)
 
     Assert(u_sess->syscache_cxt.CacheInitialized);
 
-    for (cacheId = 0; cacheId < SysCacheSize; cacheId++)
+    for (cacheId = 0; cacheId < SysCacheSize; cacheId++) {
+        /*
+         * We create pg_subscription in upgrade-post script, cause the relmap is full(check apply_map_update),
+         * and pg_subscription is a shared relation. When we do upgrade, before commit, we can't init cache for
+         * pg_subscription, cause the pg_subscription is not created yet.
+         */
+        if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM &&
+            (cacheId == SUBSCRIPTIONNAME || cacheId == SUBSCRIPTIONOID)) {
+            continue;
+        }
         InitCatCachePhase2(u_sess->syscache_cxt.SysCache[cacheId], true);
+    }
 }
 
 /*

@@ -465,7 +465,7 @@ static bool WriteContentToFile(const char* filename, const void* content, size_t
 static bool isModeExists(KeyMode mode)
 {
     if (mode != SERVER_MODE && mode != CLIENT_MODE && mode != USER_MAPPING_MODE &&
-        mode != OBS_MODE && mode != SOURCE_MODE && mode != GDS_MODE) {
+        mode != OBS_MODE && mode != SOURCE_MODE && mode != GDS_MODE && mode != SUBSCRIPTION_MODE) {
 #ifndef ENABLE_LLT
         (void)fprintf(stderr, _("AK/SK encrypt/decrypt encounters invalid key mode.\n"));
         return false;
@@ -828,6 +828,11 @@ void decode_cipher_files(
         ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/usermapping%s", datadir, CIPHER_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/usermapping%s", datadir, RAN_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
+    } else if (mode == SUBSCRIPTION_MODE) {
+        ret = snprintf_s(cipherkeyfile, MAXPGPATH, MAXPGPATH - 1, "%s/subscription%s", datadir, CIPHER_KEY_FILE);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(randfile, MAXPGPATH, MAXPGPATH - 1, "%s/subscription%s", datadir, RAN_KEY_FILE);
         securec_check_ss_c(ret, "\0", "\0");
     }
     /*

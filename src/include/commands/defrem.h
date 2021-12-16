@@ -176,6 +176,7 @@ extern List* defSetOption(List* options, const char* name, Node* value);
 extern void delete_file_handle(const char* library_path);
 extern int libraryGetPendingDeletes(bool forCommit, char** str_ptr, int* libraryLen);
 extern void removeLibrary(const char* filename);
+extern List *defGetStringList(DefElem *def);
 
 /* support routines in commands/datasourcecmds.cpp */
 extern void CreateDataSource(CreateDataSourceStmt* stmt);

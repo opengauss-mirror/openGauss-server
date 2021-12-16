@@ -21,6 +21,7 @@
 #include "utils/rel.h"
 #include "utils/snapshot.h"
 #include "utils/timestamp.h"
+#include "access/ustore/knl_utuple.h"
 
 /* an individual tuple, stored in one chunk of memory */
 typedef struct ReorderBufferTupleBuf {
@@ -193,6 +194,7 @@ typedef struct ReorderBufferTXN {
 
     /* origin of the change that caused this transaction */
     RepOriginId origin_id;
+    XLogRecPtr	origin_lsn;
 
     /* The csn of the transaction */
     CommitSeqNo csn;
@@ -382,7 +384,7 @@ ReorderBufferUTupleBuf *ReorderBufferGetUTupleBuf(ReorderBuffer*, Size tuple_len
 
 void ReorderBufferQueueChange(ReorderBuffer*, TransactionId, XLogRecPtr lsn, ReorderBufferChange*);
 void ReorderBufferCommit(ReorderBuffer*, TransactionId, XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
-    RepOriginId origin_id, CommitSeqNo csn, TimestampTz commit_time);
+    RepOriginId origin_id, XLogRecPtr origin_lsn, CommitSeqNo csn, TimestampTz commit_time);
 void ReorderBufferAssignChild(ReorderBuffer*, TransactionId, TransactionId, XLogRecPtr commit_lsn);
 void ReorderBufferCommitChild(ReorderBuffer*, TransactionId, TransactionId, XLogRecPtr commit_lsn, XLogRecPtr end_lsn);
 void ReorderBufferAbort(ReorderBuffer*, TransactionId, XLogRecPtr lsn);

@@ -1278,7 +1278,7 @@ static void ReorderBufferFreeSnap(ReorderBuffer *rb, Snapshot snap)
  * order.
  */
 void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit_lsn, XLogRecPtr end_lsn,
-                         RepOriginId origin_id, CommitSeqNo csn, TimestampTz commit_time)
+                         RepOriginId origin_id, XLogRecPtr origin_lsn, CommitSeqNo csn, TimestampTz commit_time)
 {
     ReorderBufferTXN *txn = NULL;
     ReorderBufferIterTXNState *volatile iterstate = NULL;
@@ -1297,6 +1297,7 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
     txn->final_lsn = commit_lsn;
     txn->end_lsn = end_lsn;
     txn->origin_id = origin_id;
+    txn->origin_lsn = origin_lsn;
     txn->csn = csn;
     txn->commit_time = commit_time;
 

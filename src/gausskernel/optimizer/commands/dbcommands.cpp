@@ -42,6 +42,7 @@
 #include "catalog/pg_job.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_tablespace.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pgxc_slice.h"
 #include "catalog/storage_xlog.h"
 #include "commands/comment.h"
@@ -984,6 +985,7 @@ void dropdb(const char* dbname, bool missing_ok)
     HeapTuple tup;
     int notherbackends;
     int npreparedxacts;
+    int			nsubscriptions;
 
     /* If we will return before reaching function end, please release this lock */
     LWLockAcquire(DelayDDLLock, LW_SHARED);
@@ -1070,7 +1072,20 @@ void dropdb(const char* dbname, bool missing_ok)
                     "view: \"pg_stat_activity\".", dbname),
                 errdetail_busy_db(notherbackends, npreparedxacts)));
 
-    /* Search need delete use-defined C fun library.*/
+    /*
+     * Check if there are subscriptions defined in the target database.
+     *
+     * We can't drop them automatically because they might be holding
+     * resources in other databases/instances.
+     */
+    if ((nsubscriptions = CountDBSubscriptions(db_id)) > 0) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_IN_USE),
+            errmsg("database \"%s\" is being used by logical replication subscription", dbname),
+            errdetail_plural("There is %d subscription.", "There are %d subscriptions.", nsubscriptions,
+            nsubscriptions)));
+    }
+
+    /* Search need delete use-defined C fun library. */
     prepareDatabaseCFunLibrary(db_id);
 
     /* Relate to remove all job belong the database. */

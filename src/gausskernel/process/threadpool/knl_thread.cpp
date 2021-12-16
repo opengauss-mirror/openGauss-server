@@ -428,6 +428,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->curFileTLI = 0;
     xlog_cxt->ProcLastRecPtr = InvalidXLogRecPtr;
     xlog_cxt->XactLastRecEnd = InvalidXLogRecPtr;
+    xlog_cxt->XactLastCommitEnd = InvalidXLogRecPtr;
     xlog_cxt->RedoRecPtr = InvalidXLogRecPtr;
     xlog_cxt->doPageWrites = false;
     xlog_cxt->RedoStartLSN = InvalidXLogRecPtr;
@@ -1017,6 +1018,41 @@ static void knl_t_autovacuum_init(knl_t_autovacuum_context* autovacuum_cxt)
     autovacuum_cxt->MyWorkerInfo = NULL;
     autovacuum_cxt->AutovacuumLauncherPid = 0;
     autovacuum_cxt->last_read = 0;
+}
+
+static void KnlTApplyLauncherInit(knl_t_apply_launcher_context* applyLauncherCxt)
+{
+    applyLauncherCxt->got_SIGHUP = false;
+    applyLauncherCxt->got_SIGUSR2 = false;
+    applyLauncherCxt->got_SIGTERM = false;
+    applyLauncherCxt->onCommitLauncherWakeup = false;
+    applyLauncherCxt->applyLauncherShm = NULL;
+}
+
+static void KnlTApplyWorkerInit(knl_t_apply_worker_context* applyWorkerCxt)
+{
+    applyWorkerCxt->got_SIGHUP = false;
+    applyWorkerCxt->got_SIGTERM = false;
+    applyWorkerCxt->lsnMapping.head.next = &applyWorkerCxt->lsnMapping.head;
+    applyWorkerCxt->lsnMapping.head.prev = &applyWorkerCxt->lsnMapping.head;
+    applyWorkerCxt->logicalRepRelMap = NULL;
+    applyWorkerCxt->sendTime = 0;
+    applyWorkerCxt->lastRecvpos = InvalidXLogRecPtr;
+    applyWorkerCxt->lastWritepos = InvalidXLogRecPtr;
+    applyWorkerCxt->lastFlushpos = InvalidXLogRecPtr;
+    applyWorkerCxt->mySubscription = NULL;
+    applyWorkerCxt->mySubscriptionValid = false;
+    applyWorkerCxt->inRemoteTransaction = false;
+    applyWorkerCxt->curWorker = NULL;
+    applyWorkerCxt->messageContext = NULL;
+    applyWorkerCxt->logicalRepRelMapContext = NULL;
+    applyWorkerCxt->applyContext = NULL;
+}
+
+static void KnlTPublicationInit(knl_t_publication_context* publicationCxt)
+{
+    publicationCxt->publications_valid = false;
+    publicationCxt->RelationSyncCache = NULL;
 }
 
 static void KnlTUndolauncherInit(knl_t_undolauncher_context* undolauncherCxt)
@@ -1683,6 +1719,9 @@ void knl_thread_init(knl_thread_role role)
     knl_t_security_policy_init(&t_thrd.security_policy_cxt);
     knl_t_security_ledger_init(&t_thrd.security_ledger_cxt);
     knl_t_bgworker_init(&t_thrd.bgworker_cxt);
+    KnlTApplyLauncherInit(&t_thrd.applylauncher_cxt);
+    KnlTApplyWorkerInit(&t_thrd.applyworker_cxt);
+    KnlTPublicationInit(&t_thrd.publication_cxt);
 #ifdef ENABLE_MOT
     knl_t_mot_init(&t_thrd.mot_cxt);
 #endif

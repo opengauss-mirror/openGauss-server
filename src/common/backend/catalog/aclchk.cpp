@@ -46,7 +46,9 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_publication.h"
 #include "catalog/gs_package.h"
+#include "catalog/pg_subscription.h"
 #include "catalog/pg_synonym.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/pg_type.h"
@@ -4725,6 +4727,12 @@ static const char* const not_owner_msg[MAX_ACL_KIND] = {
     gettext_noop("must be owner of column encryption key %s"),
     /* ACL_KIND_GLOBAL_SETTING */
     gettext_noop("must be owner of client master key %s"),
+    /* ACL_KIND_PACKAGE */
+    gettext_noop("must be owner of package %s"),
+    /* ACL_KIND_PUBLICATION */
+    gettext_noop("must be owner of publication %s"),
+    /* ACL_KIND_SUBSCRIPTION */
+    gettext_noop("must be owner of subscription %s"),
 };
 
 void aclcheck_error(AclResult aclerr, AclObjectKind objectkind, const char* objectname)
@@ -6941,6 +6949,54 @@ bool pg_synonym_ownercheck(Oid synOid, Oid roleId)
 }
 
 /*
+ * Ownership check for an publication (specified by OID).
+ */
+bool pg_publication_ownercheck(Oid pub_oid, Oid roleid)
+{
+    HeapTuple tuple;
+    Oid ownerId;
+
+    /* Superusers bypass all permission checking. */
+    if (superuser_arg(roleid))
+        return true;
+
+    tuple = SearchSysCache1(PUBLICATIONOID, ObjectIdGetDatum(pub_oid));
+    if (!HeapTupleIsValid(tuple))
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("publication with OID %u does not exist", pub_oid)));
+
+    ownerId = ((Form_pg_publication)GETSTRUCT(tuple))->pubowner;
+
+    ReleaseSysCache(tuple);
+
+    return has_privs_of_role(roleid, ownerId);
+}
+
+/*
+ * Ownership check for an subscription (specified by OID).
+ */
+bool pg_subscription_ownercheck(Oid sub_oid, Oid roleid)
+{
+    HeapTuple tuple;
+    Oid ownerId;
+
+    /* Superusers bypass all permission checking. */
+    if (superuser_arg(roleid)) {
+        return true;
+    }
+
+    tuple = SearchSysCache1(SUBSCRIPTIONOID, ObjectIdGetDatum(sub_oid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("subscription with OID %u does not exist", sub_oid)));
+    }
+
+    ownerId = ((Form_pg_subscription)GETSTRUCT(tuple))->subowner;
+
+    ReleaseSysCache(tuple);
+
+    return has_privs_of_role(roleid, ownerId);
+}
+
+/*
  * Check whether specified role has CREATEROLE privilege (or is a superuser)
  *
  * Note: roles do not have owners per se; instead we use this test in
@@ -6957,8 +7013,9 @@ bool has_createrole_privilege(Oid roleid)
     HeapTuple utup = NULL;
 
     /* Superusers bypass all permission checking. */
-    if (superuser_arg(roleid))
+    if (superuser_arg(roleid)) {
         return true;
+    }
 
     utup = SearchSysCache1(AUTHOID, ObjectIdGetDatum(roleid));
     if (HeapTupleIsValid(utup)) {

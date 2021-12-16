@@ -1531,12 +1531,13 @@ extern void encryptOBS(char* srcplaintext, char destciphertext[], uint32 destcip
 extern void decryptOBS(
     const char* srcciphertext, char destplaintext[], uint32 destplainlength, const char* obskey = NULL);
 extern void encryptECString(char* src_plain_text, char* dest_cipher_text,
-                                 uint32 dest_cipher_length, bool isDataSource);
+                                 uint32 dest_cipher_length, KeyMode mode);
 extern bool decryptECString(const char* src_cipher_text, char* dest_plain_text,
-                                 uint32 dest_plain_length, bool isDataSource = true);
+                                 uint32 dest_plain_length, KeyMode mode);
 extern bool IsECEncryptedString(const char* src_cipher_text);
 extern void EncryptGenericOptions(List* options, const char** sensitiveOptionsArray,
-                                         int arrayLength, bool isDataSource);
+                                         int arrayLength, KeyMode mode);
+extern void DecryptOptions(List *options, const char** sensitiveOptionsArray, int arrayLength, KeyMode mode);
 
 #define EC_CIPHER_TEXT_LENGTH 1024
 
@@ -1610,6 +1611,27 @@ extern Datum ledger_gchain_check(PG_FUNCTION_ARGS);
 extern Datum ledger_gchain_repair(PG_FUNCTION_ARGS);
 extern Datum ledger_gchain_archive(PG_FUNCTION_ARGS);
 extern Datum gs_is_recycle_object(PG_FUNCTION_ARGS);
+
+/* origin.cpp */
+extern Datum pg_replication_origin_advance(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_create(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_drop(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_oid(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_progress(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_session_is_setup(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_session_progress(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_session_reset(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_session_setup(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_xact_reset(PG_FUNCTION_ARGS);
+extern Datum pg_replication_origin_xact_setup(PG_FUNCTION_ARGS);
+extern Datum pg_show_replication_origin_status(PG_FUNCTION_ARGS);
+
+/* pg_publication.cpp */
+extern Datum pg_get_publication_tables(PG_FUNCTION_ARGS);
+
+/* launcher.cpp */
+extern Datum pg_stat_get_subscription(PG_FUNCTION_ARGS);
+
 
 #endif /* !FRONTEND_PARSER */
 

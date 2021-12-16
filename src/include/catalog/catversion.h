@@ -61,6 +61,6 @@
 
 #define NAILED_IN_CATALOG_NUM 8
 
-#define CATALOG_NUM	97
+#define CATALOG_NUM	101
 
 #endif

@@ -205,6 +205,9 @@ typedef enum ObjectClass {
 	OCLASS_DB4AI_MODEL,      /* gs_model_warehouse */
     OCLASS_GS_CL_PROC,       /* client logic procedures */
     OCLASS_PACKAGE,          /* gs_package */
+    OCLASS_PUBLICATION,      /* pg_publication */
+    OCLASS_PUBLICATION_REL,  /* pg_publication_rel */
+    OCLASS_SUBSCRIPTION,     /* pg_subscription */
 	MAX_OCLASS               /* MUST BE LAST */
 } ObjectClass;
 

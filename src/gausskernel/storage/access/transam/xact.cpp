@@ -70,8 +70,11 @@
 #include "replication/datasyncrep.h"
 #include "replication/datasender.h"
 #include "replication/dataqueue.h"
+#include "replication/logical.h"
+#include "replication/logicallauncher.h"
 #include "replication/walsender.h"
 #include "replication/syncrep.h"
+#include "replication/origin.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
 #include "storage/procarray.h"
@@ -1773,8 +1776,14 @@ static TransactionId RecordTransactionCommit(void)
          * invalidation messages, that's more extensible and degrades more
          * gracefully. Till then, it's just 20 bytes of overhead.
          */
+#ifdef ENABLE_MULTIPLE_NODES
+        bool hasOrigin = false;
+#else
+        bool hasOrigin = u_sess->reporigin_cxt.originId != InvalidRepOriginId &&
+            u_sess->reporigin_cxt.originId != DoNotReplicateId;
+#endif
         if (nrels > 0 || nmsgs > 0 || RelcacheInitFileInval || t_thrd.xact_cxt.forceSyncCommit ||
-            XLogLogicalInfoActive()) {
+            XLogLogicalInfoActive() || hasOrigin) {
             xl_xact_commit xlrec;
 
             /* Set flags required for recovery processing of commits. */
@@ -1788,6 +1797,9 @@ static TransactionId RecordTransactionCommit(void)
                 xlrec.xinfo |= XACT_MOT_ENGINE_USED;
             }
 #endif
+            if (hasOrigin) {
+                xlrec.xinfo |= XACT_HAS_ORIGIN;
+            }
 
             xlrec.dbId = u_sess->proc_cxt.MyDatabaseId;
             xlrec.tsId = u_sess->proc_cxt.MyDatabaseTableSpace;
@@ -1831,6 +1843,13 @@ static TransactionId RecordTransactionCommit(void)
                 XLogRegisterData((char *)library_name, library_length);
             }
 
+            if (hasOrigin) {
+                xl_xact_origin origin;
+                origin.origin_lsn = u_sess->reporigin_cxt.originLsn;
+                origin.origin_timestamp = u_sess->reporigin_cxt.originTs;
+                XLogRegisterData((char*)&origin, sizeof(xl_xact_origin));
+            }
+
             /* we allow filtering by xacts */
             XLogIncludeOrigin();
 
@@ -1844,6 +1863,10 @@ static TransactionId RecordTransactionCommit(void)
                     t_thrd.xact_cxt.xactDelayDDL = false;
 
                 LWLockRelease(DelayDDLLock);
+            }
+
+            if (hasOrigin) {
+                replorigin_session_advance(u_sess->reporigin_cxt.originLsn, t_thrd.xlog_cxt.XactLastRecEnd);
             }
         } else {
             xl_xact_commit_compact xlrec;
@@ -1963,6 +1986,9 @@ static TransactionId RecordTransactionCommit(void)
 
     /* Compute latestXid while we have the child XIDs handy */
     latestXid = TransactionIdLatest(xid, nchildren, children);
+
+    /* remember end of last commit record */
+    t_thrd.xlog_cxt.XactLastCommitEnd = t_thrd.xlog_cxt.XactLastRecEnd;
 
     /* Reset XactLastRecEnd until the next transaction writes something */
     t_thrd.xlog_cxt.XactLastRecEnd = 0;
@@ -3206,6 +3232,8 @@ static void CommitTransaction(bool STP_commit)
 #endif
 
     AtEOXact_Snapshot(true);
+    AtEOXact_ApplyLauncher(true);
+
     pgstat_report_xact_timestamp(0);
 
     t_thrd.utils_cxt.CurrentResourceOwner = NULL;
@@ -4220,6 +4248,7 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
         AtEOXact_ComboCid();
         AtEOXact_HashTables(false);
         AtEOXact_PgStat(false);
+        AtEOXact_ApplyLauncher(false);
 
 #ifdef DEBUG_UHEAP
         AtEOXact_UHeapStats();
@@ -7438,7 +7467,7 @@ static void unlink_relfiles(_in_ ColFileNodeRel *xnodes, _in_ int nrels)
 static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, TransactionId* sub_xids, int nsubxacts,
                                       SharedInvalidationMessage* inval_msgs, int nmsgs, ColFileNodeRel* xnodes,
                                       int nrels, int nlibrary, Oid dbId, Oid tsId, uint32 xinfo,
-                                      uint64 csn, TransactionId newStandbyXmin)
+                                      uint64 csn, TransactionId newStandbyXmin, RepOriginId originId)
 {
     TransactionId max_xid;
     XLogRecPtr globalDelayDDLLSN;
@@ -7616,6 +7645,13 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
         parseAndRemoveLibrary(filename, nlibrary);
     }
 
+    if (xinfo & XACT_HAS_ORIGIN) {
+        xl_xact_origin *origin = (xl_xact_origin *)GetRepOriginPtr((char*)xnodes, xinfo, nsubxacts,
+            nmsgs, nrels, nlibrary);
+        /* recover apply progress */
+        replorigin_advance(originId, origin->origin_lsn, lsn, false, false);
+    }
+
     /*
      * We issue an XLogFlush() for the same reason we emit ForceSyncCommit()
      * in normal operation. For example, in CREATE DATABASE, we copy all files
@@ -7648,7 +7684,7 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
 /*
  * Utility function to call xact_redo_commit_internal after breaking down xlrec
  */
-static void xact_redo_commit(xl_xact_commit *xlrec, TransactionId xid, XLogRecPtr lsn)
+static void xact_redo_commit(xl_xact_commit *xlrec, TransactionId xid, XLogRecPtr lsn, RepOriginId originId)
 {
     TransactionId* subxacts = NULL;
     SharedInvalidationMessage* inval_msgs = NULL;
@@ -7679,7 +7715,8 @@ static void xact_redo_commit(xl_xact_commit *xlrec, TransactionId xid, XLogRecPt
         xlrec->tsId,
         xlrec->xinfo,
         xlrec->csn,
-        newStandbyXmin);
+        newStandbyXmin,
+        originId);
 }
 
 /*
@@ -7709,7 +7746,8 @@ static void xact_redo_commit_compact(xl_xact_commit_compact *xlrec, TransactionI
         InvalidOid,  /* tsId */
         0,           /* xinfo */
         xlrec->csn, /* csn */
-        globalXmin); /* recent_xmin */
+        globalXmin, /* recent_xmin */
+        InvalidRepOriginId);
 }
 
 /*
@@ -7820,7 +7858,7 @@ void xact_redo(XLogReaderState *record)
         xact_redo_commit_compact(xlrec, XLogRecGetXid(record), lsn);
     } else if (info == XLOG_XACT_COMMIT) {
         xl_xact_commit *xlrec = (xl_xact_commit *)XLogRecGetData(record);
-        xact_redo_commit(xlrec, XLogRecGetXid(record), lsn);
+        xact_redo_commit(xlrec, XLogRecGetXid(record), lsn, XLogRecGetOrigin(record));
     } else if (info == XLOG_XACT_ABORT || info == XLOG_XACT_ABORT_WITH_XID) {
         xl_xact_abort *xlrec = (xl_xact_abort *)XLogRecGetData(record);
 
@@ -7843,7 +7881,7 @@ void xact_redo(XLogReaderState *record)
     } else if (info == XLOG_XACT_COMMIT_PREPARED) {
         xl_xact_commit_prepared *xlrec = (xl_xact_commit_prepared *)XLogRecGetData(record);
 
-        xact_redo_commit(&xlrec->crec, xlrec->xid, lsn);
+        xact_redo_commit(&xlrec->crec, xlrec->xid, lsn, XLogRecGetOrigin(record));
 
         /* Delete TwoPhaseState gxact entry and/or 2PC file. */
         (void)TWOPAHSE_LWLOCK_ACQUIRE(xlrec->xid, LW_EXCLUSIVE);

@@ -86,6 +86,8 @@ static char* passwd = NULL;
 static char* decrypt_key = NULL;
 static bool is_encrypt = false;
 static bool is_pipeline = false;
+static int no_subscriptions = 0;
+static int no_publications = 0;
 
 typedef struct option optType;
 #ifdef GSDUMP_LLT
@@ -147,7 +149,9 @@ int main(int argc, char** argv)
         {"role", required_argument, NULL, 2},
         {"section", required_argument, NULL, 3},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
+        {"no-publications", no_argument, &no_publications, 1},
         {"no-security-labels", no_argument, &no_security_labels, 1},
+        {"no-subscriptions", no_argument, &no_subscriptions, 1},
         {"rolepassword", required_argument, NULL, 5},
         {"with-key", required_argument, NULL, 6},
         {"pipeline", no_argument, NULL, 7},
@@ -502,6 +506,8 @@ static void validate_restore_options(char** argv, RestoreOptions* opts)
     opts->noTablespace = outputNoTablespaces;
     opts->use_setsessauth = use_setsessauth;
     opts->no_security_labels = no_security_labels;
+    opts->no_subscriptions = no_subscriptions;
+    opts->no_publications = no_publications;
 
     if (NULL != opts->formatName) {
         switch (opts->formatName[0]) {
@@ -758,7 +764,9 @@ void usage(const char* pchProgname)
     printf(_("  --disable-triggers                    disable triggers during data-only restore\n"));
     printf(_("  --no-data-for-failed-tables           do not restore data of tables that could not be\n"
              "                                        created\n"));
+    printf(_("  --no-publications                     do not restore publications\n"));
     printf(_("  --no-security-labels                  do not restore security labels\n"));
+    printf(_("  --no-subscriptions                    do not restore subscriptions\n"));
     printf(_("  --no-tablespaces                      do not restore tablespace assignments\n"));
     printf(_("  --section=SECTION                     restore named section (pre-data, data, or post-data)\n"));
     printf(_("  --use-set-session-authorization       use SET SESSION AUTHORIZATION commands instead of\n"

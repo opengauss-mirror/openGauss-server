@@ -57,10 +57,12 @@
 #include "commands/portalcmds.h"
 #include "commands/prepare.h"
 #include "commands/proclang.h"
+#include "commands/publicationcmds.h"
 #include "commands/schemacmds.h"
 #include "commands/seclabel.h"
 #include "commands/sec_rls_cmds.h"
 #include "commands/sequence.h"
+#include "commands/subscriptioncmds.h"
 #include "commands/shutdown.h"
 #include "commands/tablecmds.h"
 #include "commands/tablespace.h"
@@ -485,6 +487,11 @@ static void check_xact_readonly(Node* parse_tree)
         case T_CreateClientLogicColumn:
         case T_CreatePackageStmt:
         case T_CreatePackageBodyStmt:
+        case T_CreatePublicationStmt:
+		case T_AlterPublicationStmt:
+		case T_CreateSubscriptionStmt:
+		case T_AlterSubscriptionStmt:
+		case T_DropSubscriptionStmt:
             PreventCommandIfReadOnly(CreateCommandTag(parse_tree));
             break;
         case T_VacuumStmt: {
@@ -6828,6 +6835,52 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
             break;
         }
+
+        case T_CreatePublicationStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("openGauss does not support PUBLICATION yet"),
+                    errdetail("The feature is not currently supported")));
+#endif
+            CreatePublication((CreatePublicationStmt *) parse_tree);
+            break;
+        case T_AlterPublicationStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("openGauss does not support PUBLICATION yet"),
+                    errdetail("The feature is not currently supported")));
+#endif
+            AlterPublication((AlterPublicationStmt *) parse_tree);
+            break;
+        case T_CreateSubscriptionStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("openGauss does not support SUBSCRIPTION yet"),
+                    errdetail("The feature is not currently supported")));
+#endif
+            CreateSubscription((CreateSubscriptionStmt *) parse_tree, is_top_level);
+            break;
+        case T_AlterSubscriptionStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("openGauss does not support SUBSCRIPTION yet"),
+                    errdetail("The feature is not currently supported")));
+#endif
+            AlterSubscription((AlterSubscriptionStmt *) parse_tree);
+            break;
+        case T_DropSubscriptionStmt:
+#ifdef ENABLE_MULTIPLE_NODES
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                    errmsg("openGauss does not support SUBSCRIPTION yet"),
+                    errdetail("The feature is not currently supported")));
+#endif
+            DropSubscription((DropSubscriptionStmt *) parse_tree, is_top_level);
+            break;
         default: {
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
@@ -7638,6 +7691,12 @@ static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
         case OBJECT_SYNONYM:
             tag = "ALTER SYNONYM";
             break;
+        case OBJECT_PUBLICATION:
+            tag = "ALTER PUBLICATION";
+            break;
+        case OBJECT_SUBSCRIPTION:
+            tag = "ALTER SUBSCRIPTION";
+            break;
         default:
             tag = "?\?\?";
             break;
@@ -8004,6 +8063,9 @@ const char* CreateCommandTag(Node* parse_tree)
                     break;
                 case OBJECT_COLUMN_SETTING:
                     tag = "DROP COLUMN ENCRYPTION KEY";
+                    break;
+                case OBJECT_PUBLICATION:
+                    tag = "DROP PUBLICATION";
                     break;
                 default:
                     tag = "?\?\?";
@@ -8644,6 +8706,25 @@ const char* CreateCommandTag(Node* parse_tree)
             break;
         case T_CreateModelStmt:
             tag = "CREATE MODEL";
+            break;
+        case T_CreatePublicationStmt:
+            tag = "CREATE PUBLICATION";
+            break;
+
+        case T_AlterPublicationStmt:
+            tag = "ALTER PUBLICATION";
+            break;
+
+        case T_CreateSubscriptionStmt:
+            tag = "CREATE SUBSCRIPTION";
+            break;
+
+        case T_AlterSubscriptionStmt:
+            tag = "ALTER SUBSCRIPTION";
+            break;
+
+        case T_DropSubscriptionStmt:
+            tag = "DROP SUBSCRIPTION";
             break;
 
         default:
@@ -9382,6 +9463,11 @@ LogStmtLevel GetCommandLogLevel(Node* parse_tree)
         case T_CreateAppWorkloadGroupMappingStmt:
         case T_AlterAppWorkloadGroupMappingStmt:
         case T_DropAppWorkloadGroupMappingStmt:
+        case T_CreatePublicationStmt:
+        case T_AlterPublicationStmt:
+        case T_CreateSubscriptionStmt:
+        case T_AlterSubscriptionStmt:
+        case T_DropSubscriptionStmt:
             lev = LOGSTMT_DDL;
             break;
 
