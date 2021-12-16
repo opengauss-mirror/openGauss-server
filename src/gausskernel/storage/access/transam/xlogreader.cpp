@@ -1214,6 +1214,18 @@ void ResetDecoder(XLogReaderState *state)
         remaining -= sizeof(type); \
     } while (0)
 
+/**
+ * happens during the upgrade, copy the RelFileNodeV2 to RelFileNode
+ * support little-endian system
+ * @param relfileNode relfileNode
+ */
+static void CompressTableRecord(RelFileNode* relfileNode)
+{
+    if (relfileNode->bucketNode <= -1 && relfileNode->opt == 0xFFFF) {
+        relfileNode->opt = 0;
+    }
+}
+
 /*  
  * Decode the previously read record.
  *
@@ -1333,8 +1345,11 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
                 if (remaining < filenodelen)
                     goto shortdata_err;
                 blk->rnode.bucketNode = InvalidBktId;
+                blk->rnode.opt = 0;
                 errno_t rc = memcpy_s(&blk->rnode, filenodelen, ptr, filenodelen);
                 securec_check(rc, "\0", "\0");
+                /* support decode old version of relfileNode */
+                CompressTableRecord(&blk->rnode);
                 ptr += filenodelen;
                 remaining -= filenodelen;
 

@@ -167,6 +167,7 @@
 #include "rewrite/rewriteDefine.h"
 #include "rewrite/rewriteRlsPolicy.h"
 #include "storage/lmgr.h"
+#include "storage/page_compression.h"
 #include "storage/smgr/smgr.h"
 #include "storage/smgr/segment.h"
 #include "threadpool/threadpool.h"
@@ -1232,7 +1233,7 @@ static OpClassCacheEnt* LookupOpclassInfo(Oid operatorClassOid, StrategyNumber n
 static void RelationCacheInitFileRemoveInDir(const char* tblspcpath);
 static void unlink_initfile(const char* initfilename);
 static void SetBackendId(Relation relation);
-
+static void SetupPageCompressForRelation(Relation relation, PageCompressOpts *compress_options);
 /*
  *		ScanPgRelation
  *
@@ -2419,6 +2420,12 @@ static void RelationInitPhysicalAddr(Relation relation)
     relation->rd_node.bucketNode = InvalidBktId;
     if (!RelationIsPartitioned(relation) && relation->storage_type == SEGMENT_PAGE) {
         relation->rd_node.bucketNode = SegmentBktId;
+    }
+
+    // setup page compression options
+    relation->rd_node.opt = 0;
+    if (relation->rd_options && REL_SUPPORT_COMPRESSED(relation)) {
+        SetupPageCompressForRelation(relation, &((StdRdOptions*)(relation->rd_options))->compress);
     }
 }
 
@@ -4247,8 +4254,9 @@ void AtEOSubXact_RelationCache(bool isCommit, SubTransactionId mySubid, SubTrans
  *			and enter it into the relcache.
  */
 Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, TupleDesc tupDesc, Oid relid,
-    Oid relfilenode, Oid reltablespace, bool shared_relation, bool mapped_relation, char relpersistence, char relkind,
-    int8 row_compress, TableAmType tam_type, int8 relindexsplit, StorageType storage_type)
+    Oid relfilenode, Oid reltablespace, bool shared_relation, bool mapped_relation, char relpersistence,
+    char relkind, int8 row_compress, Datum reloptions, TableAmType tam_type, int8 relindexsplit,
+    StorageType storage_type, Oid accessMethodObjectId)
 {
     Relation rel;
     MemoryContext oldcxt;
@@ -4364,6 +4372,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     rel->rd_rel->relowner = BOOTSTRAP_SUPERUSERID;
     rel->rd_rel->parttype = PARTTYPE_NON_PARTITIONED_RELATION;
     rel->rd_rel->relrowmovement = false;
+    rel->rd_rel->relam = accessMethodObjectId;
 
     /* set up persistence and relcache fields dependent on it */
     rel->rd_rel->relpersistence = relpersistence;
@@ -4419,6 +4428,13 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     RelationInitLockInfo(rel); /* see lmgr.c */
 
     RelationInitPhysicalAddr(rel);
+
+    /* compressed option was set by RelationInitPhysicalAddr if rel->rd_options != NULL */
+    if (rel->rd_options == NULL && reloptions && SUPPORT_COMPRESSED(relkind, rel->rd_rel->relam)) {
+        StdRdOptions *options = (StdRdOptions *) default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
+        SetupPageCompressForRelation(rel, &options->compress);
+    }
+
 
     /* materialized view not initially scannable */
     if (relkind == RELKIND_MATVIEW)
@@ -7758,3 +7774,41 @@ void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info)
     }
 }
 
+/* setup page compress options for relation */
+static void SetupPageCompressForRelation(Relation relation, PageCompressOpts* compress_options)
+{
+    relation->rd_node.opt = 0;
+    uint1 algorithm = compress_options->compressType;
+    if (algorithm != COMPRESS_TYPE_NONE) {
+        if (!SUPPORT_PAGE_COMPRESSION) {
+            elog(ERROR, "unsupported page compression on this platform");
+        }
+
+        uint1 compressLevel;
+        bool symbol = false;
+        if (compress_options->compressLevel >= 0) {
+            symbol = true;
+            compressLevel = compress_options->compressLevel;
+        } else {
+            symbol = false;
+            compressLevel = -compress_options->compressLevel;
+        }
+        bool success = false;
+        uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
+        if (!success) {
+            elog(ERROR, "invalid compress_chunk_size %d , must be one of %d, %d, %d or %d for %s",
+                 compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
+                 RelationGetRelationName(relation));
+        }
+        uint1 preallocChunks;
+        if (compress_options->compressPreallocChunks >= BLCKSZ / compress_options->compressChunkSize) {
+            preallocChunks = (uint1)(BLCKSZ / compress_options->compressChunkSize - 1);
+        } else {
+            preallocChunks = (uint1)(compress_options->compressPreallocChunks);
+        }
+        Assert(preallocChunks <= MAX_PREALLOC_CHUNKS);
+        SET_COMPRESS_OPTION(relation->rd_node, compress_options->compressByteConvert,
+                            compress_options->compressDiffConvert, preallocChunks,
+                            symbol, compressLevel, algorithm, chunkSize);
+    }
+}

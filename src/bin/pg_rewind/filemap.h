@@ -8,6 +8,7 @@
 #ifndef FILEMAP_H
 #define FILEMAP_H
 
+#include "compressed_common.h"
 #include "storage/smgr/relfilenode.h"
 #include "storage/buf/block.h"
 
@@ -41,6 +42,9 @@ typedef struct file_entry_t {
     file_type_t type;
 
     file_action_t action;
+
+    /* for compressed table */
+    RewindCompressInfo rewindCompressInfo;
 
     /* for a regular file */
     size_t oldsize;
@@ -96,8 +100,10 @@ extern void print_filemap(void);
 extern void print_filemap_to_file(FILE* file);
 
 /* Functions for populating the filemap */
-extern void process_source_file(const char* path, file_type_t type, size_t newsize, const char* link_target);
-extern void process_target_file(const char* path, file_type_t type, size_t newsize, const char* link_target);
+extern void process_source_file(const char* path, file_type_t type, size_t newsize, const char* link_target,
+    RewindCompressInfo* rewindCompressInfo = nullptr);
+extern void process_target_file(const char* path, file_type_t type, size_t newsize, const char* link_target,
+    const RewindCompressInfo* rewindCompressInfo = nullptr);
 extern void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blkno);
 extern void process_waldata_change(
     ForkNumber forknum, RelFileNode rnode, StorageEngine store, off_t file_offset, size_t data_size);

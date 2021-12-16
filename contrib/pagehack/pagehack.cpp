@@ -90,6 +90,9 @@
 #include "tsdb/utils/constant_def.h"
 #endif
 
+#include "openGaussCompression.h"
+
+
 /* Max number of pg_class oid, currently about 4000 */
 #define MAX_PG_CLASS_ID 10000
 /* Number of pg_class types */
@@ -129,6 +132,7 @@ static const char* PgHeapRelName[] = {"pg_class",
     "pg_am",
     "pg_statistic",
     "pg_toast"};
+typedef enum SegmentType { SEG_HEAP, SEG_FSM, SEG_UHEAP, SEG_INDEX_BTREE, SEG_UNDO, SEG_UNKNOWN } SegmentType;
 
 static void ParsePgClassTupleData(binary tupdata, int len, binary nullBitmap, int natrrs);
 static void ParsePgIndexTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
@@ -146,6 +150,8 @@ static void ParseToastTupleData(binary tupdata, int len, binary nullBitmap, int 
 static void ParseTDSlot(const char *page);
 
 static void ParseToastIndexTupleData(binary tupdata, int len, binary nullBitmap, int nattrs);
+static int parse_uncompressed_page_file(const char *filename, SegmentType type, const uint32 start_point,
+    const uint32 number_read);
 
 static ParseHeapTupleData PgHeapRelTupleParser[] = {
     ParsePgClassTupleData,       // pg_class
@@ -893,8 +899,6 @@ static const char* HACKINGTYPE[] = {"heap",
     "undo_fix",
     "segment"
 };
-
-typedef enum SegmentType { SEG_HEAP, SEG_FSM, SEG_UHEAP, SEG_INDEX_BTREE, SEG_UNDO, SEG_UNKNOWN } SegmentType;
 
 const char* PageTypeNames[] = {"DATA", "FSM", "VM"};
 
@@ -3093,7 +3097,78 @@ static int parse_a_page(const char* buffer, int blkno, int blknum, SegmentType t
     return true;
 }
 
+static BlockNumber CalculateMaxBlockNumber(BlockNumber blknum, BlockNumber start, BlockNumber number)
+{
+    /* parse */
+    if (start >= blknum) {
+        fprintf(stderr, "start point exceeds the total block number of relation.\n");
+        return InvalidBlockNumber;
+    } else if ((start + number) > blknum) {
+        fprintf(stderr, "don't have %d blocks from block %d in the relation, only %d blocks\n", number, start,
+                (blknum - start));
+        number = blknum;
+    } else if (number == 0) {
+        number = blknum;
+    } else {
+        number += start;
+    }
+    return number;
+}
+
 static int parse_page_file(const char* filename, SegmentType type, const uint32 start_point, const uint32 number_read)
+{
+    if (type != SEG_HEAP && type != SEG_INDEX_BTREE) {
+        return parse_uncompressed_page_file(filename, type, start_point, number_read);
+    }
+
+    auto openGaussCompression = new OpenGaussCompression();
+    openGaussCompression->SetFilePath(filename, SegNo);
+    bool success = openGaussCompression->TryOpen();
+    if (!success) {
+        delete openGaussCompression;
+        return parse_uncompressed_page_file(filename, type, start_point, number_read);
+    }
+
+    BlockNumber start = start_point;
+    BlockNumber blknum = openGaussCompression->GetMaxBlockNumber();
+    BlockNumber number = CalculateMaxBlockNumber(blknum, start, number_read);
+    if (number == InvalidBlockNumber) {
+        delete openGaussCompression;
+        return false;
+    }
+    char compressed[BLCKSZ];
+    size_t compressedLen;
+    while (start < number) {
+        if (!openGaussCompression->ReadChunkOfBlock(compressed, &compressedLen, start)) {
+            fprintf(stderr, "read block %d failed, filename: %s: %s\n", start, openGaussCompression->GetPcdFilePath(),
+                    strerror(errno));
+            delete openGaussCompression;
+            return false;
+        }
+        if (!parse_a_page(openGaussCompression->GetDecompressedPage(), start, blknum, type)) {
+            fprintf(stderr, "Error during parsing block %d/%d\n", start, blknum);
+            delete openGaussCompression;
+            return false;
+        }
+        if ((write_back && num_item) || dirty_page) {
+            if (dirty_page) {
+                openGaussCompression->MarkUncompressedDirty();
+            }
+            if (!openGaussCompression->WriteBackUncompressedData()) {
+                fprintf(stderr, "write back failed, filename: %s: %s\n", openGaussCompression->GetPcdFilePath(),
+                        strerror(errno));
+                delete openGaussCompression;
+                return false;
+            }
+        }
+        start++;
+    }
+    delete openGaussCompression;
+    return true;
+}
+
+static int parse_uncompressed_page_file(const char *filename, SegmentType type, const uint32 start_point,
+                                        const uint32 number_read)
 {
     char buffer[BLCKSZ];
     FILE* fd = NULL;
@@ -3121,21 +3196,9 @@ static int parse_page_file(const char* filename, SegmentType type, const uint32 
     blknum = size / BLCKSZ;
 
     /* parse */
-    if (start >= blknum) {
-        fprintf(stderr, "start point exceeds the total block number of relation.\n");
-        fclose(fd);
+    number = CalculateMaxBlockNumber(blknum, start, number);
+    if (number == InvalidBlockNumber) {
         return false;
-    } else if ((start + number) > blknum) {
-        fprintf(stderr,
-            "don't have %d blocks from block %d in the relation, only %d blocks\n",
-            number,
-            start,
-            (blknum - start));
-        number = blknum;
-    } else if (number == 0) {
-        number = blknum;
-    } else {
-        number += start;
     }
 
     Assert((start * BLCKSZ) < size);

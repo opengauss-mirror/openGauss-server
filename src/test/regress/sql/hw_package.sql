@@ -3,7 +3,6 @@ drop trigger if exists insert_trigger on test_trigger_src_tbl;
 drop table if exists test_trigger_des_tbl;
 drop table if exists test_trigger_src_tbl;
 drop package if exists trigger_test;
-drop table if exists test1;
 drop table if exists dams_ci.test1;
 drop table if exists dams_ci.DB_LOG;
 drop table if exists au_pkg;

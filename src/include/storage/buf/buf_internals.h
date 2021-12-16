@@ -96,6 +96,13 @@ typedef struct buftag {
     BlockNumber blockNum; /* blknum relative to begin of reln */
 } BufferTag;
 
+typedef struct buftagnocompress {
+    RelFileNodeV2 rnode;
+    ForkNumber forkNum;
+    BlockNumber blockNum; /* blknum relative to begin of reln */
+} BufferTagSecondVer;
+
+
 typedef struct buftagnohbkt {
     RelFileNodeOld rnode; /* physical relation identifier */
     ForkNumber forkNum;

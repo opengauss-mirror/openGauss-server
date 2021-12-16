@@ -281,7 +281,11 @@ inline void dw_prepare_page(dw_batch_t *batch, uint16 page_num, uint16 page_id, 
         if (t_thrd.proc->workingVersionNum < DW_SUPPORT_SINGLE_FLUSH_VERSION) {
             page_num = page_num | IS_HASH_BKT_SEGPAGE_MASK;
         }
-        batch->buftag_ver = HASHBUCKET_TAG;
+        if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
+            batch->buftag_ver = HASHBUCKET_TAG;
+        } else {
+            batch->buftag_ver = PAGE_COMPRESS_TAG;
+        }
     } else {
         batch->buftag_ver = ORIGIN_TAG;
     }
@@ -304,7 +308,7 @@ static void dw_prepare_file_head(char *file_head, uint16 start, uint16 dwn)
         curr_head->head.page_id = 0;
         curr_head->head.dwn = dwn;
         curr_head->start = start;
-        curr_head->buftag_version = HASHBUCKET_TAG;
+        curr_head->buftag_version = PAGE_COMPRESS_TAG;
         curr_head->tail.dwn = dwn;
         dw_calc_file_head_checksum(curr_head);
     }
@@ -430,15 +434,21 @@ static void dw_recover_pages(T1 *batch, T2 *buf_tag, PageHeader data_page, BufTa
 
     for (i = 0; i < GET_REL_PGAENUM(batch->page_num); i++) {
         buf_tag = &batch->buf_tag[i];
+        relnode.dbNode = buf_tag->rnode.dbNode;
+        relnode.spcNode = buf_tag->rnode.spcNode;
+        relnode.relNode = buf_tag->rnode.relNode;
         if (tag_ver == HASHBUCKET_TAG) {
-            relnode.dbNode = buf_tag->rnode.dbNode;
-            relnode.spcNode = buf_tag->rnode.spcNode;
-            relnode.relNode = buf_tag->rnode.relNode;
+            relnode.opt = 0;
+            // 2 bytes are used for bucketNode.
+            relnode.bucketNode = (int2)((BufferTagSecondVer *)buf_tag)->rnode.bucketNode;
+        } else if (tag_ver == PAGE_COMPRESS_TAG) {
+            relnode.opt = ((BufferTag *)buf_tag)->rnode.opt;
             relnode.bucketNode = ((BufferTag *)buf_tag)->rnode.bucketNode;
         } else {
             relnode.dbNode = buf_tag->rnode.dbNode;
             relnode.spcNode = buf_tag->rnode.spcNode;
             relnode.relNode = buf_tag->rnode.relNode;
+            relnode.opt = 0;
             relnode.bucketNode = InvalidBktId;
         }
         relation = smgropen(relnode, InvalidBackendId, GetColumnNum(buf_tag->forkNum));
@@ -757,7 +767,10 @@ static void dw_recover_partial_write(knl_g_dw_context *cxt)
         }
         if (t_thrd.proc->workingVersionNum < DW_SUPPORT_SINGLE_FLUSH_VERSION) {
             bool is_hashbucket = ((curr_head->page_num & IS_HASH_BKT_SEGPAGE_MASK) != 0);
-            curr_head->buftag_ver = is_hashbucket ? HASHBUCKET_TAG : ORIGIN_TAG;
+            curr_head->buftag_ver = is_hashbucket ?
+                                    (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION ? HASHBUCKET_TAG
+                                                                                               : PAGE_COMPRESS_TAG)
+                                                  : ORIGIN_TAG;
         }
 
         remain_pages = read_asst.buf_end - read_asst.buf_start;
@@ -1988,9 +2001,9 @@ int buftag_compare(const void *pa, const void *pb)
 static inline void dw_log_recovery_page(int elevel, const char *state, BufferTag buf_tag)
 {
     ereport(elevel, (errmodule(MOD_DW),
-        errmsg("[single flush] recovery, %s: buf_tag[rel %u/%u/%u blk %u fork %d]",
+        errmsg("[single flush] recovery, %s: buf_tag[rel %u/%u/%u blk %u fork %d], compress: %u",
             state, buf_tag.rnode.spcNode, buf_tag.rnode.dbNode, buf_tag.rnode.relNode, buf_tag.blockNum,
-            buf_tag.forkNum)));
+            buf_tag.forkNum, buf_tag.rnode.opt)));
 }
 
 void dw_recovery_page_single(const dw_single_flush_item *item, uint16 item_num)

@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92423;
+const uint32 GRAND_VERSION_NUM = 92424;
 
 const uint32 HINT_ENHANCEMENT_VERSION_NUM = 92359;
 const uint32 MATVIEW_VERSION_NUM = 92213;

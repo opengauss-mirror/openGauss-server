@@ -6026,8 +6026,11 @@ void shared_buffer_write_error_callback(void *arg)
     /* Buffer is pinned, so we can read the tag without locking the spinlock */
     if (buf_desc != NULL) {
         char *path = relpathperm(((BufferDesc *)buf_desc)->tag.rnode, ((BufferDesc *)buf_desc)->tag.forkNum);
-
-        (void)errcontext("writing block %u of relation %s", buf_desc->tag.blockNum, path);
+        if (((BufferDesc *)buf_desc)->tag.rnode.opt) {
+            (void)errcontext("writing block %u of relation %s_pcd", buf_desc->tag.blockNum, path);
+        } else {
+            (void)errcontext("writing block %u of relation %s", buf_desc->tag.blockNum, path);
+        }
         pfree(path);
     }
 }
@@ -6382,7 +6385,7 @@ retry:
     PROFILING_REMOTE_START();
 
     int ret_code = RemoteGetPage(remote_address, rnode.node.spcNode, rnode.node.dbNode, rnode.node.relNode,
-                                   rnode.node.bucketNode, fork_num, block_num, BLCKSZ, cur_lsn, buf);
+                                   rnode.node.bucketNode, rnode.node.opt, fork_num, block_num, BLCKSZ, cur_lsn, buf);
 
     PROFILING_REMOTE_END_READ(BLCKSZ, (ret_code == REMOTE_READ_OK));
 

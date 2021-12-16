@@ -115,6 +115,10 @@ static relopt_bool boolRelOpts[] = {
     {{ "on_commit_delete_rows", "global temp table on commit options", RELOPT_KIND_HEAP}, true},
     {{ "crossbucket", "Enables cross bucket index creation in this index relation", RELOPT_KIND_BTREE}, false },
     {{ "enable_tde", "enable table's level transparent data encryption", RELOPT_KIND_HEAP }, false },
+    {{ "compress_byte_convert", "Whether do byte convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     false },
+    {{ "compress_diff_convert", "Whether do diiffer convert in compression", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     false },
     /* list terminator */
     {{NULL}}
 };
@@ -235,6 +239,16 @@ static relopt_int intRelOpts[] = {
         },
         -1, 0, 32
     },
+    {{ "compress_level", "Level of page compression.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, -31, 31},
+    {{ "compresstype", "compress type (none, pglz or zstd).", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE}, 0, 0, 2},
+    {{ "compress_chunk_size", "Size of chunk to store compressed page.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     BLCKSZ / 2,
+     BLCKSZ / 16,
+     BLCKSZ / 2},
+    {{ "compress_prealloc_chunks", "Number of prealloced chunks for each block.", RELOPT_KIND_HEAP | RELOPT_KIND_BTREE},
+     0,
+     0,
+     7},
     /* list terminator */
     {{NULL}}
 };
@@ -1934,6 +1948,18 @@ bytea *default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         { "cmk_id", RELOPT_TYPE_STRING, offsetof(StdRdOptions, cmk_id)},
         { "encrypt_algo", RELOPT_TYPE_STRING, offsetof(StdRdOptions, encrypt_algo)},
         { "enable_tde", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, enable_tde)},
+        { "compresstype", RELOPT_TYPE_INT, 
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressType)},
+        { "compress_level", RELOPT_TYPE_INT,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressLevel)},
+        { "compress_chunk_size", RELOPT_TYPE_INT,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressChunkSize)},
+        {"compress_prealloc_chunks", RELOPT_TYPE_INT,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressPreallocChunks)},
+        { "compress_byte_convert", RELOPT_TYPE_BOOL,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressByteConvert)},
+        { "compress_diff_convert", RELOPT_TYPE_BOOL,
+          offsetof(StdRdOptions, compress) + offsetof(PageCompressOpts, compressDiffConvert)},
     };
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);

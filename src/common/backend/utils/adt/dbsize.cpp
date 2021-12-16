@@ -69,6 +69,7 @@
 #include "storage/custorage.h"
 #include "storage/smgr/segment.h"
 #include "storage/cstore/cstore_compress.h"
+#include "storage/page_compression.h"
 #include "vecexecutor/vecnodes.h"
 
 #ifdef PGXC
@@ -791,6 +792,7 @@ int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber fo
 
     relationpath = relpathbackend(*rfn, backend, forknum);
 
+    bool rowCompress = IS_COMPRESSED_RNODE((*rfn), forknum);
     for (segcount = 0;; segcount++) {
         struct stat fst;
 
@@ -807,7 +809,7 @@ int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber fo
             else
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathname)));
         }
-        totalsize += fst.st_size;
+        totalsize += rowCompress ? CalculateMainForkSize((char*)pathname, rfn, forknum) : fst.st_size;
     }
 
     pfree_ext(relationpath);

@@ -17,6 +17,7 @@
 
 #include <dirent.h>
 #include "utils/resowner.h"
+#include "storage/page_compression.h"
 #include "storage/smgr/relfilenode.h"
 
 typedef struct vfd {
@@ -34,6 +35,8 @@ typedef struct vfd {
     int fileFlags;               /* open(2) flags for (re)opening the file */
     int fileMode;                /* mode to pass to open(2) */
     RelFileNodeForkNum fileNode; /* current logical file node */
+    bool with_pcmap;        /* is page compression relation */
+    PageCompressHeader *pcmap;    /* memory map of page compression address file */
 } Vfd;
 
 #endif /* VFD_H */

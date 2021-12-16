@@ -628,6 +628,7 @@ endif
 	cp $(LIBOBS_LIB_PATH)/libpcre* '$(DESTDIR)$(libdir)/../temp/'
 	mv $(DESTDIR)$(libdir)/../temp/* '$(DESTDIR)$(libdir)/'
 	cp $(SECUREDYNAMICLIB_HOME)/libsecurec* '$(DESTDIR)$(libdir)/'
+	cp $(ZSTD_LIB_PATH)/libzstd* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/liblog4* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libeSDK* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libxml2* '$(DESTDIR)$(libdir)/'

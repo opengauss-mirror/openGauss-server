@@ -4,15 +4,15 @@
 --
 -- Tables and rules for the view test
 --
-create table test1 (a int4, b int4);
-create view tv1 as select * from test1;
+create table rule_test1_table (a int4, b int4);
+create view tv1 as select * from rule_test1_table;
 create rule tv1_ins as on insert to tv1 do instead
-	insert into test1 values (new.a, new.b);
+	insert into rule_test1_table values (new.a, new.b);
 create rule tv1_upd as on update to tv1 do instead
-	update test1 set a = new.a, b = new.b
+	update rule_test1_table set a = new.a, b = new.b
 	where a = old.a;
 create rule tv1_del as on delete to tv1 do instead
-	delete from test1 where a = old.a;
+	delete from rule_test1_table where a = old.a;
 -- insert values
 insert into tv1 values (1, 11);
 insert into tv1 values (2, 12);
@@ -45,7 +45,7 @@ drop rule if exists tv1_ins on tv1;
 drop rule if exists tv1_upd on tv1;
 drop rule if exists tv1_del on tv1;
 drop view if exists tv1;
-drop table if exists test1;
+drop table if exists rule_test1_table;
 --
 -- Tables and rules for the constraint update/delete/insert test
 --

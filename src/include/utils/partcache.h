@@ -64,7 +64,7 @@ extern void PartitionCacheInitializePhase3(void);
  * Routine to create a partcache entry for an about-to-be-created relation
  */
 Partition PartitionBuildLocalPartition(const char *relname, Oid partid, Oid partfilenode, Oid parttablespace,
-    StorageType storage_type);
+    StorageType storage_type, Datum reloptions);
 /*
  * Routines for backend startup
  */

@@ -221,6 +221,12 @@ public:
 
     template <MemType mem_type>
     static int gs_posix_memalign(void** memptr, Size alignment, Size sz, bool needProtect);
+
+    template <MemType mem_type>
+    static bool gs_memprot_reserve(Size sz, bool needProtect);
+
+    template <MemType mem_type>
+    static void gs_memprot_release(Size sz);
 };
 
 extern int alloc_trunk_size(int width);

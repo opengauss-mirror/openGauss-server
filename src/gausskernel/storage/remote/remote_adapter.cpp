@@ -115,10 +115,57 @@ Datum gs_read_block_from_remote(PG_FUNCTION_ARGS)
         /* if request to read CU block, we use forkNum column to replace colid. */
         (void)StandbyReadCUforPrimary(spcNode, dbNode, relNode, forkNum, blockNum, blockSize, lsn, &result);
     } else {
-        (void)StandbyReadPageforPrimary(spcNode, dbNode, relNode, bucketNode, forkNum, blockNum, blockSize,
+        (void)StandbyReadPageforPrimary(spcNode, dbNode, relNode, bucketNode, 0, forkNum, blockNum, blockSize,
             lsn, &result);
     }
 
+    if (NULL != result) {
+        PG_RETURN_BYTEA_P(result);
+    } else {
+        PG_RETURN_NULL();
+    }
+}
+
+/*
+ * Read block from buffer from primary, returning it as bytea
+ */
+Datum gs_read_block_from_remote_compress(PG_FUNCTION_ARGS)
+{
+    uint32 spcNode;
+    uint32 dbNode;
+    uint32 relNode;
+    int16 bucketNode;
+    uint16 opt = 0;
+    int32 forkNum;
+    uint64 blockNum;
+    uint32 blockSize;
+    uint64 lsn;
+    bool isForCU = false;
+    bytea* result = NULL;
+
+    if (GetUserId() != BOOTSTRAP_SUPERUSERID) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("must be initial account to read files"))));
+    }
+    /* handle optional arguments */
+    spcNode = PG_GETARG_UINT32(0);
+    dbNode = PG_GETARG_UINT32(1);
+    relNode = PG_GETARG_UINT32(2);
+    bucketNode = PG_GETARG_INT16(3);
+    opt = PG_GETARG_UINT16(4);
+    forkNum = PG_GETARG_INT32(5);
+    blockNum = (uint64)PG_GETARG_TRANSACTIONID(6);
+    blockSize = PG_GETARG_UINT32(7);
+    lsn = (uint64)PG_GETARG_TRANSACTIONID(8);
+    isForCU = PG_GETARG_BOOL(9);
+    /* get block from local buffer */
+    if (isForCU) {
+        /* if request to read CU block, we use forkNum column to replace colid. */
+        (void)StandbyReadCUforPrimary(spcNode, dbNode, relNode, forkNum, blockNum, blockSize, lsn, &result);
+    } else {
+        (void)StandbyReadPageforPrimary(spcNode, dbNode, relNode, bucketNode, opt, forkNum, blockNum, blockSize,
+                                        lsn, &result);
+    }
+    
     if (NULL != result) {
         PG_RETURN_BYTEA_P(result);
     } else {
@@ -203,7 +250,7 @@ int StandbyReadCUforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int32
  * @Return: remote read error code
  * @See also:
  */
-int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int16 bucketnode, int32 forknum,
+int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int16 bucketnode, uint2 opt, int32 forknum,
                               uint32 blocknum, uint32 blocksize, uint64 lsn, bytea** pagedata)
 {
     Assert(pagedata);
@@ -220,7 +267,7 @@ int StandbyReadPageforPrimary(uint32 spcnode, uint32 dbnode, uint32 relnode, int
         return ret_code;
     }
 
-    RelFileNode relfilenode {spcnode, dbnode, relnode, bucketnode};
+    RelFileNode relfilenode {spcnode, dbnode, relnode, bucketnode, opt};
 
     {
         bytea* pageData = (bytea*)palloc(BLCKSZ + VARHDRSZ);

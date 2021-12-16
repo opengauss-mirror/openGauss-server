@@ -11,10 +11,11 @@
 #define FILE_OPS_H
 
 #include "filemap.h"
+#include "compressed_common.h"
 extern char* pg_data;
 
 extern void open_target_file(const char* path, bool trunc);
-extern void write_target_range(char* buf, off_t begin, size_t size, int space);
+extern void write_target_range(char* buf, off_t begin, size_t size, int space, bool compressed = false);
 extern void close_target_file(void);
 extern void truncate_target_file(const char* path, off_t newsize);
 extern void create_target(file_entry_t* t);
@@ -40,6 +41,9 @@ extern bool restore_target_dir(const char* datadir_target, bool remove_from);
 extern void delete_target_file(const char* file);
 extern bool isPathInFilemap(const char* path);
 extern bool tablespaceDataIsValid(const char* path);
-
+extern void CompressedFileTruncate(const char* path, const RewindCompressInfo* rewindCompressInfo);
+void FetchCompressedFile(char* buf, BlockNumber begin, int32 size);
+void OpenCompressedPcaFile(const char* fileName, int32 chunkSize, int32 algorithm, bool rebuild);
+void CloseCompressedPcaFile();
 #endif /* FILE_OPS_H */
 

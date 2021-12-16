@@ -1139,7 +1139,7 @@ void XLogDropBktRowRelation(XLogRecParseState *redoblockstate)
     rnode.spcNode = redoblockstate->blockparse.blockhead.spcNode;
     rnode.dbNode = redoblockstate->blockparse.blockhead.dbNode;
     rnode.relNode = redoblockstate->blockparse.blockhead.relNode;
-
+    rnode.opt = redoblockstate->blockparse.blockhead.opt;
     uint32 *bktmap = (uint32 *)redoblockstate->blockparse.extra_rec.blockddlrec.mainData;
     for (uint32 bktNode = 0; bktNode < MAX_BUCKETMAPLEN; bktNode++) {
         if (!GET_BKT_MAP_BIT(bktmap, bktNode)) {
@@ -1163,6 +1163,7 @@ void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
             relNode.dbNode = redoblockstate->blockparse.blockhead.dbNode;
             relNode.relNode = redoblockstate->blockparse.blockhead.relNode;
             relNode.bucketNode = redoblockstate->blockparse.blockhead.bucketNode;
+            relNode.opt = redoblockstate->blockparse.blockhead.opt;
             XlogDropRowReation(relNode);
         }
     } else if (ddlrecparse->blockddltype == BLOCK_DDL_TRUNCATE_RELNODE) {
@@ -1171,6 +1172,7 @@ void XLogForgetDDLRedo(XLogRecParseState *redoblockstate)
         relNode.dbNode = redoblockstate->blockparse.blockhead.dbNode;
         relNode.relNode = redoblockstate->blockparse.blockhead.relNode;
         relNode.bucketNode = redoblockstate->blockparse.blockhead.bucketNode;
+        relNode.opt = redoblockstate->blockparse.blockhead.opt;
         XLogTruncateRelation(relNode, redoblockstate->blockparse.blockhead.forknum,
                              redoblockstate->blockparse.blockhead.blkno);
     }
@@ -1182,7 +1184,8 @@ void XLogDropSpaceShrink(XLogRecParseState *redoblockstate)
         .spcNode = redoblockstate->blockparse.blockhead.spcNode,
         .dbNode = redoblockstate->blockparse.blockhead.dbNode,
         .relNode = redoblockstate->blockparse.blockhead.relNode,
-        .bucketNode = redoblockstate->blockparse.blockhead.bucketNode
+        .bucketNode = redoblockstate->blockparse.blockhead.bucketNode,
+        .opt = redoblockstate->blockparse.blockhead.opt
     };
     ForkNumber forknum = redoblockstate->blockparse.blockhead.forknum;
     BlockNumber target_size = redoblockstate->blockparse.blockhead.blkno;

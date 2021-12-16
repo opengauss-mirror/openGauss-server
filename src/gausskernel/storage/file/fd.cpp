@@ -191,6 +191,16 @@ static pthread_mutex_t VFDLockArray[NUM_VFD_PARTITIONS];
 #define VFDMappingPartitionLock(hashcode) \
     (&VFDLockArray[VFDTableHashPartition(hashcode)])
 
+/*
+ * pc_munmap
+ */
+#define SAFE_MUNMAP(vfdP)                                  \
+    do {                                                   \
+        if ((vfdP)->with_pcmap && (vfdP)->pcmap != NULL) { \
+            UnReferenceAddrFile((vfdP));                   \
+            (vfdP)->pcmap = NULL;                          \
+        }                                                  \
+    } while (0)
 /* --------------------
  *
  * Private Routines
@@ -344,11 +354,13 @@ RelFileNodeForkNum RelFileNodeForkNumFill(RelFileNode* rnode,
         filenode.rnode.node.spcNode = rnode->spcNode;
         filenode.rnode.node.dbNode = rnode->dbNode;
         filenode.rnode.node.bucketNode = rnode->bucketNode;
+        filenode.rnode.node.opt = rnode->opt;
     } else {
         filenode.rnode.node.relNode = InvalidOid;
         filenode.rnode.node.spcNode = InvalidOid;
         filenode.rnode.node.dbNode = InvalidOid;
         filenode.rnode.node.bucketNode = InvalidBktId;
+        filenode.rnode.node.opt = 0;
     }
 
     filenode.rnode.backend = backend;
@@ -898,6 +910,7 @@ static void LruDelete(File file)
 
     vfdP = &u_sess->storage_cxt.VfdCache[file];
 
+    SAFE_MUNMAP(vfdP);
     /* delete the vfd record from the LRU ring */
     Delete(file);
 
@@ -1669,6 +1682,8 @@ void FileCloseWithThief(File file)
 {
     Vfd* vfdP = &u_sess->storage_cxt.VfdCache[file];
     if (!FileIsNotOpen(file)) {
+        SAFE_MUNMAP(vfdP);
+
         /* remove the file from the lru ring */
         Delete(file);
         /* the thief has close the real fd */
@@ -1807,6 +1822,8 @@ void FileClose(File file)
     vfdP = &u_sess->storage_cxt.VfdCache[file];
 
     if (!FileIsNotOpen(file)) {
+        SAFE_MUNMAP(vfdP);
+
         /* remove the file from the lru ring */
         Delete(file);
 
@@ -3917,3 +3934,71 @@ static void UnlinkIfExistsFname(const char *fname, bool isdir, int elevel)
     }
 }
 
+/*
+ * initialize page compress memory map.
+ *
+ */
+void SetupPageCompressMemoryMap(File file, RelFileNode node, const RelFileNodeForkNum& relFileNodeForkNum)
+{
+    Vfd *vfdP = &u_sess->storage_cxt.VfdCache[file];
+    auto chunk_size = CHUNK_SIZE_LIST[GET_COMPRESS_CHUNK_SIZE(node.opt)];
+    int returnCode = FileAccess(file);
+    if (returnCode < 0) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to open file %s: %m", vfdP->fileName)));
+    }
+    RelFileNodeForkNum newOne(relFileNodeForkNum);
+    newOne.forknumber = PCA_FORKNUM;
+    PageCompressHeader *map = GetPageCompressHeader(vfdP, chunk_size, newOne);
+    if (map == (void *) (-1)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to mmap page compression address file %s: %m",
+                                                                 vfdP->fileName)));
+    }
+    if (map->chunk_size == 0 && map->algorithm == 0) {
+        map->chunk_size = chunk_size;
+        map->algorithm = GET_COMPRESS_ALGORITHM(node.opt);
+        if (pc_msync(map) != 0) {
+            ereport(data_sync_elevel(ERROR),
+                    (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m", vfdP->fileName)));
+        }
+    }
+
+    if (RecoveryInProgress()) {
+        CheckAndRepairCompressAddress(map, chunk_size, map->algorithm, vfdP->fileName);
+    }
+
+    vfdP->with_pcmap = true;
+    vfdP->pcmap = map;
+}
+
+/*
+ * Return the page compress memory map.
+ *
+ */
+PageCompressHeader *GetPageCompressMemoryMap(File file, uint32 chunk_size)
+{
+    int returnCode;
+    Vfd *vfdP = &u_sess->storage_cxt.VfdCache[file];
+    PageCompressHeader *map = NULL;
+
+    Assert(FileIsValid(file));
+
+    returnCode = FileAccess(file);
+    if (returnCode < 0) {
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to open file %s: %m", vfdP->fileName)));
+    }
+
+    Assert(vfdP->with_pcmap);
+    if (vfdP->pcmap == NULL) {
+        map = GetPageCompressHeader(vfdP, chunk_size, vfdP->fileNode);
+        if (map == MAP_FAILED) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg(
+                "Failed to mmap page compression address file %s: %m", vfdP->fileName)));
+        }
+
+        vfdP->with_pcmap = true;
+        vfdP->pcmap = map;
+    }
+
+    return vfdP->pcmap;
+}

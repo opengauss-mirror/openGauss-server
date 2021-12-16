@@ -38,10 +38,22 @@ typedef struct xl_smgr_create {
 	ForkNumber	forkNum;
 } xl_smgr_create;
 
+typedef struct xl_smgr_create_compress {
+    xl_smgr_create xlrec;
+    uint2 pageCompressOpts;
+} xl_smgr_create_compress;
+
 typedef struct xl_smgr_truncate {
 	BlockNumber blkno;
 	RelFileNodeOld rnode;
 } xl_smgr_truncate;
+
+typedef struct xl_smgr_truncate_compress {
+    xl_smgr_truncate xlrec;
+    uint2 pageCompressOpts;
+} xl_smgr_truncate_compress;
+
+
 
 extern void log_smgrcreate(RelFileNode *rnode, ForkNumber forkNum);
 

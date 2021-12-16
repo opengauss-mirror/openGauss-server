@@ -2068,6 +2068,8 @@ int PostmasterMain(int argc, char* argv[])
     ngroup_info_hash_create();
     /*init Role id hash table*/
     InitRoleIdHashTable();
+    /* pcmap */
+    RealInitialMMapLockArray();
     /* init unique sql */
     InitUniqueSQL();
     /* init hypo index */

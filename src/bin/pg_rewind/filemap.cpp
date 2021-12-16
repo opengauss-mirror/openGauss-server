@@ -19,6 +19,7 @@
 #include "catalog/catalog.h"
 #include "catalog/pg_tablespace.h"
 #include "common/fe_memutils.h"
+#include "compressed_rewind.h"
 #include "storage/cu.h"
 #include "storage/smgr/fd.h"
 
@@ -127,7 +128,8 @@ void filemapInit(void)
     filemaptarget = filemap_create();
 }
 
-void processTargetFileMap(const char* path, file_type_t type, size_t oldsize, const char* link_target)
+void processTargetFileMap(const char* path, file_type_t type, size_t oldsize, const char* link_target,
+    const RewindCompressInfo* info)
 {
     file_entry_t* entry = NULL;
     filemap_t* map = filemaptarget;
@@ -142,6 +144,8 @@ void processTargetFileMap(const char* path, file_type_t type, size_t oldsize, co
     entry->next = NULL;
     entry->pagemap.bitmap = NULL;
     entry->pagemap.bitmapsize = 0;
+
+    COPY_REWIND_COMPRESS_INFO(entry, info, info == NULL ? 0 : info->oldBlockNumber, 0)
 
     if (map->last != NULL) {
         map->last->next = entry;
@@ -211,7 +215,7 @@ BuildErrorCode targetFilemapProcess(void)
     filemap_t* map = filemaptarget;
     for (i = 0; i < map->narray; i++) {
         entry = map->array[i];
-        process_target_file(entry->path, entry->type, entry->oldsize, entry->link_target);
+        process_target_file(entry->path, entry->type, entry->oldsize, entry->link_target, &entry->rewindCompressInfo);
     }
     return BUILD_SUCCESS;
 }
@@ -322,7 +326,8 @@ static bool process_source_file_sanity_check(const char* path, file_type_t type)
  * action needs to be taken for the file, depending on whether the file
  * exists in the target and whether the size matches.
  */
-void process_source_file(const char* path, file_type_t type, size_t newsize, const char* link_target)
+void process_source_file(const char* path, file_type_t type, size_t newsize, const char* link_target,
+    RewindCompressInfo* info)
 {
     bool exists = false;
     char localpath[MAXPGPATH];
@@ -330,6 +335,7 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
     filemap_t* map = filemap;
     file_action_t action = FILE_ACTION_NONE;
     size_t oldsize = 0;
+    BlockNumber oldBlockNumber = 0;
     file_entry_t* entry = NULL;
     int ss_c = 0;
     bool isreldatafile = false;
@@ -480,7 +486,21 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
                  * replayed.
                  */
                 /* mod blocksize 8k to avoid half page write */
-                oldsize = statbuf.oldsize;
+                RewindCompressInfo oldRewindCompressInfo;
+                bool sourceCompressed = info != NULL;
+                bool targetCompressed = ProcessLocalPca(path, &oldRewindCompressInfo);
+                if (sourceCompressed && !targetCompressed) {
+                    info->compressed = false;
+                    action = FILE_ACTION_REMOVE;
+                    break;
+                } else if (!sourceCompressed && targetCompressed) {
+                    info = &oldRewindCompressInfo;
+                    action = FILE_ACTION_REMOVE;
+                    break;
+                } else if (sourceCompressed && targetCompressed) {
+                    oldBlockNumber = oldRewindCompressInfo.oldBlockNumber;
+                    oldsize = oldBlockNumber * BLCKSZ;
+                }
                 if (oldsize % BLOCKSIZE != 0) {
                     oldsize = oldsize - (oldsize % BLOCKSIZE);
                     pg_log(PG_PROGRESS, "target file size mod BLOCKSIZE not equal 0 %s %ld \n", path, statbuf.oldsize);
@@ -511,6 +531,8 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
     entry->pagemap.bitmapsize = 0;
     entry->isrelfile = isreldatafile;
 
+    COPY_REWIND_COMPRESS_INFO(entry, info, oldBlockNumber, info == NULL ? 0 : info->newBlockNumber)
+
     if (map->last != NULL) {
         map->last->next = entry;
         map->last = entry;
@@ -526,7 +548,8 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
  * marks target data directory's files that didn't exist in the source for
  * deletion.
  */
-void process_target_file(const char* path, file_type_t type, size_t oldsize, const char* link_target)
+void process_target_file(const char* path, file_type_t type, size_t oldsize, const char* link_target,
+    const RewindCompressInfo* info)
 {
     bool exists = false;
     file_entry_t key;
@@ -555,7 +578,7 @@ void process_target_file(const char* path, file_type_t type, size_t oldsize, con
      */
     for (int excludeIdx = 0; excludeFiles[excludeIdx] != NULL; excludeIdx++) {
         if (strstr(path, excludeFiles[excludeIdx]) != NULL) {
-            pg_log(PG_DEBUG, "entry \"%s\" excluded from target file list", path);
+            pg_log(PG_DEBUG, "entry \"%s\" excluded from target file list\n", path);
             return;
         }
     }
@@ -606,6 +629,8 @@ void process_target_file(const char* path, file_type_t type, size_t oldsize, con
         entry->pagemap.bitmap = NULL;
         entry->pagemap.bitmapsize = 0;
         entry->isrelfile = isRelDataFile(path);
+
+        COPY_REWIND_COMPRESS_INFO(entry, info, info == NULL ? 0 : info->oldBlockNumber, 0)
 
         if (map->last == NULL)
             map->first = entry;
@@ -769,7 +794,8 @@ void process_waldata_change(
         entry->pagemap.bitmap = NULL;
         entry->pagemap.bitmapsize = 0;
         entry->isrelfile = isRelDataFile(path);
-
+        RewindCompressInfo *rewindCompressInfo = NULL;
+        COPY_REWIND_COMPRESS_INFO(entry, rewindCompressInfo, 0, 0)
         if (map->last != NULL) {
             map->last->next = entry;
             map->last = entry;
