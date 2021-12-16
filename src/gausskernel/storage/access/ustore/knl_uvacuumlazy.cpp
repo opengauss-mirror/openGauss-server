@@ -640,7 +640,8 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
     if (RelationIsPartition(onerel)) {
         Assert(vacstmt->onepart != NULL);
 
-        vac_update_partstats(vacstmt->onepart, newRelPages, newRelTuples, newRelAllvisible, InvalidTransactionId);
+        vac_update_partstats(vacstmt->onepart, newRelPages, newRelTuples, newRelAllvisible, InvalidTransactionId,
+            InvalidMultiXactId);
         /*
          * when vacuum partition, do not change the relhasindex field in pg_class
          * for partitioned table, as some partition may be altered as "all local
@@ -649,11 +650,11 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
          * misdguge as hot update even if update indexes columns.
          */
         vac_update_pgclass_partitioned_table(vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex,
-            InvalidTransactionId);
+            InvalidTransactionId, InvalidMultiXactId);
     } else {
         Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
         vac_update_relstats(onerel, classRel, newRelPages, newRelTuples, newRelAllvisible, nindexes > 0,
-            InvalidTransactionId);
+            InvalidTransactionId, InvalidMultiXactId);
         heap_close(classRel, RowExclusiveLock);
     }
 

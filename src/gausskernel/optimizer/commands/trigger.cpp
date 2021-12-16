@@ -87,7 +87,7 @@
 static void ConvertTriggerToFK(CreateTrigStmt* stmt, Oid funcoid);
 static void SetTriggerFlags(TriggerDesc* trigdesc, const Trigger* trigger);
 static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
-    int2 bucketid, ItemPointer tid, TupleTableSlot** newSlot);
+    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot);
 static void ReleaseFakeRelation(Relation relation, Partition part, Relation* fakeRelation);
 static bool TriggerEnabled(EState* estate, ResultRelInfo* relinfo, Trigger* trigger, TriggerEvent event,
     const Bitmapset* modifiedCols, HeapTuple oldtup, HeapTuple newtup);
@@ -2125,7 +2125,8 @@ bool ExecBRDeleteTriggers(EState* estate, EPQState* epqstate, ResultRelInfo* rel
     } else {
         /* On datanode, do the usual way */
 #endif
-        trigtuple = GetTupleForTrigger(estate, epqstate, relinfo, deletePartitionOid, bucketid, tupleid, &newSlot);
+        trigtuple = GetTupleForTrigger(estate, epqstate, relinfo, deletePartitionOid,
+            bucketid, tupleid, LockTupleExclusive, &newSlot);
 #ifdef PGXC
     }
 #endif
@@ -2192,7 +2193,8 @@ void ExecARDeleteTriggers(EState* estate, ResultRelInfo* relinfo, Oid deletePart
         } else {
             /* Do the usual PG-way for datanode */
 #endif
-            trigtuple = GetTupleForTrigger(estate, NULL, relinfo, deletePartitionOid, bucketid, tupleid, NULL);
+            trigtuple = GetTupleForTrigger(estate, NULL, relinfo, deletePartitionOid,
+                bucketid, tupleid, LockTupleExclusive, NULL);
 #ifdef PGXC
         }
 #endif
@@ -2346,6 +2348,25 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
     TupleTableSlot* newSlot = NULL;
     int i;
     Bitmapset* updatedCols = NULL;
+    Bitmapset* keyCols = NULL;
+    LockTupleMode lockmode;
+
+    /*
+     * Compute lock mode to use.  If columns that are part of the key have not
+     * been modified, then we can use a weaker lock, allowing for better
+     * concurrency.
+     */
+    updatedCols = GET_ALL_UPDATED_COLUMNS(relinfo, estate);
+    keyCols = RelationGetIndexAttrBitmap(relinfo->ri_RelationDesc, INDEX_ATTR_BITMAP_KEY);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!bms_overlap(keyCols, updatedCols)) {
+        lockmode = LockTupleNoKeyExclusive;
+    } else
+#endif
+    {
+        lockmode = LockTupleExclusive;
+    }
+
 
 #ifdef PGXC
     bool exec_all_triggers = false;
@@ -2377,7 +2398,8 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
         /* On datanode, do the usual way */
 #endif
         /* get a copy of the on-disk tuple we are planning to update */
-        trigtuple = GetTupleForTrigger(estate, epqstate, relinfo, oldPartitionOid, bucketid, tupleid, &newSlot);
+        trigtuple = GetTupleForTrigger(estate, epqstate, relinfo, oldPartitionOid,
+            bucketid, tupleid, lockmode, &newSlot);
         if (trigtuple == NULL)
             return NULL; /* cancel the update action */
 
@@ -2400,8 +2422,6 @@ TupleTableSlot* ExecBRUpdateTriggers(EState* estate, EPQState* epqstate, ResultR
 #ifdef PGXC
     }
 #endif
-
-    updatedCols = GET_ALL_UPDATED_COLUMNS(relinfo, estate);
 
     LocTriggerData.type = T_TriggerData;
     LocTriggerData.tg_event = TRIGGER_EVENT_UPDATE | TRIGGER_EVENT_ROW | TRIGGER_EVENT_BEFORE;
@@ -2476,7 +2496,8 @@ void ExecARUpdateTriggers(EState* estate, ResultRelInfo* relinfo, Oid oldPartiti
         } else {
             /* Do the usual PG-way for datanode */
 #endif
-            trigtuple = GetTupleForTrigger(estate, NULL, relinfo, oldPartitionOid, bucketid, tupleid, NULL);
+            trigtuple = GetTupleForTrigger(estate, NULL, relinfo, oldPartitionOid,
+                bucketid, tupleid, LockTupleExclusive, NULL);
 #ifdef PGXC
         }
 #endif
@@ -2629,7 +2650,7 @@ void ExecASTruncateTriggers(EState* estate, ResultRelInfo* relinfo)
 }
 
 static HeapTuple GetTupleForTrigger(EState* estate, EPQState* epqstate, ResultRelInfo* relinfo, Oid targetPartitionOid,
-    int2 bucketid, ItemPointer tid, TupleTableSlot** newSlot)
+    int2 bucketid, ItemPointer tid, LockTupleMode lockmode, TupleTableSlot** newSlot)
 {
     Relation relation = relinfo->ri_RelationDesc;
     HeapTupleData tuple;
@@ -2796,7 +2817,7 @@ ltrmark:;
                 &tuple,
                 &buffer,
                 estate->es_output_cid,
-                LockTupleExclusive,
+                lockmode,
                 false,
                 &tmfd,
                 false,       // fake params below are for uheap implementation
@@ -2838,7 +2859,8 @@ ltrmark:;
                     TupleTableSlot* epqslot = NULL;
 
                     epqslot = EvalPlanQual(
-                        estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex, &tmfd.ctid, tmfd.xmax, false);
+                        estate, epqstate, fakeRelation, relinfo->ri_RangeTableIndex,
+                        lockmode, &tmfd.ctid, tmfd.xmax, false);
                     if (!TupIsNull(epqslot)) {
                         *tid = tmfd.ctid;
                         *newSlot = epqslot;

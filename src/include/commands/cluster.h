@@ -32,15 +32,15 @@ extern double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
     TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem* memUsage);
 extern double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHeap, TransactionId oldestXmin,
     TransactionId freezeXid, bool verbose, bool useSort, const AdaptMem* memUsage);
-extern TransactionId getPartitionRelfrozenxid(Relation ordTableRel);
-extern TransactionId getRelationRelfrozenxid(Relation ordTableRel);
+extern void getPartitionRelxids(Relation ordTableRel, TransactionId* frozenXid, MultiXactId* multiXid = NULL);
+extern void getRelationRelxids(Relation ordTableRel, TransactionId* frozenXid, MultiXactId* multiXid = NULL);
 extern void  setRelationRelfrozenxid(Oid relid, TransactionId frozenXid);
 extern void  setPartitionRelfrozenxid(Oid partid, TransactionId frozenXid);
 extern void finishPartitionHeapSwap(Oid partitionOid, Oid tempTableOid, bool swapToastByContent,
-    TransactionId frozenXid, bool tempTableIsPartition = false);
+    TransactionId frozenXid, MultiXactId multiXid, bool tempTableIsPartition = false);
 
 extern void finish_heap_swap(Oid OIDOldHeap, Oid OIDNewHeap, bool is_system_catalog, bool swap_toast_by_content,
-    bool check_constraints, TransactionId frozenXid, AdaptMem* memInfo = NULL);
+    bool check_constraints, TransactionId frozenXid, MultiXactId frozenMulti, AdaptMem* memInfo = NULL);
 
 extern void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int freeze_table_age);
 extern void GpiVacuumFullMainPartiton(Oid parentOid);

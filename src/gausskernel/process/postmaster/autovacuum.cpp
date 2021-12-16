@@ -81,6 +81,7 @@
 #include "access/twophase.h"
 #include "access/transam.h"
 #include "access/xact.h"
+#include "access/multixact.h"
 #include "catalog/dependency.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_database.h"
@@ -137,6 +138,7 @@ typedef struct avw_dbase {
     Oid adw_datid;
     char* adw_name;
     TransactionId adw_frozenxid;
+    MultiXactId	adw_frozenmulti;
     PgStat_StatDBEntry* adw_entry;
 } avw_dbase;
 
@@ -863,7 +865,11 @@ static Oid do_start_worker(void)
     List* dblist = NIL;
     ListCell* cell = NULL;
     TransactionId xidForceLimit;
+#ifndef ENABLE_MULTIPLE_NODES
+    MultiXactId multiForceLimit;
+#endif
     bool for_xid_wrap = false;
+    bool for_multi_wrap = false;
     avw_dbase* avdb = NULL;
     TimestampTz current_time;
     bool skipit = false;
@@ -906,6 +912,16 @@ static Oid do_start_worker(void)
     else
         xidForceLimit = FirstNormalTransactionId;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    /* Also determine the oldest datminmxid we will consider. */
+    t_thrd.autovacuum_cxt.recentMulti = ReadNextMultiXactId();
+    if (t_thrd.autovacuum_cxt.recentMulti >
+        FirstMultiXactId + g_instance.attr.attr_storage.autovacuum_freeze_max_age)
+        multiForceLimit = t_thrd.autovacuum_cxt.recentMulti - g_instance.attr.attr_storage.autovacuum_freeze_max_age;
+    else
+        multiForceLimit = FirstMultiXactId;
+#endif
+
     /*
      * Choose a database to connect to.  We pick the database that was least
      * recently auto-vacuumed, or one that needs vacuuming to recycle clog.
@@ -923,6 +939,7 @@ static Oid do_start_worker(void)
      */
     avdb = NULL;
     for_xid_wrap = false;
+    for_multi_wrap = false;
     current_time = GetCurrentTimestamp();
     foreach (cell, dblist) {
         avw_dbase* tmp = (avw_dbase*)lfirst(cell);
@@ -936,6 +953,15 @@ static Oid do_start_worker(void)
             continue;
         } else if (for_xid_wrap)
             continue; /* ignore not-at-risk DBs */
+#ifndef ENABLE_MULTIPLE_NODES
+        else if (MultiXactIdPrecedes(tmp->adw_frozenmulti, multiForceLimit)) {
+            if (avdb == NULL || MultiXactIdPrecedes(tmp->adw_frozenmulti, avdb->adw_frozenmulti))
+                avdb = tmp;
+            for_multi_wrap = true;
+            continue;
+        } else if (for_multi_wrap)
+            continue; /* ignore not-at-risk DBs */
+#endif
 
         /* Find pgstat entry if any */
         tmp->adw_entry = pgstat_fetch_stat_dbentry(tmp->adw_datid);
@@ -1359,6 +1385,7 @@ NON_EXEC_STATIC void AutoVacWorkerMain()
 
         /* And do an appropriate amount of work */
         t_thrd.autovacuum_cxt.recentXid = ReadNewTransactionId();
+        t_thrd.autovacuum_cxt.recentMulti = ReadNextMultiXactId();
         do_autovacuum();
     }
 
@@ -1576,7 +1603,11 @@ static List* get_database_list(void)
                 datfrozenxid = FirstNormalTransactionId;
         } else
             datfrozenxid = DatumGetTransactionId(xid64datum);
-
+#ifndef ENABLE_MULTIPLE_NODES
+        Datum mxidDatum = heap_getattr(tup, Anum_pg_database_datminmxid, RelationGetDescr(rel), &isNull);
+        MultiXactId datminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(mxidDatum);
+        avdb->adw_frozenmulti = datminmxid;
+#endif
         avdb->adw_frozenxid = datfrozenxid;
         /* this gets set later: */
         avdb->adw_entry = NULL;
@@ -2873,7 +2904,7 @@ static autovac_table* table_recheck_autovac(
  */
 static void determine_vacuum_params(float4& vac_scale_factor, int& vac_base_thresh, float4& anl_scale_factor,
     int& anl_base_thresh, int64& freeze_max_age, bool& av_enabled, TransactionId& xidForceLimit,
-    const AutoVacOpts* relopts)
+    MultiXactId& multiForceLimit, const AutoVacOpts* relopts)
 {
     /* -1 in autovac setting means use plain vacuum_cost_delay */
     vac_scale_factor = (relopts && relopts->vacuum_scale_factor >= 0) ? relopts->vacuum_scale_factor
@@ -2899,6 +2930,15 @@ static void determine_vacuum_params(float4& vac_scale_factor, int& vac_base_thre
         xidForceLimit = t_thrd.autovacuum_cxt.recentXid - freeze_max_age;
     else
         xidForceLimit = FirstNormalTransactionId;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.autovacuum_cxt.recentMulti >
+        FirstMultiXactId + g_instance.attr.attr_storage.autovacuum_freeze_max_age)
+        multiForceLimit = t_thrd.autovacuum_cxt.recentMulti -
+                            g_instance.attr.attr_storage.autovacuum_freeze_max_age;
+    else
+        multiForceLimit = FirstMultiXactId;
+#endif
 }
 
 /*
@@ -2968,18 +3008,18 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
     /* freeze parameters */
     int64 freeze_max_age = 0;
     TransactionId xidForceLimit = InvalidTransactionId;
+    MultiXactId	multiForceLimit = InvalidMultiXactId;
 
     AssertArg(classForm != NULL);
     AssertArg(OidIsValid(relid));
 
     determine_vacuum_params(vac_scale_factor, vac_base_thresh, anl_scale_factor, anl_base_thresh, freeze_max_age,
-        av_enabled, xidForceLimit, relopts);
+        av_enabled, xidForceLimit, multiForceLimit, relopts);
 
     bool isNull = false;
     TransactionId relfrozenxid = InvalidTransactionId;
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
     Datum xid64datum = heap_getattr(tuple, Anum_pg_class_relfrozenxid64, RelationGetDescr(rel), &isNull);
-    heap_close(rel, AccessShareLock);
 
     if (isNull) {
         relfrozenxid = classForm->relfrozenxid;
@@ -2993,6 +3033,14 @@ static void relation_needs_vacanalyze(Oid relid, AutoVacOpts* relopts, Form_pg_c
     }
 
     force_vacuum = (TransactionIdIsNormal(relfrozenxid) && TransactionIdPrecedes(relfrozenxid, xidForceLimit));
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!force_vacuum) {
+        Datum mxidDatum = heap_getattr(tuple, Anum_pg_class_relminmxid, RelationGetDescr(rel), &isNull);
+        MultiXactId relminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(mxidDatum);
+        force_vacuum = (MultiXactIdIsValid(relminmxid) && MultiXactIdPrecedes(relminmxid, multiForceLimit));
+    }
+#endif
+    heap_close(rel, AccessShareLock);
     *need_freeze = force_vacuum;
     AUTOVAC_LOG(DEBUG2, "vac \"%s\": need freeze is %s", NameStr(classForm->relname), force_vacuum ? "true" : "false");
 
@@ -3366,6 +3414,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     /* freeze parameters */
     int64 freeze_max_age = 0;
     TransactionId xidForceLimit = InvalidTransactionId;
+    MultiXactId multiForceLimit = InvalidMultiXactId;
 
     char* relname = NULL;
     Oid nameSpaceOid = InvalidOid;
@@ -3373,7 +3422,7 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
 
     AssertArg(partForm != NULL && OidIsValid(partid));
     determine_vacuum_params(vac_scale_factor, vac_base_thresh, anl_scale_factor, anl_base_thresh, freeze_max_age,
-        av_enabled, xidForceLimit, relopts);
+        av_enabled, xidForceLimit, multiForceLimit, relopts);
     /* Force vacuum if table need freeze the old tuple to recycle clog */
     if (t_thrd.autovacuum_cxt.recentXid > FirstNormalTransactionId + freeze_max_age)
         xidForceLimit = t_thrd.autovacuum_cxt.recentXid - freeze_max_age;
@@ -3384,7 +3433,6 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     TransactionId relfrozenxid = InvalidTransactionId;
     Relation rel = heap_open(PartitionRelationId, AccessShareLock);
     Datum xid64datum = heap_getattr(partTuple, Anum_pg_partition_relfrozenxid64, RelationGetDescr(rel), &isNull);
-    heap_close(rel, AccessShareLock);
 
     if (isNull) {
         relfrozenxid = partForm->relfrozenxid;
@@ -3396,6 +3444,15 @@ static void partition_needs_vacanalyze(Oid partid, AutoVacOpts* relopts, Form_pg
     } else {
         relfrozenxid = DatumGetTransactionId(xid64datum);
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!force_vacuum) {
+        Datum mxidDatum = heap_getattr(partTuple, Anum_pg_partition_relminmxid, RelationGetDescr(rel), &isNull);
+        MultiXactId relminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(mxidDatum);
+        force_vacuum = (MultiXactIdIsValid(relminmxid) && MultiXactIdPrecedes(relminmxid, multiForceLimit));
+    }
+#endif
+    heap_close(rel, AccessShareLock);
 
     force_vacuum = (TransactionIdIsNormal(relfrozenxid) && TransactionIdPrecedes(relfrozenxid, xidForceLimit));
     *need_freeze = force_vacuum;

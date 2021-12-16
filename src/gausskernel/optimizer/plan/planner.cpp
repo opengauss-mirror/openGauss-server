@@ -1781,7 +1781,7 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
                 returningLists = NIL;
 
             /*
-             * If there was a FOR UPDATE/SHARE clause, the LockRows node will
+             * If there was a FOR [KEY] UPDATE/SHARE clause, the LockRows node will
              * have dealt with fetching non-locked marked rows, else we need
              * to have ModifyTable do that.
              */
@@ -2298,7 +2298,7 @@ static Plan* inheritance_planner(PlannerInfo* root)
     root->simple_rel_array = save_rel_array;
     root->simple_rte_array = save_rte_array;
     /*
-     * If there was a FOR UPDATE/SHARE clause, the LockRows node will have
+     * If there was a FOR [KEY] UPDATE/SHARE clause, the LockRows node will have
      * dealt with fetching non-locked marked rows, else we need to have
      * ModifyTable do that.
      */
@@ -2649,13 +2649,14 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
         tlist = postprocess_setop_tlist((List*)copyObject(result_plan->targetlist), tlist);
 
         /*
-         * Can't handle FOR UPDATE/SHARE here (parser should have checked
+         * Can't handle FOR [KEY] UPDATE/SHARE here (parser should have checked
          * already, but let's make sure).
          */
         if (parse->rowMarks)
             ereport(ERROR,
                 (errmodule(MOD_OPT), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("SELECT FOR UPDATE/SHARE is not allowed with UNION/INTERSECT/EXCEPT"),
+                    errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed "
+                           "with UNION/INTERSECT/EXCEPT"),
                     errdetail("N/A"),
                     errcause("SQL uses unsupported feature."),
                     erraction("Modify SQL statement according to the manual.")));
@@ -4142,7 +4143,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
     }
 
     /*
-     * If there is a FOR UPDATE/SHARE clause, add the LockRows node. (Note: we
+     * If there is a FOR [KEY] UPDATE/SHARE clause, add the LockRows node. (Note: we
      * intentionally test parse->rowMarks not root->rowMarks here. If there
      * are only non-locking rowmarks, they should be handled by the
      * ModifyTable node instead.)
@@ -4832,7 +4833,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
 
     if (parse->rowMarks) {
         /*
-         * We've got trouble if FOR UPDATE/SHARE appears inside grouping,
+         * We've got trouble if FOR [KEY] UPDATE/SHARE appears inside grouping,
          * since grouping renders a reference to individual tuple CTIDs
          * invalid.  This is also checked at parse time, but that's
          * insufficient because of rule substitution, query pullup, etc.
@@ -4840,7 +4841,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
         CheckSelectLocking(parse);
     } else {
         /*
-         * We only need rowmarks for UPDATE, DELETE, MEREG INTO, or FOR UPDATE/SHARE.
+         * We only need rowmarks for UPDATE, DELETE, MEREG INTO, or FOR [KEY] UPDATE/SHARE.
          */
         if (parse->commandType != CMD_UPDATE && parse->commandType != CMD_DELETE &&
             (parse->commandType != CMD_MERGE || (u_sess->opt_cxt.is_stream == false && IS_SINGLE_NODE == false)))
@@ -4850,7 +4851,7 @@ static void preprocess_rowmarks(PlannerInfo* root)
     /*
      * We need to have rowmarks for all base relations except the target. We
      * make a bitmapset of all base rels and then remove the items we don't
-     * need or have FOR UPDATE/SHARE marks for.
+     * need or have FOR [KEY] UPDATE/SHARE marks for.
      */
     rels = get_base_rel_indexes((Node*)parse->jointree);
     if (parse->resultRelation)
@@ -4897,10 +4898,23 @@ static void preprocess_rowmarks(PlannerInfo* root)
         newrc = makeNode(PlanRowMark);
         newrc->rti = newrc->prti = rc->rti;
         newrc->rowmarkId = ++(root->glob->lastRowMarkId);
-        if (rc->forUpdate)
-            newrc->markType = ROW_MARK_EXCLUSIVE;
-        else
-            newrc->markType = ROW_MARK_SHARE;
+        switch (rc->strength) {
+            case LCS_FORUPDATE:
+                newrc->markType = ROW_MARK_EXCLUSIVE;
+                break;
+            case LCS_FORNOKEYUPDATE:
+                newrc->markType = ROW_MARK_NOKEYEXCLUSIVE;
+                break;
+            case LCS_FORSHARE:
+                newrc->markType = ROW_MARK_SHARE;
+                break;
+            case LCS_FORKEYSHARE:
+                newrc->markType = ROW_MARK_KEYSHARE;
+                break;
+            default:
+                ereport(ERROR, (errmsg("unknown lock type: %d", rc->strength)));
+                break;
+        }
         newrc->noWait = rc->noWait;
         newrc->isParent = false;
         newrc->bms_nodeids = ng_get_baserel_data_nodeids(rte->relid, rte->relkind);

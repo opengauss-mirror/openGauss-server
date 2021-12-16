@@ -1608,6 +1608,9 @@ static RowMarkClause* _readRowMarkClause(void)
     READ_BOOL_FIELD(forUpdate);
     READ_BOOL_FIELD(noWait);
     READ_BOOL_FIELD(pushedDown);
+    IF_EXIST(strength) {
+        READ_ENUM_FIELD(strength, LockClauseStrength);
+    }
 
     READ_DONE();
 }

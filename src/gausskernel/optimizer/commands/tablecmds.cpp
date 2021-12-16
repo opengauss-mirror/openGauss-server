@@ -35,6 +35,7 @@
 #include "access/tableam.h"
 #include "access/ustore/knl_uheap.h"
 #include "access/ustore/knl_uscan.h"
+#include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/dfsstore_ctlg.h"
@@ -197,7 +198,7 @@
 #include "pgxc/redistrib.h"
 
 extern void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_table_age, TransactionId* oldestXmin,
-    TransactionId* freezeLimit, TransactionId* freezeTableLimit);
+    TransactionId* freezeLimit, TransactionId* freezeTableLimit, MultiXactId* multiXactFrzLimit);
 
 /*
  * ON COMMIT action list
@@ -679,7 +680,7 @@ static void AlterPartitionedSetWaitCleanGPI(bool alterGPI, Relation partTableRel
 static Oid AddTemporaryRangePartitionForAlterPartitions(const AlterTableCmd* cmd, Relation partTableRel,
     int sequence, bool* renameTargetPart);
 static void ExchangePartitionWithGPI(const AlterTableCmd* cmd, Relation partTableRel, Oid srcPartOid,
-    TransactionId frozenXid);
+    TransactionId frozenXid, MultiXactId multiXid);
 static void fastAddPartition(Relation partTableRel, List* destPartDefList, List** newPartOidList);
 static void readTuplesAndInsert(Relation tempTableRel, Relation partTableRel);
 static Oid createTempTableForPartition(Relation partTableRel, Partition part);
@@ -3988,6 +3989,7 @@ void ExecuteTruncate(TruncateStmt* stmt)
         Oid heap_relid;
         Oid toast_relid;
         bool is_shared = rel->rd_rel->relisshared;
+        MultiXactId	minmulti;
         /*
          * This effectively deletes all rows in the table, and may be done
          * in a serializable transaction.  In that case we must record a
@@ -3999,6 +4001,8 @@ void ExecuteTruncate(TruncateStmt* stmt)
         if (RELATION_IS_GLOBAL_TEMP(rel) && !gtt_storage_attached(RelationGetRelid(rel))) {
             continue;
         }
+
+        minmulti = GetOldestMultiXactId();
 
 #ifdef ENABLE_MOT
         if (RelationIsForeignTable(rel) && isMOTFromTblOid(RelationGetRelid(rel))) {
@@ -4038,7 +4042,9 @@ void ExecuteTruncate(TruncateStmt* stmt)
                 }
             }
 
-            RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin, isDfsTruncate);
+            RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin,
+                                      RelationIsColStore(rel) ? InvalidMultiXactId : minmulti,
+                                      isDfsTruncate);
 
             if (rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED)
                 heap_create_init_fork(rel);
@@ -4051,7 +4057,7 @@ void ExecuteTruncate(TruncateStmt* stmt)
              */
             if (OidIsValid(toast_relid)) {
                 rel = relation_open(toast_relid, AccessExclusiveLock);
-                RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin);
+                RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin, minmulti);
                 if (rel->rd_rel->relpersistence == RELPERSISTENCE_UNLOGGED)
                     heap_create_init_fork(rel);
                 heap_close(rel, NoLock);
@@ -4082,13 +4088,14 @@ void ExecuteTruncate(TruncateStmt* stmt)
 
                 Oid partOid = HeapTupleGetOid(tup);
                 Partition p = partitionOpen(rel, partOid, AccessExclusiveLock);
-                PartitionSetNewRelfilenode(rel, p, u_sess->utils_cxt.RecentXmin);
+                PartitionSetNewRelfilenode(rel, p, u_sess->utils_cxt.RecentXmin,
+                                           RelationIsColStore(rel) ? InvalidMultiXactId : minmulti);
 
                 /* process the toast table */
                 if (OidIsValid(toastOid)) {
                     Assert(rel->rd_rel->relpersistence != RELPERSISTENCE_UNLOGGED);
                     toastRel = heap_open(toastOid, AccessExclusiveLock);
-                    RelationSetNewRelfilenode(toastRel, u_sess->utils_cxt.RecentXmin);
+                    RelationSetNewRelfilenode(toastRel, u_sess->utils_cxt.RecentXmin, minmulti);
                     heap_close(toastRel, NoLock);
                 }
                 partitionClose(rel, p, NoLock);
@@ -4097,7 +4104,9 @@ void ExecuteTruncate(TruncateStmt* stmt)
                 pgstat_report_truncate(partOid, heap_relid, is_shared);
             }
 
-            RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin, isDfsTruncate);
+            RelationSetNewRelfilenode(rel, u_sess->utils_cxt.RecentXmin,
+                                      RelationIsColStore(rel) ? InvalidMultiXactId : minmulti,
+                                      isDfsTruncate);
             freePartList(partTupleList);
             pgstat_report_truncate(
                 heap_relid, InvalidOid, is_shared); /* report truncate partitioned table to PgStatCollector */
@@ -19943,7 +19952,8 @@ static void destroyMergeingIndexes(Relation srcIndexRelation, List* merging_btre
     list_free_ext(merging_part_list);
 }
 
-static void mergePartitionIndexSwap(List* indexRel, List* indexDestPartOid, List* indexDestOid, TransactionId FreezeXid)
+static void mergePartitionIndexSwap(List* indexRel, List* indexDestPartOid, List* indexDestOid, TransactionId FreezeXid,
+                                    MultiXactId FreezeMultiXid)
 {
     ListCell* cell1 = NULL;
     ListCell* cell2 = NULL;
@@ -19966,12 +19976,13 @@ static void mergePartitionIndexSwap(List* indexRel, List* indexDestPartOid, List
                         getPartitionName(dstPartOid, false))));
         }
         /* swap relfilenode between temp index relation and dest index partition */
-        finishPartitionHeapSwap(dstPartOid, clonedIndexRelationId, false, FreezeXid);
+        finishPartitionHeapSwap(dstPartOid, clonedIndexRelationId, false, FreezeXid, FreezeMultiXid);
         partitionClose(currentIndex, dstPart, NoLock);
     }
 }
 
-static void mergePartitionHeapSwap(Relation partTableRel, Oid destPartOid, Oid tempTableOid, TransactionId FreezeXid)
+static void mergePartitionHeapSwap(Relation partTableRel, Oid destPartOid, Oid tempTableOid, TransactionId FreezeXid,
+                                   MultiXactId FreezeMultiXid)
 {
     Partition destPart;
 
@@ -19986,7 +19997,7 @@ static void mergePartitionHeapSwap(Relation partTableRel, Oid destPartOid, Oid t
                     getPartitionName(destPartOid, false))));
     }
 
-    finishPartitionHeapSwap(destPartOid, tempTableOid, false, FreezeXid);
+    finishPartitionHeapSwap(destPartOid, tempTableOid, false, FreezeXid, FreezeMultiXid);
     partitionClose(partTableRel, destPart, NoLock);
 }
 
@@ -20048,9 +20059,10 @@ static void mergePartitionBTreeIndexes(List* srcPartOids, List* srcPartMergeOffs
 }
 
 static void mergePartitionHeapData(Relation partTableRel, Relation tempTableRel, List* srcPartOids, List* indexRel_list,
-    List* indexDestOid_list, int2 bucketId, TransactionId* freezexid)
+    List* indexDestOid_list, int2 bucketId, TransactionId* freezexid, MultiXactId* freezeMultixid)
 {
     TransactionId FreezeXid = InvalidTransactionId;
+    MultiXactId FreezeMultiXid = InvalidMultiXactId;
     HTAB* chunkIdHashTable = NULL;
     ListCell* cell1 = NULL;
     List* mergeToastIndexes = NIL;
@@ -20177,17 +20189,21 @@ static void mergePartitionHeapData(Relation partTableRel, Relation tempTableRel,
         Relation srcPartRel = NULL;
         char persistency;
         BlockNumber srcPartHeapBlocks = 0;
-        TransactionId relfrozenxid;
+        TransactionId relfrozenxid = InvalidTransactionId;
+        MultiXactId relminmxid = InvalidMultiXactId;
 
         srcPartition = partitionOpen(partTableRel, srcPartOid, ExclusiveLock, bucketId);  // already ExclusiveLock
                                                                                           // locked
         srcPartRel = partitionGetRelation(partTableRel, srcPartition);
         PartitionOpenSmgr(srcPartition);
 
-        relfrozenxid = getPartitionRelfrozenxid(srcPartRel);
+        getPartitionRelxids(srcPartRel, &relfrozenxid, &relminmxid);
         /* update final fronzenxid, we choose the least one */
         if (!TransactionIdIsValid(FreezeXid) || TransactionIdPrecedes(relfrozenxid, FreezeXid))
             FreezeXid = relfrozenxid;
+
+        if (!MultiXactIdIsValid(FreezeMultiXid) || MultiXactIdPrecedes(relminmxid, FreezeMultiXid))
+            FreezeMultiXid = relminmxid;
 
         /* Retry to open smgr in case it is cloesd when we process SI messages  */
         RelationOpenSmgr(tempTableRel);
@@ -20271,6 +20287,9 @@ static void mergePartitionHeapData(Relation partTableRel, Relation tempTableRel,
 
     if (freezexid != NULL)
         *freezexid = FreezeXid;
+
+    if (freezeMultixid != NULL)
+        *freezeMultixid = FreezeMultiXid;
     /*
      * 3.4 merge toast indexes and destroy chunkId hash table
      */
@@ -20368,6 +20387,7 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     Relation tempTableRel = NULL;
     ObjectAddress object;
     TransactionId FreezeXid;
+    MultiXactId FreezeMultiXid;
     LOCKMODE lockMode = NoLock;
 
     srcPartitions = (List*)cmd->def;
@@ -20587,7 +20607,7 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         /* set new empty filenode for toast index */
         Relation toastRel = relation_open(tempTableRel->rd_rel->reltoastrelid, AccessExclusiveLock);
         Relation toastIndexRel = index_open(toastRel->rd_rel->reltoastidxid, AccessExclusiveLock);
-        RelationSetNewRelfilenode(toastIndexRel, InvalidTransactionId);
+        RelationSetNewRelfilenode(toastIndexRel, InvalidTransactionId, InvalidMultiXactId);
         relation_close(toastRel, NoLock);
         index_close(toastIndexRel, NoLock);
     }
@@ -20612,7 +20632,8 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
                 indexRel_list,
                 clonedIndexRelId_list,
                 bucketlist->values[i],
-                &FreezeXid);
+                &FreezeXid,
+                &FreezeMultiXid);
 
             /* first bucket already merged into target cross bucket index. */
             if (i != 0) {
@@ -20622,7 +20643,8 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
         }
     } else {
         mergePartitionHeapData(
-            partTableRel, tempTableRel, srcPartOids, indexRel_list, clonedIndexRelId_list, InvalidBktId, &FreezeXid);
+            partTableRel, tempTableRel, srcPartOids, indexRel_list, clonedIndexRelId_list, InvalidBktId, &FreezeXid,
+            &FreezeMultiXid);
     }
 
     /* close temp relation */
@@ -20630,10 +20652,10 @@ static void ATExecMergePartition(Relation partTableRel, AlterTableCmd* cmd)
     heap_close(tempTableRel, NoLock);
 
     /* swap the index relfilenode*/
-    mergePartitionIndexSwap(indexRel_list, indexDestPartOid_list, clonedIndexRelId_list, FreezeXid);
+    mergePartitionIndexSwap(indexRel_list, indexDestPartOid_list, clonedIndexRelId_list, FreezeXid, FreezeMultiXid);
 
     /* swap the heap relfilenode */
-    mergePartitionHeapSwap(partTableRel, destPartOid, tempTableOid, FreezeXid);
+    mergePartitionHeapSwap(partTableRel, destPartOid, tempTableOid, FreezeXid, FreezeMultiXid);
     CommandCounterIncrement();
 
     /*free index list*/
@@ -20907,6 +20929,7 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
     List* partIndexList = NIL;
     List* ordIndexList = NIL;
     TransactionId relfrozenxid = InvalidTransactionId;
+    MultiXactId relminmxid = InvalidMultiXactId;
 
     ordTableOid = RangeVarGetRelid(cmd->exchange_with_rel, AccessExclusiveLock, false);
 
@@ -20998,12 +21021,12 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
         checkValidationForExchange(partTableRel, ordTableRel, partOid, cmd->exchange_verbose);
     }
     if (RelationIsPartition(ordTableRel))
-        relfrozenxid = getPartitionRelfrozenxid(ordTableRel);
+        getPartitionRelxids(ordTableRel, &relfrozenxid, &relminmxid);
     else
-        relfrozenxid = getRelationRelfrozenxid(ordTableRel);
+        getRelationRelxids(ordTableRel, &relfrozenxid, &relminmxid);
 
     // Swap relfilenode of table and toast table
-    finishPartitionHeapSwap(partOid, ordTableRel->rd_id, false, relfrozenxid);
+    finishPartitionHeapSwap(partOid, ordTableRel->rd_id, false, relfrozenxid, relminmxid);
 
     // Swap relfilenode of index
     Assert(list_length(partIndexList) == list_length(ordIndexList));
@@ -21019,7 +21042,7 @@ static void ATExecExchangePartition(Relation partTableRel, AlterTableCmd* cmd)
         // Unusable Global Index
         ATUnusableGlobalIndex(partTableRel);
     } else {
-        ExchangePartitionWithGPI(cmd, partTableRel, partOid, relfrozenxid);
+        ExchangePartitionWithGPI(cmd, partTableRel, partOid, relfrozenxid, relminmxid);
     }
 }
 
@@ -22272,7 +22295,7 @@ static void finishIndexSwap(List* partIndexList, List* ordIndexList)
         partOid = (Oid)lfirst_oid(cell1);
         ordOid = (Oid)lfirst_oid(cell2);
 
-        finishPartitionHeapSwap(partOid, ordOid, true, u_sess->utils_cxt.RecentGlobalXmin);
+        finishPartitionHeapSwap(partOid, ordOid, true, u_sess->utils_cxt.RecentGlobalXmin, GetOldestMultiXactId());
     }
 }
 
@@ -22469,7 +22492,7 @@ static void ATExecSplitPartition(Relation partTableRel, AlterTableCmd* cmd)
 
         // creat temp table and swap relfilenode with src partition
         tempTableOid = createTempTableForPartition(partTableRel, part);
-        finishPartitionHeapSwap(srcPartOid, tempTableOid, false, u_sess->utils_cxt.RecentXmin);
+        finishPartitionHeapSwap(srcPartOid, tempTableOid, false, u_sess->utils_cxt.RecentXmin, GetOldestMultiXactId());
 
         CommandCounterIncrement();
 
@@ -22940,7 +22963,7 @@ static Oid AddTemporaryHashPartitionForAlterPartitions(const AlterTableCmd* cmd,
  * 	@in srcPartOid: current partition oid.
  */
 static void ExchangePartitionWithGPI(const AlterTableCmd* cmd, Relation partTableRel, Oid srcPartOid,
-    TransactionId frozenXid)
+    TransactionId frozenXid, MultiXactId multiXid)
 {
     List* indexList = NIL;
     ListCell* cell = NULL;
@@ -22994,14 +23017,14 @@ static void ExchangePartitionWithGPI(const AlterTableCmd* cmd, Relation partTabl
         }
 
         /* swap relfilenode between temp index relation and dest index partition */
-        finishPartitionHeapSwap(indexDestPartOid, indexSrcPartOid, false, frozenXid, true);
+        finishPartitionHeapSwap(indexDestPartOid, indexSrcPartOid, false, frozenXid, multiXid, true);
         partitionClose(indexRel, dstPart, NoLock);
         relation_close(indexRel, RowExclusiveLock);
     }
 
     // Swap relfilenode of table and toast table
     CommandCounterIncrement();
-    finishPartitionHeapSwap(srcPartOid, destPartOid, false, frozenXid, true);
+    finishPartitionHeapSwap(srcPartOid, destPartOid, false, frozenXid, multiXid, true);
 
     CommandCounterIncrement();
     AlterPartitionedSetWaitCleanGPI(cmd->alterGPI, partTableRel, srcPartOid);
@@ -24121,7 +24144,8 @@ static void ExecRewriteRowTable(AlteredTableInfo* tab, Oid NewTableSpace, LOCKMO
      * we never try to swap toast tables by content, since we have no
      * interest in letting this code work on system catalogs.
      */
-    finish_heap_swap(tab->relid, OIDNewHeap, false, swapToastByContent, true, u_sess->utils_cxt.RecentXmin);
+    finish_heap_swap(tab->relid, OIDNewHeap, false, swapToastByContent, true, u_sess->utils_cxt.RecentXmin,
+                     GetOldestMultiXactId());
 
     /* clear all attrinitdefval */
     clearAttrInitDefVal(tab->relid);
@@ -24201,7 +24225,7 @@ static void ExecRewriteRowPartitionedTable(AlteredTableInfo* tab, Oid NewTableSp
         heap_close(newRel, NoLock);
 
         /* swap the temp table and partition */
-        finishPartitionHeapSwap(oldRel->rd_id, OIDNewHeap, false, u_sess->utils_cxt.RecentXmin);
+        finishPartitionHeapSwap(oldRel->rd_id, OIDNewHeap, false, u_sess->utils_cxt.RecentXmin, GetOldestMultiXactId());
 
         /* record the temp table oid for dropping */
         tempTableOidList = lappend_oid(tempTableOidList, OIDNewHeap);

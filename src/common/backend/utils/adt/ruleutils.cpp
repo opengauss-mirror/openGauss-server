@@ -5425,7 +5425,7 @@ static void get_select_query_def(Query* query, deparse_context* context, TupleDe
             get_rule_expr(query->limitCount, context, false);
     }
 
-    /* Add FOR UPDATE/SHARE clauses if present */
+    /* Add FOR [KEY] UPDATE/SHARE clauses if present */
     if (query->hasForUpdate) {
         foreach (l, query->rowMarks) {
             RowMarkClause* rc = (RowMarkClause*)lfirst(l);
@@ -5435,10 +5435,30 @@ static void get_select_query_def(Query* query, deparse_context* context, TupleDe
             if (rc->pushedDown)
                 continue;
 
+#ifndef ENABLE_MULTIPLE_NODES
+            switch (rc->strength) {
+                case LCS_FORKEYSHARE:
+                    appendContextKeyword(context, " FOR KEY SHARE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+                    break;
+                case LCS_FORSHARE:
+                    appendContextKeyword(context, " FOR SHARE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+                    break;
+                case LCS_FORNOKEYUPDATE:
+                    appendContextKeyword(context, " FOR NO KEY UPDATE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+                    break;
+                case LCS_FORUPDATE:
+                    appendContextKeyword(context, " FOR UPDATE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+                    break;
+                default:
+                    ereport(ERROR, (errmsg("unknown lock type: %d", rc->strength)));
+                    break;
+            }
+#else
             if (rc->forUpdate)
                 appendContextKeyword(context, " FOR UPDATE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
             else
                 appendContextKeyword(context, " FOR SHARE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+#endif
             appendStringInfo(buf, " OF %s", quote_identifier(rte->eref->aliasname));
             if (rc->noWait)
                 appendStringInfo(buf, " NOWAIT");

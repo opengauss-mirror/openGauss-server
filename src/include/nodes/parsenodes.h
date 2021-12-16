@@ -87,7 +87,7 @@ typedef uint32 AclMode; /* a bitmask of privilege bits */
 #define ACL_WRITE (1 << 14)       /* for pg_directory */
 #define N_ACL_RIGHTS 15           /* 1 plus the last 1<<x */
 #define ACL_NO_RIGHTS 0
-/* Currently, SELECT ... FOR UPDATE/FOR SHARE requires UPDATE privileges */
+/* Currently, SELECT ... FOR [KEY] UPDATE/FOR SHARE requires UPDATE privileges */
 #define ACL_SELECT_FOR_UPDATE ACL_UPDATE
 
 /* grantable rights for DDL operations */
@@ -448,22 +448,23 @@ typedef struct WindowClause {
 
 /*
  * RowMarkClause -
- *	   parser output representation of FOR UPDATE/SHARE clauses
+ *	   parser output representation of FOR [KEY] UPDATE/SHARE clauses
  *
  * Query.rowMarks contains a separate RowMarkClause node for each relation
- * identified as a FOR UPDATE/SHARE target.  If FOR UPDATE/SHARE is applied
- * to a subquery, we generate RowMarkClauses for all normal and subquery rels
- * in the subquery, but they are marked pushedDown = true to distinguish them
- * from clauses that were explicitly written at this query level.  Also,
- * Query.hasForUpdate tells whether there were explicit FOR UPDATE/SHARE
- * clauses in the current query level.
+ * identified as a FOR [KEY] UPDATE/SHARE target.  If one of these clauses
+ * is applied to a subquery, we generate RowMarkClauses for all normal and
+ * subquery rels in the subquery, but they are marked pushedDown = true to
+ * distinguish them from clauses that were explicitly written at this query
+ * level.  Also, Query.hasForUpdate tells whether there were explicit FOR
+ * UPDATE/SHARE/KEY SHARE clauses in the current query level
  */
 typedef struct RowMarkClause {
     NodeTag type;
     Index rti;       /* range table index of target relation */
-    bool forUpdate;  /* true = FOR UPDATE, false = FOR SHARE */
+    bool forUpdate;  /* for compatibility, we reserve this filed but don't use it */
     bool noWait;     /* NOWAIT option */
     bool pushedDown; /* pushed down from higher query level? */
+    LockClauseStrength strength;
 } RowMarkClause;
 
 /* Convenience macro to get the output tlist of a CTE's query */

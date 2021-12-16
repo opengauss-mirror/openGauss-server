@@ -157,6 +157,7 @@ typedef struct RelationData {
 
     /* data managed by RelationGetIndexAttrBitmap: */
     Bitmapset* rd_indexattr; /* identifies columns used in indexes */
+    Bitmapset* rd_keyattr;   /* cols that can be ref'd by foreign keys */
     Bitmapset* rd_idattr;    /* included in replica identity index */
 
     /*

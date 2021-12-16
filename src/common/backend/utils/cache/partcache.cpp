@@ -1448,7 +1448,7 @@ static void PartitionReloadIndexInfo(Partition part)
  * Output	:
  * Notes		:
  */
-void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid)
+void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId freezeXid, MultiXactId freezeMultiXid)
 {
     Oid newrelfilenode;
     RelFileNodeBackend newrnode;
@@ -1556,6 +1556,11 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
 
     replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
     values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    replaces[Anum_pg_partition_relminmxid - 1] = true;
+    values[Anum_pg_partition_relminmxid - 1] = TransactionIdGetDatum(freezeMultiXid);
+#endif
 
     ntup = heap_modify_tuple(tuple, RelationGetDescr(pg_partition), values, nulls, replaces);
 

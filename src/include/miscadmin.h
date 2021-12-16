@@ -72,6 +72,7 @@ extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
 extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
+extern const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM;
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
 

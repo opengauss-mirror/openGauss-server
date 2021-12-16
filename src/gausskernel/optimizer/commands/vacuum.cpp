@@ -34,6 +34,7 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/tableam.h"
+#include "access/multixact.h"
 #include "catalog/dfsstore_ctlg.h"
 #include "catalog/namespace.h"
 #include "catalog/gs_matview.h"
@@ -127,7 +128,7 @@ static void DropEmptyPartitionDirectories(Oid relid);
 static THR_LOCAL BufferAccessStrategy vac_strategy;
 static THR_LOCAL int elevel = -1;
 
-static void vac_truncate_clog(TransactionId frozenXID);
+static void vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti);
 static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast);
 static void GPIVacuumMainPartition(
     Relation onerel, const VacuumStmt* vacstmt, LOCKMODE lockmode, BufferAccessStrategy bstrategy);
@@ -899,7 +900,7 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
  * vacuum_set_xid_limits() -- compute oldest-Xmin and freeze cutoff points
  */
 void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_table_age, TransactionId* oldestXmin,
-    TransactionId* freezeLimit, TransactionId* freezeTableLimit)
+    TransactionId* freezeLimit, TransactionId* freezeTableLimit, MultiXactId* multiXactFrzLimit)
 {
     int64 freezemin;
     TransactionId limit;
@@ -990,6 +991,28 @@ void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_tabl
 
         *freezeTableLimit = limit;
     }
+
+    if (multiXactFrzLimit != NULL) {
+#ifndef ENABLE_MULTIPLE_NODES
+        MultiXactId mxLimit;
+
+        /*
+         * simplistic multixactid freezing: use the same freezing policy as
+         * for Xids
+         */
+        mxLimit = GetOldestMultiXactId();
+        if (mxLimit > FirstMultiXactId + freezemin)
+            mxLimit -= freezemin;
+        else
+            mxLimit = FirstMultiXactId;
+
+        *multiXactFrzLimit = mxLimit;
+#else
+        *multiXactFrzLimit = InvalidMultiXactId;
+#endif
+    }
+
+
 }
 
 /*
@@ -1092,7 +1115,7 @@ static void debug_print_rows_and_pages(Relation relation, Form_pg_class pgcform)
  *		This routine is shared by VACUUM and ANALYZE.
  */
 void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_pages, double num_tuples,
-    BlockNumber num_all_visible_pages, bool hasindex, TransactionId frozenxid)
+    BlockNumber num_all_visible_pages, bool hasindex, TransactionId frozenxid, MultiXactId minmulti)
 {
     Oid relid = RelationGetRelid(relation);
     HeapTuple ctup;
@@ -1103,6 +1126,7 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
     TransactionId relfrozenxid;
     Datum xid64datum;
     bool isGtt = false;
+    MultiXactId relminmxid;
 
     /* global temp table remember relstats to localhash and rel->rd_rel, not catalog */
     if (RELATION_IS_GLOBAL_TEMP(relation)) {
@@ -1190,11 +1214,20 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
         relfrozenxid = DatumGetTransactionId(xid64datum);
     }
 
-    if (TransactionIdIsNormal(frozenxid) && (TransactionIdPrecedes(relfrozenxid, frozenxid)
-#ifdef PGXC
-                                                || !IsPostmasterEnvironment)
+#ifndef ENABLE_MULTIPLE_NODES
+    Datum minmxidDatum = tableam_tops_tuple_getattr(ctup,
+        Anum_pg_class_relminmxid,
+        RelationGetDescr(classRel),
+        &isNull);
+    relminmxid = isNull ? InvalidMultiXactId : DatumGetTransactionId(minmxidDatum);
 #endif
-    ) {
+
+    if ((TransactionIdIsNormal(frozenxid) && (TransactionIdPrecedes(relfrozenxid, frozenxid)
+#ifdef PGXC
+                                                || !IsPostmasterEnvironment
+#endif
+    )) || (MultiXactIdIsValid(minmulti) && (MultiXactIdPrecedes(relminmxid, minmulti) || !IsPostmasterEnvironment)) ||
+    isNull) {
 
         Datum values[Natts_pg_class];
         bool nulls[Natts_pg_class];
@@ -1210,8 +1243,17 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
         rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
         securec_check(rc, "", "");
 
-        replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
-        values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
+        if (TransactionIdIsNormal(frozenxid) && TransactionIdPrecedes(relfrozenxid, frozenxid)) {
+            replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
+            values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
+        }
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if ((MultiXactIdIsValid(minmulti) && MultiXactIdPrecedes(relminmxid, minmulti)) || isNull) {
+            replaces[Anum_pg_class_relminmxid - 1] = true;
+            values[Anum_pg_class_relminmxid - 1] = TransactionIdGetDatum(minmulti);
+        }
+#endif
 
         nctup = (HeapTuple) tableam_tops_modify_tuple(ctup, RelationGetDescr(classRel), values, nulls, replaces);
         ctup = nctup;
@@ -1235,8 +1277,13 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
  *	vac_update_datfrozenxid() -- update pg_database.datfrozenxid for our DB
  *
  *		Update pg_database's datfrozenxid entry for our database to be the
- *		minimum of the pg_class.relfrozenxid values.  If we are able to
- *		advance pg_database.datfrozenxid, also try to truncate pg_clog.
+ *		minimum of the pg_class.relfrozenxid values.
+ *
+ *		Similarly, update our datfrozenmulti to be the minimum of the
+ *		pg_class.relfrozenmulti values.
+ *
+ *		If we are able to advance either pg_database value, also try to
+ *		truncate pg_clog and pg_multixact.
  *
  *		We violate transaction semantics here by overwriting the database's
  *		existing pg_database tuple with the new value.	This is reasonably
@@ -1260,6 +1307,12 @@ void vac_update_datfrozenxid(void)
     TransactionId datfrozenxid;
     TransactionId relfrozenxid;
     Datum xid64datum;
+    MultiXactId	newFrozenMulti = InvalidMultiXactId;
+#ifndef ENABLE_MULTIPLE_NODES
+    Datum minmxidDatum;
+    MultiXactId relminmxid = InvalidMultiXactId;
+#endif
+    MultiXactId	datminmxid = InvalidMultiXactId;
 
     /* Don't update datfrozenxid when cluser is resizing */
     if (ClusterResizingInProgress()) {
@@ -1269,9 +1322,17 @@ void vac_update_datfrozenxid(void)
      * Initialize the "min" calculation with GetOldestXmin, which is a
      * reasonable approximation to the minimum relfrozenxid for not-yet-
      * committed pg_class entries for new tables; see AddNewRelationTuple().
-     * Se we cannot produce a wrong minimum by starting with this.
+     * So we cannot produce a wrong minimum by starting with this.
      */
     newFrozenXid = GetOldestXmin(NULL);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    /*
+     * Similarly, initialize the MultiXact "min" with the value that would
+     * be used on pg_class for new tables.  See AddNewRelationTuple().
+     */
+    newFrozenMulti = GetOldestMultiXactId();
+#endif
 
     lastSaneFrozenXid = ReadNewTransactionId();
 
@@ -1342,6 +1403,15 @@ void vac_update_datfrozenxid(void)
 
         if (TransactionIdPrecedes(relfrozenxid, newFrozenXid))
             newFrozenXid = relfrozenxid;
+
+#ifndef ENABLE_MULTIPLE_NODES
+        minmxidDatum = tableam_tops_tuple_getattr(
+            classTup, Anum_pg_class_relminmxid, RelationGetDescr(relation), &isNull);
+        relminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(minmxidDatum);
+
+        if (MultiXactIdIsValid(relminmxid) && MultiXactIdPrecedes(relminmxid, newFrozenMulti))
+            newFrozenMulti = relminmxid;
+#endif
     }
 
     /* we're done with pg_class */
@@ -1425,11 +1495,16 @@ void vac_update_datfrozenxid(void)
     /* Consider frozenxid of objects in recyclebin. */
     TrAdjustFrozenXid64(u_sess->proc_cxt.MyDatabaseId, &newFrozenXid);
 
-    if ((TransactionIdPrecedes(datfrozenxid, newFrozenXid))
-#ifdef PGXC
-        || !IsPostmasterEnvironment)
+#ifndef ENABLE_MULTIPLE_NODES
+    minmxidDatum = tableam_tops_tuple_getattr(tuple, Anum_pg_database_datminmxid, RelationGetDescr(relation), &isNull);
+    datminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(minmxidDatum);
 #endif
-    {
+
+    if ((TransactionIdPrecedes(datfrozenxid, newFrozenXid)) || (MultiXactIdPrecedes(datminmxid, newFrozenMulti))
+#ifdef PGXC
+        || !IsPostmasterEnvironment
+#endif
+    ) {
         Datum values[Natts_pg_database];
         bool nulls[Natts_pg_database];
         bool replaces[Natts_pg_database];
@@ -1444,9 +1519,16 @@ void vac_update_datfrozenxid(void)
         rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
         securec_check(rc, "", "");
 
-        replaces[Anum_pg_database_datfrozenxid64 - 1] = true;
-        values[Anum_pg_database_datfrozenxid64 - 1] = TransactionIdGetDatum(newFrozenXid);
-
+        if (TransactionIdPrecedes(datfrozenxid, newFrozenXid)) {
+            replaces[Anum_pg_database_datfrozenxid64 - 1] = true;
+            values[Anum_pg_database_datfrozenxid64 - 1] = TransactionIdGetDatum(newFrozenXid);
+        }
+#ifndef ENABLE_MULTIPLE_NODES
+        if (MultiXactIdPrecedes(datminmxid, newFrozenMulti)) {
+            replaces[Anum_pg_database_datminmxid - 1] = true;
+            values[Anum_pg_database_datminmxid - 1] = TransactionIdGetDatum(newFrozenMulti);
+        }
+#endif
         newtuple = (HeapTuple) tableam_tops_modify_tuple(tuple, RelationGetDescr(relation), values, nulls, replaces);
         dirty = true;
     }
@@ -1470,7 +1552,7 @@ void vac_update_datfrozenxid(void)
      * this action will update that too.
      */
     if (dirty || ForceTransactionIdLimitUpdate()) {
-        vac_truncate_clog(newFrozenXid);
+        vac_truncate_clog(newFrozenXid, newFrozenMulti);
     }
 }
 
@@ -1486,14 +1568,17 @@ void vac_update_datfrozenxid(void)
  *		This routine is only invoked when we've managed to change our
  *		DB's datfrozenxid entry.
  */
-static void vac_truncate_clog(TransactionId frozenXID)
+static void vac_truncate_clog(TransactionId frozenXID, MultiXactId frozenMulti)
 {
     Relation relation;
     TableScanDesc scan;
     HeapTuple tuple;
-    Oid oldest_datoid;
-    /* init oldest_datoid to sync with my frozenXID */
-    oldest_datoid = u_sess->proc_cxt.MyDatabaseId;
+    Oid oldestxid_datoid;
+    Oid oldestmulti_datoid;
+
+    /* init oldest datoids to sync with my frozen values */
+    oldestxid_datoid = u_sess->proc_cxt.MyDatabaseId;
+    oldestmulti_datoid = u_sess->proc_cxt.MyDatabaseId;
 
     /*
      * Scan pg_database to compute the minimum datfrozenxid
@@ -1518,6 +1603,7 @@ static void vac_truncate_clog(TransactionId frozenXID)
     scan = tableam_scan_begin(relation, SnapshotNow, 0, NULL);
     while ((tuple = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         volatile FormData_pg_database* dbform = (Form_pg_database)GETSTRUCT(tuple);
+
         bool isNull = false;
         TransactionId datfrozenxid;
         Datum xid64datum = tableam_tops_tuple_getattr(tuple, Anum_pg_database_datfrozenxid64, RelationGetDescr(relation), &isNull);
@@ -1534,8 +1620,20 @@ static void vac_truncate_clog(TransactionId frozenXID)
 
         if (TransactionIdPrecedes(datfrozenxid, frozenXID)) {
             frozenXID = datfrozenxid;
-            oldest_datoid = HeapTupleGetOid(tuple);
+            oldestxid_datoid = HeapTupleGetOid(tuple);
         }
+
+#ifndef ENABLE_MULTIPLE_NODES
+        Datum minmxidDatum = tableam_tops_tuple_getattr(tuple, Anum_pg_database_datminmxid,
+            RelationGetDescr(relation), &isNull);
+        MultiXactId datminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(minmxidDatum);
+        Assert(MultiXactIdIsValid(datminmxid));
+
+        if (MultiXactIdPrecedes(datminmxid, frozenMulti)) {
+            frozenMulti = datminmxid;
+            oldestmulti_datoid = HeapTupleGetOid(tuple);
+        }
+#endif
     }
 
     heap_endscan(scan);
@@ -1544,20 +1642,26 @@ static void vac_truncate_clog(TransactionId frozenXID)
 
     /* Truncate CLOG to the oldest frozenxid */
     TruncateCLOG(frozenXID);
+#ifndef ENABLE_MULTIPLE_NODES
+    TruncateMultiXact(frozenMulti);
+#endif
 
     /*
-     * Update the wrap limit for GetNewTransactionId.  Note: this function
-     * will also signal the postmaster for an(other) autovac cycle if needed.
+     * Update the wrap limit for GetNewTransactionId and creation of new
+     * MultiXactIds.  Note: these functions will also signal the postmaster for
+     * an(other) autovac cycle if needed.   XXX should we avoid possibly
+     * signalling twice?
      */
-    SetTransactionIdLimit(frozenXID, oldest_datoid);
+    SetTransactionIdLimit(frozenXID, oldestxid_datoid);
+    MultiXactAdvanceOldest(frozenMulti, oldestmulti_datoid);
 
     ereport(LOG,
-        (errmsg("In truncate clog: frozenXID:" XID_FMT ", oldest_datoid: %u, xid:" XID_FMT
+        (errmsg("In truncate clog: frozenXID:" XID_FMT ", oldestxid_datoid: %u, xid:" XID_FMT
                 ", pid: %lu, ShmemVariableCache: nextOid:%u, oldestXid:" XID_FMT ","
                 "nextXid:" XID_FMT ", xidVacLimit:%lu, oldestXidDB:%u, RecentXmin:" XID_FMT
                 ", RecentGlobalXmin:" XID_FMT ", OldestXmin:" XID_FMT ", FreezeLimit:%lu, useLocalSnapshot:%d.",
             frozenXID,
-            oldest_datoid,
+            oldestxid_datoid,
             t_thrd.pgxact->xid,
             t_thrd.proc->pid,
             t_thrd.xact_cxt.ShmemVariableCache->nextOid,
@@ -2516,7 +2620,7 @@ void vacuum_delay_point(void)
 }
 
 void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tuples, BlockNumber num_all_visible_pages,
-    TransactionId frozenxid)
+    TransactionId frozenxid, MultiXactId minmulti)
 {
     Oid partid = PartitionGetPartid(part);
     Relation rd;
@@ -2527,6 +2631,7 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
     bool isNull = false;
     TransactionId relfrozenxid;
     Datum xid64datum;
+    MultiXactId relminmxid = MaxMultiXactId;
 
     rd = heap_open(PartitionRelationId, RowExclusiveLock);
 
@@ -2576,7 +2681,14 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
         relfrozenxid = DatumGetTransactionId(xid64datum);
     }
 
-    if (TransactionIdIsNormal(frozenxid) && TransactionIdPrecedes(relfrozenxid, frozenxid)) {
+#ifndef ENABLE_MULTIPLE_NODES
+    Datum minmxidDatum = tableam_tops_tuple_getattr(parttup, Anum_pg_partition_relminmxid,
+        RelationGetDescr(rd), &isNull);
+    relminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(minmxidDatum);
+#endif
+
+    if ((TransactionIdIsNormal(frozenxid) && TransactionIdPrecedes(relfrozenxid, frozenxid)) ||
+        (MultiXactIdIsValid(minmulti) && MultiXactIdPrecedes(relminmxid, minmulti))) {
         Datum values[Natts_pg_partition];
         bool nulls[Natts_pg_partition];
         bool replaces[Natts_pg_partition];
@@ -2591,8 +2703,17 @@ void vac_update_partstats(Partition part, BlockNumber num_pages, double num_tupl
         rc = memset_s(replaces, sizeof(replaces), false, sizeof(replaces));
         securec_check(rc, "", "");
 
-        replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
-        values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
+        if (TransactionIdIsNormal(frozenxid) && TransactionIdPrecedes(relfrozenxid, frozenxid)) {
+            replaces[Anum_pg_partition_relfrozenxid64 - 1] = true;
+            values[Anum_pg_partition_relfrozenxid64 - 1] = TransactionIdGetDatum(frozenxid);
+        }
+
+#ifndef ENABLE_MULTIPLE_NODES
+        if (MultiXactIdIsValid(minmulti) && MultiXactIdPrecedes(relminmxid, minmulti)) {
+            replaces[Anum_pg_partition_relminmxid - 1] = true;
+            values[Anum_pg_partition_relminmxid - 1] = TransactionIdGetDatum(minmulti);
+        }
+#endif
 
         nparttup = (HeapTuple) tableam_tops_modify_tuple(parttup, RelationGetDescr(rd), values, nulls, replaces);
         parttup = nparttup;
@@ -2742,16 +2863,18 @@ void vac_close_part_indexes(
 }
 
 /* Scan pg_partition to get all the partitions of the partitioned table,
- * calculate all the pages, tuples, and the min frozenXid
+ * calculate all the pages, tuples, and the min frozenXid, multiXid
  */
 void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation partRel, _out_ BlockNumber* totalPages,
-    _out_ BlockNumber* totalVisiblePages, _out_ double* totalTuples, _out_ TransactionId* minFrozenXid)
+    _out_ BlockNumber* totalVisiblePages, _out_ double* totalTuples, _out_ TransactionId* minFrozenXid,
+    _out_ MultiXactId* minMultiXid)
 {
     ScanKeyData partKey[2];
     BlockNumber pages = 0;
     BlockNumber allVisiblePages = 0;
     double tuples = 0;
     TransactionId frozenXid;
+    MultiXactId multiXid = InvalidMultiXactId;
     Form_pg_partition partForm;
 
     Assert(partitionRel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION);
@@ -2781,7 +2904,7 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
     SysScanDesc partScan = systable_beginscan(partRel, PartitionParentOidIndexId, true, NULL, 2, partKey);
 
     HeapTuple partTuple = NULL;
-    /* compute all pages, tuples and the minimum frozenXid */
+    /* compute all pages, tuples and the minimum frozenXid, multiXid */
     partTuple = systable_getnext(partScan);
     if (partTuple != NULL) {
         partForm = (Form_pg_partition)GETSTRUCT(partTuple);
@@ -2802,6 +2925,12 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
         }
 
         frozenXid = relfrozenxid;
+
+#ifndef ENABLE_MULTIPLE_NODES
+        xid64datum = tableam_tops_tuple_getattr(partTuple, Anum_pg_partition_relminmxid,
+            RelationGetDescr(rel), &isNull);
+        multiXid = isNull ? FirstMultiXactId : DatumGetTransactionId(xid64datum);
+#endif
 
         do {
             partForm = (Form_pg_partition)GETSTRUCT(partTuple);
@@ -2826,11 +2955,22 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
             if (TransactionIdPrecedes(relfrozenxid, frozenXid)) {
                 frozenXid = relfrozenxid;
             }
+
+#ifndef ENABLE_MULTIPLE_NODES
+            xid64datum = tableam_tops_tuple_getattr(partTuple, Anum_pg_partition_relminmxid,
+                RelationGetDescr(rel), &isNull);
+            MultiXactId relminmxid = isNull ? FirstMultiXactId : DatumGetTransactionId(xid64datum);
+
+            if (TransactionIdPrecedes(relminmxid, multiXid)) {
+                multiXid = relminmxid;
+            }
+#endif
         } while ((partTuple = systable_getnext(partScan)) != NULL);
 
         heap_close(rel, AccessShareLock);
     } else {
         frozenXid = InvalidTransactionId;
+        multiXid = InvalidMultiXactId;
     }
 
     systable_endscan(partScan);
@@ -2843,17 +2983,21 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
         *totalTuples = tuples;
     if (minFrozenXid != NULL)
         *minFrozenXid = frozenXid;
+    if (minMultiXid != NULL)
+        *minMultiXid = multiXid;
 }
 
 /*
  * After VACUUM or ANALYZE, update pg_class for the partitioned tables.
  */
-void vac_update_pgclass_partitioned_table(Relation partitionRel, bool hasIndex, TransactionId newFrozenXid)
+void vac_update_pgclass_partitioned_table(Relation partitionRel, bool hasIndex, TransactionId newFrozenXid,
+                                          MultiXactId newMultiXid)
 {
     BlockNumber pages = 0;
     BlockNumber allVisiblePages = 0;
     double tuples = 0;
     TransactionId frozenXid = newFrozenXid;
+    MultiXactId multiXid = newMultiXid;
 
     Assert(partitionRel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION);
 
@@ -2864,8 +3008,8 @@ void vac_update_pgclass_partitioned_table(Relation partitionRel, bool hasIndex, 
      */
     Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
     Relation partRel = heap_open(PartitionRelationId, ShareUpdateExclusiveLock);
-    CalculatePartitionedRelStats(partitionRel, partRel, &pages, &allVisiblePages, &tuples, &frozenXid);
-    vac_update_relstats(partitionRel, classRel, pages, tuples, allVisiblePages, hasIndex, frozenXid);
+    CalculatePartitionedRelStats(partitionRel, partRel, &pages, &allVisiblePages, &tuples, &frozenXid, &multiXid);
+    vac_update_relstats(partitionRel, classRel, pages, tuples, allVisiblePages, hasIndex, frozenXid, multiXid);
     heap_close(partRel, ShareUpdateExclusiveLock);
     heap_close(classRel, RowExclusiveLock);
 }
@@ -2884,7 +3028,7 @@ void CStoreVacUpdatePartitionRelStats(Relation partitionRel, TransactionId newFr
      */
     Relation pgclassRel = heap_open(RelationRelationId, RowExclusiveLock);
     Relation pgPartitionRel = heap_open(PartitionRelationId, ShareUpdateExclusiveLock);
-    CalculatePartitionedRelStats(partitionRel, pgPartitionRel, NULL, NULL, NULL, &frozenXid);
+    CalculatePartitionedRelStats(partitionRel, pgPartitionRel, NULL, NULL, NULL, &frozenXid, NULL);
     CStoreVacUpdateNormalRelStats(RelationGetRelid(partitionRel), frozenXid, pgclassRel);
     heap_close(pgPartitionRel, ShareUpdateExclusiveLock);
     heap_close(pgclassRel, RowExclusiveLock);
@@ -3149,7 +3293,8 @@ void merge_cu_relation(void* _info, VacuumStmt* stmt)
                     getTuplesAndInsert(delta_rel, OIDNewHeap);
 
                     /* swap relfile node */
-                    finish_heap_swap(deltaOid, OIDNewHeap, false, false, false, u_sess->utils_cxt.RecentGlobalXmin);
+                    finish_heap_swap(deltaOid, OIDNewHeap, false, false, false, u_sess->utils_cxt.RecentGlobalXmin,
+                                     InvalidMultiXactId);
 
                     /* close relation */
                     relation_close(delta_rel, NoLock);
@@ -3191,7 +3336,8 @@ void merge_cu_relation(void* _info, VacuumStmt* stmt)
         getTuplesAndInsert(delta_rel, OIDNewHeap);
 
         /* swap relfile node */
-        finish_heap_swap(deltaOid, OIDNewHeap, false, false, false, u_sess->utils_cxt.RecentGlobalXmin);
+        finish_heap_swap(deltaOid, OIDNewHeap, false, false, false, u_sess->utils_cxt.RecentGlobalXmin,
+                         InvalidMultiXactId);
 
         /* close relation */
         if (delta_rel != NULL)
@@ -3939,7 +4085,8 @@ static void GPIVacuumMainPartition(
             cbi_set_enable_clean(iRel[i]);
         }
         vac_update_relstats(
-            iRel[i], classRel, indstats[i]->num_pages, indstats[i]->num_index_tuples, 0, false, InvalidTransactionId);
+            iRel[i], classRel, indstats[i]->num_pages, indstats[i]->num_index_tuples, 0, false, InvalidTransactionId,
+            InvalidMultiXactId);
         pfree_ext(indstats[i]);
         index_close(iRel[i], lockmode);
     }

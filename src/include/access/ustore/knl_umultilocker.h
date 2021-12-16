@@ -22,30 +22,6 @@
 #include "access/multixact.h"
 #include "access/ustore/knl_utuple.h"
 
-const struct LockExtraInfo TupleLockExtraInfo[MaxLockTupleMode + 1] = {
-    {
-        /* LockTupleKeyShare */
-        AccessShareLock,
-        MultiXactStatusForKeyShare,
-        -1 /* KeyShare does not allow updating tuples */
-    },
-    {
-        ShareLock, /* LockTupleShared */
-        MultiXactStatusForShare,
-        -1
-    },
-    {
-        ExclusiveLock, /* LockTupleNoKeyExclusive */
-        MultiXactStatusForNoKeyUpdate,
-        MultiXactStatusNoKeyUpdate
-    },
-    {
-        ExclusiveLock, /* LockTupleExclusive */
-        MultiXactStatusForUpdate,
-        MultiXactStatusUpdate
-    }
-};
-
 /*
  * Get the heavy-weight lock mode from lock tuple mode.
  */

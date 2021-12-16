@@ -2375,7 +2375,7 @@ typedef struct SetOpState {
 /* ----------------
  *	 LockRowsState information
  *
- *		LockRows nodes are used to enforce FOR UPDATE/FOR SHARE locking.
+ *		LockRows nodes are used to enforce FOR [KEY] UPDATE/FOR SHARE locking.
  * ----------------
  */
 typedef struct LockRowsState {

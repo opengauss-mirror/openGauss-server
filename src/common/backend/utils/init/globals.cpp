@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92422;
+const uint32 GRAND_VERSION_NUM = 92423;
 
 const uint32 HINT_ENHANCEMENT_VERSION_NUM = 92359;
 const uint32 MATVIEW_VERSION_NUM = 92213;
@@ -96,6 +96,8 @@ const uint32 V5R2C00_BACKEND_VERSION_NUM = 92412;
 
 const uint32 ANALYZER_HOOK_VERSION_NUM = 92420;
 const uint32 SUPPORT_HASH_XLOG_VERSION_NUM = 92420;
+
+const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM = 92423;
 
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;

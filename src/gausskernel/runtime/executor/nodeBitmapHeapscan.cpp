@@ -835,7 +835,8 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
                  * occured after taking the snapshot. Skip for explain only commands.
                  */
                 if (isUstoreRel && !(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
-                    TransactionId relfrozenxid64 = getPartitionRelfrozenxid(partitiontrel);
+                    TransactionId relfrozenxid64 = InvalidTransactionId;
+                    getPartitionRelxids(partitiontrel, &relfrozenxid64);
                     if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                         !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                         TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {
@@ -859,7 +860,8 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
              * occured after taking the snapshot. Skip for explain only commands.
              */
             if (!(eflags & EXEC_FLAG_EXPLAIN_ONLY)) {
-                TransactionId relfrozenxid64 = getRelationRelfrozenxid(currentRelation);
+                TransactionId relfrozenxid64 = InvalidTransactionId;
+                getRelationRelxids(currentRelation, &relfrozenxid64);
                 if (TransactionIdPrecedes(FirstNormalTransactionId, scanSnap->xmax) &&
                     !TransactionIdIsCurrentTransactionId(relfrozenxid64) &&
                     TransactionIdPrecedes(scanSnap->xmax, relfrozenxid64)) {

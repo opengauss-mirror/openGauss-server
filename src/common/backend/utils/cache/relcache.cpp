@@ -37,6 +37,7 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/heap.h"
 #include "catalog/catversion.h"
@@ -3444,6 +3445,7 @@ static void RelationDestroyRelation(Relation relation, bool remember_tupdesc)
     }
     list_free_ext(relation->rd_indexlist);
     bms_free_ext(relation->rd_indexattr);
+    bms_free_ext(relation->rd_keyattr);
     bms_free_ext(relation->rd_idattr);
     FreeTriggerDesc(relation->trigdesc);
     if (relation->rd_rlsdesc) {
@@ -4452,7 +4454,7 @@ extern void heap_create_init_fork(Relation rel);
 void DeltaTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool partition)
 {
     Relation deltaRel = heap_open(relid, AccessExclusiveLock);
-    RelationSetNewRelfilenode(deltaRel, freezeXid);
+    RelationSetNewRelfilenode(deltaRel, freezeXid, InvalidMultiXactId);
     // skip partition because one partition CANNOT be unlogged.
     if (!partition && RELPERSISTENCE_UNLOGGED == deltaRel->rd_rel->relpersistence) {
         heap_create_init_fork(deltaRel);
@@ -4467,7 +4469,7 @@ void DescTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool partiti
     // Because indexRelation has locked as AccessExclusiveLock, so it is safe
     //
     Relation cudescRel = heap_open(relid, AccessExclusiveLock);
-    RelationSetNewRelfilenode(cudescRel, freezeXid);
+    RelationSetNewRelfilenode(cudescRel, freezeXid, InvalidMultiXactId);
 
     // skip partition because one partition CANNOT be unlogged.
     if (!partition && RELPERSISTENCE_UNLOGGED == cudescRel->rd_rel->relpersistence) {
@@ -4480,7 +4482,7 @@ void DescTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool partiti
     foreach (indlist, RelationGetIndexList(cudescRel)) {
         Oid indexId = lfirst_oid(indlist);
         Relation currentIndex = index_open(indexId, AccessExclusiveLock);
-        RelationSetNewRelfilenode(currentIndex, InvalidTransactionId);
+        RelationSetNewRelfilenode(currentIndex, InvalidTransactionId, InvalidMultiXactId);
         // keep the same logic with row index relation, and
         // skip checking RELPERSISTENCE_UNLOGGED persistence
 
@@ -4512,7 +4514,7 @@ void DescTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool partiti
  * must be passed for indexes and sequences).  This should be a lower bound on
  * the XIDs that will be put into the new relation contents.
  */
-void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool isDfsTruncate)
+void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, MultiXactId minmulti, bool isDfsTruncate)
 {
     Oid newrelfilenode;
     RelFileNodeBackend newrnode;
@@ -4648,6 +4650,11 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool 
 
         replaces[Anum_pg_class_relfrozenxid64 - 1] = true;
         values[Anum_pg_class_relfrozenxid64 - 1] = TransactionIdGetDatum(freezeXid);
+
+#ifndef ENABLE_MULTIPLE_NODES
+        replaces[Anum_pg_class_relminmxid - 1] = true;
+        values[Anum_pg_class_relminmxid - 1] = TransactionIdGetDatum(minmulti);
+#endif
 
         nctup = heap_modify_tuple(tuple, RelationGetDescr(pg_class), values, nulls, replaces);
 
@@ -6147,6 +6154,7 @@ static void ClusterConstraintFetch(__inout Relation relation)
 Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind attrKind)
 {
     Bitmapset* indexattrs = NULL;
+    Bitmapset* uindexattrs = NULL;
     List* indexoidlist = NULL;
     ListCell* l = NULL;
     Bitmapset* idindexattrs = NULL; /* columns in the the replica identity */
@@ -6160,7 +6168,7 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
             case INDEX_ATTR_BITMAP_ALL:
                 return bms_copy(relation->rd_indexattr);
             case INDEX_ATTR_BITMAP_KEY:
-                ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unknown attrKind %u", attrKind)));
+                return bms_copy(relation->rd_keyattr);
             case INDEX_ATTR_BITMAP_IDENTITY_KEY:
                 return bms_copy(relation->rd_idattr);
             default:
@@ -6201,18 +6209,23 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
      * won't be returned at all by RelationGetIndexList.
      */
     indexattrs = NULL;
+    uindexattrs = NULL;
     idindexattrs = NULL;
     foreach (l, indexoidlist) {
         Oid indexOid = lfirst_oid(l);
         Relation indexDesc;
         IndexInfo* indexInfo = NULL;
         int i;
+        bool isKey = false;    /* candidate key */
         bool isIDKey = false; /* replica identity index */
 
         indexDesc = index_open(indexOid, AccessShareLock);
 
         /* Extract index key information from the index's pg_index row */
         indexInfo = BuildIndexInfo(indexDesc);
+
+        /* Can this index be referenced by a foreign key? */
+        isKey = indexInfo->ii_Unique && indexInfo->ii_Expressions == NIL && indexInfo->ii_Predicate == NIL;
 
         /* Is this index the configured (or default) replica identity? */
         isIDKey = (indexOid == relreplindex);
@@ -6231,6 +6244,9 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
              */
             if (attrnum != 0) {
                 indexattrs = bms_add_member(indexattrs, attrnum - FirstLowInvalidHeapAttributeNumber);
+                if (isKey && i < indexInfo->ii_NumIndexKeyAttrs) {
+                    uindexattrs = bms_add_member(uindexattrs, attrnum - FirstLowInvalidHeapAttributeNumber);
+                }
                 if (isIDKey && i < indexInfo->ii_NumIndexKeyAttrs)
                     idindexattrs = bms_add_member(idindexattrs, attrnum - FirstLowInvalidHeapAttributeNumber);
             }
@@ -6255,6 +6271,7 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
      * empty.
      */
     oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
+    relation->rd_keyattr = bms_copy(uindexattrs);
     relation->rd_idattr = bms_copy(idindexattrs);
     relation->rd_indexattr = bms_copy(indexattrs);
     (void)MemoryContextSwitchTo(oldcxt);
@@ -6264,7 +6281,7 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
         case INDEX_ATTR_BITMAP_ALL:
             return indexattrs;
         case INDEX_ATTR_BITMAP_KEY:
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("unknown attrKind %u", attrKind)));
+            return uindexattrs;
         case INDEX_ATTR_BITMAP_IDENTITY_KEY:
             return idindexattrs;
         default:
@@ -6822,6 +6839,7 @@ static bool load_relcache_init_file(bool shared)
         rel->rd_indexlist = NIL;
         rel->rd_oidindex = InvalidOid;
         rel->rd_indexattr = NULL;
+        rel->rd_keyattr = NULL;
         rel->rd_idattr = NULL;
         rel->rd_createSubid = InvalidSubTransactionId;
         rel->rd_newRelfilenodeSubid = InvalidSubTransactionId;

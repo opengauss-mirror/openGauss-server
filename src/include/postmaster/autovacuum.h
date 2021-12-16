@@ -131,8 +131,8 @@ typedef struct autovac_table {
     bool at_doanalyze;
     bool at_needfreeze;
     bool at_sharedrel;
-    int at_freeze_min_age;
-    int at_freeze_table_age;
+    int64 at_freeze_min_age;
+    int64 at_freeze_table_age;
     int at_vacuum_cost_delay;
     int at_vacuum_cost_limit;
     char* at_partname;

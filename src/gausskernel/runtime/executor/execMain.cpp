@@ -317,7 +317,7 @@ void standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
     switch (queryDesc->operation) {
         case CMD_SELECT:
             /*
-             * SELECT FOR UPDATE/SHARE and modifying CTEs need to mark tuples
+             * SELECT FOR [KEY] UPDATE/SHARE and modifying CTEs need to mark tuples
              */
             if (queryDesc->plannedstmt->rowMarks != NIL || queryDesc->plannedstmt->hasModifyingCTE) {
                 estate->es_output_cid = GetCurrentCommandId(true);
@@ -1241,7 +1241,7 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
     }
 
     /*
-     * Similarly, we have to lock relations selected FOR UPDATE/FOR SHARE
+     * Similarly, we have to lock relations selected FOR [KEY] UPDATE/SHARE
      * before we initialize the plan tree, else we'd be risking lock upgrades.
      * While we are at it, build the ExecRowMark list.
      */
@@ -1264,7 +1264,9 @@ void InitPlan(QueryDesc *queryDesc, int eflags)
          */
         switch (rc->markType) {
             case ROW_MARK_EXCLUSIVE:
+            case ROW_MARK_NOKEYEXCLUSIVE:
             case ROW_MARK_SHARE:
+            case ROW_MARK_KEYSHARE:
                 if (IS_PGXC_COORDINATOR || u_sess->pgxc_cxt.PGXCNodeId < 0 ||
                     bms_is_member(u_sess->pgxc_cxt.PGXCNodeId, rc->bms_nodeids)) {
                     relid = getrelid(rc->rti, rangeTable);
@@ -1979,7 +1981,7 @@ static void ExecEndPlan(PlanState *planstate, EState *estate)
     }
 
     /*
-     * close any relations selected FOR UPDATE/FOR SHARE, again keeping locks
+     * close any relations selected FOR [KEY] UPDATE/SHARE, again keeping locks
      */
     foreach (l, estate->es_rowMarks) {
         ExecRowMark *erm = (ExecRowMark *)lfirst(l);
@@ -2773,6 +2775,7 @@ TupleTableSlot *EvalPlanQualUHeap(EState *estate, EPQState *epqstate, Relation r
  * 	epqstate - state for EvalPlanQual rechecking
  * 	relation - table containing tuple
  * 	rti - rangetable index of table containing tuple
+ *  lockmode - requested tuple lock mode
  * 	*tid - t_ctid from the outdated tuple (ie, next updated version)
  * 	priorXmax - t_xmax from the outdated tuple
  *
@@ -2781,9 +2784,12 @@ TupleTableSlot *EvalPlanQualUHeap(EState *estate, EPQState *epqstate, Relation r
  *
  * Returns a slot containing the new candidate update/delete tuple, or
  * NULL if we determine we shouldn't process the row.
+ *
+ * Note: properly, lockmode should be declared as enum LockTupleMode,
+ * but we use "int" to avoid having to include heapam.h in executor.h.
  */
-TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relation, Index rti, ItemPointer tid,
-    TransactionId priorXmax, bool partRowMoveUpdate)
+TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relation, Index rti, int lockmode,
+    ItemPointer tid, TransactionId priorXmax, bool partRowMoveUpdate)
 {
     TupleTableSlot *slot = NULL;
     Tuple copyTuple;
@@ -2793,7 +2799,7 @@ TupleTableSlot *EvalPlanQual(EState *estate, EPQState *epqstate, Relation relati
     /*
      * Get and lock the updated version of the row; if fail, return NULL.
      */
-    copyTuple = tableam_tuple_lock_updated(estate->es_output_cid, relation, LockTupleExclusive, tid, priorXmax,
+    copyTuple = tableam_tuple_lock_updated(estate->es_output_cid, relation, lockmode, tid, priorXmax,
         estate->es_snapshot);
 
     if (copyTuple == NULL) {
@@ -3073,7 +3079,7 @@ HeapTuple heap_lock_updated(CommandId cid, Relation relation, int lockmode, Item
         /* updated, so look at the updated row */
         tuple.t_self = tuple.t_data->t_ctid;
         /* updated row should have xmin matching this xmax */
-        priorXmax = HeapTupleGetRawXmax(&tuple);
+        priorXmax = HeapTupleGetUpdateXid(&tuple);
         ReleaseBuffer(buffer);
         /* loop back to fetch next in chain */
     }

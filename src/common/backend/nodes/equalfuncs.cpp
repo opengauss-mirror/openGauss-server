@@ -2542,6 +2542,9 @@ static bool _equalLockingClause(const LockingClause* a, const LockingClause* b)
     COMPARE_NODE_FIELD(lockedRels);
     COMPARE_SCALAR_FIELD(forUpdate);
     COMPARE_SCALAR_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(strength);
+    }
 
     return true;
 }
@@ -2680,6 +2683,9 @@ static bool _equalRowMarkClause(const RowMarkClause* a, const RowMarkClause* b)
     COMPARE_SCALAR_FIELD(forUpdate);
     COMPARE_SCALAR_FIELD(noWait);
     COMPARE_SCALAR_FIELD(pushedDown);
+    if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+        COMPARE_SCALAR_FIELD(strength);
+    }
 
     return true;
 }

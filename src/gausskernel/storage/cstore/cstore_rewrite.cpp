@@ -33,6 +33,7 @@
 #include "catalog/objectaccess.h"
 #include "access/cstore_insert.h"
 #include "access/tableam.h"
+#include "access/multixact.h"
 #include "catalog/dependency.h"
 #include "utils/lsyscache.h"
 #include "catalog/index.h"
@@ -593,8 +594,8 @@ void CStoreRewriter::RewriteColsData()
     index_close(oldCudescIndex, NoLock);
 
     // finish rewriting cudesc relation.
-    finish_heap_swap(
-        m_OldHeapRel->rd_rel->relcudescrelid, m_NewCuDescHeap, false, swapToastByContent, false, m_NewCudescFrozenXid);
+    finish_heap_swap(m_OldHeapRel->rd_rel->relcudescrelid, m_NewCuDescHeap, false,
+                     swapToastByContent, false, m_NewCudescFrozenXid, FirstMultiXactId);
 }
 
 void CStoreRewriter::EndRewriteCols()
@@ -894,7 +895,7 @@ void CStoreRewriter::FetchCudescFrozenXid(Relation oldCudescHeap)
     //
     Assert(oldCudescHeap->rd_rel->relisshared == false);
     TransactionId OldestXmin = InvalidTransactionId;
-    vacuum_set_xid_limits(oldCudescHeap, -1, -1, &OldestXmin, &m_NewCudescFrozenXid, NULL);
+    vacuum_set_xid_limits(oldCudescHeap, -1, -1, &OldestXmin, &m_NewCudescFrozenXid, NULL, NULL);
 
     // FreezeXid will become the table's new relfrozenxid, and that mustn't go
     // backwards, so take the max.
@@ -2117,7 +2118,7 @@ void ATExecCStoreMergePartition(Relation partTableRel, AlterTableCmd* cmd)
                         getPartitionName(destPartOid, false))));
     }
 
-    finishPartitionHeapSwap(destPartOid, tempTableOid, true, u_sess->utils_cxt.RecentXmin);
+    finishPartitionHeapSwap(destPartOid, tempTableOid, true, u_sess->utils_cxt.RecentXmin, InvalidMultiXactId);
     partitionClose(partTableRel, destPart, NoLock);
 
 #ifndef ENABLE_MULTIPLE_NODES

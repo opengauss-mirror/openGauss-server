@@ -4124,7 +4124,7 @@ static bool is_rel_child_of_rel(RangeTblEntry* child_rte, RangeTblEntry* parent_
 #endif
 
 /*
- * Check for features that are not supported together with FOR UPDATE/SHARE.
+ * Check for features that are not supported together with FOR [KEY] UPDATE/SHARE.
  *
  * exported so planner can check again after rewriting, query pullup, etc
  */
@@ -4133,42 +4133,44 @@ void CheckSelectLocking(Query* qry)
     if (qry->setOperations) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("SELECT FOR UPDATE/SHARE is not allowed with UNION/INTERSECT/EXCEPT")));
+                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed "
+                       "with UNION/INTERSECT/EXCEPT")));
     }
     if (qry->distinctClause != NIL) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("SELECT FOR UPDATE/SHARE is not allowed with DISTINCT clause")));
+                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed with DISTINCT clause")));
     }
     if (qry->groupClause != NIL) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("SELECT FOR UPDATE/SHARE is not allowed with GROUP BY clause")));
+                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed with GROUP BY clause")));
     }
     if (qry->havingQual != NULL) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("SELECT FOR UPDATE/SHARE is not allowed with HAVING clause")));
+                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed with HAVING clause")));
     }
     if (qry->hasAggs) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("SELECT FOR UPDATE/SHARE is not allowed with aggregate functions")));
+                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed with aggregate functions")));
     }
     if (qry->hasWindowFuncs) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("SELECT FOR UPDATE/SHARE is not allowed with window functions")));
+                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed with window functions")));
     }
     if (expression_returns_set((Node*)qry->targetList)) {
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                errmsg("SELECT FOR UPDATE/SHARE is not allowed with set-returning functions in the target list")));
+                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE is not allowed with set-returning functions "
+                       "in the target list")));
     }
 }
 
 /*
- * Transform a FOR UPDATE/SHARE clause
+ * Transform a FOR [KEY] UPDATE/SHARE clause
  *
  * This basically involves replacing names by integer relids.
  *
@@ -4189,7 +4191,7 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
     /* make a clause we can pass down to subqueries to select all rels */
     allrels = makeNode(LockingClause);
     allrels->lockedRels = NIL; /* indicates all rels */
-    allrels->forUpdate = lc->forUpdate;
+    allrels->strength = lc->strength;
     allrels->noWait = lc->noWait;
 
     if (lockedRels == NIL) {
@@ -4206,20 +4208,20 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                         heap_close(rel, AccessShareLock);
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                errmsg("SELECT FOR UPDATE/SHARE cannot be used with column table \"%s\"",
-                                    rte->eref->aliasname)));
+                                errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
+                                       "column table \"%s\"", rte->eref->aliasname)));
                     }
 
                     heap_close(rel, AccessShareLock);
 
-                    applyLockingClause(qry, i, lc->forUpdate, lc->noWait, pushedDown);
+                    applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown);
                     rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
                     break;
                 case RTE_SUBQUERY:
-                    applyLockingClause(qry, i, lc->forUpdate, lc->noWait, pushedDown);
+                    applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown);
 
                     /*
-                     * FOR UPDATE/SHARE of subquery is propagated to all of
+                     * FOR [KEY] UPDATE/SHARE of subquery is propagated to all of
                      * subquery's rels, too.  We could do this later (based on
                      * the marking of the subquery RTE) but it is convenient
                      * to have local knowledge in each query level about which
@@ -4246,7 +4248,8 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
             if (thisrel->catalogname || thisrel->schemaname) {
                 ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR),
-                        errmsg("SELECT FOR UPDATE/SHARE must specify unqualified relation names"),
+                        errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE must specify unqualified "
+                               "relation names"),
                         parser_errposition(pstate, thisrel->location)));
             }
 
@@ -4263,42 +4266,46 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
                                 heap_close(rel, AccessShareLock);
                                 ereport(ERROR,
                                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                        errmsg("SELECT FOR UPDATE/SHARE cannot be used with column table \"%s\"",
-                                            rte->eref->aliasname),
+                                        errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be used with "
+                                               "column table \"%s\"", rte->eref->aliasname),
                                         parser_errposition(pstate, thisrel->location)));
                             }
 
                             heap_close(rel, AccessShareLock);
-                            applyLockingClause(qry, i, lc->forUpdate, lc->noWait, pushedDown);
+                            applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown);
                             rte->requiredPerms |= ACL_SELECT_FOR_UPDATE;
                             break;
                         case RTE_SUBQUERY:
-                            applyLockingClause(qry, i, lc->forUpdate, lc->noWait, pushedDown);
+                            applyLockingClause(qry, i, lc->strength, lc->noWait, pushedDown);
                             /* see comment above */
                             transformLockingClause(pstate, rte->subquery, allrels, true);
                             break;
                         case RTE_JOIN:
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    errmsg("SELECT FOR UPDATE/SHARE cannot be applied to a join"),
+                                    errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be applied "
+                                           "to a join"),
                                     parser_errposition(pstate, thisrel->location)));
                             break;
                         case RTE_FUNCTION:
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    errmsg("SELECT FOR UPDATE/SHARE cannot be applied to a function"),
+                                    errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be applied "
+                                           "to a function"),
                                     parser_errposition(pstate, thisrel->location)));
                             break;
                         case RTE_VALUES:
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    errmsg("SELECT FOR UPDATE/SHARE cannot be applied to VALUES"),
+                                    errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be applied "
+                                           "to VALUES"),
                                     parser_errposition(pstate, thisrel->location)));
                             break;
                         case RTE_CTE:
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                                    errmsg("SELECT FOR UPDATE/SHARE cannot be applied to a WITH query"),
+                                    errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be applied "
+                                           "to a WITH query"),
                                     parser_errposition(pstate, thisrel->location)));
                             break;
                         default:
@@ -4313,7 +4320,8 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
             if (rt == NULL) {
                 ereport(ERROR,
                     (errcode(ERRCODE_UNDEFINED_TABLE),
-                        errmsg("relation \"%s\" in FOR UPDATE/SHARE clause not found in FROM clause", thisrel->relname),
+                        errmsg("relation \"%s\" in FOR UPDATE/SHARE//NO KEY UPDATE/KEY SHARE clause not found "
+                               "in FROM clause", thisrel->relname),
                         parser_errposition(pstate, thisrel->location)));
             }
         }
@@ -4323,7 +4331,7 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
 /*
  * Record locking info for a single rangetable item
  */
-void applyLockingClause(Query* qry, Index rtindex, bool forUpdate, bool noWait, bool pushedDown)
+void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, bool noWait, bool pushedDown)
 {
     RowMarkClause* rc = NULL;
 
@@ -4335,10 +4343,10 @@ void applyLockingClause(Query* qry, Index rtindex, bool forUpdate, bool noWait, 
     /* Check for pre-existing entry for same rtindex */
     if ((rc = get_parse_rowmark(qry, rtindex)) != NULL) {
         /*
-         * If the same RTE is specified both FOR UPDATE and FOR SHARE, treat
-         * it as FOR UPDATE.  (Reasonable, since you can't take both a shared
-         * and exclusive lock at the same time; it'll end up being exclusive
-         * anyway.)
+         * If the same RTE is specified for more than one locking strength,
+         * treat is as the strongest.  (Reasonable, since you can't take both a
+         * shared and exclusive lock at the same time; it'll end up being
+         * exclusive anyway.)
          *
          * We also consider that NOWAIT wins if it's specified both ways. This
          * is a bit more debatable but raising an error doesn't seem helpful.
@@ -4347,7 +4355,7 @@ void applyLockingClause(Query* qry, Index rtindex, bool forUpdate, bool noWait, 
          *
          * And of course pushedDown becomes false if any clause is explicit.
          */
-        rc->forUpdate = rc->forUpdate || forUpdate;
+        rc->strength = Max(rc->strength, strength);
         rc->noWait = rc->noWait || noWait;
         rc->pushedDown = rc->pushedDown && pushedDown;
         return;
@@ -4356,7 +4364,7 @@ void applyLockingClause(Query* qry, Index rtindex, bool forUpdate, bool noWait, 
     /* Make a new RowMarkClause */
     rc = makeNode(RowMarkClause);
     rc->rti = rtindex;
-    rc->forUpdate = forUpdate;
+    rc->strength = strength;
     rc->noWait = noWait;
     rc->pushedDown = pushedDown;
     qry->rowMarks = lappend(qry->rowMarks, rc);

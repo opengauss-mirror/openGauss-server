@@ -3634,6 +3634,9 @@ static void _outLockingClause(StringInfo str, LockingClause* node)
     WRITE_NODE_FIELD(lockedRels);
     WRITE_BOOL_FIELD(forUpdate);
     WRITE_BOOL_FIELD(noWait);
+    if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+        WRITE_ENUM_FIELD(strength, LockClauseStrength);
+    }
 }
 
 static void _outXmlSerialize(StringInfo str, XmlSerialize* node)
@@ -4269,6 +4272,9 @@ static void _outRowMarkClause(StringInfo str, RowMarkClause* node)
     WRITE_BOOL_FIELD(forUpdate);
     WRITE_BOOL_FIELD(noWait);
     WRITE_BOOL_FIELD(pushedDown);
+    if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+        WRITE_ENUM_FIELD(strength, LockClauseStrength);
+    }
 }
 
 static void _outWithClause(StringInfo str, WithClause* node)

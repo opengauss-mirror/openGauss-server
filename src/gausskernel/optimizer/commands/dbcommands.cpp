@@ -31,6 +31,7 @@
 #include "access/xact.h"
 #include "access/xloginsert.h"
 #include "access/xlogutils.h"
+#include "access/multixact.h"
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
@@ -100,8 +101,8 @@ static void createdb_failure_callback(int code, Datum arg);
 static void movedb(const char* dbname, const char* tblspcname);
 static void movedb_failure_callback(int code, Datum arg);
 static bool get_db_info(const char* name, LOCKMODE lockmode, Oid* dbIdP, Oid* ownerIdP, int* encodingP,
-    bool* dbIsTemplateP, bool* dbAllowConnP, Oid* dbLastSysOidP, TransactionId* dbFrozenXidP, Oid* dbTablespace,
-    char** dbCollate, char** dbCtype, char** src_compatibility = NULL);
+    bool* dbIsTemplateP, bool* dbAllowConnP, Oid* dbLastSysOidP, TransactionId* dbFrozenXidP, MultiXactId *dbMinMultiP,
+    Oid* dbTablespace, char** dbCollate, char** dbCtype, char** src_compatibility = NULL);
 static void remove_dbtablespaces(Oid db_id);
 static bool check_db_file_conflict(Oid db_id);
 static void createdb_xact_callback(bool isCommit, const void* arg);
@@ -152,6 +153,7 @@ void createdb(const CreatedbStmt* stmt)
     bool src_allowconn = false;
     Oid src_lastsysoid;
     TransactionId src_frozenxid;
+    MultiXactId src_minmxid;
     Oid src_deftablespace;
     volatile Oid dst_deftablespace;
     Relation pg_database_rel;
@@ -324,6 +326,7 @@ void createdb(const CreatedbStmt* stmt)
         &src_allowconn,
         &src_lastsysoid,
         &src_frozenxid,
+        &src_minmxid,
         &src_deftablespace,
         &src_collate,
         &src_ctype,
@@ -529,6 +532,9 @@ void createdb(const CreatedbStmt* stmt)
      */
     new_record_nulls[Anum_pg_database_datacl - 1] = true;
     new_record[Anum_pg_database_datfrozenxid64 - 1] = TransactionIdGetDatum(src_frozenxid);
+#ifndef ENABLE_MULTIPLE_NODES
+    new_record[Anum_pg_database_datminmxid - 1] = TransactionIdGetDatum(src_minmxid);
+#endif
     tuple = heap_form_tuple(RelationGetDescr(pg_database_rel), new_record, new_record_nulls);
 
     HeapTupleSetOid(tuple, dboid);
@@ -1001,7 +1007,8 @@ void dropdb(const char* dbname, bool missing_ok)
     pgdbrel = heap_open(DatabaseRelationId, RowExclusiveLock);
 
     if (!get_db_info(
-            dbname, AccessExclusiveLock, &db_id, NULL, NULL, &db_istemplate, NULL, NULL, NULL, NULL, NULL, NULL)) {
+            dbname, AccessExclusiveLock, &db_id, NULL, NULL, &db_istemplate,
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL)) {
         if (!missing_ok) {
             ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", dbname)));
         } else {
@@ -1211,7 +1218,7 @@ void RenameDatabase(const char* oldname, const char* newname)
      */
     rel = heap_open(DatabaseRelationId, RowExclusiveLock);
 
-    if (!get_db_info(oldname, AccessExclusiveLock, &db_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
+    if (!get_db_info(oldname, AccessExclusiveLock, &db_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", oldname)));
 
     /* Permission check. */
@@ -1356,7 +1363,7 @@ static void movedb(const char* dbname, const char* tblspcname)
     pgdbrel = heap_open(DatabaseRelationId, RowExclusiveLock);
 
     if (!get_db_info(
-            dbname, AccessExclusiveLock, &db_id, NULL, NULL, NULL, NULL, NULL, NULL, &src_tblspcoid, NULL, NULL))
+            dbname, AccessExclusiveLock, &db_id, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &src_tblspcoid, NULL, NULL))
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database \"%s\" does not exist", dbname)));
 
     /*
@@ -1925,8 +1932,8 @@ void AlterDatabaseOwner(const char* dbname, Oid newOwnerId)
  * return FALSE.
  */
 static bool get_db_info(const char* name, LOCKMODE lockmode, Oid* dbIdP, Oid* ownerIdP, int* encodingP,
-    bool* dbIsTemplateP, bool* dbAllowConnP, Oid* dbLastSysOidP, TransactionId* dbFrozenXidP, Oid* dbTablespace,
-    char** dbCollate, char** dbCtype, char** dbcompatibility)
+    bool* dbIsTemplateP, bool* dbAllowConnP, Oid* dbLastSysOidP, TransactionId* dbFrozenXidP, MultiXactId *dbMinMultiP,
+    Oid* dbTablespace, char** dbCollate, char** dbCtype, char** dbcompatibility)
 {
     bool result = false;
     Relation relation;
@@ -2019,6 +2026,15 @@ static bool get_db_info(const char* name, LOCKMODE lockmode, Oid* dbIdP, Oid* ow
 
                     *dbFrozenXidP = datfrozenxid;
                 }
+#ifndef ENABLE_MULTIPLE_NODES
+                /* limit of frozen Multixacts */
+                if (dbMinMultiP != NULL) {
+                    bool isNull = false;
+                    Datum minmxidDatum =
+                        heap_getattr(tuple, Anum_pg_database_datminmxid, RelationGetDescr(relation), &isNull);
+                    *dbMinMultiP = isNull ? FirstMultiXactId : DatumGetTransactionId(minmxidDatum);
+                }
+#endif
                 /* default tablespace for this database */
                 if (dbTablespace != NULL)
                     *dbTablespace = dbform->dattablespace;

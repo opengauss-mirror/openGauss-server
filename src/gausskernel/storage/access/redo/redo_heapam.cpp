@@ -120,7 +120,8 @@ void HeapXlogCleanOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *b
     PageSetLSN(page, buffer->lsn);
 }
 
-void HeapXlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *blkdata, Size datalen)
+void HeapXlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *blkdata, Size datalen,
+    bool isTupleLockUpgrade)
 {
     xl_heap_freeze *xlrec = (xl_heap_freeze *)recorddata;
     Page page = buffer->pageinfo.page;
@@ -141,7 +142,7 @@ void HeapXlogFreezeOperatorPage(RedoBufferInfo *buffer, void *recorddata, void *
             HeapTupleCopyBaseFromPage(&tuple, page);
             ItemPointerSet(&(tuple.t_self), buffer->blockinfo.blkno, *offsets);
 
-            (void)heap_freeze_tuple(&tuple, cutoff_xid);
+            (void)heap_freeze_tuple(&tuple, cutoff_xid, isTupleLockUpgrade ? xlrec->cutoff_multi : InvalidMultiXactId);
 
             offsets++;
         }
@@ -237,7 +238,8 @@ inline static void HeapXlogVisibleOperatorVmbuffer(RedoBufferInfo *vmbuffer, voi
     }
 }
 
-void HeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, TransactionId recordxid)
+void HeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, TransactionId recordxid,
+    bool isTupleLockUpgrade)
 {
     xl_heap_delete *xlrec = (xl_heap_delete *)recorddata;
     Page page = buffer->pageinfo.page;
@@ -257,10 +259,24 @@ void HeapXlogDeleteOperatorPage(RedoBufferInfo *buffer, void *recorddata, Transa
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
-    htup->t_infomask &= ~(HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | HEAP_XMAX_IS_MULTI | HEAP_IS_LOCKED | HEAP_MOVED);
+    htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    htup->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
     HeapTupleHeaderClearHotUpdated(htup);
-    if (!(xlrec->flags & XLH_DELETE_IS_SUPER)) {
+
+    if (isTupleLockUpgrade) {
+        FixInfomaskFromInfobits(xlrec->infobits_set, &htup->t_infomask, &htup->t_infomask2);
+        HeapTupleHeaderSetXmax(page, htup, xlrec->xmax);
+    } else {
+        htup->t_infomask2 |= HEAP_KEYS_UPDATED;
         HeapTupleHeaderSetXmax(page, htup, recordxid);
+    }
+
+    if (!(xlrec->flags & XLH_DELETE_IS_SUPER)) {
+        if (isTupleLockUpgrade) {
+            HeapTupleHeaderSetXmax(page, htup, xlrec->xmax);
+        } else {
+            HeapTupleHeaderSetXmax(page, htup, recordxid);
+        }
     } else {
         HeapTupleHeaderSetXmin(page, htup, FrozenTransactionId);
         HeapTupleHeaderSetXmax(page, htup, FrozenTransactionId);
@@ -473,7 +489,7 @@ void HeapXlogMultiInsertOperatorPage(RedoBufferInfo *buffer, const void *recored
 }
 
 void HeapXlogUpdateOperatorOldpage(RedoBufferInfo *buffer, void *recoreddata, bool hot_update, bool isnewinit,
-                                   BlockNumber newblk, TransactionId recordxid)
+                                   BlockNumber newblk, TransactionId recordxid, bool isTupleLockUpgrade)
 {
     Page page = buffer->pageinfo.page;
     Pointer rec_data = (Pointer)recoreddata;
@@ -499,12 +515,19 @@ void HeapXlogUpdateOperatorOldpage(RedoBufferInfo *buffer, void *recoreddata, bo
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
-    htup->t_infomask &= ~(HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | HEAP_XMAX_IS_MULTI | HEAP_IS_LOCKED | HEAP_MOVED);
+    htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    htup->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
     if (hot_update)
         HeapTupleHeaderSetHotUpdated(htup);
     else
         HeapTupleHeaderClearHotUpdated(htup);
-    HeapTupleHeaderSetXmax(page, htup, recordxid);
+    if (isTupleLockUpgrade) {
+        FixInfomaskFromInfobits(xlrec->old_infobits_set, &htup->t_infomask, &htup->t_infomask2);
+        HeapTupleHeaderSetXmax(page, htup, xlrec->old_xmax);
+    } else {
+        htup->t_infomask2 |= HEAP_KEYS_UPDATED;
+        HeapTupleHeaderSetXmax(page, htup, recordxid);
+    }
     HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
     /* Set forward chain link in t_ctid */
     htup->t_ctid = newtid;
@@ -530,7 +553,7 @@ void HeapXlogUpdateOperatorOldpage(RedoBufferInfo *buffer, void *recoreddata, bo
 }
 
 void HeapXlogUpdateOperatorNewpage(RedoBufferInfo *buffer, void *recorddata, bool isinit, void *blkdata, Size datalen,
-                                   TransactionId recordxid, Size *freespace, bool tde)
+                                   TransactionId recordxid, Size *freespace, bool isTupleLockUpgrade, bool tde)
 {
     Page page = buffer->pageinfo.page;
     Pointer rec_data = (Pointer)recorddata;
@@ -618,6 +641,9 @@ void HeapXlogUpdateOperatorNewpage(RedoBufferInfo *buffer, void *recorddata, boo
 
     HeapTupleHeaderSetXmin(page, htup, recordxid);
     HeapTupleHeaderSetCmin(htup, FirstCommandId);
+    if (isTupleLockUpgrade) {
+        HeapTupleHeaderSetXmax(page, htup, xlrec->new_xmax);
+    }
     /* Make sure there is no forward chain link in t_ctid */
     htup->t_ctid = newtid;
 
@@ -640,7 +666,7 @@ void HeapXlogPageUpgradeOperatorPage(RedoBufferInfo *buffer)
     PageSetLSN(page, buffer->lsn);
 }
 
-void HeapXlogLockOperatorPage(RedoBufferInfo *buffer, void *recorddata)
+void HeapXlogLockOperatorPage(RedoBufferInfo *buffer, void *recorddata, bool isTupleLockUpgrade)
 {
     xl_heap_lock *xlrec = (xl_heap_lock *)recorddata;
     Page page = buffer->pageinfo.page;
@@ -657,13 +683,26 @@ void HeapXlogLockOperatorPage(RedoBufferInfo *buffer, void *recorddata)
 
     htup = (HeapTupleHeader)PageGetItem(page, lp);
 
-    htup->t_infomask &= ~(HEAP_XMAX_COMMITTED | HEAP_XMAX_INVALID | HEAP_XMAX_IS_MULTI | HEAP_IS_LOCKED | HEAP_MOVED);
-    if (xlrec->xid_is_mxact)
-        htup->t_infomask |= HEAP_XMAX_IS_MULTI;
-    if (xlrec->shared_lock)
-        htup->t_infomask |= HEAP_XMAX_SHARED_LOCK;
-    else
-        htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
+    htup->t_infomask &= ~(HEAP_XMAX_BITS | HEAP_MOVED);
+    htup->t_infomask2 &= ~(HEAP_XMAX_LOCK_ONLY | HEAP_KEYS_UPDATED);
+
+    if (isTupleLockUpgrade) {
+        FixInfomaskFromInfobits(xlrec->infobits_set, &htup->t_infomask, &htup->t_infomask2);
+        if (xlrec->lock_updated) {
+            HeapTupleHeaderSetXmax(page, htup, xlrec->locking_xid);
+            PageSetLSN(page, buffer->lsn);
+            return;
+        }
+    } else {
+        if (xlrec->xid_is_mxact)
+            htup->t_infomask |= HEAP_XMAX_IS_MULTI;
+        if (xlrec->shared_lock)
+            htup->t_infomask |= HEAP_XMAX_SHARED_LOCK;
+        else {
+            htup->t_infomask |= HEAP_XMAX_EXCL_LOCK;
+            htup->t_infomask2 |= HEAP_KEYS_UPDATED;
+        }
+    }
     HeapTupleHeaderClearHotUpdated(htup);
     HeapTupleHeaderSetXmax(page, htup, xlrec->locking_xid);
     HeapTupleHeaderSetCmax(htup, FirstCommandId, false);
@@ -1333,8 +1372,9 @@ static void HeapXlogDeleteBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
     action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
     if (action == BLK_NEEDS_REDO) {
         char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
+        bool isTupleLockUpgrad = (XLogBlockHeadGetInfo(blockhead) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) != 0;
 
-        HeapXlogDeleteOperatorPage(bufferinfo, (void *)maindata, recordxid);
+        HeapXlogDeleteOperatorPage(bufferinfo, (void *)maindata, recordxid, isTupleLockUpgrad);
         MakeRedoBufferDirty(bufferinfo);
     }
 }
@@ -1346,6 +1386,7 @@ static void HeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
     bool tde = ((blockdatarec->blockhead.cur_block_id) & BKID_HAS_TDE_PAGE) != 0;
     TransactionId recordxid = XLogBlockHeadGetXid(blockhead);
     XLogBlockDataParse *datadecode = blockdatarec;
+    bool isTupleLockUpgrade = (XLogBlockHeadGetInfo(blockhead) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) != 0;
 
     XLogRedoAction action;
 
@@ -1362,7 +1403,7 @@ static void HeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
 
             if (oldblk == bufferinfo->blockinfo.blkno) {
                 HeapXlogUpdateOperatorOldpage(bufferinfo, (void *)maindata, hot_update, isinit, oldblk,
-                                              recordxid); /* old tuple */
+                                              recordxid, isTupleLockUpgrade); /* old tuple */
             }
 
             blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
@@ -1370,12 +1411,13 @@ static void HeapXlogUpdateBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
 
             /* new block */
             HeapXlogUpdateOperatorNewpage(bufferinfo, (void *)maindata, isinit, (void *)blkdata, blkdatalen, recordxid,
-                                          NULL, tde);
+                                          NULL, isTupleLockUpgrade, tde);
         } else {
             BlockNumber newblk = XLogBlockDataGetAuxiBlock1(datadecode);
 
             /* old block */
-            HeapXlogUpdateOperatorOldpage(bufferinfo, (void *)maindata, hot_update, isinit, newblk, recordxid);
+            HeapXlogUpdateOperatorOldpage(bufferinfo, (void *)maindata, hot_update, isinit, newblk, recordxid,
+                                          isTupleLockUpgrade);
         }
         MakeRedoBufferDirty(bufferinfo);
     }
@@ -1414,8 +1456,9 @@ static void HeapXlogLockBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bloc
     action = XLogCheckBlockDataRedoAction(datadecode, bufferinfo);
     if (action == BLK_NEEDS_REDO) {
         char *maindata = XLogBlockDataGetMainData(datadecode, NULL);
+        bool isTupleLockUpgrade = (XLogBlockHeadGetInfo(blockhead) & XLOG_TUPLE_LOCK_UPGRADE_FLAG) != 0;
 
-        HeapXlogLockOperatorPage(bufferinfo, (void *)maindata);
+        HeapXlogLockOperatorPage(bufferinfo, (void *)maindata, isTupleLockUpgrade);
         MakeRedoBufferDirty(bufferinfo);
     }
 }
@@ -1500,7 +1543,7 @@ static void HeapXlogFreezeBlock(XLogBlockHead *blockhead, XLogBlockDataParse *bl
 
         blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
         Assert(blkdata != NULL);
-        HeapXlogFreezeOperatorPage(bufferinfo, (void *)maindata, (void *)blkdata, blkdatalen);
+        HeapXlogFreezeOperatorPage(bufferinfo, (void *)maindata, (void *)blkdata, blkdatalen, false);
         MakeRedoBufferDirty(bufferinfo);
     }
 }

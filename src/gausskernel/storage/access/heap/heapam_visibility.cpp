@@ -211,10 +211,20 @@ static bool DealCurrentTansactionNotCommited(HeapTupleHeader tuple, Page page, B
     if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
         return true;
 
-    if (tuple->t_infomask & HEAP_IS_LOCKED) /* not deleter */
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) /* not deleter */
         return true;
 
-    Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
+    if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
+        TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+        /* not LOCKED_ONLY, so it has to have an xmax */
+        Assert(TransactionIdIsValid(xmax));
+        /* updating subtransaction must have aborted */
+        if (!TransactionIdIsCurrentTransactionId(xmax)) {
+            return true;
+        } else {
+            return false;
+        }
+    }
 
     if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
         /* deleting subtransaction must have aborted */
@@ -297,19 +307,31 @@ bool HeapTupleSatisfiesSelf(HeapTuple htup, Snapshot snapshot, Buffer buffer)
         return true;
 
     if (tuple->t_infomask & HEAP_XMAX_COMMITTED) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED)
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
             return true;
         return false; /* updated by other */
     }
 
     if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
-        /* MultiXacts are currently only allowed to lock tuples */
-        Assert(tuple->t_infomask & HEAP_IS_LOCKED);
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
+            return true;
+
+        TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+        /* not LOCKED_ONLY, so it has to have an xmax */
+        Assert(TransactionIdIsValid(xmax));
+        if (TransactionIdIsCurrentTransactionId(xmax))
+            return false;
+        if (TransactionIdIsInProgress(xmax)) {
+            return true;
+        }
+        if (TransactionIdDidCommit(xmax))
+            return false;
+        /* it must have aborted or crashed */
         return true;
     }
 
     if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED)
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
             return true;
         return false;
     }
@@ -329,7 +351,7 @@ bool HeapTupleSatisfiesSelf(HeapTuple htup, Snapshot snapshot, Buffer buffer)
 
     /* xmax transaction committed */
 
-    if (tuple->t_infomask & HEAP_IS_LOCKED) {
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
         SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
         return true;
     }
@@ -408,10 +430,22 @@ restart:
             if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
                 return true;
 
-            if (tuple->t_infomask & HEAP_IS_LOCKED) /* not deleter */
+            if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) /* not deleter */
                 return true;
 
-            Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
+            if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
+                TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+                if (!TransactionIdIsValid(xmax)) {
+                    return true;
+                }
+
+                /* updating subtransaction must have aborted */
+                if (!TransactionIdIsCurrentTransactionId(xmax)) {
+                    return true;
+                } else {
+                    return false;
+                }
+            }
 
             if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
                 /* deleting subtransaction must have aborted */
@@ -451,19 +485,37 @@ restart:
         return true;
 
     if (tuple->t_infomask & HEAP_XMAX_COMMITTED) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED)
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
             return true;
         return false;
     }
 
     if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
-        /* MultiXacts are currently only allowed to lock tuples */
-        Assert(tuple->t_infomask & HEAP_IS_LOCKED);
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
+            return true;
+
+        TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+        if (!TransactionIdIsValid(xmax)) {
+            return true;
+        }
+        if (TransactionIdIsCurrentTransactionId(xmax)) {
+            if (HeapTupleHeaderGetCmax(tuple, page) >= GetCurrentCommandId(false)) {
+                return true; /* deleted after scan started */
+            } else {
+                return false; /* deleted before scan started */
+            }
+        }
+        if (TransactionIdIsInProgress(xmax)) {
+            return true;
+        }
+        if (TransactionIdDidCommit(xmax)) {
+            return false;
+        }
         return true;
     }
 
     if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED)
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
             return true;
         if (HeapTupleHeaderGetCmax(tuple, page) >= GetCurrentCommandId(false))
             return true; /* deleted after scan started */
@@ -494,7 +546,7 @@ restart:
 
     /* xmax transaction committed */
 
-    if (tuple->t_infomask & HEAP_IS_LOCKED) {
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
         SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
         return true;
     }
@@ -612,10 +664,51 @@ restart:
             if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
                 return TM_Ok;
 
-            if (tuple->t_infomask & HEAP_IS_LOCKED) /* not deleter */
-                return TM_Ok;
+            if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
+                TransactionId xmax = HeapTupleHeaderGetRawXmax(page, tuple);
 
-            Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
+                /*
+                 * Careful here: even though this tuple was created by our own
+                 * transaction, it might be locked by other transactions, if
+                 * the original version was key-share locked when we updated
+                 * it.
+                 */
+                if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
+                    if (MultiXactIdIsRunning(xmax))
+                        return TM_BeingModified;
+                    else
+                        return TM_Ok;
+                }
+
+                /*
+                 * If the locker is gone, then there is nothing of interest
+                 * left in this Xmax; otherwise, report the tuple as
+                 * locked/updated.
+                 */
+                if (!TransactionIdIsInProgress(xmax))
+                    return TM_Ok;
+
+                return TM_BeingModified;
+            }
+
+            if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
+                TransactionId xmax= HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+
+                /* not LOCKED_ONLY, so it has to have an xmax */
+                Assert(TransactionIdIsValid(xmax));
+
+                /* deleting subtransaction must have aborted */
+                if (!TransactionIdIsCurrentTransactionId(xmax)) {
+                    if (MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(page, tuple)))
+                        return TM_BeingModified;
+                    return TM_Ok;
+                } else {
+                    if (HeapTupleHeaderGetCmax(tuple, page) >= curcid)
+                        return TM_SelfModified; /* updated after scan started */
+                    else
+                        return TM_Invisible; /* updated before scan started */
+                }
+            }
 
             if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
                 /* deleting subtransaction must have aborted */
@@ -654,7 +747,7 @@ restart:
         return TM_Ok;
     }
     if (tuple->t_infomask & HEAP_XMAX_COMMITTED) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED) {
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
             return TM_Ok;
         }
         if (!ItemPointerEquals(&htup->t_self, &tuple->t_ctid)) {
@@ -665,19 +758,51 @@ restart:
     }
 
     if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
-        /* MultiXacts are currently only allowed to lock tuples */
-        Assert(tuple->t_infomask & HEAP_IS_LOCKED);
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
+            /*
+             * If it's only locked but HEAP_LOCK_MASK is not set,
+             * it cannot possibly be running.  Otherwise need to check.
+             */
+            if ((tuple->t_infomask & HEAP_LOCK_MASK) &&
+                MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(page, tuple)))
+                return TM_BeingModified;
 
-        if (MultiXactIdIsRunning(HeapTupleHeaderGetXmax(page, tuple))) {
-            return TM_BeingModified;
+            SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
+            return TM_Ok;
         }
-        SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
+
+        TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+        /* not LOCKED_ONLY, so it has to have an xmax */
+        Assert(TransactionIdIsValid(xmax));
+
+        if (TransactionIdIsCurrentTransactionId(xmax)) {
+            if (HeapTupleHeaderGetCmax(tuple, page) >= curcid)
+                return TM_SelfModified; /* updated after scan started */
+            else
+                return TM_Invisible; /* updated before scan started */
+        }
+
+        if (TransactionIdIsInProgress(xmax))
+            return TM_BeingModified;
+
+        if (TransactionIdDidCommit(xmax)) {
+            if (!ItemPointerEquals(&htup->t_self, &tuple->t_ctid)) {
+                return TM_Updated;
+            } else {
+                return TM_Deleted;
+            }
+        }
+
+        /* no member, even just a locker, alive anymore */
+        if (!MultiXactIdIsRunning(HeapTupleHeaderGetXmax(page, tuple)))
+            SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
+        /* it must have aborted or crashed */
         return TM_Ok;
     }
 
     if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED) {
-            return TM_Ok;
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
+            return TM_BeingModified;
         }
         if (HeapTupleHeaderGetCmax(tuple, page) >= curcid) {
             return TM_SelfModified; /* updated after scan started */
@@ -702,7 +827,7 @@ restart:
 
     /* xmax transaction committed */
 
-    if (tuple->t_infomask & HEAP_IS_LOCKED) {
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
         SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
         return TM_Ok;
     }
@@ -787,19 +912,33 @@ static bool HeapTupleSatisfiesDirty(HeapTuple htup, Snapshot snapshot, Buffer bu
         return true;
 
     if (tuple->t_infomask & HEAP_XMAX_COMMITTED) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED)
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
             return true;
         return false; /* updated by other */
     }
 
     if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
-        /* MultiXacts are currently only allowed to lock tuples */
-        Assert(tuple->t_infomask & HEAP_IS_LOCKED);
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
+            return true;
+        }
+        TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+        /* not LOCKED_ONLY, so it has to have an xmax */
+        Assert(TransactionIdIsValid(xmax));
+        if (TransactionIdIsCurrentTransactionId(xmax))
+            return false;
+        if (TransactionIdIsInProgress(xmax)) {
+            snapshot->xmax = xmax;
+            return true;
+        }
+        if (TransactionIdDidCommit(xmax)) {
+            return false;
+        }
+        /* it must have aborted or crashed */
         return true;
     }
 
     if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
-        if (tuple->t_infomask & HEAP_IS_LOCKED)
+        if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
             return true;
         return false;
     }
@@ -821,7 +960,7 @@ static bool HeapTupleSatisfiesDirty(HeapTuple htup, Snapshot snapshot, Buffer bu
 
     /* xmax transaction committed */
 
-    if (tuple->t_infomask & HEAP_IS_LOCKED) {
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
         SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
         return true;
     }
@@ -896,10 +1035,22 @@ static bool HeapTupleSatisfiesMVCC(HeapTuple htup, Snapshot snapshot, Buffer buf
             if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
                 return true;
 
-            if (tuple->t_infomask & HEAP_IS_LOCKED) /* not deleter */
+            if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) /* not deleter */
                 return true;
 
-            Assert(!(tuple->t_infomask & HEAP_XMAX_IS_MULTI));
+            if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
+                TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+                /* not LOCKED_ONLY, so it has to have an xmax */
+                Assert(TransactionIdIsValid(xmax));
+
+                /* updating subtransaction must have aborted */
+                if (!TransactionIdIsCurrentTransactionId(xmax))
+                    return true;
+                else if (HeapTupleHeaderGetCmax(tuple, page) >= snapshot->curcid)
+                    return true; /* updated after scan started */
+                else
+                    return false; /* updated before scan started */
+            }
 
             if (!TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
                 /* deleting subtransaction must have aborted */
@@ -952,12 +1103,28 @@ recheck_xmax:
     if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid or aborted */
         return true;
 
-    if (tuple->t_infomask & HEAP_IS_LOCKED)
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
         return true;
 
     if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
-        /* MultiXacts are currently only allowed to lock tuples */
-        Assert(tuple->t_infomask & HEAP_IS_LOCKED);
+        TransactionId xmax = HeapTupleHeaderMultiXactGetUpdateXid(page, tuple);
+        /* not LOCKED_ONLY, so it has to have an xmax */
+        Assert(TransactionIdIsValid(xmax));
+        if (TransactionIdIsCurrentTransactionId(xmax)) {
+            if (HeapTupleHeaderGetCmax(tuple, page) >= snapshot->curcid)
+                return true; /* deleted after scan started */
+            else
+                return false; /* deleted before scan started */
+        }
+        if (TransactionIdIsInProgress(xmax))
+            return true;
+        if (TransactionIdDidCommit(xmax)) {
+            /* updating transaction committed, but when? */
+            if (!CommittedXidVisibleInSnapshot(xmax, snapshot, buffer))
+                return true; /* treat as still in progress */
+            return false;
+        }
+        /* it must have aborted or crashed */
         return true;
     }
 
@@ -1104,7 +1271,7 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
         if (TransactionIdIsCurrentTransactionId(HeapTupleGetRawXmin(htup))) {
             if (tuple->t_infomask & HEAP_XMAX_INVALID) /* xid invalid */
                 return HEAPTUPLE_INSERT_IN_PROGRESS;
-            if (tuple->t_infomask & HEAP_IS_LOCKED)
+            if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2))
                 return HEAPTUPLE_INSERT_IN_PROGRESS;
             /* inserted and then deleted by same xact */
             if (TransactionIdIsCurrentTransactionId(HeapTupleGetRawXmax(htup))) {
@@ -1158,7 +1325,7 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
     if (tuple->t_infomask & HEAP_XMAX_INVALID)
         return HEAPTUPLE_LIVE;
 
-    if (tuple->t_infomask & HEAP_IS_LOCKED) {
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2)) {
         /*
          * "Deleting" xact really only locked it, so the tuple is live in any
          * case.  However, we should make sure that either XMAX_COMMITTED or
@@ -1174,7 +1341,7 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
                 xidstatus = TransactionIdGetStatus(HeapTupleGetRawXmax(htup));
                 if (xidstatus == XID_INPROGRESS && TransactionIdIsInProgress(HeapTupleGetRawXmax(htup))) {
                     return HEAPTUPLE_LIVE;
-                }    
+                }
             }
 
             /*
@@ -1192,8 +1359,36 @@ HTSV_Result HeapTupleSatisfiesVacuum(HeapTuple htup, TransactionId OldestXmin, B
     }
 
     if (tuple->t_infomask & HEAP_XMAX_IS_MULTI) {
-        /* MultiXacts are currently only allowed to lock tuples */
-        Assert(tuple->t_infomask & HEAP_IS_LOCKED);
+        TransactionId xmax = HeapTupleHeaderGetUpdateXid(page, tuple);
+
+        /* already checked above */
+        Assert(!HEAP_XMAX_IS_LOCKED_ONLY(tuple->t_infomask, tuple->t_infomask2));
+
+        /* not LOCKED_ONLY, so it has to have an xmax */
+        Assert(TransactionIdIsValid(xmax));
+
+        if (TransactionIdIsInProgress(xmax)) {
+            return HEAPTUPLE_DELETE_IN_PROGRESS;
+        } else if (TransactionIdDidCommit(xmax)) {
+            /*
+             * The multixact might still be running due to lockers.  If the
+             * updater is below the xid horizon, we have to return DEAD
+             * regardless -- otherwise we could end up with a tuple where the
+             * updater has to be removed due to the horizon, but is not pruned
+             * away.  It's not a problem to prune that tuple, because any
+             * remaining lockers will also be present in newer tuple versions.
+             */
+            if (!TransactionIdPrecedes(xmax, OldestXmin))
+                return HEAPTUPLE_RECENTLY_DEAD;
+            return HEAPTUPLE_DEAD;
+        } else if (!MultiXactIdIsRunning(HeapTupleHeaderGetRawXmax(page, tuple))) {
+            /*
+             * Not in Progress, Not Committed, so either Aborted or crashed.
+             * Mark the Xmax as invalid.
+             */
+            SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
+        }
+        /* it must have aborted or crashed */
         return HEAPTUPLE_LIVE;
     }
 
@@ -1263,10 +1458,22 @@ bool HeapTupleIsSurelyDead(HeapTuple tuple, TransactionId OldestXmin)
 
     /*
      * If the inserting transaction committed, but any deleting transaction
-     * aborted, the tuple is still alive.  Likewise, if XMAX is a lock rather
-     * than a delete, the tuple is still alive.
+     * aborted, the tuple is still alive.
      */
-    if (tup->t_infomask & (HEAP_XMAX_INVALID | HEAP_IS_LOCKED | HEAP_XMAX_IS_MULTI))
+    if (tup->t_infomask & HEAP_XMAX_INVALID)
+        return false;
+    
+    /*
+     * If the XMAX is just a lock, the tuple is still alive.
+     */
+    if (HEAP_XMAX_IS_LOCKED_ONLY(tup->t_infomask, tup->t_infomask2))
+        return false;
+
+    /*
+     * If the Xmax is a MultiXact, it might be dead or alive, but we cannot
+     * know without checking pg_multixact.
+     */
+    if (tup->t_infomask & HEAP_XMAX_IS_MULTI)
         return false;
 
     /* If deleter isn't known to have committed, assume it's still running. */
@@ -1275,6 +1482,64 @@ bool HeapTupleIsSurelyDead(HeapTuple tuple, TransactionId OldestXmin)
 
     /* Deleter committed, so tuple is dead if the XID is old enough. */
     return TransactionIdPrecedes(HeapTupleGetRawXmax(tuple), OldestXmin);
+}
+
+/*
+ * Is the tuple really only locked?  That is, is it not updated?
+ *
+ * It's easy to check just infomask bits if the locker is not a multi; but
+ * otherwise we need to verify that the updating transaction has not aborted.
+ *
+ * This function is here because it follows the same time qualification rules
+ * laid out at the top of this file.
+ */
+bool HeapTupleIsOnlyLocked(HeapTuple tuple)
+{
+    TransactionId xmax;
+
+    /* if there's no valid Xmax, then there's obviously no update either */
+    if (tuple->t_data->t_infomask & HEAP_XMAX_INVALID) {
+        return true;
+    }
+
+    if (tuple->t_data->t_infomask2 & HEAP_XMAX_LOCK_ONLY) {
+        return true;
+    }
+
+    /* invalid xmax means no update */
+    if (!TransactionIdIsValid(HeapTupleGetRawXmax(tuple))) {
+        return true;
+    }
+
+    /*
+     * if HEAP_XMAX_LOCK_ONLY is not set and not a multi, then this
+     * must necessarily have been updated
+     */
+    if (!(tuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI)) {
+        return false;
+    }
+
+    /* ... but if it's a multi, then perhaps the updating Xid aborted. */
+    xmax = HeapTupleMultiXactGetUpdateXid(tuple);
+    if (!TransactionIdIsValid(xmax)) { /* shouldn't happen .. */
+        return true;
+    }
+
+    if (TransactionIdIsCurrentTransactionId(xmax)) {
+        return false;
+    }
+    if (TransactionIdIsInProgress(xmax)) {
+        return false;
+    }
+    if (TransactionIdDidCommit(xmax)) {
+        return false;
+    }
+
+    /*
+     * not current, not in progress, not committed -- must have aborted or
+     * crashed
+     */
+    return true;
 }
 
 /*

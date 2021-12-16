@@ -3456,10 +3456,10 @@ void CheckForSerializableConflictOut(bool visible, Relation relation, void* stup
         case HEAPTUPLE_RECENTLY_DEAD:
             if (!visible)
                 return;
-            xid = HeapTupleGetRawXmax(tuple);
+            xid = HeapTupleGetUpdateXid(tuple);
             break;
         case HEAPTUPLE_DELETE_IN_PROGRESS:
-            xid = HeapTupleGetRawXmax(tuple);
+            xid = HeapTupleGetUpdateXid(tuple);
             break;
         case HEAPTUPLE_INSERT_IN_PROGRESS:
             xid = HeapTupleGetRawXmin(tuple);

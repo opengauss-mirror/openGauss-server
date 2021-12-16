@@ -885,11 +885,11 @@ static SpecialJoinInfo* make_outerjoininfo(
         "unexpected join type.");
 
     /*
-     * Presently the executor cannot support FOR UPDATE/SHARE marking of rels
+     * Presently the executor cannot support FOR [KEY] UPDATE/SHARE marking of rels
      * appearing on the nullable side of an outer join. (It's somewhat unclear
      * what that would mean, anyway: what should we mark when a result row is
      * generated from no element of the nullable relation?)  So, complain if
-     * any nullable rel is FOR UPDATE/SHARE.
+     * any nullable rel is FOR [KEY] UPDATE/SHARE.
      *
      * You might be wondering why this test isn't made far upstream in the
      * parser.	It's because the parser hasn't got enough info --- consider
@@ -906,7 +906,8 @@ static SpecialJoinInfo* make_outerjoininfo(
             ereport(ERROR,
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-                    errmsg("SELECT FOR UPDATE/SHARE cannot be applied to the nullable side of an outer join")));
+                    errmsg("SELECT FOR UPDATE/SHARE/NO KEY UPDATE/KEY SHARE cannot be applied to the nullable side "
+                           "of an outer join")));
         }
     }
 

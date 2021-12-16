@@ -1,5 +1,5 @@
 --run
-\! @abs_srcdir@/snapshots_test/test.sh -r -p @portstring@ -d regression
+\! sh @abs_srcdir@/snapshots_test/test.sh -r -p @portstring@ -d regression
 [1;33m## SETTING UP ##[0m harness: SetupTestHarness.sql ..... [1;32mPASS
 [0m[1;33m# RUNNING TEST #[0m case: 00 CreateSnapshotAPI.sql .... [1;32mPASS
 [0m[1;33m# RUNNING TEST #[0m case: 01 PrepareSnapshotAPI.sql ... [1;32mPASS

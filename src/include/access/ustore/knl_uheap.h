@@ -36,9 +36,6 @@
 #define NUM_BLOCKS_FOR_NON_INPLACE_UPDATES 200
 #define MIN_SAVING_LEN 3
 
-#define ConditionalLockTupleTuplock(_rel, _tup, _mode) \
-    ConditionalLockTuple((_rel), (_tup), TupleLockExtraInfo[_mode].hwlock)
-
 typedef struct UHeapWALInfo {
     Oid relOid;
     Oid partitionOid;

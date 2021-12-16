@@ -325,12 +325,6 @@ typedef struct LOCKTAG {
         (locktag).locktag_type = LOCKTAG_CSTORE_FREESPACE, \
         (locktag).locktag_lockmethodid = DEFAULT_LOCKMETHOD)
 
-struct LockExtraInfo {
-    LOCKMODE        hwlock;
-    int                     lockstatus;
-    int                     updstatus;
-};
-
 /*
  * Per-locked-object lock information:
  *

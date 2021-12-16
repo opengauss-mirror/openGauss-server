@@ -728,6 +728,7 @@ typedef struct knl_u_commands_context {
     List* PendingLibraryDeletes;
     TransactionId OldestXmin;
     TransactionId FreezeLimit;
+    MultiXactId MultiXactFrzLimit;
     struct SeqTableData* seqtab; /* Head of list of SeqTable items */
     /*
      * last_used_seq is updated by nextval() to point to the last used

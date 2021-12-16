@@ -7175,6 +7175,7 @@ void BootStrapXLOG(void)
     t_thrd.xact_cxt.ShmemVariableCache->startupMaxXid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
     MultiXactSetNextMXact(checkPoint.nextMulti, checkPoint.nextMultiOffset);
     SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
+    SetMultiXactIdLimit(FirstMultiXactId, TemplateDbOid);
 
     /* Set up the XLOG page header */
     page->xlp_magic = XLOG_PAGE_MAGIC;
@@ -9688,6 +9689,7 @@ void StartupXLOG(void)
     t_thrd.xact_cxt.ShmemVariableCache->oidCount = 0;
     MultiXactSetNextMXact(checkPoint.nextMulti, checkPoint.nextMultiOffset);
     SetTransactionIdLimit(checkPoint.oldestXid, checkPoint.oldestXidDB);
+    SetMultiXactIdLimit(FirstMultiXactId, TemplateDbOid);
     t_thrd.shemem_ptr_cxt.XLogCtl->ckptXid = checkPoint.oldestXid;
     t_thrd.shemem_ptr_cxt.XLogCtl->IsRecoveryDone = false;
 

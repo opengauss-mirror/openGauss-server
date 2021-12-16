@@ -901,20 +901,22 @@ extern AbnormalProcFunc g_AbFunList[ABNORMAL_NUM];
 
 void HeapXlogCleanOperatorPage(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repairFragmentation);
-void HeapXlogFreezeOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen);
+void HeapXlogFreezeOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen,
+    bool isTupleLockUpgrade);
 void HeapXlogVisibleOperatorPage(RedoBufferInfo* buffer, void* recorddata);
 void HeapXlogVisibleOperatorVmpage(RedoBufferInfo* vmbuffer, void* recorddata);
-void HeapXlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, TransactionId recordxid);
+void HeapXlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, TransactionId recordxid,
+    bool isTupleLockUpgrade);
 void HeapXlogInsertOperatorPage(RedoBufferInfo* buffer, void* recorddata, bool isinit, void* blkdata, Size datalen,
     TransactionId recxid, Size* freespace, bool tde = false);
 void HeapXlogMultiInsertOperatorPage(RedoBufferInfo* buffer, const void* recoreddata, bool isinit, const void* blkdata,
     Size len, TransactionId recordxid, Size* freespace, bool tde = false);
 void HeapXlogUpdateOperatorOldpage(RedoBufferInfo* buffer, void* recoreddata, bool hot_update, bool isnewinit,
-    BlockNumber newblk, TransactionId recordxid);
+    BlockNumber newblk, TransactionId recordxid, bool isTupleLockUpgrade);
 void HeapXlogUpdateOperatorNewpage(RedoBufferInfo* buffer, void* recorddata, bool isinit, void* blkdata,
-    Size datalen, TransactionId recordxid, Size* freespace, bool tde = false);
+    Size datalen, TransactionId recordxid, Size* freespace, bool isTupleLockUpgrade, bool tde = false);
 void HeapXlogPageUpgradeOperatorPage(RedoBufferInfo* buffer);
-void HeapXlogLockOperatorPage(RedoBufferInfo* buffer, void* recorddata);
+void HeapXlogLockOperatorPage(RedoBufferInfo* buffer, void* recorddata, bool isTupleLockUpgrade);
 void HeapXlogInplaceOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size newlen);
 void HeapXlogBaseShiftOperatorPage(RedoBufferInfo* buffer, void* recorddata);
 

@@ -114,7 +114,8 @@ extern Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace
  */
 extern void DescTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool partition);
 extern void DeltaTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool partition);
-extern void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, bool isDfsTruncate = false);
+extern void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid,  MultiXactId minmulti,
+    bool isDfsTruncate = false);
 extern RelFileNodeBackend CreateNewRelfilenode(Relation relation, TransactionId freezeXid);
 extern void UpdatePgclass(Relation relation, TransactionId freezeXid, const RelFileNodeBackend *rnode);
 /*

@@ -2755,7 +2755,7 @@ void index_build(Relation heapRelation, Partition heapPartition, Relation indexR
         Oid psortRelId = targetIndexRelation->rd_rel->relcudescrelid;
         Relation psortRel = relation_open(psortRelId, AccessExclusiveLock);
 
-        RelationSetNewRelfilenode(psortRel, u_sess->utils_cxt.RecentXmin);
+        RelationSetNewRelfilenode(psortRel, u_sess->utils_cxt.RecentXmin, InvalidMultiXactId);
         relation_close(psortRel, NoLock);
     }
 
@@ -3192,7 +3192,7 @@ double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexIn
                      * unless it's our own deletion or a system catalog.
                      */
                     Assert(!(heapTuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
-                    xwait = HeapTupleGetRawXmax(heapTuple);
+                    xwait = HeapTupleGetUpdateXid(heapTuple);
                     if (!TransactionIdIsCurrentTransactionId(xwait)) {
                         if (!is_system_catalog)
                             ereport(WARNING,
@@ -4220,7 +4220,7 @@ void reindex_indexpart_internal(Relation heapRelation, Relation iRel, IndexInfo*
     heapPart = partitionOpen(heapRelation, heapPartId, ShareLock);
     indexpart = partitionOpen(iRel, indexPartId, AccessExclusiveLock);
 
-    PartitionSetNewRelfilenode(iRel, indexpart, InvalidTransactionId);
+    PartitionSetNewRelfilenode(iRel, indexpart, InvalidTransactionId, InvalidMultiXactId);
 
     index_build(heapRelation, heapPart, iRel, indexpart, indexInfo, false, true, INDEX_CREATE_LOCAL_PARTITION, true);
 
@@ -4243,7 +4243,7 @@ void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo*
     partitionList = relationGetPartitionList(heapRelation, ShareLock);
 
     /* We'll build a new physical relation for the index */
-    RelationSetNewRelfilenode(iRel, InvalidTransactionId);
+    RelationSetNewRelfilenode(iRel, InvalidTransactionId, InvalidMultiXactId);
 
     /* Initialize the index and rebuild */
     /* Note: we do not need to re-establish pkey setting */
@@ -4404,7 +4404,7 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
                 TrRelationSetNewRelfilenode(iRel, InvalidTransactionId, baseDesc);
             } else {
                 /* We'll build a new physical relation for the index */
-                RelationSetNewRelfilenode(iRel, InvalidTransactionId);
+                RelationSetNewRelfilenode(iRel, InvalidTransactionId, InvalidMultiXactId);
             }
 
             /* Initialize the index and rebuild */
@@ -4859,7 +4859,7 @@ void reindex_partIndex(Relation heapRel, Partition heapPart, Relation indexRel, 
      */
 
     // change the storage of part index
-    PartitionSetNewRelfilenode(indexRel, indexPart, InvalidTransactionId);
+    PartitionSetNewRelfilenode(indexRel, indexPart, InvalidTransactionId, InvalidMultiXactId);
 
     // build the part index
     indexInfo = BuildIndexInfo(indexRel);
@@ -5139,7 +5139,7 @@ static void reindexPartIndex(Oid indexId, Oid partOid, bool skip_constraint_chec
         // REINDEX INDEX
         CheckPartitionNotInUse(indexpart, "REINDEX INDEX index_partition");
 
-        PartitionSetNewRelfilenode(iRel, indexpart, InvalidTransactionId);
+        PartitionSetNewRelfilenode(iRel, indexpart, InvalidTransactionId, InvalidMultiXactId);
         index_build(heapRelation, heapPart, iRel, indexpart, indexInfo, false, true, INDEX_CREATE_LOCAL_PARTITION);
 
         /*
@@ -5219,7 +5219,7 @@ static void reindexPartIndex(Oid indexId, Oid partOid, bool skip_constraint_chec
     }
 
     /* Update reltuples and relpages in pg_class for partitioned index. */
-    vac_update_pgclass_partitioned_table(iRel, false, InvalidTransactionId);
+    vac_update_pgclass_partitioned_table(iRel, false, InvalidTransactionId, InvalidMultiXactId);
 
     /* Close rels, but keep locks */
     index_close(iRel, NoLock);
