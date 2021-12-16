@@ -272,8 +272,8 @@ typedef enum AclObjectKind {
     ACL_KIND_COLUMN_SETTING,  /* column setting */
     ACL_KIND_GLOBAL_SETTING,  /* master client key */
     ACL_KIND_PACKAGE,         /* pg_package */
-    ACL_KIND_PUBLICATION,		/* pg_publication */
-	ACL_KIND_SUBSCRIPTION,		/* pg_subscription */
+    ACL_KIND_PUBLICATION,     /* pg_publication */
+    ACL_KIND_SUBSCRIPTION,    /* pg_subscription */
     MAX_ACL_KIND              /* MUST BE LAST */
 } AclObjectKind;
 

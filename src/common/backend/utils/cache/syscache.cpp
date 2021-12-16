@@ -878,6 +878,11 @@ void InitCatalogCachePhase2(void)
     Assert(u_sess->syscache_cxt.CacheInitialized);
 
     for (cacheId = 0; cacheId < SysCacheSize; cacheId++) {
+        /*
+         * We create pg_subscription in upgrade-post script, cause the relmap is full(check apply_map_update),
+         * and pg_subscription is a shared relation. When we do upgrade, before commit, we can't init cache for
+         * pg_subscription, cause the pg_subscription is not created yet.
+         */
         if (t_thrd.proc->workingVersionNum < PUBLICATION_VERSION_NUM &&
             (cacheId == SUBSCRIPTIONNAME || cacheId == SUBSCRIPTIONOID)) {
             continue;

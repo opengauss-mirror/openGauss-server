@@ -335,8 +335,8 @@ static Node *make_node_from_scanbuf(int start_pos, int end_pos, core_yyscan_t yy
 		CreateAppWorkloadGroupMappingStmt AlterAppWorkloadGroupMappingStmt DropAppWorkloadGroupMappingStmt
 		MergeStmt PurgeStmt CreateMatViewStmt RefreshMatViewStmt
 		CreateWeakPasswordDictionaryStmt DropWeakPasswordDictionaryStmt
-        CreatePublicationStmt AlterPublicationStmt
-        CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
+		CreatePublicationStmt AlterPublicationStmt
+		CreateSubscriptionStmt AlterSubscriptionStmt DropSubscriptionStmt
 
 /* <DB4AI> */
 /* SNAPSHOTS */
@@ -988,7 +988,7 @@ stmt :
 			| AlterForeignTableStmt
 			| AlterFunctionStmt
 			| AlterProcedureStmt
-            | AlterPublicationStmt
+			| AlterPublicationStmt
 			| AlterGroupStmt
 			| AlterNodeGroupStmt
 			| AlterNodeStmt
@@ -998,7 +998,7 @@ stmt :
 			| AlterResourcePoolStmt
 			| AlterSeqStmt
 			| AlterSchemaStmt
-            | AlterSubscriptionStmt
+			| AlterSubscriptionStmt
 			| AlterTableStmt
 			| AlterSystemStmt
 			| AlterCompositeTypeStmt
@@ -1050,7 +1050,7 @@ stmt :
 			| CreateRlsPolicyStmt
 			| CreatePLangStmt
 			| CreateProcedureStmt
-            | CreatePublicationStmt
+			| CreatePublicationStmt
             | CreateKeyStmt
 			| CreatePolicyLabelStmt
 			| CreateWeakPasswordDictionaryStmt
@@ -1067,7 +1067,7 @@ stmt :
 			| CreateSchemaStmt
 			| CreateSeqStmt
 			| CreateStmt
-            | CreateSubscriptionStmt
+			| CreateSubscriptionStmt
 			| CreateSynonymStmt
 			| CreateTableSpaceStmt
 			| CreateTrigStmt
@@ -1101,7 +1101,7 @@ stmt :
 			| DropResourcePoolStmt
 			| DropRuleStmt
 			| DropStmt
-            | DropSubscriptionStmt
+			| DropSubscriptionStmt
 			| DropSynonymStmt
 			| DropTableSpaceStmt
 			| DropTrigStmt
@@ -13278,7 +13278,7 @@ AlterOwnerStmt: ALTER AGGREGATE func_name aggr_args OWNER TO RoleId
 					n->newowner = $6;
 					$$ = (Node *)n;
 				}
-            | ALTER PUBLICATION name OWNER TO RoleId
+			| ALTER PUBLICATION name OWNER TO RoleId
 				{
 					AlterOwnerStmt *n = makeNode(AlterOwnerStmt);
 					n->objectType = OBJECT_PUBLICATION;
@@ -21863,7 +21863,7 @@ unreserved_keyword:
 			| PRIVILEGES
 			| PROCEDURAL
 			| PROFILE
-            | PUBLICATION
+			| PUBLICATION
 			| PUBLISH
 			| PURGE
 			| QUERY

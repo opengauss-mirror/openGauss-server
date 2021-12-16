@@ -498,7 +498,7 @@ void CheckPointReplicationOrigin(void)
 
     if (unlikely(stat("pg_logical", &st) != 0)) {
         /* maybe other threads have created this directory, so check the errno again */
-        if ((0 != mkdir("pg_logical", S_IRWXU)) && (errno != EEXIST)) {
+        if ((mkdir("pg_logical", S_IRWXU) != 0) && (errno != EEXIST)) {
             ereport(PANIC, (errcode_for_file_access(), errmsg("could not create directory \"pg_logical\": %m")));
         }
     }

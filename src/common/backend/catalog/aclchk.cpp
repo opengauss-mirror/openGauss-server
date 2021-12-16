@@ -4727,6 +4727,8 @@ static const char* const not_owner_msg[MAX_ACL_KIND] = {
     gettext_noop("must be owner of column encryption key %s"),
     /* ACL_KIND_GLOBAL_SETTING */
     gettext_noop("must be owner of client master key %s"),
+    /* ACL_KIND_PACKAGE */
+    gettext_noop("must be owner of package %s"),
     /* ACL_KIND_PUBLICATION */
     gettext_noop("must be owner of publication %s"),
     /* ACL_KIND_SUBSCRIPTION */
