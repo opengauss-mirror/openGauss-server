@@ -181,7 +181,8 @@ typedef struct WalSndCtlData {
      * mode.
      */
     bool sync_master_standalone;
-
+    TimestampTz last_sync_master_standalone_time;
+    
     /*
      * The demotion of postmaster  Also indicates that all the walsenders
      * should reject any demote requests if postmaster is doning domotion.
