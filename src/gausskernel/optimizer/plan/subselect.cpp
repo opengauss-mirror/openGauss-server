@@ -5584,7 +5584,7 @@ void convert_ORANY_to_join(
 
         /* Replace this any sublink with "not null" expr. */
         or_clause =
-            (BoolExpr*)replace_node_clause((Node*)or_clause, (Node*)any_sublink, (Node*)nullTest, RNC_RECURSE_AGGREF);
+            (BoolExpr*)replace_node_clause((Node*)or_clause, (Node*)any_sublink, (Node*)nullTest, RNC_RECURSE_AGGREF | RNC_REPLACE_FIRST_ONLY);
 
         if (root->glob->sublink_counter != 0 && ENABLE_PRED_PUSH_ALL(root)) {
             char *subquery_name = denominate_sublink_name(root->glob->sublink_counter);
