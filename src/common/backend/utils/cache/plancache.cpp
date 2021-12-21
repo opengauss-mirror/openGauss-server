@@ -836,6 +836,13 @@ List* RevalidateCachedQuery(CachedPlanSource* plansource, bool has_lp)
     }
 
     /*
+     * Query Tree is about to be rebuilt, reset is_top_unique_sql, otherwise, unique sql id
+     * can not be set.
+     */
+    if (IS_UNIQUE_SQL_TRACK_TOP)
+        SetIsTopUniqueSQL(false);
+
+    /*
      * Run parse analysis and rule rewriting.  The parser tends to scribble on
      * its input, so we must copy the raw parse tree to prevent corruption of
      * the cache.
