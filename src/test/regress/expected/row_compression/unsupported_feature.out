@@ -20,20 +20,24 @@ ERROR:  value 128 out of bounds for option "compress_level"
 DETAIL:  Valid values are between "-31" and "31".
 -- compresstype cant be used with column table
 CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(ORIENTATION = 'column', compresstype=2);
-ERROR:  only row orientation table support compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.
+ERROR:  only row orientation table support compresstype.
 -- compresstype cant be used with temp table
 CREATE TEMP TABLE compressed_temp_table_1024(id int) WITH(compresstype=2);
-ERROR:  only row orientation table support compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.
+ERROR:  only row orientation table support compresstype.
 -- compresstype cant be used with unlogged table
 CREATE unlogged TABLE compressed_unlogged_table_1024(id int) WITH(compresstype=2);
-ERROR:  only row orientation table support compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.
+ERROR:  only row orientation table support compresstype.
 -- use compress_prealloc_chunks\compress_chunk_size\compress_level without compresstype
 CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_prealloc_chunks=5);
-ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level should be used with compresstype.
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
 CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_chunk_size=1024);
-ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level should be used with compresstype.
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_byte_convert=true);
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_diff_convert=true);
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
 CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_level=5);
-ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level should be used with compresstype.
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
 -- unspport exchange
 CREATE TABLE unspported_feature.exchange_table(id int) WITH(compresstype=2);
 CREATE TABLE unspported_feature.alter_table(id int) partition by range(id)

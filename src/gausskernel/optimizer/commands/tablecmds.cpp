@@ -1084,10 +1084,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
     bool isUstore = false;
     bool assignedStorageType = false;
 
-    bool hasRowCompressType = false;
-    bool hasRowCompressChunk = false;
-    bool hasRowCompressPre = false;
-    bool hasRowCompressLevel = false;
+    TableCreateSupport tableCreateSupport{false,false,false,false,false,false};
     (void)isOrientationSet(options, NULL, false);
     foreach (cell, options) {
         DefElem* def = (DefElem*)lfirst(cell);
@@ -1118,13 +1115,17 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("It is not allowed to assign version option for non-dfs table.")));
         } else if (pg_strcasecmp(def->defname, "compresstype") == 0) {
-            hasRowCompressType = true;
+            tableCreateSupport.compressType = true;
         } else if (pg_strcasecmp(def->defname, "compress_chunk_size") == 0) {
-            hasRowCompressChunk = true;
+            tableCreateSupport.compressChunkSize = true;
         } else if (pg_strcasecmp(def->defname, "compress_prealloc_chunks") == 0) {
-            hasRowCompressPre = true;
+            tableCreateSupport.compressPreAllocChunks = true;
         } else if (pg_strcasecmp(def->defname, "compress_level") == 0) {
-            hasRowCompressLevel = true;
+            tableCreateSupport.compressLevel = true;
+        } else if (pg_strcasecmp(def->defname, "compress_byte_convert") == 0) {
+            tableCreateSupport.compressByteConvert = true;
+        } else if (pg_strcasecmp(def->defname, "compress_diff_convert") == 0) {
+            tableCreateSupport.compressDiffConvert = true;
         }
 
         if (pg_strcasecmp(def->defname, "orientation") == 0 && pg_strcasecmp(defGetString(def), ORIENTATION_ORC) == 0) {
@@ -1150,23 +1151,17 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
         res = lappend(options, def);
     }
 
-
-    if ((isCStore || isTsStore || relkind != RELKIND_RELATION ||
-         stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
-         stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
-         stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) &&
-        (hasRowCompressType || hasRowCompressChunk || hasRowCompressPre || hasRowCompressLevel)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPTION),
-                errmsg("only row orientation table support "
-                       "compresstype/compress_chunk_size/compress_prealloc_chunks/compress_level.")));
+    bool noSupportTable = isCStore || isTsStore || relkind != RELKIND_RELATION ||
+                          stmt->relation->relpersistence == RELPERSISTENCE_UNLOGGED ||
+                          stmt->relation->relpersistence == RELPERSISTENCE_TEMP ||
+                          stmt->relation->relpersistence == RELPERSISTENCE_GLOBAL_TEMP;
+    if (noSupportTable && tableCreateSupport.compressType) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("only row orientation table support compresstype.")));
     }
-    if (!hasRowCompressType && (hasRowCompressChunk || hasRowCompressPre || hasRowCompressLevel)) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_OPTION),
-                errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level "
-                       "should be used with compresstype.")));
-
+    if (!tableCreateSupport.compressType && HasCompressOption(&tableCreateSupport)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/"
+                               "compress_diff_convert should be used with compresstype.")));
     }
 
     if (isUstore && !isCStore && !hasCompression) {
@@ -1204,7 +1199,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
                 DefElem *def1 = makeDefElem("orientation", (Node *)makeString(ORIENTATION_ROW));
                 res = lcons(def1, options);
             }
-            if (!hasCompression  && !hasRowCompressType) {
+            if (!hasCompression  && !tableCreateSupport.compressType) {
                 DefElem *def2 = makeDefElem("compression", (Node *)rowCmprOpt);
                 res = lappend(options, def2);
             }

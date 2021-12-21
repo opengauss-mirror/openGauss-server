@@ -3949,24 +3949,6 @@ void SetupPageCompressMemoryMap(File file, RelFileNode node, const RelFileNodeFo
     RelFileNodeForkNum newOne(relFileNodeForkNum);
     newOne.forknumber = PCA_FORKNUM;
     PageCompressHeader *map = GetPageCompressHeader(vfdP, chunk_size, newOne);
-    if (map == (void *) (-1)) {
-        ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg("Failed to mmap page compression address file %s: %m",
-                                                                 vfdP->fileName)));
-    }
-    if (map->chunk_size == 0 && map->algorithm == 0) {
-        map->chunk_size = chunk_size;
-        map->algorithm = GET_COMPRESS_ALGORITHM(node.opt);
-        if (pc_msync(map) != 0) {
-            ereport(data_sync_elevel(ERROR),
-                    (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m", vfdP->fileName)));
-        }
-    }
-
-    if (t_thrd.xlog_cxt.InRecovery) {
-        CheckAndRepairCompressAddress(map, chunk_size, map->algorithm, vfdP->fileName);
-    }
-
     vfdP->with_pcmap = true;
     vfdP->pcmap = map;
 }
@@ -3991,11 +3973,6 @@ PageCompressHeader *GetPageCompressMemoryMap(File file, uint32 chunk_size)
     Assert(vfdP->with_pcmap);
     if (vfdP->pcmap == NULL) {
         map = GetPageCompressHeader(vfdP, chunk_size, vfdP->fileNode);
-        if (map == MAP_FAILED) {
-            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES), errmsg(
-                "Failed to mmap page compression address file %s: %m", vfdP->fileName)));
-        }
-
         vfdP->with_pcmap = true;
         vfdP->pcmap = map;
     }

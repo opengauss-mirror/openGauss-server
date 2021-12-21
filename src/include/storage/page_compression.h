@@ -113,6 +113,21 @@ typedef struct HeapPageCompressData {
     char data[FLEXIBLE_ARRAY_MEMBER];       /* compressed page, except for the page header */
 } HeapPageCompressData;
 
+struct TableCreateSupport {
+    bool compressType;
+    bool compressLevel;
+    bool compressChunkSize;
+    bool compressPreAllocChunks;
+    bool compressByteConvert;
+    bool compressDiffConvert;
+};
+
+inline bool HasCompressOption(TableCreateSupport *tableCreateSupport)
+{
+    return tableCreateSupport->compressLevel || tableCreateSupport->compressChunkSize ||
+           tableCreateSupport->compressPreAllocChunks || tableCreateSupport->compressByteConvert ||
+           tableCreateSupport->compressDiffConvert;
+}
 
 const uint4 CHUNK_SIZE_LIST[4] = {BLCKSZ / 2, BLCKSZ / 4, BLCKSZ / 8, BLCKSZ / 16};
 constexpr uint4 INDEX_OF_HALF_BLCKSZ = 0; 
@@ -167,13 +182,13 @@ constexpr unsigned CMP_LEVEL_INDEX = 4;
 constexpr unsigned CMP_ALGORITHM_INDEX = 5;
 constexpr unsigned CMP_CHUNK_SIZE_INDEX = 6;
 
-struct CmpBitStuct {
+struct CmpBitStruct {
     unsigned int bitLen;
     unsigned int mask;
     unsigned int moveBit;
 };
 
-constexpr CmpBitStuct g_cmpBitStruct[] = {{CMP_BYTE_CONVERT_LEN, 0x01, 15},
+constexpr CmpBitStruct g_cmpBitStruct[] = {{CMP_BYTE_CONVERT_LEN, 0x01, 15},
     {CMP_DIFF_CONVERT_LEN, 0x01, 14},
     {CMP_PRE_CHUNK_LEN, 0x07, 11},
     {CMP_LEVEL_SYMBOL_LEN, 0x01, 10},
@@ -323,11 +338,11 @@ extern uint1 ConvertChunkSize(uint32 compressedChunkSize, bool* success);
  * @param pageCompressAddr addr of block
  * @return checksum uint32
  */
-extern uint32 AddrChecksum32(BlockNumber blockNumber, const PageCompressAddr* pageCompressAddr);
+extern uint32 AddrChecksum32(BlockNumber blockNumber, const PageCompressAddr* pageCompressAddr, uint16 chunkSize);
 
 #ifndef FRONTEND
 extern void CheckAndRepairCompressAddress(PageCompressHeader *pcMap, uint16 chunk_size, uint8 algorithm, const char *path);
-PageCompressHeader* GetPageCompressHeader(void* vfd, int chunkSize, const RelFileNodeForkNum &relFileNodeForkNum);
+PageCompressHeader* GetPageCompressHeader(void* vfd, uint16 chunkSize, const RelFileNodeForkNum &relFileNodeForkNum);
 void UnReferenceAddrFile(void* vfd);
 void RealInitialMMapLockArray();
 #endif
