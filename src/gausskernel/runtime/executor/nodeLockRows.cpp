@@ -94,6 +94,7 @@ lnext:
         ExecRowMark* erm = aerm->rowmark;
         Datum datum;
         bool isNull = false;
+        bool rowMovement = false;
         HeapTupleData tuple;
         Buffer buffer;
         TM_FailureData tmfd;
@@ -141,7 +142,7 @@ lnext:
             Datum part_datum;
 
             part_datum = ExecGetJunkAttribute(slot, aerm->toidAttNo, &isNull);
-
+            rowMovement = erm->relation->rd_rel->relrowmovement;
             tblid = DatumGetObjectId(part_datum);
             /* if it is a partition */
             if (tblid != erm->relation->rd_id) {
@@ -214,6 +215,16 @@ lnext:
                 copy_tuple = tableam_tuple_lock_updated(estate->es_output_cid, bucket_rel, lock_mode, &tmfd.ctid, tmfd.xmax);
                 if (copy_tuple == NULL) {
                     /* Tuple was deleted, so don't return it */
+                    if (rowMovement) {
+                        /*
+                        * the may be a row movement update action which delete tuple from original
+                        * partition and insert tuple to new partition or we can add lock on the tuple to
+                        * be delete or updated to avoid throw exception
+                        */
+                        ereport(ERROR, (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                            errmsg("partition table update conflict"),
+                            errdetail("disable row movement of table can avoid this conflict")));
+                    }
                     goto lnext;
                 }
                 /* remember the actually locked tuple's TID */
@@ -242,6 +253,17 @@ lnext:
 
                 /* Tuple was deleted, so don't return it */
                 Assert(ItemPointerEquals(&tmfd.ctid, &tuple.t_self));
+                if (rowMovement) {
+                    /*
+                     * the may be a row movement update action which delete tuple from original
+                     * partition and insert tuple to new partition or we can add lock on the tuple to
+                     * be delete or updated to avoid throw exception
+                     */
+                    ereport(ERROR, (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                        errmsg("partition table update conflict"),
+                        errdetail("disable row movement of table can avoid this conflict")));
+                }
+
                 goto lnext;
 
             default:
