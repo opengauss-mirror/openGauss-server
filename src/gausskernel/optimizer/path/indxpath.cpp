@@ -27,6 +27,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_opfamily.h"
 #include "catalog/pg_type.h"
+#include "catalog/pg_proc.h"
 #include "nodes/makefuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/cost.h"
@@ -725,6 +726,67 @@ static inline bool index_relation_has_bucket(IndexOptInfo* index)
     return hasBucket;
 }
 
+inline bool IsEqRestrict(const RestrictInfo* rinfo)
+{
+    Expr* clause = rinfo->clause;
+    return is_opclause(clause) && get_oprrest(((OpExpr*)clause)->opno) == EQSELRETURNOID;
+}
+
+/*
+ * Check whether the indexqualcols in indexpath contain the given attNum and the
+ * constraint condition on this attNum is equality constraints.
+ */
+inline bool HasAttNumAndEqRestrict(const IndexPath* newPath, const int attNum)
+{
+    ListCell* lc1 = NULL;
+    ListCell* lc2 = NULL;
+    IndexOptInfo* newPathIndex = (IndexOptInfo*)newPath->indexinfo;
+    forboth (lc1, newPath->indexqualcols, lc2, newPath->indexquals) {
+        int i = lfirst_int(lc1);
+        RestrictInfo* rinfo = (RestrictInfo*)lfirst(lc2);
+        if (newPathIndex->indexkeys[i] == attNum && IsEqRestrict(rinfo))
+            return true;
+    }
+    return false;
+}
+
+/*
+ * Check whether index path contain all the index columns and the constraint conditions
+ * are equality constraints.
+ */
+inline bool ContainAllColsAndEqRestrict(const IndexPath* newPath, const IndexOptInfo* index)
+{
+    for (int pos = 0; pos < index->ncolumns; pos++) {
+        if (!HasAttNumAndEqRestrict(newPath, index->indexkeys[pos]))
+            return false;
+    }
+    return true;
+}
+
+/*
+ * For the given index, we want to mark whether the index contains the columns come from an
+ * unique index and the constraint conditions on these columns are equality constraints. This
+ * mark will be used in unique index first rule during path generation.
+ */
+void MarkUniqueIndexFirstRule(const RelOptInfo* rel, const IndexOptInfo* index, List* result)
+{
+    if (!ENABLE_SQL_BETA_FEATURE(NO_UNIQUE_INDEX_FIRST) && index->relam == BTREE_AM_OID) {
+        ListCell* lcr = NULL;
+        foreach (lcr, result) {
+            IndexPath* newPath = (IndexPath*)lfirst(lcr);
+            ListCell* lci = NULL;
+            foreach (lci, rel->indexlist) {
+                IndexOptInfo* indexToMatch = (IndexOptInfo*)lfirst(lci);
+                if (indexToMatch->relam == BTREE_AM_OID && indexToMatch->unique &&
+                    ContainAllColsAndEqRestrict(newPath, indexToMatch)) {
+                        newPath->rulesforindexgen |= BTREE_INDEX_CONTAIN_UNIQUE_COLS;
+                        break;
+                }
+            }
+        }
+    }
+}
+
 /*
  * build_index_paths
  *	  Given an index and a set of index clauses for it, construct zero
@@ -963,6 +1025,13 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
             result = lappend(result, ipath);
         }
     }
+
+    /*
+     * 6. Mark whether unique index fisrt rule satisfied in current btree index path.
+     * The rules will be used for selecting paths. We will check whether current index path
+     * contains a unique btree columns and the constraint conditions are equality constraints.
+     */
+    MarkUniqueIndexFirstRule(rel, index, result);
 
     return result;
 }

@@ -760,3 +760,6 @@ test: leaky_function_operator
 #test: gs_guc
 
 test: smp
+test: mulcolpk
+test: pbe_partition
+test: unique_index_first

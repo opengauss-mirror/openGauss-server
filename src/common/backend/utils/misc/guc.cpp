@@ -993,6 +993,7 @@ static const struct config_enum_entry sql_beta_options[] = {
     {"rand_cost_opt", RAND_COST_OPT, false},
     {"page_est_opt", PAGE_EST_OPT, false},
     {"param_path_opt", PARAM_PATH_OPT, false},
+    {"no_unique_index_first", NO_UNIQUE_INDEX_FIRST, false},
     {NULL, 0, false}
 };
 

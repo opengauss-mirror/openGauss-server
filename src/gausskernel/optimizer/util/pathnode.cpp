@@ -253,6 +253,134 @@ PathCostComparison compare_join_single_node_distribution(Path* path1, Path* path
     return COSTS_DIFFERENT;
 }
 
+inline bool IsSeqScanPath(const Path* path)
+{
+    return path->pathtype == T_SeqScan;
+}
+
+inline bool IsBtreeIndexPath(const Path* path)
+{
+    return path->type == T_IndexPath &&
+        ((IndexPath*)path)->indexinfo->relam == BTREE_AM_OID;
+}
+
+inline bool AreTwoBtreeIdxPaths(const Path* path1, const Path* path2)
+{
+    return IsBtreeIndexPath(path1) && IsBtreeIndexPath(path2);
+}
+
+inline bool IsBtreeIdxAndSeqPath(const Path* path1, const Path* path2)
+{
+    return (IsBtreeIndexPath(path1) && IsSeqScanPath(path2)) ||
+        (IsBtreeIndexPath(path2) && IsSeqScanPath(path1));
+}
+
+inline bool IsParamPath(const Path* path)
+{
+    return path->param_info != NULL;
+}
+
+inline bool BothParamPathOrBothNot(const Path* path1, const Path* path2)
+{
+    return (IsParamPath(path1) && IsParamPath(path2)) ||
+        (!IsParamPath(path1) && !IsParamPath(path2));
+}
+
+inline bool ContainUniqueCols(const IndexPath* path)
+{
+    return path->rulesforindexgen & BTREE_INDEX_CONTAIN_UNIQUE_COLS;
+}
+
+/*
+ * The main entry for unique index first rule.
+ * In this rule, we check two aspects:
+ * 1. For Btree index pathA and pathB, pathA contains a unique btree columns and the constraint
+ * conditions are equality constraints. We prefer pathA.
+ * Notice: Only consider unique index first rule when the two index paths are both parameterized path
+ * or both not.
+ * 2. For Btree index pathA and SeqScan pathB, pathA contains a unique btree columns and the constraint
+ * conditions are equality constraints. We prefer pathA.
+ * Notice: This rule is vaild when Btree index pathA is unparameterized path.
+ */
+bool ImplementUniqueIndexRule(const Path* path1, const Path* path2, PathCostComparison &cost_comparison)
+{
+    /* Check the first aspect */
+    if (AreTwoBtreeIdxPaths(path1, path2) && BothParamPathOrBothNot(path1, path2)) {
+        bool path1ContainUniqueCols = ContainUniqueCols((IndexPath*)path1);
+        bool path2ContainUniqueCols = ContainUniqueCols((IndexPath*)path2);
+        /* Compare with 1 to verify whether one path satisfy unique index first rule and another don't. */
+        if (path1ContainUniqueCols + path2ContainUniqueCols == 1) {
+            const int suppressionParam = g_instance.cost_cxt.disable_cost_enlarge_factor;
+            if (path1ContainUniqueCols == true && path1->total_cost < suppressionParam * path2->total_cost) {
+                cost_comparison = COSTS_BETTER1;
+                return true;
+            } else if (path2ContainUniqueCols == true && path2->total_cost < suppressionParam * path1->total_cost) {
+                cost_comparison = COSTS_BETTER2;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* Check the second aspect */
+    if (IsBtreeIdxAndSeqPath(path1, path2)) {
+        const int suppressionParam = g_instance.cost_cxt.disable_cost_enlarge_factor;
+        if (IsSeqScanPath(path1) && !IsParamPath(path2) && ContainUniqueCols((IndexPath*)path2) &&
+            path2->total_cost < suppressionParam * path1->total_cost) {
+            cost_comparison = COSTS_BETTER2;
+            return true;
+        } else if (IsSeqScanPath(path2) && !IsParamPath(path1) && ContainUniqueCols((IndexPath*)path1) &&
+            path1->total_cost < suppressionParam * path2->total_cost) {
+            cost_comparison = COSTS_BETTER1;
+            return true;
+        }
+        return false;
+    }
+
+    return false;
+}
+
+void DebugPrintUniqueIndexFirstInfo(const Path* path1, const Path* path2, const PathCostComparison &cost_comparison)
+{
+    char* preferIndexName = NULL;
+    char* ruledOutIndexName = NULL;
+
+    if (cost_comparison == COSTS_BETTER1) {
+        preferIndexName = get_rel_name(((IndexPath*)path1)->indexinfo->indexoid);
+        ruledOutIndexName = IsBtreeIndexPath(path2) ? get_rel_name(((IndexPath*)path2)->indexinfo->indexoid) : NULL;
+    } else {
+        preferIndexName = get_rel_name(((IndexPath*)path2)->indexinfo->indexoid);
+        ruledOutIndexName = IsBtreeIndexPath(path1) ? get_rel_name(((IndexPath*)path1)->indexinfo->indexoid) : NULL;
+    }
+
+    /* ruledOutIndexName = NULL means the ruled out path is a seqscan path. */
+    if (ruledOutIndexName == NULL) {
+        ereport(DEBUG1,
+            (errmodule(MOD_OPT),
+                errmsg("Implement Unique Index rule in selecting path: prefer to use index: %s, rule out seqscan.",
+                    preferIndexName)));
+    } else {
+        ereport(DEBUG1,
+            (errmodule(MOD_OPT),
+                errmsg("Implement Unique Index rule in selecting path: prefer to use index: %s, rule out index: %s.",
+                    preferIndexName, ruledOutIndexName)));
+    }
+
+    pfree_ext(preferIndexName);
+    pfree_ext(ruledOutIndexName);
+}
+
+/* Check whether unique index first rule can be used */
+bool CheckUniqueIndexFirstRule(const Path* path1, const Path* path2, PathCostComparison &cost_comparison)
+{
+    if (!ENABLE_SQL_BETA_FEATURE(NO_UNIQUE_INDEX_FIRST) && ImplementUniqueIndexRule(path1, path2, cost_comparison)) {
+        if (log_min_messages <= DEBUG1)
+            DebugPrintUniqueIndexFirstInfo(path1, path2, cost_comparison);
+        return true;
+    }
+    return false;
+}
+
 /*
  * compare_path_costs_fuzzily
  *	  Compare the costs of two paths to see if either can be said to
@@ -282,8 +410,18 @@ PathCostComparison compare_path_costs_fuzzily(Path* path1, Path* path2, double f
     else if (path1->hint_value < path2->hint_value)
         return COSTS_BETTER2;
 
+    PathCostComparison cost_comparison;
+
+    /*
+     * For index paths, we check if rules can be used to filter.
+     * Here, we tend to select path containing unique index columns.
+     */
+    if (CheckUniqueIndexFirstRule(path1, path2, cost_comparison)) {
+        return cost_comparison;
+    }
+
     /* dn gather RBO */
-    PathCostComparison cost_comparison = compare_join_single_node_distribution(path1, path2);
+    cost_comparison = compare_join_single_node_distribution(path1, path2);
     if (cost_comparison != COSTS_DIFFERENT) {
         return cost_comparison;
     }

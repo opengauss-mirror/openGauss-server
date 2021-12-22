@@ -1246,6 +1246,13 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
             min_IO_cost = 0;
         }
 
+        /*
+         * When database keep running without vacuum, the number of relpages may inflate quickly
+         * and finally cause min_IO_cost overestimated. So, adjust min_IO_cost to ensure
+         * min_IO_cost < max_IO_cost.
+         */
+        min_IO_cost = Min(min_IO_cost, max_IO_cost);
+
         ereport(DEBUG2,
             (errmodule(MOD_OPT),
                 errmsg("Computing IndexScanCost(loop_count = 1): min_pages_fetched: %lf, min_IO_cost: %lf",

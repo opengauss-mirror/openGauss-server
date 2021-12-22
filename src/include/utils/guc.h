@@ -356,7 +356,8 @@ typedef enum {
     PARAM_PATH_GEN = 4, /* Parametrized Path Generation */
     RAND_COST_OPT = 8,  /* Optimizing sc_random_page_cost */
     PARAM_PATH_OPT = 16, /* Parametrized Path Optimization. */
-    PAGE_EST_OPT = 32   /* More accurate (rowstored) index pages estimation */
+    PAGE_EST_OPT = 32,   /* More accurate (rowstored) index pages estimation */
+    NO_UNIQUE_INDEX_FIRST = 64 /* use unique index first rule in path generation */
 } sql_beta_param;
 
 #define ENABLE_PRED_PUSH(root) \
