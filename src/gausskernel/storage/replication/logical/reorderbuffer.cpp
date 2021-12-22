@@ -1308,7 +1308,6 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
             Relation relation = NULL;
             Oid reloid;
             Oid partitionReltoastrelid = InvalidOid;
-            bool stopDecoding = false;
 
             switch (change->action) {
                 case REORDER_BUFFER_CHANGE_INSERT:
@@ -1409,10 +1408,7 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
 
                 case REORDER_BUFFER_CHANGE_INTERNAL_COMMAND_ID:
                     Assert(change->data.command_id != InvalidCommandId);
-                    if (change->data.command_id != FirstCommandId) {
-                        stopDecoding = true;
-                        break;
-                    }
+
                     if (command_id < change->data.command_id) {
                         command_id = change->data.command_id;
 
@@ -1439,9 +1435,6 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                 case REORDER_BUFFER_CHANGE_INTERNAL_TUPLECID:
                     ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("tuplecid value in changequeue")));
                     break;
-            }
-            if (stopDecoding) {
-                break;
             }
         }
 

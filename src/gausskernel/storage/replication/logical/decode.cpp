@@ -839,11 +839,7 @@ static void DecodeMultiInsert(LogicalDecodingContext *ctx, XLogRecordBuffer *buf
          */
         if (xlrec->flags & XLH_INSERT_CONTAINS_NEW_TUPLE) {
             HeapTupleHeader header;
-            if ((data - tupledata) % ALIGNOF_SHORT == 0) {
-                xlhdr = (xl_multi_insert_tuple *)data;
-            } else {
-                xlhdr = (xl_multi_insert_tuple *)(data + ALIGNOF_SHORT - (data - tupledata) % ALIGNOF_SHORT);
-            }
+            xlhdr = (xl_multi_insert_tuple *)SHORTALIGN(data);
             data = ((char *)xlhdr) + SizeOfMultiInsertTuple;
             datalen = xlhdr->datalen;
             if (datalen != 0 && AllocSizeIsValid((uint)datalen)) {
