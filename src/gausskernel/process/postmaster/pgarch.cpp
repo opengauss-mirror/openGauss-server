@@ -736,8 +736,12 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
         }
 
         XLogRecPtr restartLsn = getRestartLsnFromSlot();
+        /* we need to initialize the archive slot */
         if (restartLsn == InvalidXLogRecPtr) {
-            continue;
+            ereport(WARNING, (errmsg("the archive slot is not initialized, "
+                                        "we should restart the archiver and init the archive slot")));
+            t_thrd.arch.ready_to_stop = true;
+            return;
         }
 
         uint32 size = isObsSlot() ? OBS_XLOG_SLICE_BLOCK_SIZE : NAS_XLOG_FILE_SIZE;
