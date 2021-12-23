@@ -12,6 +12,8 @@ CREATE DIRECTORY DummyDir AS '/home/dummydir';
 CREATE OR REPLACE DIRECTORY DummyDir AS '/home/dummydirreplace';
 CREATE DIRECTORY ErrorQuote AS '/home''DIR';
 CREATE DIRECTORY RelativePath AS '../DIR/subdir';
+CREATE OR REPLACE DIRECTORY RelativePath AS 'DIR';
+CREATE OR REPLACE DIRECTORY DummyDir AS '/home/dummy.dir';
 SELECT * FROM PG_DIRECTORY;
 SELECT pg_sleep(1);
 --grant and revoke
@@ -50,3 +52,85 @@ RESET SESSION AUTHORIZATION;
 SET enable_access_server_directory = ON;
 DROP USER CARRIE;
 DROP SCHEMA test_directory;
+
+-- gs_role_directory_create, gs_role_directory_drop
+RESET ROLE;
+CREATE USER test_user1 PASSWORD '1234567i*';
+CREATE USER test_user2 PASSWORD '1234567i*';
+CREATE USER test_user3 PASSWORD '1234567i*';
+CREATE USER test_sysadmin SYSADMIN PASSWORD '1234567i*';
+CREATE USER test_create PASSWORD '1234567i*' IN ROLE gs_role_directory_create;
+CREATE USER test_drop PASSWORD '1234567i*' IN ROLE gs_role_directory_drop;
+
+CREATE DIRECTORY test_dir1 AS '@testtablespace@/dir1';
+GRANT DROP ON DIRECTORY test_dir1 TO test_user1 WITH GRANT OPTION;
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+DROP DIRECTORY test_dir1;
+
+SET ROLE test_sysadmin PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+DROP DIRECTORY test_dir1;
+
+SET ROLE test_create PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+DROP DIRECTORY test_dir1;
+
+SET ROLE test_drop PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+DROP DIRECTORY test_dir1;
+
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_access_server_directory=on" >/dev/null 2>&1
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+DROP DIRECTORY test_dir1;
+
+RESET ROLE;
+CREATE DIRECTORY test_dir1 AS '@testtablespace@/dir1';
+GRANT DROP ON DIRECTORY test_dir1 TO test_user1 WITH GRANT OPTION;
+
+SELECT has_directory_privilege('test_user1','test_dir1','DROP');
+SELECT has_directory_privilege('test_dir1','DROP');
+SELECT has_directory_privilege('test_user1',(select oid from pg_directory where dirname='test_dir1'),'DROP');
+SELECT has_directory_privilege((select oid from pg_directory where dirname='test_dir1'),'DROP');
+SELECT has_directory_privilege((select oid from pg_authid where rolname='test_user1'),'test_dir1','DROP');
+SELECT has_directory_privilege((select oid from pg_authid where rolname='test_user1'),(select oid from pg_directory where dirname='test_dir1'),'DROP');
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT DROP ON DIRECTORY test_dir1 TO test_user2;
+
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+DROP DIRECTORY test_dir1;
+
+RESET ROLE;
+CREATE DIRECTORY test_dir1 AS '@testtablespace@/dir1';
+
+SET ROLE test_create PASSWORD '1234567i*';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+DROP DIRECTORY test_dir1;
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ALTER DIRECTORY test_dir2 OWNER TO test_user3;
+DROP DIRECTORY test_dir2;
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+
+SET ROLE test_drop PASSWORD '1234567i*';
+CREATE DIRECTORY test_di3 AS '@testtablespace@/dir3';
+DROP DIRECTORY test_dir1;
+DROP DIRECTORY test_dir2;
+
+\! rm -rf @testtablespace@/dir1
+\! rm -rf @testtablespace@/dir2
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_access_server_directory=off" >/dev/null 2>&1
+
+RESET ROLE;
+DROP USER test_user1,test_user2,test_user3;
+DROP USER test_sysadmin,test_create,test_drop;

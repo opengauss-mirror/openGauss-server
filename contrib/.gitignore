@@ -21,3 +21,6 @@
 /pg_xlogdump/xlogdesc.cpp
 /pg_xlogdump/xlogreader.cpp
 /pg_xlogdump/xlogreader_common.cpp
+/pg_xlogdump/segpagedesc.cpp
+/pg_xlogdump/uheapdesc.cpp
+/pg_xlogdump/undologdesc.cpp

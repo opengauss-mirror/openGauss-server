@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -90,6 +91,9 @@ typedef struct knl_session_attr_common {
     int Log_RotationSize;
     int max_function_args;
     int max_user_defined_exception;
+    int pset_lob_length;
+    char* pset_num_format;
+    int pset_num_width;
     int tcp_keepalives_idle;
     int tcp_keepalives_interval;
     int tcp_keepalives_count;
@@ -211,11 +215,16 @@ typedef struct knl_session_attr_common {
     char* router_att;
     bool enable_router;
     int backend_version;
-
+#ifdef ENABLE_MULTIPLE_NODES
+    bool enable_gpc_grayrelease_mode;
+#endif
     int gpc_clean_timeout;
     char* node_name;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool plsql_show_all_error;
     uint32 extension_session_vars_array_size;
     void** extension_session_vars_array;
+#endif
 } knl_session_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_COMMON_H_ */

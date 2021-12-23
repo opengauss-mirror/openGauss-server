@@ -53,6 +53,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -299,6 +300,8 @@ NON_EXEC_STATIC void AutoVacLauncherMain()
 
         /* since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevents interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -1710,8 +1713,6 @@ bool allow_autoanalyze(HeapTuple tuple)
     return enable_analyze;
 }
 
-#define isPartitionedRelation(classForm) (PARTTYPE_PARTITIONED_RELATION == (classForm)->parttype)
-
 static void AddApplicationNameToPoolerParams()
 {
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord() && IsAutoVacuumWorkerProcess()) {
@@ -1785,6 +1786,7 @@ static void fetch_global_autovac_info()
     PG_TRY();
     {
         DEBUG_MOD_START_TIMER(MOD_AUTOVAC);
+        SPI_STACK_LOG("connect", NULL, NULL);
         if (SPI_OK_CONNECT != SPI_connect()) {
             ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Unable to connect to execute internal query.")));
         }
@@ -1832,6 +1834,7 @@ static void fetch_global_autovac_info()
         DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: process %u SPI tuples", SPI_processed);
 
         connected = false;
+        SPI_STACK_LOG("finish", NULL, NULL);
         if (SPI_OK_FINISH != SPI_finish()) {
             ereport(ERROR, (errcode(ERRCODE_OPERATE_FAILED), errmsg("SPI_finish failed")));
         }
@@ -1841,8 +1844,10 @@ static void fetch_global_autovac_info()
     PG_CATCH(); /* Clean up in case of error. */
     {
         DeleteApplicationNameFromPoolerParams();
-        if (connected)
+        if (connected) {
+            SPI_STACK_LOG("finish", NULL, NULL);
             SPI_finish();
+        }
 
         /* Carry on with error handling. */
         PopActiveSnapshot();

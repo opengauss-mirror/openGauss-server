@@ -14,7 +14,7 @@ partition by range (c1)
     partition p3_gpi_uniquecheck_table1 VALUES less than (maxvalue)
 );
 INSERT INTO gpi_uniquecheck_table1 SELECT r, r, r FROM generate_series(0,40000) AS r;
-CREATE UNIQUE INDEX idx1_gpi_uniquecheck_table1 ON gpi_uniquecheck_table1 (c2) GLOBAL;
+CREATE UNIQUE INDEX idx1_gpi_uniquecheck_table1 ON gpi_uniquecheck_table1 (c2);
 INSERT INTO gpi_uniquecheck_table1 VALUES (9999,1,1);
 ERROR:  duplicate key value violates unique constraint "idx1_gpi_uniquecheck_table1"
 DETAIL:  Key (c2)=(1) already exists.

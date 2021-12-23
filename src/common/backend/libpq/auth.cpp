@@ -147,7 +147,9 @@ static int CheckLDAPAuth(Port* port);
 static int CheckCertAuth(Port* port);
 #endif
 
+#ifdef USE_IAM
 static int CheckIAMAuth(Port* port);
+#endif
 
 /* ----------------------------------------------------------------
  * MIT Kerberos authentication system - protocol version 5
@@ -653,7 +655,11 @@ void ClientAuthentication(Port* port)
 #endif
             break;
         case uaIAM:
+#ifdef USE_IAM
             status = CheckIAMAuth(port);
+#else
+            Assert(false);
+#endif
             break;
         case uaTrust:
             status = STATUS_OK;
@@ -664,7 +670,7 @@ void ClientAuthentication(Port* port)
     }
 
     /* Database Security: Support lock/unlock account */
-    if (!AM_WAL_SENDER) {
+    if (!AM_NOT_HADR_SENDER) {
         /*
          * Disable immediate response to SIGTERM/SIGINT/timeout interrupts as there are
          * some cache and memory operations which can not be interrupted. And nothing will
@@ -756,15 +762,15 @@ void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
     char postfix[POSTFIX_LENGTH + 1] = {0};
     char superuser_name[NAMEDATALEN] = {0};
     unsigned char buf[SHA256_DIGEST_LENGTH] = {0};
-    char encryptString[ENCRYPTED_STRING_LENGTH + 1] = {0};
+    char encrypt_string[ENCRYPTED_STRING_LENGTH + 1] = {0};
     int32 superuser_stored_method;
     errno_t rc = EOK;
     int rcs = 0;
 
     (void)GetSuperUserName((char*)superuser_name);
-    superuser_stored_method = get_password_stored_method(superuser_name, encryptString, ENCRYPTED_STRING_LENGTH + 1);
+    superuser_stored_method = get_password_stored_method(superuser_name, encrypt_string, ENCRYPTED_STRING_LENGTH + 1);
     if (superuser_stored_method == SHA256_PASSWORD || superuser_stored_method == COMBINED_PASSWORD) {
-        rc = strncpy_s(postfix, POSTFIX_LENGTH + 1, encryptString + SALT_STRING_LENGTH, POSTFIX_LENGTH);
+        rc = strncpy_s(postfix, POSTFIX_LENGTH + 1, encrypt_string + SALT_STRING_LENGTH, POSTFIX_LENGTH);
         securec_check(rc, "\0", "\0");
     }
 
@@ -775,7 +781,7 @@ void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
     SHA256_Final2(buf, &ctx);
     rc = memcpy_s(fake_salt_bytes, salt_len, buf, (salt_len < SHA256_DIGEST_LENGTH) ? salt_len : SHA256_DIGEST_LENGTH);
     securec_check(rc, "\0", "\0");
-    rc = memset_s(encryptString, ENCRYPTED_STRING_LENGTH + 1, 0, ENCRYPTED_STRING_LENGTH);
+    rc = memset_s(encrypt_string, ENCRYPTED_STRING_LENGTH + 1, 0, ENCRYPTED_STRING_LENGTH);
     securec_check(rc, "\0", "\0");
     rc = memset_s(combine_string, combine_string_length + 1, 0, combine_string_length);
     securec_check(rc, "\0", "\0");
@@ -785,16 +791,16 @@ void GenerateFakeSaltBytes(const char* user_name, char* fake_salt_bytes, int sal
 /*
  * Send an authentication request packet to the frontend.
  */
-static bool GsGenerateFakeEncryptString(char* encryptString, const Port* port, int len)
+static bool GsGenerateFakeEncryptString(char* encrypt_string, const Port* port, int len)
 {
     int retval = 0;
     errno_t rc = EOK;
     char fake_salt_bytes[SALT_LENGTH + 1] = {0};
-    char fake_salt[SALT_LENGTH * 2 + 1] = {0};
+    char fake_salt[SALT_LENGTH * ENCRY_LENGTH_DOUBLE + 1] = {0};
     char fake_serverkey_bytes[HMAC_LENGTH + 1] = {0};
-    char fake_serverkey[HMAC_LENGTH * 2 + 1] = {0};
+    char fake_serverkey[HMAC_LENGTH * ENCRY_LENGTH_DOUBLE + 1] = {0};
     char fake_storedkey_bytes[STORED_KEY_LENGTH + 1] = {0};
-    char fake_storedkey[STORED_KEY_LENGTH * 2 + 1] = {0};
+    char fake_storedkey[STORED_KEY_LENGTH * ENCRY_LENGTH_DOUBLE + 1] = {0};
     
     GenerateFakeSaltBytes(port->user_name, fake_salt_bytes, SALT_LENGTH);
     retval = RAND_priv_bytes((GS_UCHAR*)fake_serverkey_bytes, (GS_UINT32)(HMAC_LENGTH));
@@ -813,7 +819,7 @@ static bool GsGenerateFakeEncryptString(char* encryptString, const Port* port, i
     sha_bytes_to_hex64((uint8*)fake_salt_bytes, fake_salt);
     sha_bytes_to_hex64((uint8*)fake_serverkey_bytes, fake_serverkey);
     sha_bytes_to_hex64((uint8*)fake_storedkey_bytes, fake_storedkey);
-    rc = snprintf_s(encryptString,
+    rc = snprintf_s(encrypt_string,
         len,
         ENCRYPTED_STRING_LENGTH,
         "%s%s%s",
@@ -823,7 +829,6 @@ static bool GsGenerateFakeEncryptString(char* encryptString, const Port* port, i
     securec_check_ss(rc, "\0", "\0");
     return true;
 }
-
 static void sendAuthRequest(Port* port, AuthRequest areq)
 {
     /* Database Security:  Support SHA256.*/
@@ -855,10 +860,10 @@ static void sendAuthRequest(Port* port, AuthRequest areq)
 #ifdef ENABLE_MULTIPLE_NODES
     if (IsDSorHaWalSender()) {
 #else        
-    if (IsDSorHaWalSender() && is_node_internal_connection(port)) {
+    if (IsDSorHaWalSender() && is_node_internal_connection(port) && !AM_WAL_HADR_SENDER) {
 #endif        
         stored_method = SHA256_PASSWORD;
-        if (u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) { 		
+        if (u_sess->attr.attr_security.Password_encryption_type == PASSWORD_TYPE_SM3) {
             stored_method = SM3_PASSWORD;
         }
     } else {
@@ -3556,6 +3561,7 @@ static int CheckCertAuth(Port* port)
 }
 #endif
 
+#ifdef USE_IAM
 /*
  * @Description: the main function for iam authenication check.
  * @in port : the port which contain socket info for recv password from client.
@@ -3638,6 +3644,7 @@ static int CheckIAMAuth(Port* port)
     passwd = NULL;
     return STATUS_OK;
 }
+#endif
 
 /*
  * release kerberos gss connection info 

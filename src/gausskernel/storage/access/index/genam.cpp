@@ -620,7 +620,7 @@ void GPIScanInit(GPIScanDesc* gpiScan)
 
     gpiInfo->currPartOid = InvalidOid;
     gpiInfo->fakePartRelation = NULL;
-    gpiInfo->invisiblePartMap = NULL;
+    gpiInfo->invisiblePartTree = CreateOidRBTree();
     gpiInfo->parentRelation = NULL;
     gpiInfo->fakeRelationTable = NULL;
     gpiInfo->partition = NULL;
@@ -639,10 +639,7 @@ void GPIScanEnd(GPIScanDesc gpiScan)
         GPIDestroyFakeRelCache(gpiScan);
     }
 
-    if (gpiScan->invisiblePartMap != NULL) {
-        bms_free_ext(gpiScan->invisiblePartMap);
-    }
-
+    DestroyOidRBTree(&gpiScan->invisiblePartTree);
     pfree_ext(gpiScan);
 }
 
@@ -684,7 +681,7 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
     }
 
     /* First check invisible partition oid's bitmapset */
-    if (bms_is_member(gpiScan->currPartOid, gpiScan->invisiblePartMap)) {
+    if (OidRBTreeMemberOid(gpiScan->invisiblePartTree, gpiScan->currPartOid)) {
         gpiScan->fakePartRelation = NULL;
         gpiScan->partition = NULL;
         gpiScan->currPartOid = InvalidOid;
@@ -702,7 +699,7 @@ bool GPIGetNextPartRelation(GPIScanDesc gpiScan, MemoryContext cxt, LOCKMODE lmo
         /* Just save partition status if current partition metadata is invisible */
         if (currStatus == PART_METADATA_INVISIBLE) {
             /* If current partition metadata is invisible, add current partition oid into invisiblePartMap */
-            gpiScan->invisiblePartMap = bms_add_member(gpiScan->invisiblePartMap, gpiScan->currPartOid);
+            (void)OidRBTreeInsertOid(gpiScan->invisiblePartTree, gpiScan->currPartOid);
             gpiScan->currPartOid = InvalidOid;
             result = false;
         } else {

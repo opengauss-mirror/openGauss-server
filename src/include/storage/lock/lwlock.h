@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/storage/lock/lwlock.h
  *
@@ -128,6 +129,10 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #ifdef WIN32
 #define NUM_INDIVIDUAL_LWLOCKS           113 /* num should be same as lwlockname.txt */
 #endif
+
+/* Number of partitions the global package runtime state hashtable */
+#define NUM_GPRC_PARTITIONS 128
+
 /* 
  * WARNING---Please keep the order of LWLockTrunkOffset and BuiltinTrancheIds consistent!!! 
 */
@@ -168,10 +173,10 @@ const struct LWLOCK_PARTITION_DESC LWLockPartInfo[] = {
 #define FirstSegmentHeadLock (FirstStartBlockMappingLock + NUM_STARTBLOCK_PARTITIONS)
 #define FirstTwoPhaseStateLock (FirstSegmentHeadLock + NUM_SEGMENT_HEAD_PARTITIONS)
 /* session roleid */
-#define FirstSessRoleIdLock (FirstTwoPhaseStateLock + NUM_SESSION_ROLEID_PARTITIONS)
+#define FirstSessRoleIdLock (FirstTwoPhaseStateLock + NUM_TWOPHASE_PARTITIONS)
+#define FirstGPRCMappingLock (FirstSessRoleIdLock + NUM_SESSION_ROLEID_PARTITIONS)
 /* must be last: */
-#define NumFixedLWLocks (FirstSessRoleIdLock + NUM_TWOPHASE_PARTITIONS)
-
+#define NumFixedLWLocks (FirstSessRoleIdLock + NUM_SESSION_ROLEID_PARTITIONS)
 /*
  * WARNING----Please keep BuiltinTrancheIds and BuiltinTrancheNames consistent!!!
  *
@@ -219,11 +224,13 @@ enum BuiltinTrancheIds
     LWTRANCHE_OLDSERXID_SLRU_CTL,
     LWTRANCHE_WAL_INSERT,
     LWTRANCHE_DOUBLE_WRITE,
-    LWTRANCHE_DW_SINGLE_POS,
-    LWTRANCHE_DW_SINGLE_WRITE,
+    LWTRANCHE_DW_SINGLE_FIRST,   /* single flush dw file, first version pos lock */
+    LWTRANCHE_DW_SINGLE_SECOND,   /* single flush dw file, second version pos lock */
+    LWTRANCHE_DW_SINGLE_SECOND_BUFTAG,  /* single flush dw file, second version buffer tag page lock */
     LWTRANCHE_REDO_POINT_QUEUE,
     LWTRANCHE_PRUNE_DIRTY_QUEUE,
     LWTRANCHE_UNLINK_REL_TBL,
+    LWTRANCHE_UNLINK_REL_FORK_TBL,
     LWTRANCHE_ACCOUNT_TABLE,
     LWTRANCHE_EXTEND, // For general 3rd plugin
     LWTRANCHE_MPFL,

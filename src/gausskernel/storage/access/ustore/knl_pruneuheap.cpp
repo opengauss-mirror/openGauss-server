@@ -850,7 +850,11 @@ static int UHeapPruneItem(const RelationBuffer *relbuf, OffsetNumber offnum, Tra
          * that can be freed.
          */
         ndeleted++;
-
+        if (TransactionIdIsValid(xid) && TransactionIdIsInProgress(xid)) {
+            ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+                errmsg("Tuple will be pruned but xid is inprogress, xid=%lu, oldestxmin=%lu, oldestXidInUndo=%lu.",
+                xid, oldestXmin, g_instance.proc_base->oldestXidInUndo)));
+        }
         /* short aligned */
         *spaceFreed += SHORTALIGN(tup.disk_tuple_size);
     }
@@ -1075,7 +1079,7 @@ void UPageRepairFragmentation(Buffer buffer, OffsetNumber targetOffnum, Size spa
                 /* For parallel replay, clog of txactinfo.xid may not finish replay */
                 if (t_thrd.xlog_cxt.InRecovery && get_real_recovery_parallelism() > 1)
                     ;
-                else if (!TransactionIdDidCommit(txactinfo.xid)) {
+                else if (!UHeapTransactionIdDidCommit(txactinfo.xid)) {
                     return;
                 }
             }
@@ -1144,7 +1148,7 @@ void UPageRepairFragmentation(Buffer buffer, OffsetNumber targetOffnum, Size spa
                      * frozen. This can happen when the tuple is in active state 
                      * but the entry's xid is older than oldestXidInUndo 
                      */
-                    if (txactinfo.td_slot != UHEAPTUP_SLOT_FROZEN && !TransactionIdDidCommit(txactinfo.xid)) {
+                    if (txactinfo.td_slot != UHEAPTUP_SLOT_FROZEN && !UHeapTransactionIdDidCommit(txactinfo.xid)) {
                         continue;
                     }
                 }

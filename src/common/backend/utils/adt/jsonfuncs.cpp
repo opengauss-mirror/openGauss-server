@@ -1261,7 +1261,7 @@ static inline Datum each_worker_jsonb(FunctionCallInfo fcinfo, bool as_text)
     rsi = (ReturnSetInfo *) fcinfo->resultinfo;
 
     if (!rsi || !IsA(rsi, ReturnSetInfo) ||
-        (rsi->allowedModes & SFRM_Materialize) == 0 ||
+        ((uint32)rsi->allowedModes & SFRM_Materialize) == 0 ||
         rsi->expectedDesc == NULL) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1282,8 +1282,8 @@ static inline Datum each_worker_jsonb(FunctionCallInfo fcinfo, bool as_text)
 
     ret_tdesc = CreateTupleDescCopy(tupdesc);
     BlessTupleDesc(ret_tdesc);
-    tuple_store =
-        tuplestore_begin_heap(rsi->allowedModes & SFRM_Materialize_Random, false, u_sess->attr.attr_memory.work_mem);
+    tuple_store = tuplestore_begin_heap((uint32)rsi->allowedModes & SFRM_Materialize_Random,
+                                        false, u_sess->attr.attr_memory.work_mem);
 
     MemoryContextSwitchTo(old_cxt);
 
@@ -1369,7 +1369,7 @@ static inline Datum each_worker(FunctionCallInfo fcinfo, bool as_text)
     rsi = (ReturnSetInfo *) fcinfo->resultinfo;
 
     if (!rsi || !IsA(rsi, ReturnSetInfo) ||
-        (rsi->allowedModes & SFRM_Materialize) == 0 ||
+        ((uint32)rsi->allowedModes & SFRM_Materialize) == 0 ||
         rsi->expectedDesc == NULL) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1379,13 +1379,21 @@ static inline Datum each_worker(FunctionCallInfo fcinfo, bool as_text)
 
     rsi->returnMode = SFRM_Materialize;
     (void) get_call_result_type(fcinfo, NULL, &tupdesc);
+    if (tupdesc == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_OPT), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("tupdesc should not be NULL value"),
+                errdetail("N/A"),
+                errcause("An error occurred when obtaining the value of tupdesc."),
+                erraction("Contact Huawei Engineer.")));
+    }
 
     /* make these in a sufficiently long-lived memory context */
     old_cxt = MemoryContextSwitchTo(rsi->econtext->ecxt_per_query_memory);
     state->ret_tdesc = CreateTupleDescCopy(tupdesc);
     BlessTupleDesc(state->ret_tdesc);
-    state->tuple_store =
-        tuplestore_begin_heap(rsi->allowedModes & SFRM_Materialize_Random, false, u_sess->attr.attr_memory.work_mem);
+    state->tuple_store = tuplestore_begin_heap((uint32)rsi->allowedModes & SFRM_Materialize_Random,
+                                               false, u_sess->attr.attr_memory.work_mem);
     MemoryContextSwitchTo(old_cxt);
 
     sem->semstate = (void *) state;
@@ -1638,7 +1646,7 @@ static inline Datum elements_worker(FunctionCallInfo fcinfo, bool as_text)
     rsi = (ReturnSetInfo *) fcinfo->resultinfo;
 
     if (!rsi || !IsA(rsi, ReturnSetInfo) ||
-        (rsi->allowedModes & SFRM_Materialize) == 0 ||
+        ((uint32)rsi->allowedModes & SFRM_Materialize) == 0 ||
         rsi->expectedDesc == NULL) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1655,7 +1663,7 @@ static inline Datum elements_worker(FunctionCallInfo fcinfo, bool as_text)
     state->ret_tdesc = CreateTupleDescCopy(tupdesc);
     BlessTupleDesc(state->ret_tdesc);
     state->tuple_store =
-        tuplestore_begin_heap(rsi->allowedModes & SFRM_Materialize_Random,
+        tuplestore_begin_heap((uint32)rsi->allowedModes & SFRM_Materialize_Random,
                               false, u_sess->attr.attr_memory.work_mem);
     MemoryContextSwitchTo(old_cxt);
 
@@ -1799,7 +1807,7 @@ static inline Datum populate_record_worker(FunctionCallInfo fcinfo, bool have_re
     Oid         jtype = get_fn_expr_argtype(fcinfo->flinfo, have_record_arg ? 1 : 0);
     text       *json = NULL;
     Jsonb      *jb = NULL;
-    bool        use_json_as_text;
+    bool        use_json_as_text = false;
     HTAB       *json_hash = NULL;
     HeapTupleHeader rec = NULL;
     Oid         tupType = InvalidOid;
@@ -2091,7 +2099,7 @@ static void hash_object_field_end(void *state, char *fname, bool isnull)
 {
     JHashState    *_state = (JHashState *) state;
     JsonHashEntry *hashentry = NULL;
-    bool           found;
+    bool           found = false;
     char           name[NAMEDATALEN];
 
     /*
@@ -2289,7 +2297,7 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
 {
     Oid            argtype;
     Oid            jtype = get_fn_expr_argtype(fcinfo->flinfo, have_record_arg ? 1 : 0);
-    bool           use_json_as_text;
+    bool           use_json_as_text = false;
     ReturnSetInfo *rsi = NULL;
     MemoryContext  old_cxt;
     Oid            tupType;
@@ -2315,7 +2323,7 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
 
     rsi = (ReturnSetInfo *) fcinfo->resultinfo;
     if (!rsi || !IsA(rsi, ReturnSetInfo) ||
-        (rsi->allowedModes & SFRM_Materialize) == 0 ||
+        ((uint32)rsi->allowedModes & SFRM_Materialize) == 0 ||
         rsi->expectedDesc == NULL) {
         ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -2381,7 +2389,7 @@ static inline Datum populate_recordset_worker(FunctionCallInfo fcinfo, bool have
     old_cxt = MemoryContextSwitchTo(rsi->econtext->ecxt_per_query_memory);
     state->ret_tdesc = CreateTupleDescCopy(tupdesc);
     BlessTupleDesc(state->ret_tdesc);
-    state->tuple_store = tuplestore_begin_heap(rsi->allowedModes & SFRM_Materialize_Random,
+    state->tuple_store = tuplestore_begin_heap((uint32)rsi->allowedModes & SFRM_Materialize_Random,
                                                false, u_sess->attr.attr_memory.work_mem);
     MemoryContextSwitchTo(old_cxt);
 
@@ -2621,7 +2629,7 @@ static void populate_recordset_object_field_end(void *state, char *fname, bool i
 {
     PopulateRecordsetState *_state = (PopulateRecordsetState *) state;
     JsonHashEntry          *hashentry = NULL;
-    bool        found;
+    bool        found = false;
     char        name[NAMEDATALEN];
 
     /*

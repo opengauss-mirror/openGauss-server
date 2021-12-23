@@ -270,5 +270,64 @@ end loop;
 end;
 /
 
+drop table test_index_ht;
+ERROR:  table "test_index_ht" does not exist
+create table test_index_ht (a int, b int, c int)
+partition by hash(a)
+(
+ PARTITION p1,
+ PARTITION p2
+);
+insert into test_index_ht select generate_series(3,6);
+explain (costs off, verbose on) select * from test_index_ht order by 1;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ Sort
+   Output: a, b, c
+   Sort Key: test_index_ht.a
+   ->  Partition Iterator
+         Output: a, b, c
+         Iterations: 2
+         ->  Partitioned Seq Scan on public.test_index_ht
+               Output: a, b, c
+               Selected Partitions:  1..2
+(9 rows)
+
+select * from test_index_ht order by 1;
+ a | b | c 
+---+---+---
+ 3 |   |  
+ 4 |   |  
+ 5 |   |  
+ 6 |   |  
+(4 rows)
+
+create index test_exchange_index_lt_ha on test_index_ht (a) local;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain (costs off, verbose on) select * from test_index_ht order by 1;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c
+   Sort Key: test_index_ht.a
+   ->  Partition Iterator
+         Output: a, b, c
+         Iterations: 2
+         ->  Partitioned Index Scan using test_exchange_index_lt_ha on public.test_index_ht
+               Output: a, b, c
+               Selected Partitions:  1..2
+(9 rows)
+
+select * from test_index_ht order by 1;
+ a | b | c 
+---+---+---
+ 3 |   |  
+ 4 |   |  
+ 5 |   |  
+ 6 |   |  
+(4 rows)
+
+drop table test_index_ht;
 drop schema fvt_other_cmd cascade;
 NOTICE:  drop cascades to table fvt_other_cmd.idex_list_partition_table_001

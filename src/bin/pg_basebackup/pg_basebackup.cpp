@@ -2048,7 +2048,7 @@ static int GsBaseBackup(int argc, char** argv)
                 break;
         }
     }
-    
+
     /* If port is not specified by using -p, obtain the port through environment variables */
     if (dbport == NULL) {
         char *value = NULL;

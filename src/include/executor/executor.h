@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/executor/executor.h
  *
@@ -275,6 +276,7 @@ extern TupleTableSlot* ExecProject(ProjectionInfo* projInfo, ExprDoneCond* isDon
 extern TupleTableSlot* ExecScan(ScanState* node, ExecScanAccessMtd accessMtd, ExecScanRecheckMtd recheckMtd);
 extern void ExecAssignScanProjectionInfo(ScanState* node);
 extern void ExecScanReScan(ScanState* node);
+extern HTAB* ExecEvalParamExternTableOfIndex(ExprState* exprstate, ExprContext* econtext, Oid* tableOfIndexType, bool *isnestedtable);
 
 /*
  * prototypes from functions in execTuples.c

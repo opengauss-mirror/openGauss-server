@@ -58,12 +58,4 @@ alter index normal_test.tbl_partition_id_idx set (compress_prealloc_chunks=2);
 -- support
 alter table normal_test.tbl_pc set (compress_prealloc_chunks=2);
 
--- new testcase
-set search_path=normal_test;
-\d+
-reset search_path;
-CREATE TABLE normal_test.pre_handle(id int) WITH(compresstype=2, compress_chunk_size=512, compress_byte_convert=true, compress_diff_convert=true);
-insert into normal_test.pre_handle select generate_series(1,1000);
-checkpoint;
-select count(*) from normal_test.pre_handle;
 drop schema normal_test cascade;

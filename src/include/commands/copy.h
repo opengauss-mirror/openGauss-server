@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/commands/copy.h
  *
@@ -244,6 +245,23 @@ typedef struct CopyStateData {
     AssignTypmod *as_typemods;   /* array of typmod for each transformed column */
     ExprState** transexprs;     /* array of expr for each transformed column */
 
+    Relation summary_table; /* opened copy_summary table */
+    int64 skiprows;
+    int64 loadrows;
+    int64 errorrows;
+    int64 whenrows;
+    int64 allnullrows;
+
+    List *sequence_col_list;  /* list of information for each sequence column */
+    SqlLoadSequInfo **sequence;
+    StringInfoData sequence_buf;
+
+    List *filler_col_list;  /* list of information for each filler column */
+    SqlLoadFillerInfo **filler;
+
+    List *constant_col_list;  /* list of information for each sequence column */
+    SqlLoadConsInfo **constant;
+
     /*
      * These variables are used to reduce overhead in textual COPY FROM.
      *
@@ -287,7 +305,7 @@ typedef struct CopyStateData {
     /* Remote COPY state data */
     RemoteCopyData* remoteCopyState;
 #endif
-    bool fill_missing_fields;
+    int fill_missing_fields; /* 0 off;1 Compatible with the original copy; -1 trailing nullcols */
     bool ignore_extra_data; /* ignore overflowing fields */
 
     Formatter* formatter;
@@ -312,6 +330,10 @@ typedef struct CopyStateData {
     GetNextCopyFunc getNextCopyFunc;
     stringinfo_pointer inBuffer;
 
+    List *when;
+
+    int64 skip;
+
     uint32 distSessionKey;
     List* illegal_chars_error; /* used to record every illegal_chars_error for each imported data line. */
 
@@ -335,7 +357,21 @@ typedef struct CopyStateData {
     AdaptMem memUsage;
 
     LedgerHashState hashstate;
+    bool is_load_copy;
+    bool is_useeof;
 } CopyStateData;
+
+typedef struct InsertCopyLogInfoData {
+    Relation rel;
+    int insertOpt;
+    CommandId mycid;
+    EState *estate;
+    ResultRelInfo *resultRelInfo;
+    TupleTableSlot *myslot;
+    BulkInsertState bistate;
+}InsertCopyLogInfoData;
+
+typedef struct InsertCopyLogInfoData* LogInsertState;
 
 #define IS_CSV(cstate) ((cstate)->fileformat == FORMAT_CSV)
 #define IS_BINARY(cstate) ((cstate)->fileformat == FORMAT_BINARY)
@@ -420,3 +456,7 @@ extern void CopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, i
 extern void UHeapCopyFromInsertBatch(Relation rel, EState* estate, CommandId mycid, int hiOptions,
     ResultRelInfo* resultRelInfo, TupleTableSlot* myslot, BulkInsertState bistate, int nBufferedTuples,
     UHeapTuple* bufferedTuples, Partition partition, int2 bucketId);
+
+
+extern void CheckCopyWhenExprOptions(LoadWhenExpr *when);
+extern char* pg_strdup(const char* string);

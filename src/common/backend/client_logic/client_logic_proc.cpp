@@ -69,7 +69,16 @@ void add_rettype_orig(const Oid func_id, const Oid ret_type, const Oid res_type)
     int out_param_id = -1;
     Oid out_param_type = InvalidOid;
     int allnumargs = 0;
-    Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    Datum proargmodes;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    } else {
+        proargmodes = SysCacheGetAttr(PROCALLARGS, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    }
+#else
+    proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+#endif
     if (!isNull) {
         ArrayType* arr = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
         if (arr) {
@@ -117,6 +126,8 @@ void add_rettype_orig(const Oid func_id, const Oid ret_type, const Oid res_type)
     HeapTuple gs_oldtup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(func_id));
     Relation gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
     TupleDesc gs_tupDesc = RelationGetDescr(gs_rel);
+    gs_values[Anum_gs_encrypted_proc_last_change - 1] =
+        DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
     if (!HeapTupleIsValid(gs_oldtup)) {
         gs_values[Anum_gs_encrypted_proc_func_id - 1] = ObjectIdGetDatum(func_id);
         gs_values[Anum_gs_encrypted_proc_prorettype_orig - 1] = ObjectIdGetDatum(ret_type);
@@ -129,6 +140,7 @@ void add_rettype_orig(const Oid func_id, const Oid ret_type, const Oid res_type)
             ArrayType* arr_gs_all_types_orig =
                 construct_array(gs_all_args_orig, allnumargs, INT4OID, sizeof(int4), true, 'i');
             gs_values[Anum_gs_encrypted_proc_proallargtypes_orig - 1] = PointerGetDatum(arr_gs_all_types_orig);
+            gs_values[Anum_gs_encrypted_proc_last_change - 1] = PointerGetDatum(arr_gs_all_types_orig);
             pfree_ext(gs_all_args_orig);
         } else {
             gs_nulls[Anum_gs_encrypted_proc_proallargtypes_orig - 1] = true;
@@ -140,6 +152,7 @@ void add_rettype_orig(const Oid func_id, const Oid ret_type, const Oid res_type)
     } else {
         gs_values[Anum_gs_encrypted_proc_prorettype_orig - 1] = ObjectIdGetDatum(ret_type);
         gs_replaces[Anum_gs_encrypted_proc_prorettype_orig - 1] = true;
+        gs_replaces[Anum_gs_encrypted_proc_last_change - 1] = true;
         Datum gs_all_types_orig =
             SysCacheGetAttr(GSCLPROCID, gs_oldtup, Anum_gs_encrypted_proc_proallargtypes_orig, &isNull);
         if (!isNull) {
@@ -205,7 +218,15 @@ void add_allargtypes_orig(const Oid func_id, Datum* all_types_orig, Datum* all_t
     }
     vec_all_arg_types = (Oid*)ARR_DATA_PTR(arr_all_arg_types);
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    } else {
+        proargmodes = SysCacheGetAttr(PROCALLARGS, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    }
+#else
     proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+#endif
     if (!isNull) {
         arr_proargmodes = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
         bool is_char_oid_array = ARR_NDIM(arr_proargmodes) != 1 || ARR_DIMS(arr_proargmodes)[0] != allnumargs ||
@@ -264,6 +285,8 @@ void add_allargtypes_orig(const Oid func_id, Datum* all_types_orig, Datum* all_t
     heap_close(rel, RowExclusiveLock);
     Relation gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
     TupleDesc gs_tupDesc = RelationGetDescr(gs_rel);
+    gs_values[Anum_gs_encrypted_proc_last_change - 1] = 
+        DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
     if (!HeapTupleIsValid(gs_oldtup)) {
         gs_values[Anum_gs_encrypted_proc_func_id - 1] = ObjectIdGetDatum(func_id);
         Datum* all_types_orig_datum = (Datum*)palloc(allnumargs * sizeof(Datum));
@@ -280,6 +303,7 @@ void add_allargtypes_orig(const Oid func_id, Datum* all_types_orig, Datum* all_t
     } else {
         gs_values[Anum_gs_encrypted_proc_proallargtypes_orig - 1] = PointerGetDatum(arr_gs_all_types_orig);
         gs_replaces[Anum_gs_encrypted_proc_proallargtypes_orig - 1] = true;
+        gs_replaces[Anum_gs_encrypted_proc_last_change - 1] = true;
         /* Okay, do it... */
         gs_tup = heap_modify_tuple(gs_oldtup, gs_tupDesc, gs_values, gs_nulls, gs_replaces);
         simple_heap_update(gs_rel, &gs_tup->t_self, gs_tup);
@@ -295,7 +319,16 @@ void add_allargtypes_orig(const Oid func_id, Datum* all_types_orig, Datum* all_t
 void verify_out_param(HeapTuple oldtup, int *out_param_id)
 {
     bool isNull = false;
-    Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    Datum proargmodes;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    } else {
+        proargmodes = SysCacheGetAttr(PROCALLARGS, oldtup, Anum_pg_proc_proargmodes, &isNull);
+    }
+#else
+    proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, oldtup, Anum_pg_proc_proargmodes, &isNull);
+#endif
     if (isNull) {
         return;
     }
@@ -380,6 +413,8 @@ void verify_rettype_for_out_param(const Oid func_id)
     HeapTuple gs_oldtup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(func_id));
     Relation gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
     TupleDesc gs_tupDesc = RelationGetDescr(gs_rel);
+    gs_values[Anum_gs_encrypted_proc_last_change - 1] =
+        DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
     if (!HeapTupleIsValid(gs_oldtup)) {
         gs_values[Anum_gs_encrypted_proc_func_id - 1] = ObjectIdGetDatum(func_id);
         gs_values[Anum_gs_encrypted_proc_prorettype_orig - 1] = ObjectIdGetDatum(ret_type);
@@ -402,7 +437,8 @@ void verify_rettype_for_out_param(const Oid func_id)
         record_proc_depend(func_id, gs_encrypted_proc_id);
     } else {
         gs_values[Anum_gs_encrypted_proc_prorettype_orig - 1] = ObjectIdGetDatum(ret_type);
-        gs_replaces[Anum_gs_encrypted_proc_prorettype_orig-1] = true;
+        gs_replaces[Anum_gs_encrypted_proc_prorettype_orig - 1] = true;
+        gs_replaces[Anum_gs_encrypted_proc_last_change - 1] = true;
         /* Okay, do it... */
         gs_tup = heap_modify_tuple(gs_oldtup, gs_tupDesc, gs_values, gs_nulls, gs_replaces);
         simple_heap_update(gs_rel, &gs_tup->t_self, gs_tup);

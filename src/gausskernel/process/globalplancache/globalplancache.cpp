@@ -1022,8 +1022,10 @@ void GlobalPlanCache::CleanUpByTime()
                 gpckey_list = lappend(gpckey_list, dest_gpckey);
 
                 /* should not be long */
-                if (gpckey_list->length >= maxlen_gpckey_list)
+                if (gpckey_list->length >= maxlen_gpckey_list) {
+                    hash_seq_term(&hash_seq);
                     break;
+                }
             }
         }
         LWLockRelease(GetMainLWLockByIndex(lock_id));

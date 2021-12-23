@@ -358,6 +358,7 @@ Datum capture_view_to_json(PG_FUNCTION_ARGS)
     pfree_ext(filter);
 
     /* get query result to json */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errmodule(MOD_INSTR),
@@ -378,6 +379,7 @@ Datum capture_view_to_json(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
+        SPI_STACK_LOG("finish", NULL, NULL);
         SPI_finish();
         pfree(query.data);
         pfree(view_name);
@@ -392,6 +394,7 @@ Datum capture_view_to_json(PG_FUNCTION_ARGS)
     }
     PG_END_TRY();
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
     pfree(query.data);
     pfree(view_name);

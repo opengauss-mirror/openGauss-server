@@ -1084,7 +1084,7 @@ void UHeapTupleHeaderAdvanceLatestRemovedXid(UHeapDiskTuple tuple, TransactionId
      * the inserting transaction, but for that we need to traverse the
      * complete undo chain to find the root tuple, is it really worth?
      */
-    if (TransactionIdDidCommit(xid)) {
+    if (UHeapTransactionIdDidCommit(xid)) {
         Assert((tuple->flag & UHEAP_DELETED) || (tuple->flag & UHEAP_UPDATED));
         if (TransactionIdFollows(xid, *latestRemovedXid))
             *latestRemovedXid = xid;

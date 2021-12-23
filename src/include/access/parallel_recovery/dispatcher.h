@@ -66,6 +66,7 @@ typedef struct LogDispatcher {
     XLogRecPtr dispatchReadRecPtr; /* start of dispatch record read */
     XLogRecPtr dispatchEndRecPtr;  /* end of dispatch record read */
     bool checkpointNeedFullSync;
+    RedoInterruptCallBackFunc oldStartupIntrruptFunc;
 } LogDispatcher;
 
 extern LogDispatcher* g_dispatcher;

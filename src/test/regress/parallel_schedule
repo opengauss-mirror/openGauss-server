@@ -494,7 +494,7 @@ test: advisory_lock
 # ----------
 test: plancache limit plpgsql copy2 temp temp_2 rangefuncs prepare truncate returning largeobject
 test: alter_table_000 alter_table_001 alter_table_002 alter_table_003
-test: goto
+test: goto plpgsql_savepoint
 
 # run alter object to test pg_object
 test: pg_object_test
@@ -539,7 +539,7 @@ test: magic_set
 #test: hw_packages hw_user hw_independent_user
 test: hw_user_audit
 test: hw_packages hw_dbms_sql_3 hw_dbms_sql hw_independent_user hw_user_basic hw_user_revoke hw_user_privilege hw_user_pguser hw_user_namespace hw_order_cn
-test: hw_interval_format hw_function_p_1 hw_function_p_2 hw_function_p_3 hw_function_p_4 hw_current_schema hw_dba_enable_partition hw_tablespace hw_procedure_define hw_anonymous_block hw_procedure hw_functions
+test: hw_interval_format hw_function_p_1 hw_function_p_3 hw_function_p_4 hw_current_schema hw_dba_enable_partition hw_tablespace hw_procedure_define hw_anonymous_block hw_procedure hw_functions
 test: hw_user_alter_pguser
 ignore: hw_alter_system
 #test: hw_grant_all hw_dynamic_sql hw_func_return_out hw_function_default_value hw_empty_str_to_null hw_varray hw_cursor hw_schema

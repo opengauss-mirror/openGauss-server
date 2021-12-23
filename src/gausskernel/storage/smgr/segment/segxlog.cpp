@@ -787,14 +787,19 @@ static void redo_new_page(XLogReaderState *record)
         update_max_page_flush_lsn(record->EndRecPtr, t_thrd.proc_cxt.MyProcPid, false);
     }
 
-    uint32 pos = dw_single_flush_without_buffer(*tag, (Block)page);
+    bool flush_old_file = false;
+    uint32 pos = seg_dw_single_flush_without_buffer(*tag, (Block)page, &flush_old_file);
     t_thrd.proc->dw_pos = pos;
+    t_thrd.proc->flush_new_dw = !flush_old_file;
 
     SegSpace *spc = spc_open(tag->rnode.spcNode, tag->rnode.dbNode, false);
     SegmentCheck(spc != NULL);
     seg_physical_write(spc, tag->rnode, tag->forkNum, tag->blockNum, page, true);
-
-    g_instance.dw_single_cxt.single_flush_state[pos].data_flush = true;
+    if (flush_old_file) {
+        g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
+    } else {
+        g_instance.dw_single_cxt.single_flush_state[pos] = true;
+    }
     t_thrd.proc->dw_pos = -1;
 }
 

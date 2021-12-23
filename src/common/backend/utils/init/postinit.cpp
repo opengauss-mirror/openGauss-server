@@ -287,6 +287,8 @@ static void PerformAuthentication(Port* port)
     /* This should be set already, but let's make sure */
     u_sess->ClientAuthInProgress = true; /* limit visibility of log messages */
 
+    load_ident();
+
     /*
      * Set up a timeout in case a buggy or malicious client fails to respond
      * during authentication.  Since we're inside a transaction and might do
@@ -603,9 +605,11 @@ void BaseInit(void)
 
 /* -------------------------------------
  * openGauss reset username and pgoption.
+ * When ENABLE_THREAD_POOL is enabled, poolerreuse requires special processing.
+ * The usercount needs to be reduced by one.
  * -------------------------------------
  */
-void PostgresResetUsernamePgoption(const char* username)
+void PostgresResetUsernamePgoption(const char* username, bool ispoolerreuse)
 {
     ereport(DEBUG3, (errmsg("PostgresResetUsernamePgoption()")));
 
@@ -673,7 +677,7 @@ void PostgresResetUsernamePgoption(const char* username)
                 u_sess->proc_cxt.MyProcPort->user_name = (char*)GetSuperUserName((char*)username);
             }
 
-            InitializeSessionUserId(username);
+            InitializeSessionUserId(username, ispoolerreuse);
             am_superuser = superuser();
             u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
         }
@@ -781,7 +785,8 @@ static void process_startup_options(Port* port, bool am_superuser)
 
         /* check 2 -- forbid non-initial users, except gs_roach and during cluster resizing with gs_redis */
         if (!dummyStandbyMode && GetRoleOid(port->user_name) != INITIAL_USER_ID &&
-            !(ClusterResizingInProgress() && u_sess->proc_cxt.clientIsGsredis) && !u_sess->proc_cxt.clientIsGsroach) {
+            !(ClusterResizingInProgress() && u_sess->proc_cxt.clientIsGsredis) && !u_sess->proc_cxt.clientIsGsroach &&
+            !AM_WAL_HADR_SENDER) {
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_OPERATION), errmsg("Inner maintenance tools only for the initial user.")));
         }
@@ -918,6 +923,12 @@ void ShutdownPostgres(int code, Datum arg)
 
     /* Make sure we've killed any active transaction */
     AbortOutOfAnyTransaction();
+
+    if (u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
+        u_sess->gtt_ctx.gtt_cleaner_exit_registered = false;
+        pg_on_exit_callback func = u_sess->gtt_ctx.gtt_sess_exit;
+        (*func)(code, UInt32GetDatum(NULL));
+    }
 
     /*
      * If stream Top consumer or stream thread end up as elog FATAL, we must wait until we
@@ -1690,6 +1701,8 @@ void PostgresInitializer::InitTxnSnapWorker()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 
     AuditUserLogin();
@@ -2003,8 +2016,6 @@ void PostgresInitializer::InitSession()
 
     InitSettings();
 
-    InitExtensionVariable();
-
     FinishInit();
 
     AuditUserLogin();
@@ -2133,7 +2144,7 @@ void PostgresInitializer::SetSuperUserAndDatabase()
 
 void PostgresInitializer::InitUser()
 {
-    InitializeSessionUserId(m_username, m_useroid);
+    InitializeSessionUserId(m_username, false, m_useroid);
     m_isSuperUser = superuser();
     u_sess->misc_cxt.CurrentUserName = u_sess->proc_cxt.MyProcPort->user_name;
 #ifndef ENABLE_MULTIPLE_NODES

@@ -26,9 +26,10 @@
 #define LIBPQWALRECEIVER_H
 
 typedef struct LibpqrcvConnectParam {
-     XLogRecPtr startpoint;
-     char* slotname;
-     int channel_identifier;
+    char* conninfo;
+    XLogRecPtr startpoint;
+    char* slotname;
+    int channel_identifier;
 
     /* for logical replication slot */
     bool logical;

@@ -1196,9 +1196,10 @@ LINE 1: select * from test_commit;
                       ^
 drop table test_commit;
 ERROR:  table "test_commit" does not exist
-create or replace procedure test_commit_inout(p inout int)
+create or replace procedure test_commit_inout()
 as
 declare
+p int;
 begin
 	p = 3;
 	commit;
@@ -1206,10 +1207,15 @@ begin
 end;
 /
 call test_commit_inout();
-ERROR:  function "test_commit_inout" with 0 parameters doesn't exist 
-create or replace procedure test_rollback_inout(p inout int)
+ test_commit_inout 
+-------------------
+ 
+(1 row)
+
+create or replace procedure test_rollback_inout()
 as
 declare
+p int;
 begin
 	p = 3;
 	rollback;
@@ -1217,10 +1223,15 @@ begin
 end;
 /
 call test_rollback_inout();
-ERROR:  function "test_rollback_inout" with 0 parameters doesn't exist 
-create or replace procedure test_rollback_out(p out int)
+ test_rollback_inout 
+---------------------
+ 
+(1 row)
+
+create or replace procedure test_rollback_out()
 as
 declare
+p int;
 begin
 	p = 3;
 	rollback;
@@ -1228,7 +1239,11 @@ begin
 end;
 /
 call test_rollback_out();
-ERROR:  function "test_rollback_out" with 0 parameters doesn't exist 
+ test_rollback_out 
+-------------------
+ 
+(1 row)
+
 create or replace procedure test_rollback1()
 as
 declare

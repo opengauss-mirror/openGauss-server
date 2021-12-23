@@ -62,8 +62,8 @@ BEGIN
             e_stack_act := substr(e_stack_act, 200);
         END IF;
 
-        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (175|541|607|714) at assignment%'
-          AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 215 at IF%'
+        IF    e_stack_act NOT SIMILAR TO 'PL/pgSQL function db4ai.prepare_snapshot\(name,name,text\[\],name,text\) line (184|550|616|723) at assignment%'
+          AND e_stack_act NOT LIKE 'PL/pgSQL function db4ai.sample_snapshot(name,name,name[],numeric[],name[],text[]) line 224 at IF%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.prepare_snapshot_internal(bigint,bigint,bigint,bigint,name,name,text[],text,name,'
                             'int,text[],name[]) is not allowed'
@@ -191,6 +191,8 @@ DECLARE
     s_uv_proj TEXT;                                             -- snapshot user view projection list
     p_name_vers TEXT[];                                         -- split full parent name into name and version
     p_sv_proj TEXT;                                             -- parent snapshot system view projection list
+    current_compatibility_mode TEXT;                            -- current compatibility mode
+    none_represent INT;                                         -- 0 or NULL
     command_str TEXT;                                           -- command string for iterator
     pattern TEXT;                                               -- command pattern for matching
     ops_arr BOOLEAN[];                                          -- operation classes in i_commands
@@ -248,6 +250,13 @@ BEGIN
         s_vers_sep := '.';
     END;
 
+    current_compatibility_mode := current_setting('sql_compatibility');
+    IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
+        none_represent := 0;
+    ELSE
+        none_represent := NULL;
+    END IF;
+
     -- check all input parameters
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
@@ -259,7 +268,7 @@ BEGIN
         i_parent := replace(i_parent, chr(1), s_vers_del);
         i_parent := replace(i_parent, chr(2), s_vers_sep);
         p_name_vers := regexp_split_to_array(i_parent, s_vers_del);
-        IF array_length(p_name_vers, 1) <> 2 OR array_length(p_name_vers, 2) IS NOT NULL THEN
+        IF array_length(p_name_vers, 1) <> 2 OR array_length(p_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_parent must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
@@ -284,7 +293,7 @@ BEGIN
         RAISE EXCEPTION 'prepare snapshot internal error3: %', coalesce(m_id, p_id);
     END IF;
 
-    IF i_commands IS NULL OR array_length(i_commands, 1) IS NULL OR array_length(i_commands, 2) IS NOT NULL THEN
+    IF i_commands IS NULL OR array_length(i_commands, 1) = none_represent OR array_length(i_commands, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_commands array malformed'
         USING HINT = 'pass SQL DML and DDL operations as TEXT[] literal, e.g. ''{ALTER, ADD a int, DROP c, DELETE, '
                      'WHERE b=5, INSERT, FROM t, UPDATE, FROM t, SET x=y, SET z=f(z), WHERE t.u=v}''';
@@ -397,7 +406,7 @@ BEGIN
                 quoted BOOLEAN := FALSE;  -- inside quoted identifier
                 cur_ch VARCHAR;           -- current character in tokenizer
                 idx INTEGER := 0;         -- loop counter, cannot use FOR .. iterator
-                start INTEGER := 1;
+                start_pos INTEGER := 1;
                 stmt TEXT := next_clauses[SET_CLAUSE];
             BEGIN
 
@@ -433,7 +442,7 @@ BEGIN
                         IF quoted OR nested > 0 THEN
                             CONTINUE;
                         ELSIF pattern IS NULL OR length(pattern) = 0 THEN
-                            start := idx;
+                            start_pos := idx;
                             CONTINUE;
                         END IF;
                     ELSE
@@ -444,12 +453,12 @@ BEGIN
 -- END splitter code for testing
 
                     IF pattern IN ('FROM', 'WHERE') THEN
-                        next_clauses[FROM_CLAUSE] := substr(next_clauses[SET_CLAUSE], start + 1);
-                        next_clauses[SET_CLAUSE] := left(next_clauses[SET_CLAUSE], start - 1);
+                        next_clauses[FROM_CLAUSE] := substr(next_clauses[SET_CLAUSE], start_pos + 1);
+                        next_clauses[SET_CLAUSE] := left(next_clauses[SET_CLAUSE], start_pos - 1);
                         EXIT;
                     END IF;
                     pattern := '';
-                    start := idx;
+                    start_pos := idx;
                 END LOOP;
             END;
             RAISE NOTICE E'XXX UPDATE \n%\n%', command_str, array_to_string(next_clauses, E'\n');
@@ -808,7 +817,7 @@ BEGIN
         BEGIN
             vers_arr := regexp_split_to_array(p_name_vers[2], CASE s_vers_sep WHEN '.' THEN '\.' ELSE s_vers_sep END);
 
-            IF array_length(vers_arr, 1) <> 3 OR array_length(vers_arr, 2) IS NOT NULL OR
+            IF array_length(vers_arr, 1) <> 3 OR array_length(vers_arr, 2) <> none_represent OR
                 vers_arr[1] ~ '[^0-9]' OR vers_arr[2] ~ '[^0-9]' OR vers_arr[3] ~ '[^0-9]' THEN
                 RAISE EXCEPTION 'illegal version format';
             END IF;

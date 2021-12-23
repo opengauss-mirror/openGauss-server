@@ -9,6 +9,7 @@
  *
  *
  * Copyright (c) 2002-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/pg_cast.h
  *
@@ -96,7 +97,7 @@ typedef enum CoercionMethod
 
 /*
  * Numeric category: implicit casts are allowed in the direction
- * int2->int4->int8->numeric->float4->float8, while casts in the
+ * int2->int4->int8->int16->numeric->float4->float8, while casts in the
  * reverse direction are assignment-only.
  */
 DATA(insert (	23 5545  5526 i f _null_));
@@ -146,6 +147,24 @@ DATA(insert (  701	 20  483 i f _null_));
 DATA(insert (  701	 21  237 i f _null_));
 DATA(insert (  701	 23  317 i f _null_));
 DATA(insert (  701	700  312 i f _null_));
+DATA(insert ( 5545	 34 6405 i f _null_));
+DATA(insert (	34 5545 6406 a f _null_));
+DATA(insert (	21	 34 6407 i f _null_));
+DATA(insert (	34	 21 6408 a f _null_));
+DATA(insert (	23	 34 6409 i f _null_));
+DATA(insert (	34	 23 6410 a f _null_));
+DATA(insert (	20	 34 6411 i f _null_));
+DATA(insert (	34	 20 6412 a f _null_));
+DATA(insert (  701	 34 6413 i f _null_));
+DATA(insert (	34	701 6414 i f _null_));
+DATA(insert (  700	 34 6415 i f _null_));
+DATA(insert (	34	700 6416 i f _null_));
+DATA(insert (	26	 34 6417 i f _null_));
+DATA(insert (	34	 26 6418 i f _null_));
+DATA(insert (	16	 34 6419 i f _null_));
+DATA(insert (	34	 16 6420 i f _null_));
+DATA(insert ( 1700	 34 6421 i f _null_));
+DATA(insert (	34 1700 6422 i f _null_));
 
 /* 
  * convert float8 to numeric implicit(not assignment-only)
@@ -173,6 +192,10 @@ DATA(insert (	16	21	3181 i f _null_));
 /*Bool <-->INT8*/
 DATA(insert (	20	16	3177 i f _null_));
 DATA(insert (	16	20	3178 i f _null_));
+/* Bool <--> Numeric*/
+DATA(insert (	1700	16	6434 i f  _null_));
+DATA(insert (	16	1700	6433 i f  _null_));
+
 
 /* int4 ->bpchar */
 DATA(insert (	23	1042 3192 i f _null_));

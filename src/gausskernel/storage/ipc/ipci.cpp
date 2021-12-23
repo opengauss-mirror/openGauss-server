@@ -42,6 +42,7 @@
 #endif
 #include "postmaster/autovacuum.h"
 #include "postmaster/bgwriter.h"
+#include "postmaster/bgworker.h"
 #include "postmaster/pagewriter.h"
 #include "postmaster/postmaster.h"
 #include "postmaster/snapcapturer.h"
@@ -70,6 +71,7 @@
 #include "storage/cstore/cstorealloc.h"
 #include "storage/cucache_mgr.h"
 #include "storage/dfs/dfs_connector.h"
+#include "storage/xlog_share_storage/xlog_share_storage.h"
 #include "utils/memprot.h"
 #ifdef ENABLE_MULTIPLE_NODES
     #include "tsdb/cache/queryid_cachemgr.h"
@@ -173,7 +175,7 @@ Size ComputeTotalSizeOfShmem()
             size = add_size(size, DcfContextShmemSize());
         }
 #endif
-
+        size = add_size(size, CalShareStorageCtlSize());
         /* freeze the addin request size and include it */
         t_thrd.storage_cxt.addin_request_allowed = false;
         size = add_size(size, t_thrd.storage_cxt.total_addin_request);
@@ -305,6 +307,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      */
     if (!IsUnderPostmaster) {
         InitProcGlobal();
+        InitBgworkerGlobal();
         CreateSharedProcArray();
         CreateProcXactHashTable();
     }
@@ -430,19 +433,13 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     }
     if (g_instance.pid_cxt.PageWriterPID == NULL) {
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
-        g_instance.pid_cxt.PageWriterPID =
-            (ThreadId*)palloc0(sizeof(ThreadId) * g_instance.attr.attr_storage.pagewriter_thread_num);
-
-        int thread_num = get_fixed_bgwriter_thread_num();
-        g_instance.pid_cxt.CkptBgWriterPID = (ThreadId*)palloc0(sizeof(ThreadId) * thread_num);
+        int thread_num = g_instance.attr.attr_storage.pagewriter_thread_num + 1;
+        g_instance.pid_cxt.PageWriterPID = (ThreadId*)palloc0(sizeof(ThreadId) * thread_num);
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
-    if (ENABLE_INCRE_CKPT && g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc == NULL) {
+    if (ENABLE_INCRE_CKPT && g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc == NULL) {
         incre_ckpt_pagewriter_cxt_init();
-    }
-    if (ENABLE_INCRE_CKPT && g_instance.bgwriter_cxt.bgwriter_procs == NULL) {
-        incre_ckpt_bgwriter_cxt_init();
     }
 
     if (ENABLE_INCRE_CKPT && g_instance.ckpt_cxt_ctl->ckpt_redo_state.ckpt_rec_queue == NULL) {

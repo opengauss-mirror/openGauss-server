@@ -647,7 +647,7 @@ void CheckPointCSNLOG(void)
 
     for (i = 0; i < NUM_CSNLOG_PARTITIONS; i++) {
         flush_num = SimpleLruFlush(CsnlogCtl(i), true);
-        g_instance.ckpt_cxt_ctl->ckpt_csnlog_flush_num += flush_num;
+        g_instance.ckpt_cxt_ctl->ckpt_view.ckpt_csnlog_flush_num += flush_num;
     }
     TRACE_POSTGRESQL_CSNLOG_CHECKPOINT_DONE(true);
 }

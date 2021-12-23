@@ -1628,6 +1628,7 @@ TransactionId GetGlobalOldestXmin()
 TransactionId GetOldestXminForUndo(void)
 {
     TransactionId oldestXmin = GetMultiSnapshotOldestXmin();
+    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
     if (ENABLE_TCAP_VERSION) {
         if (TransactionIdPrecedes(oldestXmin, (uint64)u_sess->attr.attr_storage.version_retention_age)) {
             oldestXmin = FirstNormalTransactionId;
@@ -1635,8 +1636,8 @@ TransactionId GetOldestXminForUndo(void)
             oldestXmin -= u_sess->attr.attr_storage.version_retention_age;
         }
     }
-    if (unlikely(TransactionIdPrecedes(oldestXmin, g_instance.proc_base->oldestXidInUndo))) {
-        oldestXmin = g_instance.proc_base->oldestXidInUndo;
+    if (unlikely(TransactionIdPrecedes(oldestXmin, oldestXidInUndo))) {
+        oldestXmin = oldestXidInUndo;
     }
     return oldestXmin;
 }
@@ -3124,31 +3125,18 @@ int DecreaseUserCount(Oid roleoid)
 
     (void)LWLockAcquire(lock, LW_EXCLUSIVE);
 
-    entry = (RoleIdHashEntry *)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_ENTER, &found);
+    entry = (RoleIdHashEntry *)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_FIND, &found);
 
-    if (!found) {
-       RemoveUserCount(roleoid); 
-    } else {
+    if (found) {
         entry->roleNum--;
         roleNum = entry->roleNum;
+        if (entry->roleNum == 0) {
+            (void)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_REMOVE, &found);
+        }
     }
 
     LWLockRelease(lock);
     return roleNum;
-}
-
-void RemoveUserCount(Oid roleoid)
-{
-    bool found = false;
-    uint32 hashCode = 0;
-    hashCode = oid_hash(&roleoid, sizeof(Oid));
-    LWLock *lock = RoleidPartitionLock(hashCode);
-
-    (void)LWLockAcquire(lock, LW_EXCLUSIVE);
-
-    (void)hash_search(g_instance.roleid_cxt.roleid_table, (void*)&roleoid, HASH_REMOVE, &found);
-
-    LWLockRelease(lock);
 }
 
 /*
@@ -3257,8 +3245,10 @@ bool CountOtherDBBackends(Oid databaseId, int* nbackends, int* nprepared)
         LWLockRelease(ProcArrayLock);
 
         /* Under thread pool mode, we also need to count inactive sessions that are detached from worker threads */
-        if (ENABLE_THREAD_POOL)
+        if (ENABLE_THREAD_POOL) {
             *nbackends = g_threadPoolControler->GetSessionCtrl()->CountDBSessions(databaseId);
+            *nbackends += nautovacs;
+        }
 
         if (*nbackends == 0 && *nprepared == 0) {
             return false; /* no conflicting backends, so done */
@@ -3948,7 +3938,7 @@ void proc_cancel_invalid_gtm_lite_conn()
     ProcArrayStruct* arrayP = g_instance.proc_array_idx;
     int i;
     GtmHostIndex hostindex = GTM_HOST_INVAILD;
-    GtmHostIndex my_gtmhost = InitGTM();
+    GtmHostIndex my_gtmhost = InitGTM(false);
 
     ereport(LOG, (errmsg("GTMLite: canceling stale GTM connections, new GTM host index: %d.", my_gtmhost)));
 
@@ -4358,6 +4348,7 @@ static inline snapxid_t* GetNextSnapXid()
     return g_snap_buffer ? (snapxid_t*)g_snap_next : NULL;
 }
 
+const static int SNAP_ERROR_COUNT = 256;
 /*
  * update the current snapshot pointer find the next available slot for the next pointer
  */
@@ -4369,6 +4360,7 @@ static void SetNextSnapXid()
         g_snap_assigned = true;
         snapxid_t* ret = (snapxid_t*)g_snap_current;
         size_t idx = SNAPXID_INDEX(ret);
+        int nofindCount = 0;
 loop:
         do {
             ++idx;
@@ -4380,9 +4372,13 @@ loop:
                 g_snap_next = ret;
                 return;
             }
+            nofindCount++;
         } while (ret != g_snap_next);
         /* we alloc sufficient space for local snapshot , overflow should not happen here */
         ereport(WARNING, (errmsg("snapshot ring buffer overflow.")));
+        if (nofindCount >= SNAP_ERROR_COUNT) {
+            ereport(PANIC, (errcode(ERRCODE_LOG), errmsg("Can not get an available snapshot slot")));
+        }
         /* try to find available slot */
         goto loop;
     }
@@ -4406,6 +4402,32 @@ static void ReleaseSnapXid(snapxid_t* snapshot)
     DecrRefCount(snapshot);
 }
 
+#ifdef USE_ASSERT_CHECKING
+/* add assert information for refcount of snapshot */
+class AutoSnapId {
+public:
+    AutoSnapId()
+        : m_count(1)
+    {}
+
+    ~AutoSnapId()
+    {
+        if (m_count > 0) {
+            ereport(PANIC, (errcode(ERRCODE_LOG),
+                errmsg("snapshot refcount leak, must be zero")));
+        }
+    }
+
+    void decr()
+    {
+        m_count = 0;
+    }
+
+public:
+    int m_count;
+};
+#endif
+
 Snapshot GetLocalSnapshotData(Snapshot snapshot)
 {
     /* if first here, fallback to original code */
@@ -4414,8 +4436,14 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
         return NULL;
     }
     pg_read_barrier();
+    HOLD_INTERRUPTS();
     /* 1. increase ref-count of current snapshot in ring buffer */
     snapxid_t* snapxid = GetCurrentSnapXid();
+
+#ifdef USE_ASSERT_CHECKING
+    AutoSnapId snapid;
+#endif
+
     /* save use_data for release */
     snapshot->user_data = snapxid;
 
@@ -4453,7 +4481,14 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
     /* Non-catalog tables can be vacuumed if older than this xid */
     u_sess->utils_cxt.RecentGlobalDataXmin = u_sess->utils_cxt.RecentGlobalXmin;
 
-    ReleaseSnapshotData(snapshot);
+    ReleaseSnapXid(snapxid);
+    snapshot->user_data = NULL;
+
+#ifdef USE_ASSERT_CHECKING
+    snapid.decr();
+#endif
+
+    RESUME_INTERRUPTS();
 
     return snapshot;
 }
@@ -4647,14 +4682,6 @@ void CalculateLocalLatestSnapshot(bool forceCalc)
 
     ereport(DEBUG1, (errmsg("Generated snapshot in ring buffer slot %lu\n", SNAPXID_INDEX(snapxid))));
     SetNextSnapXid();
-}
-
-void ReleaseSnapshotData(Snapshot snapshot)
-{
-    if (snapshot && snapshot->user_data) {
-        ReleaseSnapXid((snapxid_t*)snapshot->user_data);
-        snapshot->user_data = NULL;
-    }
 }
 
 /*

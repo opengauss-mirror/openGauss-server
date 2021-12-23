@@ -306,6 +306,9 @@ extern bool check_set_hint_in_white_list(const char* name);
 extern bool has_no_expand_hint(Query* subquery);
 extern bool has_no_gpc_hint(HintState* hintState);
 
+extern void RemoveQueryHintByType(Query* query, HintKeyword hint);
+extern bool CheckNodeNameHint(HintState* hintstate);
+
 #define skip_space(str)   \
     while (isspace(*str)) \
         str++;

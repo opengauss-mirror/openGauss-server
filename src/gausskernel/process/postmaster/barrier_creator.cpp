@@ -36,7 +36,7 @@
 #include "access/obs/obs_am.h"
 #include "tcop/tcopprot.h"
 #include "replication/slot.h"
-#include "replication/obswalreceiver.h"
+#include "replication/archive_walreceiver.h"
 #include "securec.h"
 #include "port.h"
 #include "utils/postinit.h"
@@ -96,7 +96,7 @@ static uint64_t read_barrier_id_from_obs(const char *slotName)
     uint64_t barrier_id;
     long ts = 0;
 
-    if (obs_replication_read_file(BARRIER_FILE, (char *)barrier_name, MAX_BARRIER_ID_LENGTH, slotName)) {
+    if (ArchiveReplicationReadFile(BARRIER_FILE, (char *)barrier_name, MAX_BARRIER_ID_LENGTH, slotName)) {
         barrier_name[BARRIER_NAME_LEN - 1] = '\0';
         ereport(LOG, (errmsg("[BarrierCreator] read barrier id from obs %s", barrier_name)));
     } else {
@@ -181,6 +181,8 @@ void barrier_creator_main(void)
     u_sess->attr.attr_common.application_name = pstrdup("BarrierCreator");
     g_instance.barrier_creator_cxt.stop = false;
 
+    on_shmem_exit(PGXCNodeCleanAndRelease, 0);
+
     barrier_creator_setup_signal_hook();
 
     BaseInit();
@@ -216,6 +218,8 @@ void barrier_creator_main(void)
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
 
+        t_thrd.log_cxt.call_stack = NULL;
+
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
 
@@ -235,13 +239,7 @@ void barrier_creator_main(void)
 
         /* Now we can allow interrupts again */
         RESUME_INTERRUPTS();
-
-        /*
-         * Sleep at least 1 second after any error.  A write error is likely
-         * to be repeated, and we don't want to be filling the error logs as
-         * fast as we can.
-         */
-        pg_usleep(1000000L);
+        return;
     }
     destroy_handles();
     oldTryCounter = gstrace_tryblock_entry(&curTryCounter);
@@ -264,8 +262,6 @@ void barrier_creator_main(void)
     
     SetProcessingMode(NormalProcessing);
 
-    on_shmem_exit(PGXCNodeCleanAndRelease, 0);
-    
     exec_init_poolhandles();
     
 #ifdef ENABLE_MULTIPLE_NODES
@@ -290,7 +286,7 @@ void barrier_creator_main(void)
         (errmsg("[BarrierCreator] Init connections with CN/DN, dn count : %d, cn count : %d",
             u_sess->pgxc_cxt.NumDataNodes, u_sess->pgxc_cxt.NumCoords)));
     g_instance.barrier_creator_cxt.stop = false;
-    List *archiveSlotNames = get_all_archive_obs_slots_name();
+    List *archiveSlotNames = GetAllArchiveSlotsName();
     if (archiveSlotNames == NIL || archiveSlotNames->length == 0) {
         return;
     }
@@ -309,7 +305,7 @@ void barrier_creator_main(void)
         }
     
         pg_usleep_retry(1000000L, 0);
-        if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
+        if (g_instance.archive_obs_cxt.archive_slot_num == 0) {
             g_instance.barrier_creator_cxt.stop = true;
             break;
         }

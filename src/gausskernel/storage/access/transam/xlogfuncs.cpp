@@ -26,13 +26,14 @@
 #include "access/cbmparsexlog.h"
 #include "access/xlog.h"
 #include "access/obs/obs_am.h"
+#include "access/archive/archive_am.h"
 #include "access/xlog_internal.h"
 #include "access/xlogutils.h"
 #include "catalog/catalog.h"
 #include "catalog/pg_type.h"
 #include "funcapi.h"
 #include "miscadmin.h"
-#include "replication/obswalreceiver.h"
+#include "replication/archive_walreceiver.h"
 #include "replication/walreceiver.h"
 #include "replication/walsender_private.h"
 #include "replication/slot.h"
@@ -1176,8 +1177,8 @@ Datum gs_set_obs_delete_location_with_slotname(PG_FUNCTION_ARGS)
                         errmsg("could not parse transaction log location \"%s\"", lsnLocation)));
 
     locationpoint = (((uint64)hi) << 32) | lo;
-    if ((archive_conf = getObsReplicationSlotWithName(currentSlotName)) != NULL) {
-        (void)obs_replication_cleanup(locationpoint, &archive_conf->archive_obs);
+    if ((archive_conf = getArchiveReplicationSlotWithName(currentSlotName)) != NULL) {
+        (void)archive_replication_cleanup(locationpoint, &archive_conf->archive_config);
     }
 
     XLByteToSeg(locationpoint, xlogsegno);
@@ -1221,9 +1222,9 @@ Datum gs_set_obs_delete_location(PG_FUNCTION_ARGS)
 
     locationpoint = (((uint64)hi) << 32) | lo;
 
-    if (getObsRecoverySlot()) {
+    if (GetArchiveRecoverySlot()) {
         // Call the OBS deletion API.
-        (void)obs_replication_cleanup(locationpoint, NULL);
+        (void)archive_replication_cleanup(locationpoint, NULL);
     }
 
     XLByteToSeg(locationpoint, xlogsegno);
@@ -1257,11 +1258,11 @@ Datum gs_get_global_barrier_status(PG_FUNCTION_ARGS)
     get_slot_func slot_func;
     List *all_archive_slots = NIL;
     if (IS_DISASTER_RECOVER_MODE || IS_CNDISASTER_RECOVER_MODE) {
-        all_archive_slots = get_all_recovery_obs_slots_name();
-        slot_func = &getObsRecoverySlotWithName;
+        all_archive_slots = GetAllRecoverySlotsName();
+        slot_func = &getArchiveRecoverySlotWithName;
     } else {
-        all_archive_slots = get_all_archive_obs_slots_name();
-        slot_func = &getObsReplicationSlotWithName;
+        all_archive_slots = GetAllArchiveSlotsName();
+        slot_func = &getArchiveReplicationSlotWithName;
     }
     if (all_archive_slots == NIL || all_archive_slots->length == 0) {
         rc = strncpy_s((char *)globalBarrierId, MAX_BARRIER_ID_LENGTH,
@@ -1276,13 +1277,13 @@ Datum gs_get_global_barrier_status(PG_FUNCTION_ARGS)
             securec_check(rc, "\0", "\0");
         } else {
             char pathPrefix[MAXPGPATH] = {0};
-            ObsArchiveConfig obsConfig;
+            ArchiveConfig obsConfig;
             /* copy OBS configs to temporary variable for customising file path */
-            rc = memcpy_s(&obsConfig, sizeof(ObsArchiveConfig), &archive_conf->archive_obs, sizeof(ObsArchiveConfig));
+            rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), &archive_conf->archive_config, sizeof(ArchiveConfig));
             securec_check(rc, "", "");
 
             if (!IS_PGXC_COORDINATOR) {
-                rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.obs_prefix);
+                rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.archive_prefix);
                 securec_check_c(rc, "\0", "\0");
 
                 char *p = strrchr(pathPrefix, '/');
@@ -1291,21 +1292,22 @@ Datum gs_get_global_barrier_status(PG_FUNCTION_ARGS)
                             errmsg("Obs path prefix is invalid")));
                 }
                 *p = '\0';
-                obsConfig.obs_prefix = pathPrefix;
+                obsConfig.archive_prefix = pathPrefix;
             }
 
-            objectList = obsList(HADR_BARRIER_ID_FILE, &obsConfig, true, true);
+            objectList = ArchiveList(HADR_BARRIER_ID_FILE, &obsConfig, true, true);
             if (objectList == NIL || objectList->length <= 0) {
                 ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("The Barrier ID file named %s cannot be found.", HADR_BARRIER_ID_FILE))));
             }
 
-            readLen = obsRead(HADR_BARRIER_ID_FILE, 0, globalBarrierId, MAX_BARRIER_ID_LENGTH, 
+            readLen = ArchiveRead(HADR_BARRIER_ID_FILE, 0, globalBarrierId, MAX_BARRIER_ID_LENGTH, 
                 &obsConfig);
             if (readLen == 0) {
                 ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("Cannot read global barrier ID in %s file!", HADR_BARRIER_ID_FILE))));
             }
+            globalBarrierId[MAX_BARRIER_ID_LENGTH - 1] = '\0';
             list_free_deep(all_archive_slots);
         }
     }
@@ -1325,6 +1327,7 @@ Datum gs_get_global_barrier_status(PG_FUNCTION_ARGS)
     isnull[1] = false;
     resultHeapTuple = heap_form_tuple(resultTupleDesc, values, isnull);
     result = HeapTupleGetDatum(resultHeapTuple);
+    list_free_deep(objectList);
     PG_RETURN_DATUM(result);
 }    
 
@@ -1377,11 +1380,11 @@ Datum gs_get_global_barriers_status(PG_FUNCTION_ARGS)
     // global_achive_barrierId:max achive barrierId
     List *all_archive_slots = NIL;
     if (IS_DISASTER_RECOVER_MODE || IS_CNDISASTER_RECOVER_MODE) {
-        all_archive_slots = get_all_recovery_obs_slots_name();
-        slot_func = &getObsRecoverySlotWithName;
+        all_archive_slots = GetAllRecoverySlotsName();
+        slot_func = &getArchiveRecoverySlotWithName;
     } else {
-        all_archive_slots = get_all_archive_obs_slots_name();
-        slot_func = &getObsReplicationSlotWithName;
+        all_archive_slots = GetAllArchiveSlotsName();
+        slot_func = &getArchiveReplicationSlotWithName;
     }
     if (all_archive_slots == NIL || all_archive_slots->length == 0) {
         tuplestore_donestoring(tupstore);
@@ -1395,13 +1398,13 @@ Datum gs_get_global_barriers_status(PG_FUNCTION_ARGS)
         ArchiveSlotConfig *archive_conf = NULL;
         if ((archive_conf = slot_func(slotname)) != NULL) {
             char pathPrefix[MAXPGPATH] = {0};
-            ObsArchiveConfig obsConfig;
+            ArchiveConfig obsConfig;
             /* copy OBS configs to temporary variable for customising file path */
-            rc = memcpy_s(&obsConfig, sizeof(ObsArchiveConfig), &archive_conf->archive_obs, sizeof(ObsArchiveConfig));
+            rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), &archive_conf->archive_config, sizeof(ArchiveConfig));
             securec_check(rc, "", "");
 
             if (!IS_PGXC_COORDINATOR) {
-                rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.obs_prefix);
+                rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.archive_prefix);
                 securec_check_c(rc, "\0", "\0");
 
                 char *p = strrchr(pathPrefix, '/');
@@ -1410,21 +1413,22 @@ Datum gs_get_global_barriers_status(PG_FUNCTION_ARGS)
                             errmsg("Obs path prefix is invalid")));
                 }
                 *p = '\0';
-                obsConfig.obs_prefix = pathPrefix;
+                obsConfig.archive_prefix = pathPrefix;
             }
 
-            objectList = obsList(HADR_BARRIER_ID_FILE, &obsConfig, true, true);
+            objectList = ArchiveList(HADR_BARRIER_ID_FILE, &obsConfig, true, true);
             if (objectList == NIL || objectList->length <= 0) {
                 ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("The Barrier ID file named %s cannot be found.", HADR_BARRIER_ID_FILE))));
             }
 
-            readLen = obsRead(HADR_BARRIER_ID_FILE, 0, globalBarrierId, MAX_BARRIER_ID_LENGTH, 
+            readLen = ArchiveRead(HADR_BARRIER_ID_FILE, 0, globalBarrierId, MAX_BARRIER_ID_LENGTH, 
                 &obsConfig);
             if (readLen == 0) {
                 ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
                         (errmsg("Cannot read global barrier ID in %s file!", HADR_BARRIER_ID_FILE))));
             }
+            globalBarrierId[MAX_BARRIER_ID_LENGTH - 1] = '\0';
         } else {
             rc = strncpy_s((char *)globalBarrierId, MAX_BARRIER_ID_LENGTH,
                 "hadr_00000000000000000001_0000000000000", MAX_BARRIER_ID_LENGTH - 1);
@@ -1447,6 +1451,7 @@ Datum gs_get_global_barriers_status(PG_FUNCTION_ARGS)
         tuplestore_putvalues(tupstore, tupdesc, values, isnull);
     }
     list_free_deep(all_archive_slots);
+    list_free_deep(objectList);
     tuplestore_donestoring(tupstore);
     PG_RETURN_DATUM(0);
 }    
@@ -1546,7 +1551,7 @@ Datum gs_hadr_do_switchover(PG_FUNCTION_ARGS)
         PG_RETURN_BOOL(false);
     }
 
-    List *archiveSlotNames = get_all_archive_obs_slots_name();
+    List *archiveSlotNames = GetAllArchiveSlotsName();
     if (archiveSlotNames == NIL || archiveSlotNames->length == 0) {
         ereport(LOG, (errmsg("[hadr switchover]obs_archive_slot does not exist.")));
         PG_RETURN_BOOL(false);
@@ -1569,22 +1574,29 @@ Datum gs_hadr_do_switchover(PG_FUNCTION_ARGS)
 #endif
 
     errno_t rc = 0;
-    ObsArchiveConfig obsConfig;
+    ArchiveConfig obsConfig;
     char pathPrefix[MAXPGPATH] = {0};
     char *slotname = (char *)lfirst((list_head(archiveSlotNames)));
     ArchiveSlotConfig *archive_conf = NULL;
-    if ((archive_conf = getObsReplicationSlotWithName(slotname)) == NULL) {
+    if ((archive_conf = getArchiveReplicationSlotWithName(slotname)) == NULL) {
+        list_free_deep(archiveSlotNames);
+        archiveSlotNames = NULL;
+        PG_RETURN_BOOL(false);
+    }
+
+    /* hadr only support OBS */
+    if (archive_conf->archive_config.media_type != ARCHIVE_OBS) {
         list_free_deep(archiveSlotNames);
         archiveSlotNames = NULL;
         PG_RETURN_BOOL(false);
     }
 
     /* copy OBS configs to temporary variable for customising file path */
-    rc = memcpy_s(&obsConfig, sizeof(ObsArchiveConfig), &archive_conf->archive_obs, sizeof(ObsArchiveConfig));
+    rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), &archive_conf->archive_config, sizeof(ArchiveConfig));
     securec_check(rc, "", "");
 
     if (!IS_PGXC_COORDINATOR) {
-        rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.obs_prefix);
+        rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.archive_prefix);
         securec_check(rc, "\0", "\0");
 
         char *p = strrchr(pathPrefix, '/');
@@ -1596,7 +1608,7 @@ Datum gs_hadr_do_switchover(PG_FUNCTION_ARGS)
             PG_RETURN_BOOL(false);
         }
         *p = '\0';
-        obsConfig.obs_prefix = pathPrefix;
+        obsConfig.archive_prefix = pathPrefix;
     }
     ereport(LOG, (errmsg("write switchover barrier id %s to obs", barrier_name)));
 
@@ -1658,17 +1670,17 @@ Datum gs_upload_obs_file(PG_FUNCTION_ARGS)
             (errmsg("Must be system admin or operator admin in operation mode to gs_upload_obs_file."))));
 
     ArchiveSlotConfig *archive_conf = NULL;
-    if ((archive_conf = getObsReplicationSlotWithName(slotname)) != NULL) {
-        ObsArchiveConfig obsConfig;
+    if ((archive_conf = getArchiveReplicationSlotWithName(slotname)) != NULL) {
+        ArchiveConfig obsConfig;
         /* copy OBS configs to temporary variable for customising file path */
-        rc = memcpy_s(&obsConfig, sizeof(ObsArchiveConfig), &archive_conf->archive_obs, sizeof(ObsArchiveConfig));
+        rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), &archive_conf->archive_config, sizeof(ArchiveConfig));
         securec_check(rc, "", "");
         rc = snprintf_s(localFilePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", t_thrd.proc_cxt.DataDir, src);
         securec_check_ss(rc, "\0", "\0");
         ereport(LOG, ((errmsg("There local file is %s.", localFilePath))));
 
         rc = snprintf_s(netBackupPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s",
-                         archive_conf->archive_obs.obs_prefix, dest);
+                         archive_conf->archive_config.archive_prefix, dest);
         securec_check_ss(rc, "\0", "\0");
         ereport(LOG, ((errmsg("There netbackup file is %s.", netBackupPath))));
 
@@ -1700,21 +1712,21 @@ Datum gs_download_obs_file(PG_FUNCTION_ARGS)
 
     ArchiveSlotConfig *archive_conf = NULL;
     if (IS_CNDISASTER_RECOVER_MODE) {
-        archive_conf = getObsRecoverySlot();
+        archive_conf = GetArchiveRecoverySlot();
     } else {
-        archive_conf = getObsReplicationSlotWithName(slotname);
+        archive_conf = getArchiveReplicationSlotWithName(slotname);
     }
     if (archive_conf != NULL) {
-        ObsArchiveConfig obsConfig;
+        ArchiveConfig obsConfig;
         /* copy OBS configs to temporary variable for customising file path */
-        rc = memcpy_s(&obsConfig, sizeof(ObsArchiveConfig), &archive_conf->archive_obs, sizeof(ObsArchiveConfig));
+        rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), &archive_conf->archive_config, sizeof(ArchiveConfig));
         securec_check(rc, "", "");
         rc = snprintf_s(localFilePath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s", t_thrd.proc_cxt.DataDir, dest);
         securec_check_ss(rc, "\0", "\0");
         ereport(LOG, ((errmsg("There local file path is %s.", localFilePath))));
 
         rc = snprintf_s(netBackupPath, MAX_PATH_LEN, MAX_PATH_LEN - 1, "%s/%s",
-            archive_conf->archive_obs.obs_prefix, src);
+            archive_conf->archive_config.archive_prefix, src);
         securec_check_ss(rc, "\0", "\0");
         ereport(LOG, ((errmsg("[gs_download_obs_file]There netbackup file is %s.", netBackupPath))));
 
@@ -1744,9 +1756,9 @@ Datum gs_get_obs_file_context(PG_FUNCTION_ARGS)
 
     ArchiveSlotConfig *archive_conf = NULL;
     if (IS_CNDISASTER_RECOVER_MODE) {
-        archive_conf = getObsRecoverySlot();
+        archive_conf = GetArchiveRecoverySlot();
     } else {
-        archive_conf = getObsReplicationSlotWithName(slotName);
+        archive_conf = getArchiveReplicationSlotWithName(slotName);
     }
     if (archive_conf == NULL) {
         ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
@@ -1754,12 +1766,19 @@ Datum gs_get_obs_file_context(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
-    if (checkOBSFileExist(setFileName, &archive_conf->archive_obs) == false) {
+    /* hadr only support OBS */
+    if (archive_conf->archive_config.media_type != ARCHIVE_OBS) {
+        ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
+                (errmsg("The slot %s is not obs slot.", slotName))));
+        PG_RETURN_NULL();
+    }
+
+    if (checkOBSFileExist(setFileName, &archive_conf->archive_config) == false) {
         ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
                     (errmsg("The file named %s cannot be found.", setFileName))));
         PG_RETURN_NULL();
     }
-    readLen = obsRead(setFileName, 0, fileContext, MAXPGPATH, &archive_conf->archive_obs);
+    readLen = obsRead(setFileName, 0, fileContext, MAXPGPATH, &archive_conf->archive_config);
     if (readLen == 0) {
         ereport(ERROR, (errcode(ERRCODE_NO_DATA_FOUND),
                 (errmsg("Cannot read any context in %s file!", setFileName))));
@@ -1781,9 +1800,9 @@ Datum gs_set_obs_file_context(PG_FUNCTION_ARGS)
 
     ArchiveSlotConfig *archive_conf = NULL;
     if (IS_CNDISASTER_RECOVER_MODE) {
-        archive_conf = getObsRecoverySlot();
+        archive_conf = GetArchiveRecoverySlot();
     } else {
-        archive_conf = getObsReplicationSlotWithName(slotName);
+        archive_conf = getArchiveReplicationSlotWithName(slotName);
     }
     if (archive_conf == NULL) {
         ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
@@ -1791,7 +1810,14 @@ Datum gs_set_obs_file_context(PG_FUNCTION_ARGS)
         PG_RETURN_NULL();
     }
 
-    ret = obsWrite(setFileName, setFileContext, strlen(setFileContext), &archive_conf->archive_obs);
+    /* hadr only support OBS */
+    if (archive_conf->archive_config.media_type != ARCHIVE_OBS) {
+        ereport(WARNING, (errcode(ERRCODE_NO_DATA_FOUND),
+                (errmsg("The slot %s is not obs slot.", slotName))));
+        PG_RETURN_NULL();
+    }
+
+    ret = obsWrite(setFileName, setFileContext, strlen(setFileContext), &archive_conf->archive_config);
 
     PG_RETURN_TEXT_P(cstring_to_text(setFileContext));
 }
@@ -1844,13 +1870,13 @@ Datum gs_get_hadr_key_cn(PG_FUNCTION_ARGS)
 
     List *all_slots =  NIL;
     if (IS_CNDISASTER_RECOVER_MODE) {
-        all_slots = get_all_recovery_obs_slots_name();
+        all_slots = GetAllRecoverySlotsName();
         needLocalKeyCn = true;
         int rc = 0;
         rc = snprintf_s(localKeyCn, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", get_local_key_cn());
         securec_check_ss(rc, "\0", "\0");
     } else {
-        all_slots = get_all_archive_obs_slots_name();
+        all_slots = GetAllArchiveSlotsName();
     }
     if (all_slots == NIL || all_slots->length == 0) {
         tuplestore_donestoring(tupstore);
@@ -1863,12 +1889,16 @@ Datum gs_get_hadr_key_cn(PG_FUNCTION_ARGS)
         bool isExitDelete = true;
         ArchiveSlotConfig *archive_conf = NULL;
         if (IS_CNDISASTER_RECOVER_MODE) {
-            archive_conf = getObsRecoverySlot();
+            archive_conf = GetArchiveRecoverySlot();
         } else {
-            archive_conf = getObsReplicationSlotWithName(slotname);
+            archive_conf = getArchiveReplicationSlotWithName(slotname);
         }
         if (archive_conf != NULL) {
-            get_hadr_cn_info((char *)hadrKeyCn, &isExitKey, (char *)hadrDeleteCn, &isExitDelete, archive_conf);
+            if (archive_conf->archive_config.media_type == ARCHIVE_OBS) {
+                get_hadr_cn_info((char *)hadrKeyCn, &isExitKey, (char *)hadrDeleteCn, &isExitDelete, archive_conf);
+            } else {
+                continue;
+            }
         } else {
             tuplestore_donestoring(tupstore);
             PG_RETURN_NULL();
@@ -1890,4 +1920,90 @@ Datum gs_get_hadr_key_cn(PG_FUNCTION_ARGS)
     list_free_deep(all_slots);
     tuplestore_donestoring(tupstore);
     PG_RETURN_DATUM(0);
+}
+
+Datum gs_streaming_dr_in_switchover(PG_FUNCTION_ARGS)
+{
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                (errmsg("Must be system admin or operator admin in operation mode to gs_streaming_dr_switchover."))));
+
+    if (!g_instance.streaming_dr_cxt.isInStreaming_dr) {
+        ereport(LOG, (errmsg("Streaming disaster recovery is not started.")));
+        PG_RETURN_BOOL(false);
+    }    
+
+#ifndef ENABLE_MULTIPLE_NODES
+    CreateHadrSwitchoverBarrier();
+#endif
+    PG_RETURN_BOOL(true);
+}
+
+Datum gs_streaming_dr_service_truncation_check(PG_FUNCTION_ARGS)
+{
+    XLogRecPtr switchoverLsn = g_instance.streaming_dr_cxt.switchoverBarrierLsn;
+    XLogRecPtr flushLsn = InvalidXLogRecPtr;
+
+    for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        if (walsnd->pid == 0) {
+            continue;
+        }
+
+        if (walsnd->is_cross_cluster) {
+            SpinLockAcquire(&walsnd->mutex);
+            flushLsn = walsnd->flush;
+            SpinLockRelease(&walsnd->mutex);
+            if (g_instance.streaming_dr_cxt.isInteractionCompleted && 
+                XLByteEQ(switchoverLsn, flushLsn)) {
+                PG_RETURN_BOOL(true);
+            } else {
+                ereport(LOG,
+                        (errmsg("the switchover Lsn is %X/%X, the hadr receiver flush Lsn is %X/%X",
+                        (uint32)(switchoverLsn >> 32), (uint32)switchoverLsn,
+                        (uint32)(flushLsn >> 32), (uint32)flushLsn)));
+                PG_RETURN_BOOL(false);
+            }
+        }
+    }
+
+    PG_RETURN_BOOL(false);
+}
+
+Datum gs_streaming_dr_get_switchover_barrier(PG_FUNCTION_ARGS)
+{
+    if (!superuser() && !(isOperatoradmin(GetUserId()) && u_sess->attr.attr_security.operation_mode))
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                (errmsg("Must be system admin or operator admin in operation mode to gs_streaming_dr_get_switchover_barrier."))));
+
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    XLogRecPtr last_replay_location = GetXLogReplayRecPtr(NULL);
+    load_server_mode();
+
+    ereport(LOG,
+            (errmsg("is_hadr_main_standby: %d, last switchover Lsn is %X/%X, "
+            "target switchover Lsn is %X/%X, last_replay_location %X/%X",
+            t_thrd.xlog_cxt.is_hadr_main_standby,
+            (uint32)(walrcv->lastSwitchoverBarrierLSN >> 32), 
+            (uint32)(walrcv->lastSwitchoverBarrierLSN),
+            (uint32)(walrcv->targetSwitchoverBarrierLSN >> 32), 
+            (uint32)(walrcv->targetSwitchoverBarrierLSN),
+            (uint32)(last_replay_location >> 32), 
+            (uint32)(last_replay_location))));
+
+    if (t_thrd.xlog_cxt.is_hadr_main_standby) {
+        g_instance.streaming_dr_cxt.isInSwitchover = true;
+        if (g_instance.streaming_dr_cxt.isInteractionCompleted &&
+            XLByteEQ(walrcv->targetSwitchoverBarrierLSN, last_replay_location)) {
+            PG_RETURN_BOOL(true);
+        }
+    } 
+    else {
+        if (XLByteEQ(walrcv->lastSwitchoverBarrierLSN, last_replay_location)) {
+            PG_RETURN_BOOL(true);
+        }
+    }
+
+    PG_RETURN_BOOL(false);
 }

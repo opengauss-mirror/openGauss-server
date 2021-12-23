@@ -77,12 +77,25 @@ bool ParseStateUseShareBuf()
     return (G_BUFFERREADMETHOD == WITH_NORMAL_CACHE);
 }
 
+static FORCE_INLINE bool XLogLsnCheckLogInvalidPage(const RedoBufferInfo *bufferinfo,
+                                                    InvalidPageType type,
+                                                    const XLogPhyBlock *pblk)
+{
+    log_invalid_page(bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno,
+            type, pblk);
+    return false;
+}
+
 bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr lastLsn, const XLogPhyBlock *pblk)
 {
     XLogRecPtr lsn = bufferinfo->lsn;
     Page page = (Page)bufferinfo->pageinfo.page;
 
     XLogRecPtr pageCurLsn = PageGetLSN(page);
+
+    bool isSegmentPage = (IsSegmentFileNode(bufferinfo->blockinfo.rnode) &&
+                                !IsSegmentPhysicalRelNode(bufferinfo->blockinfo.rnode));
+
     if (!(XLByteEQ(lastLsn, pageCurLsn))) {
         const RedoBufferTag *blockinfo = &(bufferinfo->blockinfo);
 
@@ -104,6 +117,8 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
                                     " page info:%u/%u/%u forknum %d lsn %lu blknum:%u",
                                     lastLsn, pageCurLsn, blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
                                     blockinfo->rnode.relNode, blockinfo->forknum, lsn, blockinfo->blkno)));
+        } else if (isSegmentPage) {
+            return XLogLsnCheckLogInvalidPage(bufferinfo, SEGPAGE_LSN_CHECK_ERROR, pblk);
         } else if (PageIsJustAfterFullPageWrite(page)) {
             ereport(DEBUG4, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                              errmsg("after full page write lsn check error,lsn in record (%lu),"
@@ -111,14 +126,7 @@ bool DoLsnCheck(const RedoBufferInfo *bufferinfo, bool willInit, XLogRecPtr last
                                     lastLsn, pageCurLsn, blockinfo->rnode.spcNode, blockinfo->rnode.dbNode,
                                     blockinfo->rnode.relNode, blockinfo->forknum, lsn, blockinfo->blkno)));
         } else if (pageCurLsn == InvalidXLogRecPtr && PageIsEmpty(page) && PageUpperIsInitNew(page)) {
-            log_invalid_page(bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno, 
-                             LSN_CHECK_ERROR, pblk);
-            return false;
-        } else if (IsSegmentFileNode(bufferinfo->blockinfo.rnode) &&
-                   !IsSegmentPhysicalRelNode(bufferinfo->blockinfo.rnode)) {
-            log_invalid_page(bufferinfo->blockinfo.rnode, bufferinfo->blockinfo.forknum, bufferinfo->blockinfo.blkno,
-                    SEGPAGE_LSN_CHECK_ERROR, pblk);
-            return false;
+            return XLogLsnCheckLogInvalidPage(bufferinfo, LSN_CHECK_ERROR, pblk);
         } else {
             ereport(PANIC, (errmsg("lsn check error, lsn in record (%X/%X) ,lsn in current page %X/%X, "
                                    "page info:%u/%u/%u forknum %d blknum:%u lsn %X/%X",
@@ -1178,9 +1186,9 @@ XLogRecParseState *XLogParseBufferCopy(XLogRecParseState *srcState)
     
     if (newState->blockparse.blockhead.block_valid == BLOCK_DATA_DDL_TYPE &&
         newState->blockparse.extra_rec.blockddlrec.blockddltype == BLOCK_DDL_DROP_BKTLIST) {
-        uint32* bucketList = (uint32 *)palloc(BktBitMaxMapCnt);
-        rc = memcpy_s(bucketList, BktBitMaxMapCnt,
-                      srcState->blockparse.extra_rec.blockddlrec.mainData, BktBitMaxMapCnt);
+        uint32* bucketList = (uint32 *)palloc(BktBitMaxMapCnt * sizeof(uint32));
+        rc = memcpy_s(bucketList, BktBitMaxMapCnt * sizeof(uint32),
+                      srcState->blockparse.extra_rec.blockddlrec.mainData, BktBitMaxMapCnt * sizeof(uint32));
         securec_check(rc, "\0", "\0");
         newState->blockparse.extra_rec.blockddlrec.mainData = (char *)bucketList;
     }
@@ -1232,13 +1240,14 @@ void XLogBlockDataCommonRedo(XLogBlockHead *blockhead, void *blockrecbody, RedoB
         case RM_BTREE_ID:
             BtreeRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
+        case RM_HASH_ID:
+            HashRedoDataBlock(blockhead, blockdatarec, bufferinfo);
+            break;
         case RM_UBTREE_ID:
             UBTreeRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case RM_UBTREE2_ID:
             UBTree2RedoDataBlock(blockhead, blockdatarec, bufferinfo);
-        case RM_HASH_ID:
-            HashRedoDataBlock(blockhead, blockdatarec, bufferinfo);
             break;
         case RM_XLOG_ID:
             xlog_redo_data_block(blockhead, blockdatarec, bufferinfo);

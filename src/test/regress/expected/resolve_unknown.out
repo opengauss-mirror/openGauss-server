@@ -110,7 +110,7 @@ select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (sele
  text      | vasya | f        | t
 (1 row)
 
-explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
+explain (verbose on, costs off) with t as materialized (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
 --?.*
 --?.*
  CTE Scan on t
@@ -121,7 +121,7 @@ explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typ
            Output: 'vasya'::text
 (6 rows)
 
-explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
+explain (verbose on, costs off) with t as materialized (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
 --?.*
 --?.*
  CTE Scan on t

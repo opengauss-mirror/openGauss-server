@@ -861,11 +861,17 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 TupleTableSlot* tmp_slot = MakeSingleTupleTableSlot(slot->tts_tupleDescriptor, false, result_relation_desc->rd_tam_type);
 
                 bool is_partition_rel = result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION;
-                bulk = findBulk(((DistInsertSelectState*)state)->mgr,
-                    (is_partition_rel ? heapTupleGetPartitionId(result_relation_desc, tuple)
-                                    : RelationGetRelid(result_relation_desc)),
-                    bucket_id,
-                    &to_flush);
+                Oid targetOid = InvalidOid;
+                if (is_partition_rel) {
+                    if (RelationIsSubPartitioned(result_relation_desc)) {
+                        targetOid = heapTupleGetSubPartitionId(result_relation_desc, tuple);
+                    } else {
+                        targetOid = heapTupleGetPartitionId(result_relation_desc, tuple);
+                    }
+                } else {
+                    targetOid = RelationGetRelid(result_relation_desc);
+                }
+                bulk = findBulk(((DistInsertSelectState *)state)->mgr, targetOid, bucket_id, &to_flush);
 
                 if (to_flush) {
                     if (is_partition_rel && need_flush) {
@@ -936,6 +942,9 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                 if (updated) {
                     return returning;
                 }
+                if (result_relation_desc->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION) {
+                    partition_id = heapTupleGetPartitionId(result_relation_desc, tuple);
+                }
                 if (rel_isblockchain) {
                     is_record = hist_table_record_insert(result_relation_desc, (HeapTuple)tuple, &res_hash);
                 }
@@ -1005,6 +1014,45 @@ TupleTableSlot* ExecInsertT(ModifyTableState* state, TupleTableSlot* slot, Tuple
                                 is_record = hist_table_record_insert(target_rel, (HeapTuple)tuple, &res_hash);
                                 (void)MemoryContextSwitchTo(old_context);
                             }
+                        }
+                    } break;
+                    case PARTTYPE_SUBPARTITIONED_RELATION: {
+                        Oid partitionId = InvalidOid;
+                        Oid subPartitionId = InvalidOid;
+                        Relation partRel = NULL;
+                        Partition part = NULL;
+                        Relation subPartRel = NULL;
+                        Partition subPart = NULL;
+
+                        /* get partititon oid for insert the record */
+                        partitionId = heapTupleGetPartitionId(result_relation_desc, tuple);
+
+                        searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt,
+                                                         result_relation_desc, partitionId, partRel, part,
+                                                         RowExclusiveLock);
+
+                        /* get subpartititon oid for insert the record */
+                        subPartitionId = heapTupleGetPartitionId(partRel, tuple);
+
+                        searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, partRel,
+                                                         subPartitionId, subPartRel, subPart, RowExclusiveLock);
+
+
+                        partition_id = subPartitionId;
+                        heap_rel = subPartRel;
+                        partition = subPart;
+
+                        target_rel = heap_rel;
+                        tableam_tops_update_tuple_with_oid(heap_rel, tuple, slot);
+                        if (bucket_id != InvalidBktId) {
+                            searchHBucketFakeRelation(estate->esfRelations, estate->es_query_cxt, heap_rel, bucket_id,
+                                                      target_rel);
+                        }
+                        new_id = tableam_tuple_insert(target_rel, tuple, estate->es_output_cid, 0, NULL);
+                        if (rel_isblockchain) {
+                            MemoryContext old_context = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
+                            is_record = hist_table_record_insert(target_rel, (HeapTuple)tuple, &res_hash);
+                            (void)MemoryContextSwitchTo(old_context);
                         }
                     } break;
 
@@ -1315,7 +1363,8 @@ ldelete:
                             errmsg("concurrent update under Stream mode is not yet supported")));
                     }
                     TupleTableSlot *epqslot = EvalPlanQual(estate, epqstate, fake_relation,
-                        result_rel_info->ri_RangeTableIndex, LockTupleExclusive, &tmfd.ctid, tmfd.xmax, false);
+                        result_rel_info->ri_RangeTableIndex, LockTupleExclusive, &tmfd.ctid, tmfd.xmax,
+                        result_relation_desc->rd_rel->relrowmovement);
                     if (!TupIsNull(epqslot)) {
                         *tupleid = tmfd.ctid;
                         goto ldelete;
@@ -1877,7 +1926,6 @@ lreplace:
                 bool row_movement = false;
                 bool need_create_file = false;
                 int seqNum = -1;
-
                 if (!partKeyUpdate) {
                     row_movement = false;
                     new_partId = oldPartitionOid;
@@ -1886,6 +1934,24 @@ lreplace:
 
                     if (u_sess->exec_cxt.route->fileExist) {
                         new_partId = u_sess->exec_cxt.route->partitionId;
+                        if (RelationIsSubPartitioned(result_relation_desc)) {
+                            Partition part = partitionOpen(result_relation_desc, new_partId, RowExclusiveLock);
+                            Relation partRel = partitionGetRelation(result_relation_desc, part);
+
+                            partitionRoutingForTuple(partRel, tuple, u_sess->exec_cxt.route);
+                            if (u_sess->exec_cxt.route->fileExist) {
+                                new_partId = u_sess->exec_cxt.route->partitionId;
+                            } else {
+                                ereport(ERROR, (errmodule(MOD_EXECUTOR),
+                                                (errcode(ERRCODE_PARTITION_ERROR),
+                                                 errmsg("fail to update partitioned table \"%s\"",
+                                                        RelationGetRelationName(result_relation_desc)),
+                                                 errdetail("new tuple does not map to any table partition"))));
+                            }
+
+                            releaseDummyRelation(&partRel);
+                            partitionClose(result_relation_desc, part, NoLock);
+                        }
 
                         if (oldPartitionOid == new_partId) {
                             row_movement = false;
@@ -2141,6 +2207,7 @@ ldelete:
                             if (result_relation_desc->rd_isblockchain) {
                                 hash_del = get_user_tupleid_hash(old_fake_relation, tupleid);
                             }
+
                             result = tableam_tuple_delete(old_fake_relation,
                                 tupleid,
                                 estate->es_output_cid,
@@ -2150,6 +2217,7 @@ ldelete:
                                 &oldslot,
                                 &tmfd,
                                 allow_update_self);
+
                             switch (result) {
                                 case TM_SelfUpdated:
                                 case TM_SelfModified:
@@ -2208,6 +2276,17 @@ ldelete:
                                     if (!RelationIsUstoreFormat(old_fake_relation)) {
                                         Assert(!ItemPointerEquals(tupleid, &tmfd.ctid));
                                     }
+                                    if (result_relation_desc->rd_rel->relrowmovement) {
+                                        /*
+                                         * The part key value may has been updated,
+                                         * don't know which partition we should deal with.
+                                         */
+                                        ereport(ERROR,
+                                            (errcode(ERRCODE_TRANSACTION_ROLLBACK),
+                                                errmsg("partition table update conflict"),
+                                                errdetail("disable row movement of table can avoid this conflict")));
+                                    }
+
                                     // EvalPlanQual need to reinitialize child plan to do some recheck due to concurrent
                                     // update, but we wrap the left tree of Stream node in backend thread. So the child
                                     // plan cannot be reinitialized successful now.
@@ -2754,7 +2833,7 @@ TupleTableSlot* ExecModifyTable(ModifyTableState* node)
                 bool isNull = false;
 
                 relkind = result_rel_info->ri_RelationDesc->rd_rel->relkind;
-                if (relkind == RELKIND_RELATION || relkind == RELKIND_SEQUENCE) {
+                if (relkind == RELKIND_RELATION || RELKIND_IS_SEQUENCE(relkind)) {
                     datum = ExecGetJunkAttribute(slot, junk_filter->jf_junkAttNo, &isNull);
                     /* shouldn't ever get a null result... */
                     if (isNull) {

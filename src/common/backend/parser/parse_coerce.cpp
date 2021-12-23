@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -879,11 +880,20 @@ static Node* coerce_record_to_complex(
 
         rte = GetRTEByRangeTablePosn(pstate, rtindex, sublevels_up);
         expandRTE(rte, rtindex, sublevels_up, vlocation, false, NULL, &args);
-    } else
+    } else {
+        bool isParamExtenRecord = node && IsA(node, Param) && ((Param*)node)->paramkind == PARAM_EXTERN
+            && ((Param*)node)->paramtype == RECORDOID;
+        if (isParamExtenRecord) {
+            /* package record var'type same with target type, no need cast, just return */
+            if (((Param*)node)->recordVarTypOid == targetTypeId) {
+                return node;
+            }
+        }
         ereport(ERROR,
             (errcode(ERRCODE_CANNOT_COERCE),
                 errmsg("cannot cast type %s to %s", format_type_be(RECORDOID), format_type_be(targetTypeId)),
                 parser_coercion_errposition(pstate, location, node)));
+    }
 
     tupdesc = lookup_rowtype_tupdesc(targetTypeId, -1);
     newargs = NIL;
@@ -1331,9 +1341,17 @@ Oid select_common_type(ParseState* pstate, List* exprs, const char* context, Nod
         }
     }
 
-    if (u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && context != NULL &&
-        (0 == strncmp(context, "CASE", sizeof("CASE")) || 0 == strncmp(context, "COALESCE", sizeof("COALESCE")))) {
-        /* To C format, we need handle numeric and string mix situation*/
+    if ((u_sess->attr.attr_sql.sql_compatibility == C_FORMAT && context != NULL &&
+        (0 == strncmp(context, "CASE", sizeof("CASE")) || 0 == strncmp(context, "COALESCE", sizeof("COALESCE")))) ||
+        (ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE) && context != NULL &&
+            (0 == strncmp(context, "CASE", sizeof("CASE"))))) {
+        /*
+         * To C format, we need handle numeric and string mix situation.
+         * For A format, type should be coerced by the first case, therefore, it can accept cases like
+         *          select decode(1, 2, 'a', 3);
+         * where the default value 3 will be cast to the first value "a"'s type category. We temporarily fix this by
+         * using C format coercion.
+         */
         ptype = choose_specific_expr_type(pstate, exprs, context);
     }
     /* Follow A db nvl*/

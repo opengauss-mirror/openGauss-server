@@ -60,11 +60,14 @@ public:
     const StatementData *get_statement_data() const;
     bool deprocess_value(const char *data_2_process, int data_type, unsigned char **proccessed_data,
         size_t &length_output, DriverError *status) const;
-    bool process_record_data(const char *data_2_process, const int *modid, int oid, const char *column_label,
-        unsigned char **proccessed_data, bool *is_encreypted, size_t &length_output, DriverError *status);
+    size_t get_record_data_oid_length(int oid, const char* column_name);
+    const int *get_record_data_oids(int oid, const char* column_name);
+    bool process_record_data(const char *data_2_process, const int *original_oids, unsigned char **proccessed_data,
+        bool *is_encreypted, size_t &length_output, DriverError *status);
     bool replace_message(const char *original_message, char **new_message, DriverError *status) const;
     const char *get_new_query(const char *query);
     void set_jni_env_and_cl_impl(JNIEnv *env, jobject jni_cl_impl);
+    void reload_cache_if_needed() const;
 
 private:
     PGconn *m_stub_conn = NULL;

@@ -188,6 +188,8 @@ extern Datum interval_justify_days(PG_FUNCTION_ARGS);
 
 extern Datum timestamp_trunc(PG_FUNCTION_ARGS);
 extern Datum interval_trunc(PG_FUNCTION_ARGS);
+extern Datum timestamp_trunc_alias(PG_FUNCTION_ARGS);
+extern Datum interval_trunc_alias(PG_FUNCTION_ARGS);
 extern Datum timestamp_part(PG_FUNCTION_ARGS);
 extern Datum interval_part(PG_FUNCTION_ARGS);
 extern Datum timestamp_zone(PG_FUNCTION_ARGS);
@@ -227,12 +229,14 @@ extern Datum timestamp_mi_interval(Timestamp timestamp, const Interval* span);
 extern Datum timestamp_mi_interval(PG_FUNCTION_ARGS);
 extern Datum timestamp_age(PG_FUNCTION_ARGS);
 extern Datum timestamp_diff(PG_FUNCTION_ARGS);
+extern int64 timestamp_diff_internal(text *units, TimestampTz dt1, TimestampTz dt2, bool enable_fix = false);
 extern Datum overlaps_timestamp(PG_FUNCTION_ARGS);
 
 extern Datum timestamptz_pl_interval(PG_FUNCTION_ARGS);
 extern Datum timestamptz_mi_interval(PG_FUNCTION_ARGS);
 extern Datum timestamptz_age(PG_FUNCTION_ARGS);
 extern Datum timestamptz_trunc(PG_FUNCTION_ARGS);
+extern Datum timestamptz_trunc_alias(PG_FUNCTION_ARGS);
 extern Datum timestamptz_part(PG_FUNCTION_ARGS);
 
 extern Datum now(PG_FUNCTION_ARGS);

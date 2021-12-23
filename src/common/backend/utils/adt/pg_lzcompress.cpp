@@ -320,6 +320,9 @@ const PGLZ_Strategy* const PGLZ_strategy_always = &strategy_always_data;
 #define HIST_START_LEN (sizeof(PGLZ_HistEntry*) * PGLZ_HISTORY_LISTS)
 #define HIST_ENTRIES_LEN (sizeof(PGLZ_HistEntry) * PGLZ_HISTORY_SIZE)
 
+#define MAX_GOOD_DROP 100
+#define MAX_NEED_RATE 99
+
 /* ----------
  * pglz_find_match -
  *
@@ -723,15 +726,15 @@ int32 lz_compress(const char* source, int32 slen, char* dest)
     good_drop = strategy->match_size_drop;
     if (good_drop < 0) {
         good_drop = 0;
-    } else if (good_drop > 100) {
-        good_drop = 100;
+    } else if (good_drop > MAX_GOOD_DROP) {
+        good_drop = MAX_GOOD_DROP;
     }
 
     need_rate = strategy->min_comp_rate;
     if (need_rate < 0) {
         need_rate = 0;
-    } else if (need_rate > 99) {
-        need_rate = 99;
+    } else if (need_rate > MAX_NEED_RATE) {
+        need_rate = MAX_NEED_RATE;
     }
 
     /*

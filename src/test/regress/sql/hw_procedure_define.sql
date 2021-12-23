@@ -1,8 +1,22 @@
 -------------------------------------------------------
 -- Test A db style procedure and Function Defination
 -------------------------------------------------------
+create database pl_test_pkg_define DBCOMPATIBILITY 'pg';
+\c pl_test_pkg_define;
 
 SET CHECK_FUNCTION_BODIES TO ON;
+CREATE FUNCTION test_forallDML1(IN iter int) RETURNS integer AS $$
+BEGIN
+        forall i in 1..iter
+                CREATE ROLE jonathan PASSWORD 'gauss@123' LOGIN;
+        return iter;
+END;
+$$ LANGUAGE plpgsql;
+begin
+    forall i in 1..iter
+        CREATE ROLE jonathan PASSWORD 'gauss@123' LOGIN;
+end;
+/
 CREATE PROCEDURE test_proc_define
 (
 	in_1  	IN VARCHAR2,
@@ -599,5 +613,26 @@ call test_proc_using_001(1);
 select * from test_emp_001;
 select prosecdef,procost,proleakproof,proisstrict,proshippable,prokind from pg_proc where proname='test_proc_using_001';
 
+
+create or replace procedure p_definer() AUTHID DEFINER
+is
+begin
+commit;
+end;
+/
+
+create or replace procedure p_caller() AUTHID DEFINER
+is
+begin
+p_definer();
+end;
+/
+
+call p_definer();
+
+drop procedure p_definer;
+drop procedure p_caller;
 drop table test_emp_001;
 drop procedure test_proc_using_001;
+\c regression;
+drop database IF EXISTS pl_test_pkg_define;

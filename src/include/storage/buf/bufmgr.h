@@ -275,6 +275,7 @@ extern void DropTempRelFileNodeAllBuffers(const RelFileNodeBackend& rnode);
 
 extern void DropRelFileNodeAllBuffersUsingHash(HTAB* relfilenode_hashtbl);
 extern void DropRelFileNodeAllBuffersUsingScan(RelFileNode* rnode, int rnode_len);
+extern void DropRelFileNodeOneForkAllBuffersUsingHash(HTAB *relfilenode_hashtbl);
 
 extern void DropDatabaseBuffers(Oid dbid);
 
@@ -337,8 +338,6 @@ extern void FreeAccessStrategy(BufferAccessStrategy strategy);
 
 /* dirty page manager */
 extern int ckpt_buforder_comparator(const void* pa, const void* pb);
-extern void clean_buf_need_flush_flag(BufferDesc *buf_desc);
-extern void ckpt_flush_dirty_page(int thread_id, WritebackContext wb_context);
 
 extern uint32 SyncOneBuffer(
     int buf_id, bool skip_recently_used, WritebackContext* flush_context, bool get_candition_lock = false);
@@ -350,11 +349,12 @@ extern Buffer ReadBuffer_common_for_localbuf(RelFileNode rnode, char relpersiste
 extern void DropRelFileNodeShareBuffers(RelFileNode node, ForkNumber forkNum, BlockNumber firstDelBlock);
 extern int GetThreadBufferLeakNum(void);
 extern void flush_all_buffers(Relation rel, Oid db_id, HTAB *hashtbl = NULL);
-
 /* in localbuf.c */
 extern void ForgetLocalBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum);
 /* TDE table encryption key hash table insert function */
-extern void TdeTableEncryptionInsert(Relation reln);
-extern bool StandbyTdeTableEncryptionInsert(TdeInfo* tde_info, RelFileNode rnode);
+extern bool InsertTdeInfoToCache(RelFileNode rnode, TdeInfo *tde_info);
+extern void RelationInsertTdeInfoToCache(Relation reln);
+extern void PartitionInsertTdeInfoToCache(Relation reln, Partition p);
+extern void wakeup_pagewriter_thread();
 
 #endif

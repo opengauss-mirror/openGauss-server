@@ -508,7 +508,7 @@ void RestoreArchive(Archive* AHX)
             }
 
             /* Otherwise, drop anything that's selected and has a dropStmt */
-            if (((te->reqs & (REQ_SCHEMA | REQ_DATA)) != 0) && (te->dropStmt != NULL)) {
+            if (((te->reqs & (REQ_SCHEMA | REQ_DATA)) != 0) && (te->dropStmt != NULL) && (strlen(te->dropStmt) != 0)) {
                 /* Show namespace if available */
                 if (te->nmspace) {
                     ahlog(AH, 1, "dropping %s \"%s.%s\"\n", te->desc, te->nmspace, te->tag);
@@ -2762,7 +2762,6 @@ static void _doResetSessionAuth(ArchiveHandle* AH) {
     (void)destroyPQExpBuffer(cmd);
 }
 
-
 /*
  * Issue a SET default_with_oids command.  Caller is responsible
  * for updating state if appropriate.
@@ -2992,7 +2991,7 @@ static void _getObjectDescription(PQExpBuffer buf, TocEntry* te, ArchiveHandle* 
         strcmp(type, "TABLE") == 0 || strcmp(type, "SYNONYM") == 0 || strcmp(type, "VIEW") == 0 ||
         strcmp(type, "SEQUENCE") == 0 || strcmp(type, "TYPE") == 0 || strcmp(type, "FOREIGN TABLE") == 0 ||
         strcmp(type, "TEXT SEARCH DICTIONARY") == 0 || strcmp(type, "TEXT SEARCH CONFIGURATION") == 0 ||
-        strcmp(type, "MATERIALIZED VIEW") == 0) {
+        strcmp(type, "MATERIALIZED VIEW") == 0 || strcmp(type, "LARGE SEQUENCE") == 0) {
         (void)appendPQExpBuffer(buf, "%s ", type);
         if ((te->nmspace != NULL) && te->nmspace[0]) /* is null pre-7.3 */
             (void)appendPQExpBuffer(buf, "%s.", fmtId(te->nmspace));
@@ -3259,6 +3258,7 @@ static void _printTocEntry(ArchiveHandle* AH, TocEntry* te, RestoreOptions* ropt
                 || strcmp(te->desc, "VIEW") == 0 
                 || strcmp(te->desc, "MATERIALIZED VIEW") == 0
                 || strcmp(te->desc, "SEQUENCE") == 0 
+                || strcmp(te->desc, "LARGE SEQUENCE") == 0
                 || strcmp(te->desc, "TEXT SEARCH DICTIONARY") == 0 
                 || strcmp(te->desc, "TEXT SEARCH CONFIGURATION") == 0 
                 || strcmp(te->desc, "FOREIGN DATA WRAPPER") == 0 
@@ -4546,8 +4546,6 @@ static void DeCloneArchive(ArchiveHandle* AH)
  */
 void check_encrypt_parameters(Archive* fout, const char* encrypt_mode, const char* encrypt_key)
 {
-    int key_lenth = 0;
-
     if (NULL == encrypt_mode && NULL == encrypt_key) {
         fout->encryptfile = false;
         return;
@@ -4560,19 +4558,16 @@ void check_encrypt_parameters(Archive* fout, const char* encrypt_mode, const cha
     }
     if (NULL == encrypt_key) {
         exit_horribly(NULL, "No key for encryption,please input the key\n");
-    } else {
-        key_lenth = strlen(encrypt_key);
     }
-    if (KEY_LEN != key_lenth) {
-        exit_horribly(NULL, "The key is illegal,the length must be %d\n", KEY_LEN);
-    } else {
-        if (!check_key(encrypt_key, KEY_LEN))
-            exit_horribly(NULL, "The key is illegal, must be letters or numbers\n");
+    if (!check_input_password(encrypt_key)) {
+        exit_horribly(NULL, "The input key must be %d~%d bytes and "
+            "contain at least three kinds of characters!\n",
+            MIN_KEY_LEN, MAX_KEY_LEN);
     }
 
     errno_t rc = memset_s(fout->Key, KEY_MAX_LEN, 0, KEY_MAX_LEN);
     securec_check_c(rc, "\0", "\0");
-    rc = strncpy_s((char*)fout->Key, KEY_MAX_LEN, encrypt_key, KEY_LEN);
+    rc = strncpy_s((char*)fout->Key, KEY_MAX_LEN, encrypt_key, KEY_MAX_LEN - 1);
     securec_check_c(rc, "\0", "\0");
     fout->encryptfile = true;
 }

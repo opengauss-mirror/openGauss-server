@@ -53,6 +53,7 @@
 #include "utils/guc.h"
 #include "utils/palloc.h"
 #include "portability/instr_time.h"
+#include "postmaster/startup.h"
 
 #include "catalog/storage.h"
 #include <pthread.h>
@@ -185,7 +186,7 @@ PageRedoWorker *CreateWorker(uint32 id)
     worker->initialTimeLineID = t_thrd.xlog_cxt.ThisTimeLineID;
     worker->expectedTLIs = t_thrd.xlog_cxt.expectedTLIs;
     worker->recoveryTargetTLI = t_thrd.xlog_cxt.recoveryTargetTLI;
-
+    worker->recoveryRestoreCommand = t_thrd.xlog_cxt.recoveryRestoreCommand;
     worker->ArchiveRecoveryRequested = t_thrd.xlog_cxt.ArchiveRecoveryRequested;
     worker->StandbyModeRequested = t_thrd.xlog_cxt.StandbyModeRequested;
     worker->InArchiveRecovery = t_thrd.xlog_cxt.InArchiveRecovery;
@@ -2035,6 +2036,22 @@ void XLogReadManagerResponseSignal(uint32 tgigger)
         case TRIGGER_PRIMARY:
             break;
         case TRIGGER_FAILOVER:
+            if (t_thrd.xlog_cxt.is_cascade_standby) {
+                SendPostmasterSignal(PMSIGNAL_UPDATE_PROMOTING);
+                t_thrd.xlog_cxt.is_cascade_standby = false;
+                if (t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+                    t_thrd.xlog_cxt.is_hadr_main_standby = true;
+                    SpinLockAcquire(&t_thrd.postmaster_cxt.HaShmData->mutex);
+                    t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby = true;
+                    SpinLockRelease(&t_thrd.postmaster_cxt.HaShmData->mutex);
+                }
+                t_thrd.xlog_cxt.failover_triggered = false;
+                SendNotifySignal(NOTIFY_STANDBY, g_instance.pid_cxt.StartupPID);
+                SendPostmasterSignal(PMSIGNAL_UPDATE_NORMAL);
+                ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
+                          errmsg("failover standby ready, notify postmaster to change state.")));
+                break;
+            }
             t_thrd.xlog_cxt.failover_triggered = true;
             SendPostmasterSignal(PMSIGNAL_UPDATE_PROMOTING);
             ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
@@ -2078,6 +2095,20 @@ void WaitPageReadWorkerExit()
     } while (state != WORKER_STATE_EXIT);
 }
 
+static void HandleExtremeRtoCascadeStandbyPromote(uint32 trigger)
+{
+    if (!t_thrd.xlog_cxt.is_cascade_standby || t_thrd.xlog_cxt.server_mode != STANDBY_MODE ||
+        !IS_DN_MULTI_STANDYS_MODE()) {
+        return;
+    }
+
+    ShutdownWalRcv();
+    pg_atomic_write_u32(&g_dispatcher->rtoXlogBufState.waitRedoDone, 1);
+    WakeupRecovery();
+    XLogReadManagerResponseSignal(trigger);
+    pg_atomic_write_u32(&(extreme_rto::g_startupTriggerState), TRIGGER_NORMAL);
+}
+
 bool XLogReadManagerCheckSignal()
 {
     uint32 trigger = pg_atomic_read_u32(&(extreme_rto::g_startupTriggerState));
@@ -2088,6 +2119,11 @@ bool XLogReadManagerCheckSignal()
         ereport(LOG, (errmodule(MOD_REDO), errcode(ERRCODE_LOG),
                       errmsg("XLogReadManagerCheckSignal: smartShutdown:%u, trigger:%u, server_mode:%u",
                              g_dispatcher->smartShutdown, trigger, t_thrd.xlog_cxt.server_mode)));
+        if (t_thrd.xlog_cxt.is_cascade_standby && t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&
+            IS_DN_MULTI_STANDYS_MODE() && (trigger == TRIGGER_SWITCHOVER || trigger == TRIGGER_FAILOVER)) {
+            HandleExtremeRtoCascadeStandbyPromote(trigger);
+            return false;
+        }
         ShutdownWalRcv();
         if (g_dispatcher->smartShutdown) {
             pg_atomic_write_u32(&g_readManagerTriggerFlag, TRIGGER_SMARTSHUTDOWN);
@@ -2102,10 +2138,52 @@ bool XLogReadManagerCheckSignal()
     return false;
 }
 
+void StartRequestXLogFromStream()
+{
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    XLogRecPtr expectLsn = pg_atomic_read_u64(&g_dispatcher->rtoXlogBufState.expectLsn);
+    if (walrcv->receivedUpto == InvalidXLogRecPtr || 
+        (expectLsn != InvalidXLogRecPtr && XLByteLE(walrcv->receivedUpto, expectLsn))) {
+        uint32 readWorkerstate = pg_atomic_read_u32(&(g_recordbuffer->readWorkerState));
+        if (readWorkerstate == WORKER_STATE_RUN) {
+            pg_atomic_write_u32(&(g_recordbuffer->readWorkerState), WORKER_STATE_STOPPING);
+        }
+        SpinLockAcquire(&walrcv->mutex);
+        walrcv->receivedUpto = 0;
+        SpinLockRelease(&walrcv->mutex);
+        XLogRecPtr targetRecPtr = pg_atomic_read_u64(&g_dispatcher->rtoXlogBufState.targetRecPtr);
+        CheckMaxPageFlushLSN(targetRecPtr);
+
+        uint32 shiftSize = 32;
+        if (IS_DISASTER_RECOVER_MODE) {
+            ereport(LOG, (errmsg("request xlog stream from obs at %X/%X.", (uint32)(targetRecPtr >> shiftSize), 
+                                 (uint32)targetRecPtr)));
+            RequestXLogStreaming(&targetRecPtr, 0, REPCONNTARGET_OBS, 0);
+        } else if (IS_SHARED_STORAGE_STANBY_MODE && !IS_SHARED_STORAGE_MAIN_STANDBY_MODE) {
+#ifndef ENABLE_MULTIPLE_NODES
+            rename_recovery_conf_for_roach();
+#endif
+            ereport(LOG, (errmsg("request xlog stream from shared storage at %X/%X.", 
+                                (uint32)(targetRecPtr >> shiftSize),
+                                (uint32)targetRecPtr)));
+            RequestXLogStreaming(&targetRecPtr, 0, REPCONNTARGET_SHARED_STORAGE, 0);
+        } else {
+#ifndef ENABLE_MULTIPLE_NODES
+            rename_recovery_conf_for_roach();
+#endif
+            ereport(LOG, (errmsg("request xlog stream at %X/%X.", (uint32)(targetRecPtr >> shiftSize),
+                                 (uint32)targetRecPtr)));
+            RequestXLogStreaming(&targetRecPtr, t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
+                                u_sess->attr.attr_storage.PrimarySlotName);
+        }
+    }
+}
+
+
 void XLogReadManagerMain()
 {
-    const long sleepShortTime = 50000L;
-    const long sleepLongTime = 500000L;
+    const long sleepShortTime = 100000L;
+    const long sleepLongTime = 1000000L;
     g_recordbuffer = &g_dispatcher->rtoXlogBufState;
     uint32 xlogReadManagerState = READ_MANAGER_RUN;
 
@@ -2123,41 +2201,25 @@ void XLogReadManagerMain()
             uint32 readSource = pg_atomic_read_u32(&g_dispatcher->rtoXlogBufState.readSource);
             uint32 failSource = pg_atomic_read_u32(&g_dispatcher->rtoXlogBufState.failSource);
             if (readSource & XLOG_FROM_STREAM) {
-                if (!WalRcvInProgress() && g_instance.pid_cxt.WalReceiverPID == 0 &&
-                    !g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node) {
-                    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-                    XLogRecPtr expectLsn = pg_atomic_read_u64(&g_dispatcher->rtoXlogBufState.expectLsn);
-                    if (walrcv->receivedUpto == InvalidXLogRecPtr ||
-                        (expectLsn != InvalidXLogRecPtr && XLByteLE(walrcv->receivedUpto, expectLsn))) {
-                        uint32 readWorkerstate = pg_atomic_read_u32(&(g_recordbuffer->readWorkerState));
-                        if (readWorkerstate == WORKER_STATE_RUN) {
-                            pg_atomic_write_u32(&(g_recordbuffer->readWorkerState), WORKER_STATE_STOPPING);
-                        }
-                        SpinLockAcquire(&walrcv->mutex);
-                        walrcv->receivedUpto = 0;
-                        SpinLockRelease(&walrcv->mutex);
-                        XLogRecPtr targetRecPtr = pg_atomic_read_u64(&g_dispatcher->rtoXlogBufState.targetRecPtr);
-                        CheckMaxPageFlushLSN(targetRecPtr);
-
-                        if (IS_DISASTER_RECOVER_MODE) {
-                            ereport(LOG, (errmsg("request xlog stream from obs at %X/%X.",
-                                                (uint32)(targetRecPtr >> 32),
-                                                (uint32)targetRecPtr)));
-                            RequestXLogStreaming(&targetRecPtr, 0, REPCONNTARGET_OBS, 0);
-                        } else {
-                            ereport(LOG, (errmsg("request xlog stream at %X/%X.", (uint32)(targetRecPtr >> 32),
-                                                (uint32)targetRecPtr)));
-                            RequestXLogStreaming(&targetRecPtr, t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
-                                                u_sess->attr.attr_storage.PrimarySlotName);
-                        }
-                    }
+                uint32 disableConnectionNode = 
+                    pg_atomic_read_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node);
+                bool retryConnect = ((!disableConnectionNode) || (IS_SHARED_STORAGE_MODE && disableConnectionNode &&
+                    !knl_g_get_redo_finish_status() &&
+                    !pg_atomic_read_u32(&t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage)));
+                if (!WalRcvInProgress() && g_instance.pid_cxt.WalReceiverPID == 0 && retryConnect) {
+                    StartRequestXLogFromStream();
                 } else {
-                    if (g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node) {
+                    if (disableConnectionNode) {
+                        if (IS_SHARED_STORAGE_MODE && WalRcvIsRunning()) {
+                            ShutdownWalRcv();
+                        }
+
                         if (!WalRcvInProgress() && !knl_g_get_redo_finish_status()) {
                             pg_atomic_write_u32(&g_dispatcher->rtoXlogBufState.waitRedoDone, 1);
+                            WakeupRecovery();
                             pg_usleep(sleepLongTime);
                         } else if (knl_g_get_redo_finish_status()) {
-                            g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node = false;
+                            pg_atomic_write_u32(&g_instance.comm_cxt.localinfo_cxt.need_disable_connection_node, false);
                             pg_usleep(sleepLongTime);
                         }
                         
@@ -2380,7 +2442,7 @@ static void InitGlobals()
     g_redoWorker->proc = t_thrd.proc;
     t_thrd.storage_cxt.latestObservedXid = g_redoWorker->latestObservedXid;
     t_thrd.xlog_cxt.recoveryTargetTLI = g_redoWorker->recoveryTargetTLI;
-
+    t_thrd.xlog_cxt.recoveryRestoreCommand= g_redoWorker->recoveryRestoreCommand;
     t_thrd.xlog_cxt.ArchiveRecoveryRequested = g_redoWorker->ArchiveRecoveryRequested;
     t_thrd.xlog_cxt.StandbyModeRequested = g_redoWorker->StandbyModeRequested;
     t_thrd.xlog_cxt.InArchiveRecovery = g_redoWorker->InArchiveRecovery;

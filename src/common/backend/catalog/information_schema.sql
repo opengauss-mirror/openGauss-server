@@ -527,7 +527,8 @@ CREATE VIEW column_domain_usage AS
           AND a.attrelid = c.oid
           AND a.atttypid = t.oid
           AND t.typtype = 'd'
-          AND c.relkind IN ('r', 'v', 'f')
+          AND c.relkind IN ('r', 'm', 'v', 'f')
+          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
           AND a.attnum > 0
           AND NOT a.attisdropped
           AND pg_has_role(t.typowner, 'USAGE');
@@ -566,7 +567,7 @@ CREATE VIEW column_privileges AS
                   pr_c.relowner
            FROM (SELECT oid, relname, relnamespace, relowner, (aclexplode(coalesce(relacl, acldefault('r', relowner)))).*
                  FROM pg_class
-                 WHERE relkind IN ('r', 'v', 'f')
+                 WHERE relkind IN ('r', 'm', 'v', 'f')
                 ) pr_c (oid, relname, relnamespace, relowner, grantor, grantee, prtype, grantable),
                 pg_attribute a
            WHERE a.attrelid = pr_c.oid
@@ -588,7 +589,7 @@ CREATE VIEW column_privileges AS
                 ) pr_a (attrelid, attname, grantor, grantee, prtype, grantable),
                 pg_class c
            WHERE pr_a.attrelid = c.oid
-                 AND relkind IN ('r', 'v', 'f')
+                 AND relkind IN ('r', 'm', 'v', 'f')
          ) x,
          pg_namespace nc,
          pg_authid u_grantor,
@@ -602,6 +603,7 @@ CREATE VIEW column_privileges AS
           AND x.grantee = grantee.oid
           AND x.grantor = u_grantor.oid
           AND x.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'REFERENCES', 'COMMENT')
+          AND (x.relname not like 'mlog_%' AND x.relname not like 'matviewmap_%')
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');
@@ -631,7 +633,8 @@ CREATE VIEW column_udt_usage AS
     WHERE a.attrelid = c.oid
           AND a.atttypid = t.oid
           AND nc.oid = c.relnamespace
-          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'v', 'f')
+          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'm', 'v', 'f')
+          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
           AND pg_has_role(coalesce(bt.typowner, t.typowner), 'USAGE');
 
 GRANT SELECT ON column_udt_usage TO PUBLIC;
@@ -756,7 +759,9 @@ CREATE VIEW columns AS
 
     WHERE (NOT pg_is_other_temp_schema(nc.oid))
 
-          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'v', 'f')
+          AND a.attnum > 0 AND NOT a.attisdropped AND c.relkind in ('r', 'm', 'v', 'f')
+
+          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
 
           AND (pg_has_role(c.relowner, 'USAGE')
                OR has_column_privilege(c.oid, a.attnum,
@@ -1495,8 +1500,8 @@ CREATE VIEW sequences AS
     SELECT CAST(current_database() AS sql_identifier) AS sequence_catalog,
            CAST(nc.nspname AS sql_identifier) AS sequence_schema,
            CAST(c.relname AS sql_identifier) AS sequence_name,
-           CAST('bigint' AS character_data) AS data_type,
-           CAST(64 AS cardinal_number) AS numeric_precision,
+           CAST('int16' AS character_data) AS data_type,
+           CAST(128 AS cardinal_number) AS numeric_precision,
            CAST(2 AS cardinal_number) AS numeric_precision_radix,
            CAST(0 AS cardinal_number) AS numeric_scale,
            -- XXX: The following could be improved if we had LATERAL.
@@ -1507,7 +1512,7 @@ CREATE VIEW sequences AS
            CAST(CASE WHEN (pg_sequence_parameters(c.oid)).cycle_option THEN 'YES' ELSE 'NO' END AS yes_or_no) AS cycle_option
     FROM pg_namespace nc, pg_class c
     WHERE c.relnamespace = nc.oid
-          AND c.relkind = 'S'
+          AND (c.relkind = 'L' or c.relkind = 'S')
           AND (NOT pg_is_other_temp_schema(nc.oid))
           AND (pg_has_role(c.relowner, 'USAGE')
                OR has_sequence_privilege(c.oid, 'SELECT, UPDATE, USAGE') );
@@ -1818,11 +1823,13 @@ CREATE VIEW table_privileges AS
          ) AS grantee (oid, rolname)
 
     WHERE c.relnamespace = nc.oid
-          AND c.relkind IN ('r', 'v')
+          AND c.relkind IN ('r', 'm', 'v')
+          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
           AND c.grantee = grantee.oid
           AND c.grantor = u_grantor.oid
-          AND c.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER' ,
-                           'ALTER', 'DROP', 'COMMENT', 'INDEX', 'VACUUM')
+          AND (c.prtype IN ('INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER')
+               OR c.prtype IN ('ALTER', 'DROP', 'COMMENT', 'INDEX', 'VACUUM')
+          )
           AND (pg_has_role(u_grantor.oid, 'USAGE')
                OR pg_has_role(grantee.oid, 'USAGE')
                OR grantee.rolname = 'PUBLIC');
@@ -1864,6 +1871,7 @@ CREATE VIEW tables AS
            CAST(
              CASE WHEN nc.oid = pg_my_temp_schema() THEN 'LOCAL TEMPORARY'
                   WHEN c.relkind = 'r' THEN 'BASE TABLE'
+                  WHEN c.relkind = 'm' THEN 'MATERIALIZED VIEW'
                   WHEN c.relkind = 'v' THEN 'VIEW'
                   WHEN c.relkind = 'f' THEN 'FOREIGN TABLE'
                   ELSE null END
@@ -1887,7 +1895,8 @@ CREATE VIEW tables AS
     FROM pg_namespace nc JOIN pg_class c ON (nc.oid = c.relnamespace)
            LEFT JOIN (pg_type t JOIN pg_namespace nt ON (t.typnamespace = nt.oid)) ON (c.reloftype = t.oid)
 
-    WHERE c.relkind IN ('r', 'v', 'f')
+    WHERE c.relkind IN ('r', 'm', 'v', 'f')
+          AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
           AND (NOT pg_is_other_temp_schema(nc.oid))
           AND (pg_has_role(c.relowner, 'USAGE')
                OR has_table_privilege(c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
@@ -2256,7 +2265,7 @@ CREATE VIEW usage_privileges AS
          ) AS grantee (oid, rolname)
 
     WHERE c.relnamespace = n.oid
-          AND c.relkind = 'S'
+          AND (c.relkind = 'S' or c.relkind = 'L')
           AND c.grantee = grantee.oid
           AND c.grantor = u_grantor.oid
           AND c.prtype IN ('USAGE')
@@ -2366,7 +2375,8 @@ CREATE VIEW view_column_usage AS
           AND dt.refclassid = 'pg_catalog.pg_class'::regclass
           AND dt.refobjid = t.oid
           AND t.relnamespace = nt.oid
-          AND t.relkind IN ('r', 'v', 'f')
+          AND t.relkind IN ('r', 'm', 'v', 'f')
+          AND (t.relname not like 'mlog_%' AND t.relname not like 'matviewmap_%')
           AND t.oid = a.attrelid
           AND dt.refobjsubid = a.attnum
           AND pg_has_role(t.relowner, 'USAGE');
@@ -2436,7 +2446,8 @@ CREATE VIEW view_table_usage AS
           AND dt.refclassid = 'pg_catalog.pg_class'::regclass
           AND dt.refobjid = t.oid
           AND t.relnamespace = nt.oid
-          AND t.relkind IN ('r', 'v', 'f')
+          AND t.relkind IN ('r', 'm', 'v', 'f')
+          AND (t.relname not like 'mlog_%' AND t.relname not like 'matviewmap_%')
           AND pg_has_role(t.relowner, 'USAGE');
 
 GRANT SELECT ON view_table_usage TO PUBLIC;
@@ -2582,7 +2593,8 @@ CREATE VIEW element_types AS
                   a.attnum, a.atttypid, a.attcollation
            FROM pg_class c, pg_attribute a
            WHERE c.oid = a.attrelid
-                 AND c.relkind IN ('r', 'v', 'f', 'c')
+                 AND c.relkind IN ('r', 'm', 'v', 'f', 'c')
+                 AND (c.relname not like 'mlog_%' AND c.relname not like 'matviewmap_%')
                  AND attnum > 0 AND NOT attisdropped
 
            UNION ALL

@@ -1206,4 +1206,22 @@ GOTO pos1;
 END;
 /
 
+drop table if exists tb_test;
+create table tb_test(group_code varchar2(5), custsort varchar2(4));
+create procedure proc_test() as
+v_tb_log timestamp;
+v_tb_log1 timestamp;
+begin
+    for cm_np_duebill in (select group_code, custsort from tb_test) loop
+        <<next1>>
+        NULL;
+    end loop;
+for cm_np_duebill in (select sysdate) loop
+    v_tb_log1:=cm_np_duebill.sysdate;
+end loop;
+end;
+/
+
+call proc_test();
+
 drop schema goto_schema cascade;

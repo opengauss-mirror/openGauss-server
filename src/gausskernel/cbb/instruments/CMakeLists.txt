@@ -18,6 +18,7 @@ set(CMAKE_MODULE_PATH
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/wdr
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/workload
     ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/percentile
+    ${PROJECT_OPENGS_DIR}/src/gausskernel/cbb/instruments/func_control
 
 )
 
@@ -32,4 +33,5 @@ add_subdirectory(utils)
 add_subdirectory(wdr)
 add_subdirectory(workload)
 add_subdirectory(percentile)
+add_subdirectory(func_control)
 

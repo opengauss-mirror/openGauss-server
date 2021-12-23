@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -25,6 +26,7 @@
 #include "codegen/gscodegen.h"
 #include "codegen/vecexprcodegen.h"
 #include "catalog/pg_operator.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_proc.h"
 #include "vecexecutor/vectsstorescan.h"
 #include "executor/executor.h"

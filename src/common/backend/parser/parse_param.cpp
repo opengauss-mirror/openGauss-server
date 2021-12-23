@@ -110,6 +110,7 @@ static Node* fixed_paramref_hook(ParseState* pstate, ParamRef* pref)
     param->paramtypmod = -1;
     param->paramcollid = get_typcollation(param->paramtype);
     param->location = pref->location;
+    param->tableOfIndexType = InvalidOid;
 
     return (Node*)param;
 }
@@ -165,6 +166,7 @@ static Node* variable_paramref_hook(ParseState* pstate, ParamRef* pref)
     param->paramtypmod = -1;
     param->paramcollid = get_typcollation(param->paramtype);
     param->location = pref->location;
+    param->tableOfIndexType = InvalidOid;
 
     return (Node*)param;
 }

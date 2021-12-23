@@ -65,6 +65,22 @@ JNIEXPORT jobjectArray JNICALL Java_com_huawei_gauss200_jdbc_jdbc_ClientLogicImp
 
 /*
  * Class:     com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl
+ * Method:    getRecordIDsImpl
+ * Signature: (JLjava/lang/String;I)[Ljava/lang/Object;
+ */
+JNIEXPORT jobjectArray JNICALL JJava_com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl_getRecordIDsImpl(JNIEnv *,
+    jobject, jlong, jstring, jint);
+
+/*
+ * Class:     com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl
+ * Method:    runClientLogic4RecordImpl
+ * Signature: (JLjava/lang/String;[I)[Ljava/lang/Object;
+ */
+JNIEXPORT jobjectArray JNICALL Java_com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl_runClientLogic4RecordImpl(JNIEnv *,
+    jobject, jlong, jstring, jintArray);
+
+/*
+ * Class:     com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl
  * Method:    prepareQueryImpl
  * Signature: (JLjava/lang/String;Ljava/lang/String;I)[Ljava/lang/Object;
  */

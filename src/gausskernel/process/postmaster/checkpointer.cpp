@@ -180,7 +180,7 @@ void CheckpointerMain(void)
 
     t_thrd.checkpoint_cxt.CheckpointerShmem->checkpointer_pid = t_thrd.proc_cxt.MyProcPid;
 
-    u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
+    u_sess->attr.attr_storage.CheckPointTimeout = ENABLE_INCRE_CKPT
                                                       ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                       : u_sess->attr.attr_storage.fullCheckPointTimeout;
     ereport(
@@ -259,6 +259,8 @@ void CheckpointerMain(void)
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -382,10 +384,10 @@ void CheckpointerMain(void)
         if (t_thrd.checkpoint_cxt.got_SIGHUP) {
             t_thrd.checkpoint_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
-            u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
+            u_sess->attr.attr_storage.CheckPointTimeout = ENABLE_INCRE_CKPT
                                                               ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                               : u_sess->attr.attr_storage.fullCheckPointTimeout;
-            most_available_sync = (volatile bool)u_sess->attr.attr_storage.guc_most_available_sync;
+            most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
 
             /*
              * Checkpointer is the last process to shut down, so we ask it to
@@ -420,6 +422,7 @@ void CheckpointerMain(void)
              * control back to the sigsetjmp block above
              */
             u_sess->attr.attr_common.ExitOnAnyError = true;
+            
             /* Close down the database */
             ShutdownXLOG(0, 0);
             /* Normal exit from the checkpointer is here */
@@ -760,7 +763,7 @@ static bool IsCheckpointOnSchedule(double progress)
     double elapsed_xlogs, elapsed_time;
 
     Assert(t_thrd.checkpoint_cxt.ckpt_active);
-    u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
+    u_sess->attr.attr_storage.CheckPointTimeout = ENABLE_INCRE_CKPT
                                                       ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                       : u_sess->attr.attr_storage.fullCheckPointTimeout;
 
@@ -1150,7 +1153,7 @@ bool ForwardSyncRequest(const FileTag *ftag, SyncRequestType type)
     LWLockAcquire(CheckpointerCommLock, LW_EXCLUSIVE);
 
     /* Count all backend writes regardless of if they fit in the queue */
-    if (!AmBackgroundWriterProcess() || !AmMulitBackgroundWriterProcess() || !AmPageWriterProcess()) {
+    if (!AmBackgroundWriterProcess() && !AmPageWriterProcess()) {
         t_thrd.checkpoint_cxt.CheckpointerShmem->num_backend_writes++;
     }
 
@@ -1167,7 +1170,7 @@ bool ForwardSyncRequest(const FileTag *ftag, SyncRequestType type)
          * Count the subset of writes where backends have to do their own
          * fsync
          */
-        if (!AmBackgroundWriterProcess() || !AmMulitBackgroundWriterProcess() || !AmPageWriterProcess()) {
+        if (!AmBackgroundWriterProcess() && !AmPageWriterProcess()) {
             t_thrd.checkpoint_cxt.CheckpointerShmem->num_backend_fsync++;
         }
 

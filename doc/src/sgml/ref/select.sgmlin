@@ -15,16 +15,17 @@ SELECT [/*+ plan_hint */] [ ALL | DISTINCT [ ON ( expression [, ...] ) ] ]
     { * | {expression [ [ AS ] output_name ]} [, ...] }
     [ FROM from_item [, ...] ]
     [ WHERE condition ]
+    [ [ START WITH condition ] CONNECT BY condition [ ORDER SIBLINGS BY expression ] ]
     [ GROUP BY grouping_element [, ...] ]
     [ HAVING condition [, ...] ]
     [ WINDOW {window_name AS ( window_definition )} [, ...] ]
     [ { UNION | INTERSECT | EXCEPT | MINUS } [ ALL | DISTINCT ] select ]
     [ ORDER BY {expression [ [ ASC | DESC | USING operator ] | nlssort_expression_clause ] [ NULLS { FIRST | LAST } ]} [, ...] ]
-    [ LIMIT { [offset,] count | ALL } ] 
+    [ LIMIT { [offset,] count | ALL } ]
     [ OFFSET start [ ROW | ROWS ] ]
     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
-    [ {FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ];
-TABLE { ONLY {(table_name)| table_name} | table_name [ * ]};
+    [ {FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF table_name [, ...] ] [ NOWAIT ]} [...] ]
+TABLE { ONLY { (table_name) | table_name } | table_name [ * ]};
 
 where from_item can be:
 [ ONLY ] table_name [ * ] [ partition_clause ] [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
@@ -35,14 +36,14 @@ where from_item can be:
 |function_name ( [ argument [, ...] ] ) AS ( column_definition [, ...] )
 |from_item [ NATURAL ] join_type from_item [ ON join_condition | USING ( join_column [, ...] ) ]
 where grouping_element can be:
-() 
-|expression 
-|( expression [, ...] ) 
+()
+|expression
+|( expression [, ...] )
 |ROLLUP ( { expression | ( expression [, ...] ) } [, ...] )
 |CUBE ( { expression | ( expression [, ...] ) } [, ...] )
 |GROUPING SETS ( grouping_element [, ...] )
 where with_query can be:
-with_query_name [ ( column_name [, ...] ) ] AS ( {select | values | insert | update | delete} )
+with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ] ( {select | values | insert | update | delete} )
 where partition_clause can be:
 PARTITION { ( partition_name ) | FOR (  partition_value [, ...] ) }
 where nlssort_expression_clause can be:

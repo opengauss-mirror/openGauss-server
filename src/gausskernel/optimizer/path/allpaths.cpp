@@ -60,8 +60,8 @@ THR_LOCAL set_rel_pathlist_hook_type set_rel_pathlist_hook = NULL;
 /* Hook for plugins to get control in add_paths_to_joinrel() */
 THR_LOCAL set_join_pathlist_hook_type set_join_pathlist_hook = NULL;
 
-const int min_parallel_table_scan_size = 10737418240 / BLCKSZ;    /* 10GB */
-const int max_parallel_maintenance_workers = 4;
+const int min_parallel_table_scan_size = 1073741824 / BLCKSZ;    /* 1GB */
+const int max_parallel_maintenance_workers = 32;
 
 static bool check_func_walker(Node* node, bool* found);
 static bool check_func(Node* node);
@@ -810,6 +810,9 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
         /* get pruning result */
         if (rte->isContainPartition) {
             rel->pruning_result = singlePartitionPruningForRestrictInfo(rte->partitionOid, relation);
+        } else if (rte->isContainSubPartition) {
+            rel->pruning_result =
+                SingleSubPartitionPruningForRestrictInfo(rte->subpartitionOid, relation, rte->partitionOid);
         } else {
             rel->pruning_result = partitionPruningForRestrictInfo(root, rte, relation, rel->baserestrictinfo);
         }
@@ -828,7 +831,7 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 
         if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
             RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
-            pruningRatio = (double)rel->partItrs / partMmap->rangeElementsNum;
+            pruningRatio = rel->partItrs / partMmap->rangeElementsNum;
         }
 
         heap_close(relation, NoLock);
@@ -848,6 +851,16 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
     if (rte->tablesample == NULL) {
         /* Mark rel with estimated output rows, width, etc */
         set_baserel_size_estimates(root, rel);
+
+        /*
+         * Check to see if we can extract any restriction conditions from join
+         * quals that are OR-of-AND structures.  If so, add them to the rel's
+         * restriction list, and redo the above steps.
+         */
+        if (create_or_index_quals(root, rel)) {
+            check_partial_indexes(root, rel);
+            set_baserel_size_estimates(root, rel);
+        }
     } else {
         /* Sampled relation */
         set_tablesample_rel_size(root, rel, rte);
@@ -977,7 +990,7 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
      * support normal row table unless it is partitioned.
      * The partition table can be parallelized when partItrs > u_sess->opt_cxt.query_dop.
      */
-    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) &&
+    bool can_parallel = IS_STREAM_PLAN && (u_sess->opt_cxt.query_dop > 1) && (!rel->is_ustore) &&
                         (rel->locator_type != LOCATOR_TYPE_REPLICATED) && (rte->tablesample == NULL);
     if (!isrp) {
 #endif
@@ -2812,17 +2825,6 @@ static void set_cte_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
     foreach (lc, cteroot->parse->cteList) {
         CommonTableExpr* cte = (CommonTableExpr*)lfirst(lc);
 
-        /*
-         * MPP with recursive support.
-         *
-         * Recursive CTE is initialized in subplan list, so we should only count
-         * the recursive CTE, the none-recursive CTE is fold in early stage of
-         * query rewrite.
-         */
-        if (STREAM_RECURSIVECTE_SUPPORTED && !cte->cterecursive) {
-            continue;
-        }
-
         if (strcmp(cte->ctename, rte->ctename) == 0)
             break;
         ndx++;
@@ -3989,6 +3991,11 @@ int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, int rel_ma
         return 0;
     }
 
+    /* Return what user tell us */
+    if (rel_maxworker != -1) {
+        return max_workers;
+    }
+
     if (heap_pages >= 0) {
         int  heap_parallel_threshold;
         int  heap_parallel_workers = 1;
@@ -4002,8 +4009,8 @@ int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, int rel_ma
         heap_parallel_threshold = Max(min_parallel_table_scan_size, 1);
         while (heap_pages >= (BlockNumber)heap_parallel_threshold) {
             heap_parallel_workers++;
-            heap_parallel_threshold *= 3;
-            if (heap_parallel_threshold > INT_MAX / 3) {
+            heap_parallel_threshold *= 4;
+            if (heap_parallel_threshold > INT_MAX / 4) {
                 break;      /* avoid overflow */
             }
         }

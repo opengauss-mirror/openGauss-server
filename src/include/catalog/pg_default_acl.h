@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/pg_default_acl.h
  *
@@ -68,6 +69,7 @@ typedef FormData_pg_default_acl *Form_pg_default_acl;
  */
 #define DEFACLOBJ_RELATION        'r'        /* table, view */
 #define DEFACLOBJ_SEQUENCE        'S'        /* sequence */
+#define DEFACLOBJ_LARGE_SEQUENCE  'L'        /* large sequence */
 #define DEFACLOBJ_FUNCTION        'f'        /* function */
 #define DEFACLOBJ_PACKAGE         'p'        /* package */
 #define DEFACLOBJ_TYPE            'T'        /* type */

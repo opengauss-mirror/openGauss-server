@@ -49,9 +49,11 @@
 #define ENABLE_CN_GPC (IS_PGXC_COORDINATOR && \
                        g_instance.attr.attr_common.enable_global_plancache == true && \
                        g_instance.attr.attr_common.enable_thread_pool == true)
+#define IN_GPC_GRAYRELEASE_CHANGE (u_sess->attr.attr_common.enable_gpc_grayrelease_mode == true)
 #else
 #define ENABLE_CN_GPC (g_instance.attr.attr_common.enable_global_plancache == true && \
                        g_instance.attr.attr_common.enable_thread_pool == true)
+#define IN_GPC_GRAYRELEASE_CHANGE (false)
 #endif
 
 typedef enum PGXCNode_HandleGPC

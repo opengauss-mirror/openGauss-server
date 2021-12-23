@@ -5,6 +5,7 @@
  *	  sets and/or composite types.
  *
  * Copyright (c) 2002-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/backend/utils/fmgr/funcapi.c

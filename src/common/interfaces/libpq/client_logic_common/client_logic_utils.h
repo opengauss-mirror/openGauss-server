@@ -62,7 +62,8 @@ template<typename T> inline bool is_const(T const & x)
     return true;
 }
 char *del_blanks(char *str, const int str_len);
-int parseBinaryArray(char* input_array, void** output_array);
+size_t parse_char_array(const char *input, char ***items_out);
+size_t parse_oid_array(const char *input, Oid **items_out);
 
 extern void free_obj_list(ObjName *obj_list);
 extern ObjName *obj_list_append(ObjName *obj_list, const char *new_obj_name);

@@ -171,9 +171,11 @@ void stopLLT()
 }
 #endif /* PGXC */
 
+static void generateRandArray();
 static void free_dumpall();
 static void get_password_pipeline();
 static void get_role_password();
+static void get_encrypt_key();
 
 int main(int argc, char* argv[])
 {
@@ -601,6 +603,23 @@ static void get_role_password() {
     }
 }
 
+static void get_encrypt_key()
+{
+    GS_FREE(encrypt_key);
+    encrypt_key = simple_prompt("Encrypt Key: ", MAX_PASSWDLEN, false);
+    if (encrypt_key == NULL) {
+        exit_horribly(NULL, "out of memory\n");
+    }
+    appendPQExpBuffer(pgdumpopts, " --with-key ");
+    doShellQuoting(pgdumpopts, encrypt_key);
+    generateRandArray();
+    appendPQExpBuffer(pgdumpopts, " --with-salt ");
+    /*
+     * --with-salt comes from random generation, so we need to make sure it doesn't contain '\n' and '\r'
+     */
+    doShellQuotingForRandomstring(pgdumpopts, (char*)init_rand);
+}
+
 static void free_dumpall()
 {
     GS_FREE(binary_upgrade_oldowner);
@@ -624,8 +643,6 @@ static void free_dumpall()
  */
 static void check_encrypt_parameters_dumpall(const char* pEncrypt_mode, const char* pEncrypt_key)
 {
-    int key_lenth = 0;
-
     if (pEncrypt_mode == NULL && pEncrypt_key == NULL) {
         return;
     }
@@ -637,15 +654,12 @@ static void check_encrypt_parameters_dumpall(const char* pEncrypt_mode, const ch
     }
     if (pEncrypt_key == NULL) {
         exit_horribly(NULL, "No key for encryption,please input the key\n");
-    } else {
-        key_lenth = (int)strlen(pEncrypt_key);
     }
 
-    if (key_lenth != KEY_LEN) {
-        exit_horribly(NULL, "The key is illegal,the length must be %d\n", KEY_LEN);
-    } else {
-        if (!check_key(pEncrypt_key, KEY_LEN))
-            exit_horribly(NULL, "The key is illegal, must be letters or numbers\n");
+    if (!check_input_password(pEncrypt_key)) {
+        exit_horribly(NULL, "The input key must be %d~%d bytes and "
+            "contain at least three kinds of characters!\n",
+            MIN_KEY_LEN, MAX_KEY_LEN);
     }
 
     return;
@@ -1139,6 +1153,9 @@ static void validate_dumpall_options(char** argv)
         }
     }
 
+    if ((encrypt_mode != NULL) && (encrypt_key == NULL)) {
+        get_encrypt_key();
+    }
     /* validate encryption mode and key */
     check_encrypt_parameters_dumpall(encrypt_mode, encrypt_key);
 

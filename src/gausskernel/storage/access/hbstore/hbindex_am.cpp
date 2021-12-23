@@ -38,7 +38,7 @@ static IndexScanDesc hbkt_idx_beginscan(Relation heapRelation,
     ScanState* scanState)
 {
     HBktIdxScanDesc hpScan = NULL;
-    List *bucketlist = NIL;
+    oidvector *bucketlist = NULL;
     BucketInfo *bucketInfo = NULL;
 
     if (scanState != NULL) {
@@ -54,7 +54,7 @@ static IndexScanDesc hbkt_idx_beginscan(Relation heapRelation,
     }
     /* Step 1: load bucket */
     bucketlist = hbkt_load_buckets(heapRelation, bucketInfo);
-    if (bucketlist == NIL) {
+    if (bucketlist == NULL) {
         return NULL;
     }
 
@@ -73,7 +73,7 @@ static IndexScanDesc hbkt_idx_beginscan(Relation heapRelation,
     } else {
         /* Step 3: open first partitioned relation */
         hpScan->curr_slot = 0;
-        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
         hpScan->currBktHeapRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
         hpScan->currBktIdxRel = bucketGetRelation(hpScan->idx_rd, NULL, bucketid);
     }
@@ -111,7 +111,7 @@ static void hbkt_idx_endscan(IndexScanDesc scan)
     Relation bktIdxRel = ((hpScan->currBktIdxRel == hpScan->idx_rd) ? NULL : hpScan->currBktIdxRel);
     free_hbucket_idxscan(hpScan->currBktIdxScan, bktHeapRel, bktIdxRel);
 
-    list_free_ext(hpScan->hBktList);
+    pfree_ext(hpScan->hBktList);
 
     pfree(hpScan);
 }
@@ -134,7 +134,7 @@ void hbkt_idx_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey orderb
     } else {
         /* open first partitioned relation */
         hpScan->curr_slot = 0;
-        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
         hpScan->currBktHeapRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
         hpScan->currBktIdxRel = bucketGetRelation(hpScan->idx_rd, NULL, bucketid);
     }
@@ -180,13 +180,13 @@ static ItemPointer switch_and_scan_next_idx_hbkt(HBktIdxScanDesc hpScan, ScanDir
 
     while (true) {
         /* Step 1. To check whether all partition have been scanned. */
-        if (hpScan->curr_slot + 1 >= list_length(hpScan->hBktList)) {
+        if (hpScan->curr_slot + 1 >= hpScan->hBktList->dim1) {
             return NULL;
         }
 
         /* Step 2. Get the next partition and its relation */
         hpScan->curr_slot++;
-        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
         nextPartRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
         nextIdxRel = bucketGetRelation(hpScan->idx_rd, NULL, bucketid);
 
@@ -253,7 +253,7 @@ bool cbi_scan_fix_hbkt_rel(HBktIdxScanDesc hpScan)
     int2 bktid;
     IndexScanDescData *curr_iscan = hpScan->currBktIdxScan;
 
-    if (!list_member_int(hpScan->hBktList, curr_iscan->xs_cbi_scan->bucketid)) {
+    if (lookupHBucketid(hpScan->hBktList, 0, curr_iscan->xs_cbi_scan->bucketid) == -1) {
         curr_iscan->xs_cbi_scan->bucketid = InvalidBktId;
         return false;
     }
@@ -371,7 +371,7 @@ static IndexScanDesc hbkt_idx_beginscan_bitmap(Relation indexRelation, Snapshot 
 {
     HBktIdxScanDesc hpScan = NULL;
     Relation idxRelation = NULL;
-    List *bucketlist = NIL;
+    oidvector *bucketlist = NULL;
     BucketInfo *bucketInfo = ((Scan *)(scanState->ps.plan))->bucketInfo;
     /*
      * for global plan cache, there  isn't bucketInfo in plan,
@@ -385,7 +385,7 @@ static IndexScanDesc hbkt_idx_beginscan_bitmap(Relation indexRelation, Snapshot 
 
     /* Step 1: load partition */
     bucketlist = hbkt_load_buckets(indexRelation, bucketInfo);
-    if (bucketlist == NIL) {
+    if (bucketlist == NULL) {
         return NULL;
     }
 
@@ -402,7 +402,7 @@ static IndexScanDesc hbkt_idx_beginscan_bitmap(Relation indexRelation, Snapshot 
     } else {
         /* open first partitioned relation */
         hpScan->curr_slot = 0;
-        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
         idxRelation = bucketGetRelation(indexRelation, NULL, bucketid);
         hpScan->currBktIdxRel = idxRelation;
     }
@@ -425,13 +425,13 @@ bool hbkt_idx_bitmapscan_switch_bucket(IndexScanDesc scan, int targetSlot)
     BitmapIndexScanState *indexstate = (BitmapIndexScanState *)hpScan->scanState;
 
     /* Step 1. To check whether all partition have been scanned. */
-    if (targetSlot >= list_length(hpScan->hBktList)) {
+    if (targetSlot >= hpScan->hBktList->dim1) {
         return false;
     }
     hpScan->curr_slot = targetSlot;
 
     /* Step 2. get part from current slot */
-    int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+    int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
     idxRel = bucketGetRelation(hpScan->idx_rd, NULL, bucketid);
 
     /* Step 3. Build a indexBitmapScan */

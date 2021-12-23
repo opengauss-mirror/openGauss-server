@@ -51,7 +51,7 @@ BEGIN
 
         IF e_stack_act NOT LIKE 'referenced column: purge_snapshot_internal
 SQL statement "SELECT db4ai.purge_snapshot_internal(i_schema, i_name)"
-PL/pgSQL function db4ai.purge_snapshot(name,name) line 62 at PERFORM%'
+PL/pgSQL function db4ai.purge_snapshot(name,name) line 71 at PERFORM%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.purge_snapshot_internal(name,name) is not allowed'
             USING HINT = 'call public interface db4ai.purge_snapshot instead';
@@ -86,7 +86,7 @@ PL/pgSQL function db4ai.purge_snapshot(name,name) line 62 at PERFORM%'
     ELSE
         SELECT array_agg(id) FROM db4ai.snapshot WHERE matrix_id = m_id AND id <> s_id INTO STRICT o_id;
 
-        IF o_id IS NULL OR array_length(o_id, 1) = 0 THEN
+        IF o_id IS NULL OR array_length(o_id, 1) = 0 OR array_length(o_id, 1) IS NULL THEN
             EXECUTE 'DROP VIEW db4ai.v' || s_id;
             EXECUTE 'DROP TABLE db4ai.t' || m_id;
             RAISE NOTICE 'PURGE_SNAPSHOT: CSS backing table dropped';
@@ -129,11 +129,13 @@ CREATE OR REPLACE FUNCTION db4ai.purge_snapshot(
 RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY INVOKER SET client_min_messages TO ERROR
 AS $$
 DECLARE
-    s_mode VARCHAR(3);          -- current snapshot mode
-    s_vers_del CHAR;            -- snapshot version delimiter, default '@'
-    s_vers_sep CHAR;            -- snapshot version separator, default '.'
-    s_name_vers TEXT[];         -- split full name into name and version
-    res db4ai.snapshot_name;    -- composite result
+    s_mode VARCHAR(3);              -- current snapshot mode
+    s_vers_del CHAR;                -- snapshot version delimiter, default '@'
+    s_vers_sep CHAR;                -- snapshot version separator, default '.'
+    s_name_vers TEXT[];             -- split full name into name and version
+    current_compatibility_mode TEXT;-- current compatibility mode
+    none_represent INT;             -- 0 or NULL
+    res db4ai.snapshot_name;        -- composite result
 BEGIN
 
     -- obtain active message level
@@ -171,13 +173,20 @@ BEGIN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
     END IF;
 
+    current_compatibility_mode := current_setting('sql_compatibility');
+    IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
+        none_represent := 0;
+    ELSE
+        none_represent := NULL;
+    END IF;
+
     IF i_name IS NULL OR i_name = '' THEN
         RAISE EXCEPTION 'i_name cannot be NULL or empty';
     ELSE
         i_name := replace(i_name, chr(1), s_vers_del);
         i_name := replace(i_name, chr(2), s_vers_sep);
         s_name_vers := regexp_split_to_array(i_name, s_vers_del);
-        IF array_length(s_name_vers, 1) <> 2 OR array_length(s_name_vers, 2) IS NOT NULL THEN
+        IF array_length(s_name_vers, 1) <> 2 OR array_length(s_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_name must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;

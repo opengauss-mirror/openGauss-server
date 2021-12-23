@@ -1,34 +1,9 @@
 create role samedb_schema_cn_role_02_001 password 'Ttest_234';
 create schema authorization samedb_schema_cn_role_02_001
-create table samedb_schema_cn_role_02_001.cn_table_00 (cn_a int, cn_b text , cn_c date ,cn_d interval, cn_e serial)
+create table samedb_schema_cn_role_02_001.cn_table_00 (cn_a int, cn_b text , cn_c date ,cn_d interval)
 create view cn_view_00 as
 select cn_b,cn_d, cn_c from cn_table_00;
-NOTICE:  CREATE TABLE will create implicit sequence "cn_table_00_cn_e_seq" for serial column "cn_table_00.cn_e"
-\d+ samedb_schema_cn_role_02_001.cn_table_00
-                                                             Table "samedb_schema_cn_role_02_001.cn_table_00"
- Column |              Type              |                                        Modifiers                                        | Storage  | Stats target | Description 
---------+--------------------------------+-----------------------------------------------------------------------------------------+----------+--------------+-------------
- cn_a   | integer                        |                                                                                         | plain    |              | 
- cn_b   | text                           |                                                                                         | extended |              | 
- cn_c   | timestamp(0) without time zone |                                                                                         | plain    |              | 
- cn_d   | interval                       |                                                                                         | plain    |              | 
- cn_e   | integer                        | not null default nextval('samedb_schema_cn_role_02_001.cn_table_00_cn_e_seq'::regclass) | plain    |              | 
-Has OIDs: no
-Options: orientation=row, compression=no
-
 alter schema samedb_schema_cn_role_02_001 rename to  samedb_schema_cn_role_02_001_bak;
-\d+ samedb_schema_cn_role_02_001_bak.cn_table_00
-                                                             Table "samedb_schema_cn_role_02_001_bak.cn_table_00"
- Column |              Type              |                                          Modifiers                                          | Storage  | Stats target | Description 
---------+--------------------------------+---------------------------------------------------------------------------------------------+----------+--------------+-------------
- cn_a   | integer                        |                                                                                             | plain    |              | 
- cn_b   | text                           |                                                                                             | extended |              | 
- cn_c   | timestamp(0) without time zone |                                                                                             | plain    |              | 
- cn_d   | interval                       |                                                                                             | plain    |              | 
- cn_e   | integer                        | not null default nextval('samedb_schema_cn_role_02_001_bak.cn_table_00_cn_e_seq'::regclass) | plain    |              | 
-Has OIDs: no
-Options: orientation=row, compression=no
-
 alter view samedb_schema_cn_role_02_001_bak.cn_view_00 rename to cn_view_00_bak;
 drop view  samedb_schema_cn_role_02_001_bak.cn_view_00_bak;
 drop table samedb_schema_cn_role_02_001_bak.cn_table_00;
@@ -51,22 +26,6 @@ create user pg_error_username password 'test-1234';
 ERROR:  unacceptable user name: fail to create same name schema for user "pg_error_username"
 DETAIL:  The prefix "pg_" is reserved for system schemas.
 drop role samedb_schema_cn_role_02_001;
-create user grant_user_test password 'test-1234';
-select rolsystemadmin from pg_roles where rolname='grant_user_test';
- rolsystemadmin 
-----------------
- f
-(1 row)
-
-create schema schema_with_grant_test grant all privileges to grant_user_test;
-select rolsystemadmin from pg_roles where rolname='grant_user_test';
- rolsystemadmin 
-----------------
- t
-(1 row)
-
-drop user grant_user_test;
-drop schema schema_with_grant_test;
 drop schema test_ns_schema_1 cascade;
 NOTICE:  drop cascades to 2 other objects
 DETAIL:  drop cascades to table test_ns_schema_1.abc

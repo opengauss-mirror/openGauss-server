@@ -1,0 +1,62 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+
+
+-- testcase 1 truncate
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_test.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS;" > @abs_srcdir@/data/sqlldr_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- testcase 2 append
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_ver.txt' append into table sqlldr_tbl fields terminated by '|' TRAILING NULLCOLS;" > @abs_srcdir@/data/sqlldr_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- testcase 3 replace
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_tab.txt' replace into table sqlldr_tbl TRAILING NULLCOLS;" > @abs_srcdir@/data/sqlldr_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- testcase 4 when
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_tab.txt' replace into table sqlldr_tbl WHEN (1-2) = '40' TRAILING NULLCOLS;" > @abs_srcdir@/data/sqlldr_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_tab.txt' replace into table sqlldr_tbl WHEN (7-9) = '200' TRAILING NULLCOLS;" > @abs_srcdir@/data/sqlldr_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_ver.txt' replace into table sqlldr_tbl fields terminated by '|' WHEN (2-2) = '|' TRAILING NULLCOLS;" > @abs_srcdir@/data/sqlldr_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_ver.txt' replace into table sqlldr_tbl fields terminated by '|' WHEN (2-4) = '|b|' TRAILING NULLCOLS;" > @abs_srcdir@/data/sqlldr_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- teardown
+drop table SQLLDR_TBL;

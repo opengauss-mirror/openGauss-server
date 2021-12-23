@@ -445,7 +445,7 @@ other			.
 					}
 		}
 
-<xc><<EOF>>		{ yyerror("unterminated /* comment"); }
+<xc><<EOF>>		{ yyerror("unterminated /* comment"); return 0;}
 
 {xbstart}		{
 					/* Binary bit type.
@@ -475,7 +475,7 @@ other			.
 <xb>{quotecontinue}	{
 					/* ignore */
 				}
-<xb><<EOF>>		{ yyerror("unterminated bit string literal"); }
+<xb><<EOF>>		{ yyerror("unterminated bit string literal"); return 0;}
 
 {xhstart}		{
 					/* Hexadecimal bit type.
@@ -497,7 +497,7 @@ other			.
 					yyextra->is_hint_str = false;
 					return XCONST;
 		}
-<xh><<EOF>>		{ yyerror("unterminated hexadecimal string literal"); }
+<xh><<EOF>>		{ yyerror("unterminated hexadecimal string literal"); return 0;}
 
 {xnstart}		{
 					/* National character.
@@ -547,10 +547,6 @@ other			.
 				}
 {xusstart}		{
 					SET_YYLLOC();
-					/*
-					if (!yyextra->m_clientLogic->gucParams.standard_conforming_strings)
-								printf("unsafe use of string constant with Unicode escapes\n");*/
-                    
 						ereport(ERROR,
 								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 								 errmsg("unsafe use of string constant with Unicode escapes"),
@@ -640,17 +636,6 @@ other			.
 <xe>{xeescape}  {
 					if (yytext[1] == '\'')
 					{
-					    /*
-						if (yyextra->m_clientLogic->gucParams.backslash_quote == BACKSLASH_QUOTE_OFF ||
-							(yyextra->m_clientLogic->gucParams.backslash_quote == BACKSLASH_QUOTE_SAFE_ENCODING &&	
-							 PG_ENCODING_IS_CLIENT_ONLY(pg_get_client_encoding())))
-							printf("unsafe use of \\' in a string literal\n"); */
-                            /*
-							ereport(ERROR,
-									(errcode(ERRCODE_NONSTANDARD_USE_OF_ESCAPE_CHARACTER),
-									 errmsg("unsafe use of \\' in a string literal"),
-									 errhint("Use '' to write quotes in strings. \\' is insecure in client-only encodings."),
-									 lexer_errposition()));*/
 					}
 					check_string_escape_warning(yytext[1], yyscanner);
 					addlitchar(unescape_single_char(yytext[1], yyscanner),
@@ -679,7 +664,7 @@ other			.
 					/* This is only needed for \ just before EOF */
 					addlitchar(yytext[0], yyscanner);
 				}
-<xq,xe,xus><<EOF>>		{ yyerror("unterminated quoted string"); }
+<xq,xe,xus><<EOF>>		{ yyerror("unterminated quoted string"); return 0;}
 
 {dolqdelim}		{
 					SET_YYLLOC();
@@ -726,7 +711,7 @@ other			.
 					/* This is only needed for $ inside the quoted text */
 					addlitchar(yytext[0], yyscanner);
 				}
-<xdolq><<EOF>>	{ yyerror("unterminated dollar-quoted string"); }
+<xdolq><<EOF>>	{ yyerror("unterminated dollar-quoted string"); return 0;}
 
 {xdstart}		{
 					SET_YYLLOC();
@@ -792,7 +777,7 @@ other			.
 <xd,xui>{xdinside}	{
 					addlit(yytext, yyleng, yyscanner);
 				}
-<xd,xui><<EOF>>		{ yyerror("unterminated quoted identifier"); }
+<xd,xui><<EOF>>		{ yyerror("unterminated quoted identifier"); return 0;}
 
 {xufailed}	{
 					char		   *ident;
@@ -1098,45 +1083,6 @@ other			.
 #define yyleng  (((struct yyguts_t *) yyscanner)->yyleng_r)
 
 
-/*
- * scanner_errposition
- *		Report a lexer or grammar error cursor position, if possible.
- *
- * This is expected to be used within an ereport() call.  The return value
- * is a dummy (always 0, in fact).
- *
- * Note that this can only be used for messages emitted during raw parsing
- * (essentially, scan.l and gram.y), since it requires the yyscanner struct
- * to still be available.
- */
-/*
-int
-scanner_errposition(int location, core_yyscan_t yyscanner)
-{
-	int		pos;
-
-	if (location < 0)
-		return 0;				// no-op if location is unknown 
-
-	// Convert byte offset to character number 
-	pos = pg_mbstrlen_with_len(yyextra->scanbuf, location) + 1;
-	// And pass it to the ereport mechanism 
-	return errposition(pos);
-}
-*/
-
-/*
- * scanner_yyerror
- *		Report a lexer or grammar error.
- *
- * The message's cursor position is whatever YYLLOC was last set to,
- * ie, the start of the current token if called within yylex(), or the
- * most recently lexed token if called from the grammar.
- * This is OK for syntax error messages from the Bison parser, because Bison
- * parsers report error as soon as the first unparsable token is reached.
- * Beware of using yyerror for other purposes, as the cursor position might
- * be misleading!
- */
 void
 scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 {
@@ -1159,11 +1105,6 @@ fe_scanner_init(const char *str,
 	if (yylex_init(&scanner) != 0)
 		printf("yylex_init() failed: %m\n");
         //in this location - yyscanner is still not defined and therefore we can't use ereport macro
-        /*
-		ereport(ERROR,
-				(errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
-					errmsg("yylex_init() failed: %m")));
-        */
 
 	core_yyset_extra(yyext, scanner);
 
@@ -1206,16 +1147,6 @@ void
 scanner_finish(core_yyscan_t yyscanner)
 {
     // updated by the grammer - the variable is never true
-    /*
-	if (clear_key_memory)
-	{
-		errno_t rc = EOK;
-        rc = memset_s(yyextra->scanbuf, yyextra->scanbuflen, 0x7F, yyextra->scanbuflen);
-        securec_check_s(rc, "\0", "\0");
-		*(volatile char*)(yyextra->scanbuf) = *(volatile char*)(yyextra->scanbuf);
-        rc = memset_s(yyextra->literalbuf, yyextra->literallen, 0x7F, yyextra->literallen);
-        securec_check_s(rc, "\0", "\0");
-	}*/
 	if (yyextra->scanbuflen >= 8192)
 		feparser_free(yyextra->scanbuf);
 	if (yyextra->literalalloc >= 8192)
@@ -1225,7 +1156,6 @@ scanner_finish(core_yyscan_t yyscanner)
 		list_free_deep(yyextra->parameter_list);
 		yyextra->parameter_list = NIL;
 	}
-    //yylex_destroy(yyscanner);
 }
 
 
@@ -1555,10 +1485,6 @@ check_string_escape_warning(unsigned char ychar, core_yyscan_t yyscanner)
 {
 	if (ychar == '\'')
 	{
-		/*
-		if (yyextra->warn_on_first_escape && yyextra->m_clientLogic->gucParams.escape_string_warning)
-			printf("nonstandard use of \\' in a string literal\n");*/
-            
 			ereport(WARNING,
 					(errcode(ERRCODE_NONSTANDARD_USE_OF_ESCAPE_CHARACTER),
 					 errmsg("nonstandard use of \\' in a string literal"),
@@ -1568,9 +1494,6 @@ check_string_escape_warning(unsigned char ychar, core_yyscan_t yyscanner)
 	}
 	else if (ychar == '\\')
 	{
-		/*
-		if (yyextra->warn_on_first_escape && yyextra->m_clientLogic->gucParams.escape_string_warning)
-			printf("nonstandard use of \\\\ in a string literal\n");*/
 			ereport(WARNING,
 					(errcode(ERRCODE_NONSTANDARD_USE_OF_ESCAPE_CHARACTER),
 					 errmsg("nonstandard use of \\\\ in a string literal"),
@@ -1585,9 +1508,6 @@ check_string_escape_warning(unsigned char ychar, core_yyscan_t yyscanner)
 static void
 check_escape_warning(core_yyscan_t yyscanner)
 {
-	/*
-	if (yyextra->warn_on_first_escape && yyextra->m_clientLogic->gucParams.escape_string_warning)
-		printf("nonstandard use of escape in a string literal\n");*/
         
 		ereport(WARNING,
 				(errcode(ERRCODE_NONSTANDARD_USE_OF_ESCAPE_CHARACTER),

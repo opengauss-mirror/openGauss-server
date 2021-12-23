@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -246,16 +247,32 @@ SQLFunctionParseInfoPtr prepare_sql_fn_parse_info(HeapTuple procedure_tuple, Nod
     int n_arg_names;
     bool is_null = false;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        pro_arg_names = SysCacheGetAttr(PROCNAMEARGSNSP, procedure_tuple, Anum_pg_proc_proargnames, &is_null);
+    } else {
+        pro_arg_names = SysCacheGetAttr(PROCALLARGS, procedure_tuple, Anum_pg_proc_proargnames, &is_null);
+    }
+#else
     pro_arg_names = SysCacheGetAttr(PROCNAMEARGSNSP, procedure_tuple, Anum_pg_proc_proargnames, &is_null);
+#endif
     if (is_null) {
         pro_arg_names = PointerGetDatum(NULL); /* just to be sure */
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        pro_arg_modes = SysCacheGetAttr(PROCNAMEARGSNSP, procedure_tuple, Anum_pg_proc_proargmodes, &is_null);
+    } else {
+        pro_arg_modes = SysCacheGetAttr(PROCALLARGS, procedure_tuple, Anum_pg_proc_proargmodes, &is_null);
+    }
+#else
     pro_arg_modes = SysCacheGetAttr(PROCNAMEARGSNSP, procedure_tuple, Anum_pg_proc_proargmodes, &is_null);
+#endif
     if (is_null) {
         pro_arg_modes = PointerGetDatum(NULL); /* just to be sure */
     }
-
+    
     n_arg_names = get_func_input_arg_names(pro_arg_names, pro_arg_modes, &p_info->argnames);
     /* Paranoia: ignore the result if too few array entries */
     if (n_arg_names < nargs) {
@@ -407,6 +424,7 @@ static Node* sql_fn_make_param(SQLFunctionParseInfoPtr p_info, int param_no, int
     param->paramtypmod = -1;
     param->paramcollid = get_typcollation(param->paramtype);
     param->location = location;
+    param->tableOfIndexType = InvalidOid;
 
     /*
      * If we have a function input collation, allow it to override the
@@ -944,6 +962,9 @@ static void postquel_sub_params(SQLFunctionCachePtr fcache, FunctionCallInfo fci
             prm->isnull = fcinfo->argnull[i];
             prm->pflags = 0;
             prm->ptype = fcache->pinfo->argtypes[i];
+            prm->tableOfIndexType = InvalidOid;
+            prm->tableOfIndex = NULL;
+            prm->isnestedtable = false;
         }
     } else {
         fcache->paramLI = NULL;
@@ -1948,11 +1969,6 @@ void sql_fn_parser_replace_param_type(struct ParseState* pstate, int param_no, V
         return;
     }
     f_info->replaced_argtypes[param_no] = var->vartype;
-#ifdef ENABLE_MULTIPLE_NODES
-    if (!IS_PGXC_COORDINATOR) {
-        return;
-    }
-#endif
     /* find the column in RTE (pg_class and pg_attribute) and retrieve the gs_encrypted_columns record based on it */
     RangeTblEntry* rte = GetRTEByRangeTablePosn(pstate, var->varno, var->varlevelsup);
     if (!rte) {
@@ -1984,6 +2000,8 @@ void update_gs_encrypted_proc(const Oid func_id, SQLFunctionParseInfoPtr p_info,
     HeapTuple gs_oldtup = SearchSysCache1(GSCLPROCID, ObjectIdGetDatum(func_id));
     gs_rel = heap_open(ClientLogicProcId, RowExclusiveLock);
     TupleDesc gs_tupDesc = RelationGetDescr(gs_rel);
+    gs_values[Anum_gs_encrypted_proc_last_change - 1] =
+        DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
     if (allargs_orig) {
         ArrayType* all_parameter_types_orig =
             construct_array(allargs_orig, allnumargs, INT4OID, sizeof(int4), true, 'i');
@@ -2002,6 +2020,7 @@ void update_gs_encrypted_proc(const Oid func_id, SQLFunctionParseInfoPtr p_info,
     } else {
         gs_values[Anum_gs_encrypted_proc_proargcachedcol - 1] = PointerGetDatum(parameterTypes);
         gs_replaces[Anum_gs_encrypted_proc_proargcachedcol - 1] = true;
+        gs_replaces[Anum_gs_encrypted_proc_last_change - 1] = true;
         /* Okay, do it... */
         gs_tup = heap_modify_tuple(gs_oldtup, gs_tupDesc, gs_values, gs_nulls, gs_replaces);
         simple_heap_update(gs_rel, &gs_tup->t_self, gs_tup);
@@ -2050,11 +2069,36 @@ bool sql_fn_cl_rewrite_params(const Oid func_id, SQLFunctionParseInfoPtr p_info,
         return false;
     }
     /* support CREATE OR REPLACE with the same parameter types */
+#ifdef ENABLE_MULTIPLE_NODES
     if (SearchSysCacheExists3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
         PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace))) {
+#else
+    Datum packageidDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_packageid, &isNull);
+    Oid packageOid = ObjectIdGetDatum(packageidDatum);
+    if (!OidIsValid(packageOid)) {
+        packageidDatum = ObjectIdGetDatum(InvalidOid);
+    }
+    if (SearchSysCacheExists4(PROCALLARGS, CStringGetDatum(NameStr(oldproc->proname)),
+        PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace), ObjectIdGetDatum(packageidDatum))) {
+#endif
         rel = heap_open(ProcedureRelationId, RowExclusiveLock);
-        HeapTuple oldtup = SearchSysCache3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
+        HeapTuple oldtup = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+        if (t_thrd.proc->workingVersionNum < 92470) {
+            oldtup = SearchSysCache3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
+                PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace));
+
+        } else {
+            Datum allargtypes = ProcedureGetAllArgTypes(tuple, &isNull);
+            oldtup = SearchSysCache4(PROCALLARGS, CStringGetDatum(NameStr(oldproc->proname)),
+                allargtypes, ObjectIdGetDatum(oldproc->pronamespace),
+                ObjectIdGetDatum(packageOid));
+        }
+#else
+        oldtup = SearchSysCache3(PROCNAMEARGSNSP, CStringGetDatum(NameStr(oldproc->proname)),
             PointerGetDatum(&oldproc->proargtypes), ObjectIdGetDatum(oldproc->pronamespace));
+#endif        
+        
         if (is_replace) {
             if (HeapTupleIsValid(oldtup)) {
                 Assert(oldtup != tuple);
@@ -2092,7 +2136,16 @@ bool sql_fn_cl_rewrite_params(const Oid func_id, SQLFunctionParseInfoPtr p_info,
 
         Assert(allnumargs >= p_info->nargs);
         allargtypes = (Oid*)ARR_DATA_PTR(arr_all_types);
-        Datum proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
+        Datum proargmodes;
+#ifndef ENABLE_MULTIPLE_NODES
+        if (t_thrd.proc->workingVersionNum < 92470) {
+            proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
+        } else {
+            proargmodes = SysCacheGetAttr(PROCALLARGS, tuple, Anum_pg_proc_proargmodes, &isNull);
+        }
+#else
+        proargmodes = SysCacheGetAttr(PROCNAMEARGSNSP, tuple, Anum_pg_proc_proargmodes, &isNull);
+#endif
         if (!isNull) {
             ArrayType* arr = DatumGetArrayTypeP(proargmodes); /* ensure not toasted */
             bool is_char_oid_array = ARR_NDIM(arr) != 1 || allnumargs != ARR_DIMS(arr)[0] || ARR_HASNULL(arr) ||
@@ -2124,7 +2177,12 @@ bool sql_fn_cl_rewrite_params(const Oid func_id, SQLFunctionParseInfoPtr p_info,
         values[Anum_pg_proc_proallargtypes - 1] = PointerGetDatum(arr_all_types);
         replaces[Anum_pg_proc_proallargtypes - 1] = true;
     }
-
+    if (values[Anum_pg_proc_proallargtypes - 1] != 0) {
+        values[Anum_pg_proc_allargtypes - 1] = values[Anum_pg_proc_proallargtypes - 1];
+    } else {
+        values[Anum_pg_proc_allargtypes - 1] = values[Anum_pg_proc_proargtypes - 1];
+    }
+    replaces[Anum_pg_proc_allargtypes - 1] = true;
     if (!rel) {
         rel = heap_open(ProcedureRelationId, RowExclusiveLock);
     }
@@ -2149,11 +2207,6 @@ void sql_fn_parser_replace_param_type_for_insert(struct ParseState* pstate, int 
         return;
     }
     f_info->replaced_argtypes[param_no] = param_new_type;
-#ifdef ENABLE_MULTIPLE_NODES
-    if (!IS_PGXC_COORDINATOR) {
-        return;
-    }
-#endif
     /* get the encrypted column (gs_encrypted_columns) */
         HeapTuple ce_tuple = search_sys_cache_copy_ce_col_name(relid, col_name);
         if (!HeapTupleIsValid(ce_tuple)) {

@@ -8,6 +8,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/heap.h
  *
@@ -143,15 +144,15 @@ extern void heapDropPartitionToastList(List* toastList);
 extern void heapDropPartitionList(Relation rel, List* partitionList);
 extern Oid heapAddRangePartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                  Oid bucketOid, RangePartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
-                                 const bool* isTimestamptz, StorageType storage_type, LOCKMODE partLockMode);
+                                 const bool* isTimestamptz, StorageType storage_type, LOCKMODE partLockMode, int2vector* subpartition_key = NULL, bool isSubPartition = false);
 
 extern Oid HeapAddListPartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                 Oid bucketOid, ListPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
-                                const bool* isTimestamptz, StorageType storage_type);
+                                const bool* isTimestamptz, StorageType storage_type, int2vector* subpartition_key = NULL, bool isSubPartition = false);
 
 extern Oid HeapAddHashPartition(Relation pgPartRel, Oid partTableOid,  Oid partTablespace,
                                 Oid bucketOid, HashPartitionDefState *newPartDef, Oid ownerid, Datum reloptions,
-                                const bool* isTimestamptz, StorageType storage_type);
+                                const bool* isTimestamptz, StorageType storage_type, int2vector* subpartition_key = NULL, bool isSubPartition = false);
 
 extern void heapDropPartitionIndex(Relation parentIndex, Oid partIndexId);
 extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc, int2vector* pkey, oidvector *intablespace,
@@ -159,6 +160,7 @@ extern void addNewPartitionTuple(Relation pg_part_desc, Partition new_part_desc,
 
 extern void heap_truncate_one_part(Relation rel , Oid partOid);
 extern Oid heapTupleGetPartitionId(Relation rel, void *tuple);
+extern Oid heapTupleGetSubPartitionId(Relation rel, void *tuple);
 extern void heap_truncate(List *relids);
 extern void heap_truncate_one_rel(Relation rel);
 extern void heap_truncate_check_FKs(List *relations, bool tempTables);
@@ -230,7 +232,7 @@ extern char* make_column_map(TupleDesc tuple_desc);
  * @return: a bool array to indicate the result. The length of array is equal to the number of partition keys.
  * @Notes: remember to pfree the array.
  */
-extern bool* check_partkey_has_timestampwithzone(Relation partTableRel);
+extern bool* CheckPartkeyHasTimestampwithzone(Relation partTableRel, bool isForSubPartition = false);
 
 extern Oid AddNewIntervalPartition(Relation rel, void* insertTuple);
 

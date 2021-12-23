@@ -22,6 +22,7 @@ from flask_restful import Api
 import config
 import global_vars
 from cert import get_server_ssl_context
+from utils import getpasswd
 from .app import App
 from .resource import receiver
 
@@ -64,9 +65,8 @@ def _extract_params():
         params['server_cert'] = config.get('security', 'server_cert')
         params['server_key'] = config.get('security', 'server_key')
         params['ca'] = config.get('security', 'ca')
-        with open(os.path.join(global_vars.CURRENT_DIRNAME, 'certificate/pwf'),
-                  mode='r') as f:
-            params['cert_pwd'] = f.read().strip()
+        pwd_path = os.path.dirname(params['server_cert'])
+        params['cert_pwd'] = getpasswd(pwd_path)
     return params
 
 

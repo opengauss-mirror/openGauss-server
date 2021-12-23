@@ -160,8 +160,14 @@ void usage(void)
     tmp = GetEnvStr("PGHOST");
     if (tmp != NULL)
         check_env_value(tmp);
+#ifndef ENABLE_MULTIPLE_NODES
+    printf(_("  -h, --host=HOSTNAME      database server host or socket directory (default: \"%s\")\n"
+             "                           allow multi host IP address with comma separator in centralized cluster\n"),
+        tmp != NULL ? tmp : _("local socket"));
+#else
     printf(_("  -h, --host=HOSTNAME      database server host or socket directory (default: \"%s\")\n"),
         tmp != NULL ? tmp : _("local socket"));
+#endif
     if (NULL != tmp)
         free(tmp);
     tmp = NULL;
@@ -298,7 +304,8 @@ void slashUsage(unsigned short int pager)
     fprintf(output,
         _("  \\pset NAME [VALUE]     set table output option\n"
           "                         (NAME := {format|border|expanded|fieldsep|fieldsep_zero|footer|null|\n"
-          "                         numericlocale|recordsep|recordsep_zero|tuples_only|title|tableattr|pager})\n"));
+          "                         numericlocale|recordsep|recordsep_zero|tuples_only|title|tableattr|pager"
+          "|sqlerror_handle})\n"));
     fprintf(output, _("  \\t [on|off]            show only rows (currently %s)\n"), ON(pset.popt.topt.tuples_only));
     fprintf(output, _("  \\T [STRING]            set HTML <table> tag attributes, or unset if none\n"));
     fprintf(output,

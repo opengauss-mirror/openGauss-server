@@ -2,6 +2,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2009, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -195,6 +196,11 @@ typedef struct knl_u_sig_context {
 
 class AutonomousSession;
 
+typedef struct TableOfIndexPass {
+    Oid tableOfIndexType = InvalidOid;
+    HTAB* tableOfIndex = NULL;
+} TableOfIndexPass;
+
 typedef struct knl_u_SPI_context {
 #define BUFLEN 64
 #define XACTMSGLEN 128
@@ -221,6 +227,8 @@ typedef struct knl_u_SPI_context {
     /* Is Procedure or Function. */
     bool is_stp;
 
+    bool is_complex_sql;
+
     /* Whether procedure contains option setting guc. */
     bool is_proconfig_set;
 
@@ -239,6 +247,8 @@ typedef struct knl_u_SPI_context {
      * be released by resource owner, but need to make sure refcount be sub before longjmp abort transaction */
     struct SPICachedPlanStack* spi_exec_cplan_stack;
     struct CachedPlan* cur_spi_cplan;
+    /* save table's index into session, for pass into function */
+    struct TableOfIndexPass* cur_tableof_index;
 } knl_u_SPI_context;
 
 typedef struct knl_u_index_context {
@@ -380,6 +390,12 @@ typedef struct knl_u_parser_context {
 
     bool is_procedure;
 
+    bool is_load_copy;
+
+    List* col_list;
+
+    char* copy_fieldname;
+
     List* hint_list;
 
     List* hint_warning;
@@ -393,6 +409,9 @@ typedef struct knl_u_parser_context {
     MemoryContext ddl_pbe_context;
 
     bool in_package_function_compile;
+
+    /* this is used in parser.gram.y not in plpgsql */
+    bool isCreateFuncOrProc;
 } knl_u_parser_context;
 
 typedef struct knl_u_trigger_context {
@@ -604,6 +623,10 @@ typedef struct knl_u_utils_context {
     bool enable_memory_context_control;
 
     syscalllock deleMemContextMutex;
+
+    struct _DestReceiver* donothingDR;
+    struct _DestReceiver* debugtupDR;
+    struct _DestReceiver* spi_printtupDR;
 } knl_u_utils_context;
 
 typedef struct knl_u_security_context {
@@ -1370,64 +1393,29 @@ typedef struct knl_u_xact_context {
     char* savePrepareGID;
 
     bool pbe_execute_complete;
-    char *sendSeqDbName;
-    char *sendSeqSchmaName;
-    char *sendSeqName;
-    int64 send_result;
+    List *sendSeqDbName;
+    List *sendSeqSchmaName;
+    List *sendSeqName;
+    List *send_result;
 } knl_u_xact_context;
 
-typedef struct knl_u_plpgsql_context {
-    bool inited;
-    /* pl_comp.cpp */
-    /* A context for func to store in one session. */
-    MemoryContext plpgsql_cxt;
-    MemoryContext plpgsql_pkg_cxt;
-    /* ----------
-     * Hash table for compiled functions
-     * ----------
-     */
-    HTAB* plpgsql_HashTable;
-    HTAB* plpgsql_pkg_HashTable;
-    /* list of functions' cell. */
-    DList* plpgsql_dlist_objects;
-
+typedef struct PLpgSQL_compile_context {
     int datums_alloc;
     int datums_pkg_alloc;
     int plpgsql_nDatums;
     int plpgsql_pkg_nDatums;
     int datums_last;
     int datums_pkg_last;
-    int plpgsql_IndexErrorVariable;
     char* plpgsql_error_funcname;
     char* plpgsql_error_pkgname;
-    bool plpgsql_DumpExecTree;
-    bool plpgsql_pkg_DumpExecTree;
-    bool plpgsql_check_syntax;
-    /* A context appropriate for short-term allocs during compilation */
-    MemoryContext compile_tmp_cxt;
+    
     struct PLpgSQL_stmt_block* plpgsql_parse_result;
+    struct PLpgSQL_stmt_block* plpgsql_parse_error_result;
     struct PLpgSQL_datum** plpgsql_Datums;
     struct PLpgSQL_function* plpgsql_curr_compile;
 
-    /* pl_exec.cpp */
-    struct EState* simple_eval_estate;
-    struct SimpleEcontextStackEntry* simple_econtext_stack;
-    struct PLpgSQL_pkg_execstate* pkg_execstate;
-
-    /*
-     * "context_array" is allocated from top_transaction_mem_cxt, but the variables inside
-     * of SQLContext is created under "SQLContext Entry" memory context.
-     */
-    List* context_array;
-    List* pkg_execstate_list;
-
-    /* pl_handler.cpp */
-    int plpgsql_variable_conflict;
-    /* Hook for plugins */
-    struct PLpgSQL_plugin** plugin_ptr;
-
-    /* pl_funcs.cpp */
-    int dump_indent;
+    bool plpgsql_DumpExecTree;
+    bool plpgsql_pkg_DumpExecTree;
 
     /* pl_funcs.cpp */
     /* ----------
@@ -1467,7 +1455,7 @@ typedef struct knl_u_plpgsql_context {
     int plpgsql_yyleng;
 
     /* Token pushback stack */
-#define MAX_PUSHBACKS 4
+#define MAX_PUSHBACKS 100
 
     int num_pushbacks;
     int pushback_token[MAX_PUSHBACKS];
@@ -1477,6 +1465,54 @@ typedef struct knl_u_plpgsql_context {
     const char* cur_line_end;
     int cur_line_num;
     List* goto_labels;
+
+    bool plpgsql_check_syntax;
+
+    struct PLpgSQL_package* plpgsql_curr_compile_package;
+
+    /* A context appropriate for short-term allocs during compilation */
+    MemoryContext compile_tmp_cxt;
+    MemoryContext compile_cxt;
+} PLpgSQL_compile_context;
+
+typedef struct knl_u_plpgsql_context {
+    bool inited;
+
+    /* ----------
+     * Hash table for compiled functions
+     * ----------
+     */
+    HTAB* plpgsql_HashTable;
+    HTAB* plpgsql_pkg_HashTable;
+    /* list of functions' cell. */
+    DList* plpgsql_dlist_objects; /* for plpgsql_HashEnt */
+    /* list of package's cell */
+    DList* plpgsqlpkg_dlist_objects; /* for plpgsql_pkg_HashEnt */
+
+    int plpgsql_IndexErrorVariable;
+    
+    int compile_status;
+    struct PLpgSQL_compile_context* curr_compile_context;
+    struct List* compile_context_list;
+
+    /* pl_exec.cpp */
+    struct EState* simple_eval_estate;
+    struct SimpleEcontextStackEntry* simple_econtext_stack;
+    struct PLpgSQL_pkg_execstate* pkg_execstate;
+
+    /*
+     * "context_array" is allocated from top_transaction_mem_cxt, but the variables inside
+     * of SQLContext is created under "SQLContext Entry" memory context.
+     */
+    List* context_array;
+    List* pkg_execstate_list;
+
+    /* pl_handler.cpp */
+    /* Hook for plugins */
+    struct PLpgSQL_plugin** plugin_ptr;
+
+    /* pl_funcs.cpp */
+    int dump_indent;
 
     struct HTAB* rendezvousHash;
 
@@ -1490,12 +1526,37 @@ typedef struct knl_u_plpgsql_context {
 
     /* dbe.output buffer limit */
     uint32 dbe_output_buffer_limit;
-    struct PLpgSQL_package* plpgsql_curr_compile_package;
-    bool is_compile_pkg_body;
-    bool is_compile_pkg_spec;
     Oid running_pkg_oid;
     bool is_delete_function;
     bool is_package_instantiation;
+    char* client_info;
+    char sess_cxt_name[128];
+    HTAB* sess_cxt_htab;
+    bool have_error;
+    bool create_func_error;
+
+    /* Next ID for PL's executor EState of evaluating "simple" expressions. */
+    int64 nextStackEntryId;
+
+    /* how many savepoint have estabulished since current statemnt starts. */
+    int stp_savepoint_cnt;
+
+    /* xact context still attached by SPI while transaction is terminated. */
+    void *spi_xact_context;
+    int package_as_line;
+    int package_first_line;
+    int procedure_start_line;
+    int procedure_first_line;
+    bool rawParsePackageFunction;
+    bool insertError;
+    List* errorList;
+    int plpgsql_yylloc;
+    bool isCreateFunction;
+    bool need_pkg_dependencies;
+    List* pkg_dependencies;
+    struct SessionPackageRuntime* auto_parent_session_pkgs;
+    bool not_found_parent_session_pkgs;
+    char* sourceText;
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package
@@ -2069,6 +2130,7 @@ typedef struct knl_u_statement_context {
     int suspend_count;              /* length of suspendStatementList */
     syscalllock list_protect;       /* concurrency control for above two lists */
     MemoryContext stmt_stat_cxt;    /* statement stat context */
+    int executer_run_level;
 } knl_u_statement_context;
 
 struct Qid_key {
@@ -2541,12 +2603,15 @@ typedef struct knl_session_context {
 
     bool is_autonomous_session;
 
+    uint64 autonomous_parent_sessionid;
+
     struct config_generic** guc_variables;
 
     int num_guc_variables;
 
     int on_sess_exit_index;
-
+    
+    List* plsqlErrorList;
     knl_session_attr attr;
     struct knl_u_wlm_context* wlm_cxt;
     knl_u_analyze_context analyze_cxt;
@@ -2570,7 +2635,6 @@ typedef struct knl_session_context {
     knl_u_pgxc_context pgxc_cxt;
     knl_u_plancache_context pcache_cxt;
     knl_u_plpgsql_context plsql_cxt;
-    knl_u_plpgsql_context plsql_func_cxt;
     knl_u_postgres_context postgres_cxt;
     knl_u_proc_context proc_cxt;
     knl_u_ps_context ps_cxt;
@@ -2630,7 +2694,9 @@ enum stp_xact_err_type {
     STP_XACT_GUC_IN_OPT_CLAUSE,
     STP_XACT_OF_SECURE_DEFINER,
     STP_XACT_AFTER_TRIGGER_BEGIN,
-    STP_XACT_PACKAGE_INSTANTIATION
+    STP_XACT_PACKAGE_INSTANTIATION,
+    STP_XACT_IN_TRIGGER,
+    STP_XACT_COMPL_SQL
 };
 
 
@@ -2640,6 +2706,7 @@ extern knl_session_context* create_session_context(MemoryContext parent, uint64 
 extern void free_session_context(knl_session_context* session);
 extern void use_fake_session();
 extern bool stp_set_commit_rollback_err_msg(stp_xact_err_type type);
+extern bool enable_out_param_override();
 
 extern THR_LOCAL knl_session_context* u_sess;
 
@@ -2664,9 +2731,7 @@ inline void stp_retore_old_xact_stmt_state(bool OldState)
 
 inline void stp_reset_commit_rolback_err_msg()
 {
-    memset_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg,
-                 sizeof(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg),
-                 0, sizeof(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg));
+    u_sess->SPI_cxt.forbidden_commit_rollback_err_msg[0] = '\0';
 }
 
 inline void stp_reset_opt_values()
@@ -2676,6 +2741,8 @@ inline void stp_reset_opt_values()
     u_sess->SPI_cxt.is_stp = true;
     u_sess->SPI_cxt.is_proconfig_set = false;
     u_sess->SPI_cxt.portal_stp_exception_counter = 0;
+    u_sess->plsql_cxt.stp_savepoint_cnt = 0;
+    u_sess->plsql_cxt.nextStackEntryId = 0;
 }
 
 inline void stp_reset_xact_state_and_err_msg(bool savedisAllowCommitRollback, bool needResetErrMsg)
@@ -2685,7 +2752,6 @@ inline void stp_reset_xact_state_and_err_msg(bool savedisAllowCommitRollback, bo
         stp_reset_commit_rolback_err_msg();
     }
 }
-
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_H_ */
 

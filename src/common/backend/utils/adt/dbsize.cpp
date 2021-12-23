@@ -3,6 +3,7 @@
  *		Database object size functions, and related inquiries
  *
  * Copyright (c) 2002-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/backend/utils/adt/dbsize.c
@@ -1261,8 +1262,21 @@ static int64 CalculateRelSize(Relation rel, int forkNumOption)
         foreach (cell, partitions) {
             partition = (Partition)lfirst(cell);
             partRel = partitionGetRelation(rel, partition);
-
-            size += calculate_table_file_size(partRel, RelationIsColStore(rel), forkNumOption);
+            if (RelationIsSubPartitioned(rel)) {
+                ListCell* subcell = NULL;
+                Partition subpartition = NULL;
+                Relation subpartRel = NULL;
+                List* subpartitions = relationGetPartitionList(partRel, AccessShareLock);
+                foreach (subcell, subpartitions) {
+                    subpartition = (Partition)lfirst(subcell);
+                    subpartRel = partitionGetRelation(partRel, subpartition);
+                    size += calculate_table_file_size(subpartRel, RelationIsColStore(rel), forkNumOption);
+                    releaseDummyRelation(&subpartRel);
+                }
+                releasePartitionList(partRel, &subpartitions, AccessShareLock);
+            } else {
+                size += calculate_table_file_size(partRel, RelationIsColStore(rel), forkNumOption);
+            }
 
             releaseDummyRelation(&partRel);
         }
@@ -1586,7 +1600,7 @@ static int64 calculate_partition_indexes_size(Oid partTableOid, Oid partOid)
         return 0;
     }
 
-    indexOids = RelationGetIndexList(partTableRel);
+    indexOids = RelationGetSpecificKindIndexList(partTableRel, false);
 
     foreach (cell, indexOids) {
         Oid indexOid = lfirst_oid(cell);
@@ -1889,6 +1903,7 @@ Datum pg_relation_filenode(PG_FUNCTION_ARGS)
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX:
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
         case RELKIND_TOASTVALUE:
             /* okay, these have storage */
             if (relform->relfilenode)
@@ -2061,6 +2076,7 @@ Datum pg_relation_filepath(PG_FUNCTION_ARGS)
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX:
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
         case RELKIND_TOASTVALUE:
             /* okay, these have storage */
 
@@ -2230,6 +2246,7 @@ Datum pgxc_execute_on_nodes(int numnodes, Oid* nodelist, char* query)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((ret = SPI_connect()) < 0)
         /* internal error */
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI connect failure - returned %d", ret)));
@@ -2270,6 +2287,7 @@ Datum pgxc_execute_on_nodes(int numnodes, Oid* nodelist, char* query)
         total_size += size;
     }
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
 
     if (numnodes == 1)

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -46,6 +47,7 @@ VecPartIteratorState* ExecInitVecPartIterator(VecPartIterator* node, EState* est
     state->ps.righttree = NULL;
     state->ps.subPlan = NULL;
     state->currentItr = -1;
+    state->subPartCurrentItr = -1;
     state->ps.ps_TupFromTlist = false;
     state->ps.ps_ProjInfo = NULL;
     state->ps.vectorized = true;

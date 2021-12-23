@@ -529,7 +529,6 @@ int gs_poll_create()
 // but when the thread needed to delete is calling gs_poll, just signal it instead of del it.
 // because for CN, thread usually wait for multiple logic connection, so we cannot del it when
 // some logic connection is close.
-//
 void gs_poll_close()
 {
     AutoContextSwitch commContext(g_instance.comm_cxt.comm_global_mem_cxt);
@@ -719,7 +718,6 @@ int gs_update_fd_to_htab_socket_version(struct sock_id* fd_id)
 // step 1: get node index (node_idx)
 // step 2: traverse g_c_mailbox[node_idx][*]
 // step 3: do notify and reset all cmailbox
-//
 static void gs_r_close_all_streams_by_fd_idx(int fd, int node_idx, int close_reason)
 {
     struct c_mailbox* cmailbox = NULL;
@@ -741,8 +739,7 @@ static void gs_r_close_all_streams_by_fd_idx(int fd, int node_idx, int close_rea
         if ((fd == -1 || cmailbox->ctrl_tcp_sock == fd) && (cmailbox->state != MAIL_CLOSED)) {
             gs_r_close_logic_connection(cmailbox, close_reason, &fcmsgs);
             // reset local stream logic connection info
-            COMM_DEBUG_LOG("(r|close all streams)\tTo close stream[%d], "
-                           "node[%d]:%s, query[%lu], socket[%d].",
+            COMM_DEBUG_LOG("(r|close all streams)\tTo close stream[%d], node[%d]:%s, query[%lu], socket[%d].",
                 j,
                 node_idx,
                 g_instance.comm_cxt.g_r_node_sock[node_idx].remote_nodename,
@@ -764,7 +761,6 @@ static void gs_r_close_all_streams_by_fd_idx(int fd, int node_idx, int close_rea
 // step 1: get node index (node_idx)
 // step 2: traverse g_p_mailbox[node_idx][*]
 // step 3: do notification and reset all pmailbox
-//
 static void gs_s_close_all_streams_by_fd_idx(int fd, int node_idx, int close_reason, bool with_ctrl_lock)
 {
     struct p_mailbox* pmailbox = NULL;
@@ -772,8 +768,7 @@ static void gs_s_close_all_streams_by_fd_idx(int fd, int node_idx, int close_rea
     // Note: we should have locked at the caller, so we need not lock here again
     //
     LIBCOMM_ELOG(WARNING,
-        "(s|close all streams)\tTo reset all streams "
-        "by socket[%d] for node[%d]:%s, detail:%s.",
+        "(s|close all streams)\tTo reset all streams by socket[%d] for node[%d]:%s, detail:%s.",
         fd,
         node_idx,
         g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename,
@@ -785,8 +780,7 @@ static void gs_s_close_all_streams_by_fd_idx(int fd, int node_idx, int close_rea
 
         if (((pmailbox->ctrl_tcp_sock == -1) || (fd == -1) || (pmailbox->ctrl_tcp_sock == fd)) &&
             (pmailbox->state != MAIL_CLOSED)) {
-            COMM_DEBUG_LOG("(s|close all streams)\tTo close stream[%d], "
-                           "node[%d]:%s, query[%lu], socket[%d].",
+            COMM_DEBUG_LOG("(s|close all streams)\tTo close stream[%d], node[%d]:%s, query[%lu], socket[%d].",
                 j,
                 node_idx,
                 g_instance.comm_cxt.g_s_node_sock[node_idx].remote_nodename,
@@ -817,7 +811,6 @@ static void gs_s_close_all_streams_by_fd_idx(int fd, int node_idx, int close_rea
  */
 static void gs_clean_events(struct sock_id* old_fd_id)
 {
-    int i = 0;
     int fd = -1;
     int id = -1;
 
@@ -825,7 +818,7 @@ static void gs_clean_events(struct sock_id* old_fd_id)
         return;
     }
     int nevents = t_thrd.comm_cxt.g_libcomm_poller_list->nevents;
-    for (i = 0; i < nevents; i++) {
+    for (int i = 0; i < nevents; i++) {
         fd = (int)(((uint64)t_thrd.comm_cxt.g_libcomm_poller_list->events[i].data.u64 >> MC_POLLER_FD_ID_OFFSET));
         id = (int)(((uint64)t_thrd.comm_cxt.g_libcomm_poller_list->events[i].data.u64 & MC_POLLER_FD_ID_MASK));
         if ((old_fd_id->fd == fd) && (old_fd_id->id == id)) {
@@ -847,7 +840,6 @@ static void gs_clean_events(struct sock_id* old_fd_id)
 }
 
 // receiver close and clear bad tcp control socket, and related information
-//
 void gs_r_close_bad_ctrl_tcp_sock(struct sock_id* fd_id, int close_reason)
 {
     int fd = fd_id->fd;
@@ -914,8 +906,7 @@ void gs_r_close_bad_ctrl_tcp_sock(struct sock_id* fd_id, int close_reason)
             g_instance.comm_cxt.g_r_node_sock[node_idx].close_socket_nl(CTRL_TCP_SOCK);
 
             LIBCOMM_ELOG(WARNING,
-                "(r|close tcp socket)\tTCP disconnect with socket[%d,%d] "
-                "to host:%s, node[%d]:[%s].",
+                "(r|close tcp socket)\tTCP disconnect with socket[%d,%d] to host:%s, node[%d]:[%s].",
                 fd,
                 id,
                 g_instance.comm_cxt.g_r_node_sock[node_idx].remote_host,
@@ -1042,8 +1033,7 @@ void gs_s_close_bad_ctrl_tcp_sock(struct sock_id* fd_id, int close_reason, bool 
             g_instance.comm_cxt.g_s_node_sock[node_idx].set_nl(-1, CTRL_TCP_SOCK);
             g_instance.comm_cxt.g_s_node_sock[node_idx].set_nl(-1, CTRL_TCP_SOCK_ID);
             LIBCOMM_ELOG(WARNING,
-                "(s|cls bad tcp socket)\tClose bad socket[%d,%d] "
-                "for host:%s, node[%d]:%s.",
+                "(s|cls bad tcp socket)\tClose bad socket[%d,%d] for host:%s, node[%d]:%s.",
                 fd,
                 id,
                 g_instance.comm_cxt.g_s_node_sock[node_idx].remote_host,
@@ -1131,7 +1121,6 @@ static long gs_add_quota_size(c_mailbox* cmailbox)
 }
 
 // auxiliary thread use it to change the stream state and send control message to remote point (sender)
-//
 bool gs_r_quota_notify(c_mailbox* cmailbox, FCMSG_T* msg)
 {
     errno_t ss_rc;
@@ -1173,7 +1162,6 @@ bool gs_r_quota_notify(c_mailbox* cmailbox, FCMSG_T* msg)
 
 // traverse all the c_mailbox(es) to find the first query who used memory,
 // and make it failure to release the memory. Otherwise, the communication layer maybe hang up.
-//
 void gs_r_release_comm_memory()
 {
     uint64 release_query_id = 0;
@@ -1220,8 +1208,7 @@ void gs_r_release_comm_memory()
     }
 
     LIBCOMM_ELOG(WARNING,
-        "(r|release memory)\tReset query[%lu] "
-        "to release memory[%lu Byte].",
+        "(r|release memory)\tReset query[%lu] to release memory[%lu Byte].",
         release_query_id,
         total_buff_size);
 }  // gs_r_release_comm_memory
@@ -1232,7 +1219,6 @@ void gs_r_release_comm_memory()
 // step3: update the socket version
 // step4: delete the socket from hash table socke -> node index (g_r_htab_data_socket_node_idx)
 // step5: close the old tcp socket
-//
 void gs_r_close_bad_data_socket(int node_idx, sock_id fd_id, int close_reason, bool is_lock)
 {
     if (node_idx >= 0) {
@@ -1300,7 +1286,6 @@ void gs_r_close_bad_data_socket(int node_idx, sock_id fd_id, int close_reason, b
 }
 
 // if we failed to send message to the destination, we should do following things
-//
 void gs_s_close_bad_data_socket(struct sock_id* fd_id, int close_reason, int node_idx)
 {
     errno_t ss_rc;
@@ -1444,8 +1429,7 @@ int gs_push_cmailbox_buffer(c_mailbox* cmailbox, struct mc_lqueue_item* q_item, 
 
     // there is buffer/quota to process the received data
     if (cmailbox->bufCAP >= (unsigned long)(iov->iov_len)) {
-        COMM_DEBUG_LOG("(r|inner recv)\tNode[%d]:%s stream[%d] recv %zu msg:%c, "
-                       "bufCAP[%lu] and buff_q->u_size[%lu].",
+        COMM_DEBUG_LOG("(r|inner recv)\tNode[%d]:%s stream[%d] recv %zu msg:%c, bufCAP[%lu] and buff_q->u_size[%lu].",
             idx,
             g_instance.comm_cxt.g_r_node_sock[idx].remote_nodename,
             sid,
@@ -2156,7 +2140,6 @@ void gs_comm_ipc_print(MessageIpcLog *ipc_log, char *remotenode, gsocket *gs_soc
 }
 
 // cancel request for receiver (called by die() or StatementCancelHandler() in postgresMain )
-//
 void gs_r_cancel()
 {
     // use g_cancel_requested save DEBUG_QUERY_ID as a flag
@@ -2166,7 +2149,6 @@ void gs_r_cancel()
 
 // receiver close logic stream, call by Consumer thread
 // when no data need or all data are received, or error happed
-//
 int gs_r_close_stream(gsocket* gsock)
 {
     int node_idx = gsock->idx;
@@ -2177,8 +2159,7 @@ int gs_r_close_stream(gsocket* gsock)
 
     if ((node_idx < 0) || (node_idx >= g_instance.comm_cxt.counters_cxt.g_cur_node_num) || (stream_idx <= 0) ||
         (stream_idx >= g_instance.comm_cxt.counters_cxt.g_max_stream_num) || (type == GSOCK_PRODUCER)) {
-        COMM_DEBUG_LOG("(r|cls stream)\tInvalid argument: "
-                       "node idx[%d], stream id[%d], type[%d].",
+        COMM_DEBUG_LOG("(r|cls stream)\tInvalid argument: node idx[%d], stream id[%d], type[%d].",
             node_idx,
             stream_idx,
             type);
@@ -2224,7 +2205,6 @@ int gs_r_close_stream(gsocket* gsock)
 }  // gs_r_close_stream
 
 // sender close logic stream, call by Producer thread when it failed to send data
-//
 int gs_s_close_stream(gsocket* gsock)
 {
     int node_idx = gsock->idx;
@@ -2235,8 +2215,7 @@ int gs_s_close_stream(gsocket* gsock)
 
     if ((node_idx < 0) || (node_idx >= g_instance.comm_cxt.counters_cxt.g_cur_node_num) || (stream_idx <= 0) ||
         (stream_idx >= g_instance.comm_cxt.counters_cxt.g_max_stream_num) || (type == GSOCK_CONSUMER)) {
-        COMM_DEBUG_LOG("(s|cls stream)\tInvalid argument: "
-                       "node idx[%d], stream id[%d], type[%d].",
+        COMM_DEBUG_LOG("(s|cls stream)\tInvalid argument: node idx[%d], stream id[%d], type[%d].",
             node_idx,
             stream_idx,
             type);
@@ -2273,26 +2252,23 @@ int gs_s_close_stream(gsocket* gsock)
 }
 
 // close logic socket, it will return when the sock type is invalid.
-//
 void gs_close_gsocket(gsocket* gsock)
 {
-    int type = gsock->type;
-
-    AutoContextSwitch commContext(g_instance.comm_cxt.comm_global_mem_cxt);
-
     bool TempImmediateInterruptOK = t_thrd.int_cxt.ImmediateInterruptOK;
     t_thrd.int_cxt.ImmediateInterruptOK = false;
 
-    if (type == GSOCK_INVALID) {
+    if (gsock->type == GSOCK_INVALID) {
         LIBCOMM_INTERFACE_END(false, TempImmediateInterruptOK);
         return;
     }
 
-    if (type == GSOCK_DAUL_CHANNEL || type == GSOCK_PRODUCER) {
+    AutoContextSwitch commContext(g_instance.comm_cxt.comm_global_mem_cxt);
+
+    if (gsock->type == GSOCK_DAUL_CHANNEL || gsock->type == GSOCK_PRODUCER) {
         (void)gs_s_close_stream(gsock);
     }
 
-    if (type == GSOCK_DAUL_CHANNEL || type == GSOCK_CONSUMER) {
+    if (gsock->type == GSOCK_DAUL_CHANNEL || gsock->type == GSOCK_CONSUMER) {
         (void)gs_r_close_stream(gsock);
     }
 
@@ -2668,8 +2644,7 @@ int gs_close_all_stream_by_debug_id(uint64 query_id)
 
     if (cmailbox_count != 0 || pmailbox_count != 0) {
         LIBCOMM_ELOG(LOG,
-            "(cls all stream)\tClose all stream by debug id[%lu], "
-            "close %d cmailbox and %d pmailbox.",
+            "(cls all stream)\tClose all stream by debug id[%lu], close %d cmailbox and %d pmailbox.",
             query_id,
             cmailbox_count,
             pmailbox_count);
@@ -2706,9 +2681,21 @@ static void PoolCleanerShutdownHandler(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+/* SIGHUP: re-read config file */
+static void PoolCleanerSighupHandler(SIGNAL_ARGS)
+{
+    int save_errno = errno;
+
+    t_thrd.poolcleaner_cxt.got_SIGHUP = true;
+    if (t_thrd.proc)
+        SetLatch(&t_thrd.proc->procLatch);
+
+    errno = save_errno;
+}
+
 void SetupPoolerCleanSignalHook()
 {
-    (void)gspqsignal(SIGHUP, SIG_IGN);
+    (void)gspqsignal(SIGHUP, PoolCleanerSighupHandler);
     (void)gspqsignal(SIGQUIT, SIG_IGN);
     (void)gspqsignal(SIGTERM, PoolCleanerShutdownHandler);
     (void)gspqsignal(SIGINT, PoolCleanerShutdownHandler);                      /* cancel current query */
@@ -2818,6 +2805,12 @@ void commPoolCleanerMain()
     /* We can now handle ereport(ERROR) */
     t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
 
+    /*
+     * Unblock signals (they were blocked when the postmaster forked us)
+     */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    (void)gs_signal_unblock_sigusr2();
+
     /* report this backend in the PgBackendStatus array */
     pgstat_report_appname("PoolCleaner");
 
@@ -2842,8 +2835,12 @@ void commPoolCleanerMain()
             break;
         }
 
-        sleep(1);
+        if (t_thrd.poolcleaner_cxt.got_SIGHUP) {
+            t_thrd.poolcleaner_cxt.got_SIGHUP = false;
+            ProcessConfigFile(PGC_SIGHUP);
+        }
 
+        sleep(1);
         current_time = mc_timers_ms();
         poolerMaxIdleTime = (u_sess->attr.attr_network.PoolerMaxIdleTime) * MS_PER_S;
 

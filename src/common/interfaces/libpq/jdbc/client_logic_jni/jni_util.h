@@ -30,6 +30,8 @@ void set_no_error(JNIEnv *env, jclass objectClass, jobjectArray arrayObject);
 void set_error(JNIEnv *env, jclass objectClass, jobjectArray arrayObject, int error_code, const char *error_text);
 void place_jlong_in_target_array(JNIEnv *env, jlong value, const int index2Store, jobjectArray arrayObject);
 void place_int_in_target_array(JNIEnv *env, const int value, const int index2Store, jobjectArray arrayObject);
+void place_ints_in_target_array(JNIEnv *env, const int *values, size_t values_length, const int index2Store,
+    jobjectArray arrayObject);
 void place_string_in_array(JNIEnv *env, const char *value, const int index2Store, jobjectArray arrayObject);
 void place_ustring_in_array(JNIEnv *env, unsigned char *value, const int index2Store, jobjectArray arrayObject);
 

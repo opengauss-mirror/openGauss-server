@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -41,6 +42,7 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_PartIterator, "PartIterator"},
     {T_MergeAppend, "MergeAppend"},
     {T_RecursiveUnion, "RecursiveUnion"},
+    {T_StartWithOp, "StartWithOp"},
     {T_BitmapAnd, "BitmapAnd"},
     {T_BitmapOr, "BitmapOr"},
     {T_Scan, "Scan"},
@@ -365,6 +367,7 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_DropOwnedStmt, "DropOwnedStmt"},
     {T_ReassignOwnedStmt, "ReassignOwnedStmt"},
     {T_CompositeTypeStmt, "CompositeTypeStmt"},
+    {T_TableOfTypeStmt, "TableOfTypeStmt"},
     {T_CreateEnumStmt, "CreateEnumStmt"},
     {T_CreateRangeStmt, "CreateRangeStmt"},
     {T_AlterEnumStmt, "AlterEnumStmt"},
@@ -445,6 +448,7 @@ static const TagStr g_tagStrArr[] = {{T_Invalid, "Invalid"},
     {T_WithClause, "WithClause"},
     {T_CommonTableExpr, "CommonTableExpr"},
     {T_PruningResult, "PruningResult"},
+    {T_SubPartitionPruningResult, "SubPartitionPruningResult"},
     {T_Position, "Position"},
     {T_MergeWhenClause, "MergeWhenClause"},
     {T_IdentifySystemCmd, "IdentifySystemCmd"},

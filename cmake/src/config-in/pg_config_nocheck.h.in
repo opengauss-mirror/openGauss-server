@@ -903,5 +903,4 @@
  *    code using `volatile' can become incorrect without. Disable with care. */
 /* #undef volatile */
 
-#define ENABLE_LLVM_COMPILE 1
 

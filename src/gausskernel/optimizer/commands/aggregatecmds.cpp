@@ -243,7 +243,7 @@ void RenameAggregate(List* name, List* args, const char* newname)
     Form_pg_proc procForm;
     Relation rel;
     AclResult aclresult;
-
+    bool isNull = false;
     rel = heap_open(ProcedureRelationId, RowExclusiveLock);
 
     /* Look up function and make sure it's an aggregate */
@@ -257,8 +257,25 @@ void RenameAggregate(List* name, List* args, const char* newname)
     namespaceOid = procForm->pronamespace;
 
     oidvector* proargs = ProcedureGetArgTypes(tup);
+    Datum packageoid = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isNull);
+    if (isNull) {
+        packageoid = DatumGetObjectId(InvalidOid);
+    }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    Datum allargtypes = ProcedureGetAllArgTypes(tup, &isNull);
     /* make sure the new name doesn't exist */
+    if (SearchSysCache4(PROCALLARGS,
+            CStringGetDatum(newname),
+            allargtypes,
+            ObjectIdGetDatum(namespaceOid),
+            ObjectIdGetDatum(packageoid)))
+        ereport(ERROR,
+            (errcode(ERRCODE_DUPLICATE_FUNCTION),
+                errmsg("function %s already exists in schema \"%s\"",
+                    funcname_signature_string(newname, procForm->pronargs, NIL, proargs->values),
+                    get_namespace_name(namespaceOid))));
+#else
     if (SearchSysCacheExists3(PROCNAMEARGSNSP,
             CStringGetDatum(newname),
             PointerGetDatum(&procForm->proargtypes),
@@ -268,7 +285,7 @@ void RenameAggregate(List* name, List* args, const char* newname)
                 errmsg("function %s already exists in schema \"%s\"",
                     funcname_signature_string(newname, procForm->pronargs, NIL, proargs->values),
                     get_namespace_name(namespaceOid))));
-
+#endif
     /* must be owner */
     if (!pg_proc_ownercheck(procOid, GetUserId()))
         aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_PROC, NameListToString(name));

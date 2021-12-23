@@ -38,6 +38,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/utils/portal.h
  *
@@ -256,8 +257,8 @@ extern void AtAbort_Portals(bool STP_rollback = false);
 extern void AtCleanup_Portals(void);
 extern void PortalErrorCleanup(void);
 extern void AtSubCommit_Portals(SubTransactionId mySubid, SubTransactionId parentSubid, ResourceOwner parentXactOwner);
-extern void AtSubAbort_Portals(
-    SubTransactionId mySubid, SubTransactionId parentSubid, ResourceOwner myXactOwner, ResourceOwner parentXactOwner);
+extern void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
+    ResourceOwner myXactOwner, ResourceOwner parentXactOwner, bool inSTP);
 extern void AtSubCleanup_Portals(SubTransactionId mySubid);
 extern Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_from_spi = false);
 extern Portal CreateNewPortal(bool is_from_spi = false);
@@ -266,7 +267,7 @@ extern void UnpinPortal(Portal portal);
 extern void MarkPortalActive(Portal portal);
 extern void MarkPortalDone(Portal portal);
 extern void MarkPortalFailed(Portal portal);
-extern void PortalDrop(Portal portal, bool isTopCommit);
+extern void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate = false);
 extern Portal GetPortalByName(const char* name);
 extern void PortalDefineQuery(Portal portal, const char* prepStmtName, const char* sourceText, const char* commandTag,
     List* stmts, CachedPlan* cplan);

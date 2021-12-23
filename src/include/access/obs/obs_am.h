@@ -201,24 +201,24 @@ extern bool is_ip_address_format(const char * addr);
 extern void encryptKeyString(char* keyStr, char destplainStr[], uint32 destplainLength);
 extern void decryptKeyString(const char *keyStr, char destplainStr[], uint32 destplainLength, const char *obskey);
 
-ObsArchiveConfig *getObsArchiveConfig();
-size_t obsRead(const char* fileName, int offset, char *buffer, int length, ObsArchiveConfig *obs_config = NULL);
-int obsWrite(const char* fileName, const char *buffer, const int bufferLength, ObsArchiveConfig *obs_config = NULL);
-int obsDelete(const char* fileName, ObsArchiveConfig *obs_config = NULL);
-List* obsList(const char* prefix, ObsArchiveConfig *obs_config = NULL,
+ArchiveConfig *getArchiveConfig();
+size_t obsRead(const char* fileName, int offset, char *buffer, int length, ArchiveConfig *obs_config = NULL);
+int obsWrite(const char* fileName, const char *buffer, const int bufferLength, ArchiveConfig *obs_config = NULL);
+int obsDelete(const char* fileName, ArchiveConfig *obs_config = NULL);
+List* obsList(const char* prefix, ArchiveConfig *obs_config = NULL,
             bool reportError = true, bool shortenConnTime = false);
-void* createOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config = NULL);
+void* createOBSFile(const char* file_path, const char* mode, ArchiveConfig *obs_config = NULL);
 int writeOBSData(const void* write_data, size_t size, size_t len, OBSFile* fp, size_t* writeSize,
-    ObsArchiveConfig *obs_config = NULL);
-int closeOBSFile(void* filePtr, ObsArchiveConfig *obs_config = NULL);
-void* openReadOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config = NULL);
-int readOBSFile(char* data, size_t size, size_t len, void* fp, size_t* readSize, ObsArchiveConfig *obs_config = NULL);
+    ArchiveConfig *obs_config = NULL);
+int closeOBSFile(void* filePtr, ArchiveConfig *obs_config = NULL);
+void* openReadOBSFile(const char* file_path, const char* mode, ArchiveConfig *obs_config = NULL);
+int readOBSFile(char* data, size_t size, size_t len, void* fp, size_t* readSize, ArchiveConfig *obs_config = NULL);
 int closeReadOBSFile(void* fp);
-bool checkOBSFileExist(const char* file_path, ObsArchiveConfig *obs_config = NULL);
+bool checkOBSFileExist(const char* file_path, ArchiveConfig *obs_config = NULL);
 bool feofReadOBSFile(const void* fp);
 void initializeOBS();
-bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ObsArchiveConfig *obs_config = NULL);
-bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ObsArchiveConfig *obs_config = NULL);
+bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ArchiveConfig *obs_config = NULL);
+bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ArchiveConfig *obs_config = NULL);
 
 
 #endif /* OBS_AM_H */

@@ -544,8 +544,8 @@ void bucketClosePartition(Partition bucket)
     {
         pfree_ext(bucket->pd_part);
     }
-    if(PartitionIsBucket(bucket)) {
-        pfree_ext(bucket->pd_smgr);
+    if(bucket->pd_smgr && PartitionIsBucket(bucket)) {
+        smgrclose(bucket->pd_smgr);
     }
     pfree_ext(bucket);
 }
@@ -678,6 +678,8 @@ Relation bucketGetRelation(Relation rel, Partition part, int2 bucketId)
         bucket->rd_newRelfilenodeSubid = part->pd_newRelfilenodeSubid;
         bucket->rd_lockInfo = part->pd_lockInfo;
         bucket->rd_rel->relfilenode = part->pd_part->relfilenode;
+        bucket->rd_rel->reltoastrelid = part->pd_part->reltoastrelid;
+        bucket->rd_rel->reltablespace = part->pd_part->reltablespace;
     }
     /* fix relation bucketid info */
     bucket->rd_node.bucketNode = bucketId;
@@ -1761,4 +1763,16 @@ bool hashbucket_eq(oidvector* bucket1, oidvector* bucket2)
         }
     }
     return true;
+}
+
+int bid_cmp(const void* p1, const void* p2)
+{
+    Oid b1 = *((const Oid*)p1);
+    Oid b2 = *((const Oid*)p2);
+
+    if (b1 < b2)
+        return -1;
+    if (b1 > b2)
+        return 1;
+    return 0;
 }

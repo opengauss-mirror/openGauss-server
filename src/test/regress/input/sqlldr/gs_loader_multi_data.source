@@ -1,0 +1,90 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+
+-- basic
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_1.csv data=@abs_srcdir@/data/gs_loader_multi_data_2.csv port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- data file test
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_*.csv port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_1.csv data=@abs_srcdir@/data/gs_loader_multi_data_*.csv port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- skip
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64 skip=0
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64 skip=5
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64 skip=14
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64 skip=1024
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- errors
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=0
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=4
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=5
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=8
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=12
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=32 skip=14
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- bad/discard path
+\! mkdir -p @abs_srcdir@/data/gs_loader_multi_bad/
+\! mkdir -p @abs_srcdir@/data/gs_loader_multi_discard/
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv log=@abs_srcdir@/data/gs_loader_multi_data.log bad=@abs_srcdir@/data/gs_loader_multi_bad/ discard=@abs_srcdir@/data/gs_loader_multi_discard/ port=@portstring@ db=regression passwd=gauss@123 errors=32 skip=5
+select * from SQLLDR_TBL order by 1,2,3,4;
+\! cat @abs_srcdir@/data/gs_loader_multi_data.log | head -n -5
+\! cat @abs_srcdir@/data/gs_loader_multi_bad/gs_loader_multi_data_1.bad
+\! cat @abs_srcdir@/data/gs_loader_multi_bad/gs_loader_multi_data_2.bad
+\! cat @abs_srcdir@/data/gs_loader_multi_bad/gs_loader_multi_data_3.bad
+\! cat @abs_srcdir@/data/gs_loader_multi_discard/gs_loader_multi_data_1.dsc
+\! cat @abs_srcdir@/data/gs_loader_multi_discard/gs_loader_multi_data_2.dsc
+\! cat @abs_srcdir@/data/gs_loader_multi_discard/gs_loader_multi_data_3.dsc
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv log=@abs_srcdir@/data/gs_loader_multi_data.log bad=@abs_srcdir@/data/gs_loader_multi_data.bad discard=@abs_srcdir@/data/gs_loader_multi_data.dsc port=@portstring@ db=regression passwd=gauss@123 errors=32 skip=5
+select * from SQLLDR_TBL order by 1,2,3,4;
+\! cat @abs_srcdir@/data/gs_loader_multi_data.bad
+\! cat @abs_srcdir@/data/gs_loader_multi_data.dsc
+
+-- table mode(truncate/insert/replace/append)
+truncate table SQLLDR_TBL;
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data_insert.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data_insert.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+truncate table SQLLDR_TBL;
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data_append.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_multi_data_replace.ctl data=@abs_srcdir@/data/gs_loader_multi_data_?.csv  port=@portstring@ db=regression passwd=gauss@123 errors=64
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- teardown
+drop table SQLLDR_TBL;

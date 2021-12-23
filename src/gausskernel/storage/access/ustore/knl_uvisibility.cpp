@@ -172,10 +172,16 @@ bool UHeapTupleSatisfiesVisibility(UHeapTuple uhtup, Snapshot snapshot, Buffer b
         utuple->disk_tuple = (UHeapDiskTuple)UPageGetRowData(dp, rp);
         utuple->disk_tuple_size = RowPtrGetLen(rp);
         tdSlot = UHeapTupleHeaderGetTDSlot(utuple->disk_tuple);
+        if (tdSlot > UHEAP_MAX_TD || tdSlot < 0) {
+            ereport(PANIC, (errmsg("Normal rowptr, td_info abnormal, is %d", tdSlot)));
+        }
         isInvalidSlot = UHeapTupleHasInvalidXact(utuple->disk_tuple->flag);
     } else if (RowPtrIsDeleted(rp)) {
         utuple = NULL;
         tdSlot = RowPtrGetTDSlot(rp);
+        if (tdSlot > UHEAP_MAX_TD || tdSlot < 0) {
+            ereport(PANIC, (errmsg("Deleted rowptr, td_info abnormal, is %d", tdSlot)));
+        }
         isInvalidSlot = (RowPtrGetVisibilityInfo(rp) & ROWPTR_XACT_INVALID);
     } else {
         /*
@@ -301,7 +307,7 @@ static UVersionSelector UHeapSelectVersionNow(UTupleTidOp op, TransactionId xid)
          */
         return ((op == UTUPLETID_GONE) ? UVERSION_NONE : UVERSION_CURRENT);
     }
-    if (TransactionIdIsInProgress(xid) || TransactionIdDidAbort(xid)) {
+    if (!UHeapTransactionIdDidCommit(xid)) {
         /* The XID is not visible to us */
         return ((op == UTUPLETID_NEW) ? UVERSION_NONE : UVERSION_OLDER);
     }
@@ -322,7 +328,7 @@ static UVersionSelector UHeapSelectVersionSelf(UTupleTidOp op, TransactionId xid
             return UVERSION_NONE;
         else if (TransactionIdIsInProgress(xid))
             return UVERSION_OLDER;
-        else if (TransactionIdDidCommit(xid))
+        else if (UHeapTransactionIdDidCommit(xid))
             return UVERSION_NONE;
         else
             return UVERSION_OLDER; /* transaction is aborted */
@@ -331,7 +337,7 @@ static UVersionSelector UHeapSelectVersionSelf(UTupleTidOp op, TransactionId xid
             return UVERSION_CURRENT;
         else if (TransactionIdIsInProgress(xid))
             return UVERSION_OLDER;
-        else if (TransactionIdDidCommit(xid))
+        else if (UHeapTransactionIdDidCommit(xid))
             return UVERSION_CURRENT;
         else
             return UVERSION_OLDER; /* transaction is aborted */
@@ -340,7 +346,7 @@ static UVersionSelector UHeapSelectVersionSelf(UTupleTidOp op, TransactionId xid
             return UVERSION_CURRENT;
         else if (TransactionIdIsInProgress(xid))
             return UVERSION_NONE;
-        else if (TransactionIdDidCommit(xid))
+        else if (UHeapTransactionIdDidCommit(xid))
             return UVERSION_CURRENT;
         else
             return UVERSION_NONE; /* transaction is aborted */
@@ -381,7 +387,7 @@ static UVersionSelector UHeapSelectVersionDirty(const UTupleTidOp op, const bool
             if (uinfo->urec_add != INVALID_UNDO_REC_PTR)
                 *snapshotRequests |= SNAPSHOT_REQUESTS_SUBXID;
             return UVERSION_CURRENT;
-        } else if (TransactionIdDidCommit(uinfo->xid)) {
+        } else if (UHeapTransactionIdDidCommit(uinfo->xid)) {
             /* tuple is deleted or non-inplace-updated */
             return UVERSION_NONE;
         }
@@ -395,7 +401,7 @@ static UVersionSelector UHeapSelectVersionDirty(const UTupleTidOp op, const bool
             if (uinfo->urec_add != INVALID_UNDO_REC_PTR)
                 *snapshotRequests |= SNAPSHOT_REQUESTS_SUBXID;
             return UVERSION_CURRENT; /* being updated */
-        } else if (TransactionIdDidCommit(uinfo->xid)) {
+        } else if (UHeapTransactionIdDidCommit(uinfo->xid)) {
             return UVERSION_CURRENT; /* tuple is updated by someone else */
         }
         /* transaction is aborted */
@@ -408,7 +414,7 @@ static UVersionSelector UHeapSelectVersionDirty(const UTupleTidOp op, const bool
             if (uinfo->urec_add != INVALID_UNDO_REC_PTR)
                 *snapshotRequests |= SNAPSHOT_REQUESTS_SUBXID;
             return UVERSION_CURRENT; /* in insertion by other */
-        } else if (TransactionIdDidCommit(uinfo->xid)) {
+        } else if (UHeapTransactionIdDidCommit(uinfo->xid)) {
             return UVERSION_CURRENT;
         }
         /* inserting transaction aborted */
@@ -467,7 +473,7 @@ static UVersionSelector UHeapSelectVersionUpdate(UTupleTidOp op, TransactionId x
         return UVERSION_CURRENT;
     }
 
-    if (TransactionIdIsInProgress(xid) || !TransactionIdDidCommit(xid)) {
+    if (TransactionIdIsInProgress(xid) || !UHeapTransactionIdDidCommit(xid)) {
         /* The XID is still in progress, or aborted; we can't see it. */
         return ((op == UTUPLETID_NEW) ? UVERSION_NONE : UVERSION_OLDER);
     }
@@ -950,7 +956,7 @@ restart:
                     UHeapTupleGetRawXid(utuple), multixidIsMyself);
                 return TM_BeingModified;
             } else {
-                Assert(TransactionIdDidCommit(tdinfo->xid));
+                Assert(UHeapTransactionIdDidCommit(tdinfo->xid));
                 if (TransactionIdIsValid(conflictXid) && isUpsert) {
                     bool isUpdatedByOthers = (conflictXid != tdinfo->xid);
                     return isUpdatedByOthers ? TM_Updated : TM_BeingModified;
@@ -996,7 +1002,7 @@ restart:
 
             if (tdinfo->td_slot == UHEAPTUP_SLOT_FROZEN || TransactionIdOlderThanAllUndo(tdinfo->xid)) {
                 result = TM_Ok;
-            } else if (TransactionIdDidCommit(tdinfo->xid)) {
+            } else if (UHeapTransactionIdDidCommit(tdinfo->xid)) {
                 if (TransactionIdIsValid(conflictXid) && isUpsert) {
                     bool isUpdatedByOthers = (conflictXid != tdinfo->xid);
                     return isUpdatedByOthers ? TM_Updated : TM_Ok;
@@ -1026,7 +1032,7 @@ restart:
             // deleter is still active, caller should wait it until it commits or aborts
             result = TM_BeingModified;
             fetchSubXid = true;
-        } else if (TransactionIdDidCommit(tdinfo->xid)) {
+        } else if (UHeapTransactionIdDidCommit(tdinfo->xid)) {
             result = TM_Updated;
         } else {
             // set as being modified, and caller will rely on UHeapWait to handle this case
@@ -1053,7 +1059,7 @@ restart:
                     *lockerXid = lockerTDInfo.xid;
                     result = TM_BeingModified;
                     fetchSubXid = true;
-                } else if (TransactionIdDidCommit(lockerTDInfo.xid)) {
+                } else if (UHeapTransactionIdDidCommit(lockerTDInfo.xid)) {
                     result = TM_Ok;
                 } else {
                     *lockerXid = lockerTDInfo.xid;
@@ -1080,7 +1086,7 @@ restart:
         } else if (TransactionIdIsInProgress(tdinfo->xid, NULL, false, false, true)) {
             result = TM_BeingModified;
             fetchSubXid = true;
-        } else if (TransactionIdDidCommit(tdinfo->xid)) {
+        } else if (UHeapTransactionIdDidCommit(tdinfo->xid)) {
             bool checkVisibility = true;
 
             if (UHEAP_XID_IS_LOCKED_ONLY(tupleData->flag)) {
@@ -1101,7 +1107,7 @@ restart:
                     *lockerXid = lockerTDInfo.xid;
                     result = TM_BeingModified;
                     fetchSubXid = true;
-                } else if (TransactionIdDidCommit(lockerTDInfo.xid)) {
+                } else if (UHeapTransactionIdDidCommit(lockerTDInfo.xid)) {
                     checkVisibility = true;
                 } else {
                     *lockerXid = lockerTDInfo.xid;
@@ -1141,7 +1147,7 @@ restart:
                 SyncLocalXidWait(tdinfo->xid);
                 goto restart;
             }
-        } else if (TransactionIdDidCommit(tdinfo->xid)) {
+        } else if (UHeapTransactionIdDidCommit(tdinfo->xid)) {
             result = TM_Ok;
         } else { // aborted
             result = TM_Invisible;

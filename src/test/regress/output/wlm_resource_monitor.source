@@ -19,8 +19,13 @@ set query_band='rmdb_test';
 \! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_wlm_session_info;" > /dev/null 2>&1
 \! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM pgxc_wlm_session_info;" > /dev/null 2>&1
 \! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM gs_wlm_operator_info;"
-ERROR:  relation "gs_wlm_operator_info" does not exist
+NOTICE:  relation "gs_wlm_operator_info" has data only in database "postgres"
 HINT:  please use database "postgres"
+ count 
+-------
+     0
+(1 row)
+
 --output
 \! @abs_bindir@/gsql -r -p @portstring@ -d rmdb -c "SELECT count(*) FROM pgxc_wlm_operator_history;" > /dev/null 2>&1
 \c postgres

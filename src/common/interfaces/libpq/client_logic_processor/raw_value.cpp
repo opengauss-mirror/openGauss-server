@@ -46,7 +46,8 @@ RawValue::RawValue(PGconn *conn)
       m_processed_data(nullptr),
       m_processed_data_size(0),
       m_empty_repeat(false),
-      m_conn(conn)
+      m_conn(conn),
+      ref_count(0)
 {}
 
 RawValue::~RawValue()
@@ -183,4 +184,15 @@ bool RawValue::process(const ICachedColumn *cached_column, char *err_msg)
     }
 
     return true;
+}
+
+void RawValue::inc_ref_count()
+{
+    Assert(ref_count >= 0);
+    ref_count++;
+}
+void RawValue::dec_ref_count()
+{
+    Assert(ref_count > 0);
+    ref_count--;
 }

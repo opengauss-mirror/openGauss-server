@@ -9,6 +9,7 @@
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  * src/backend/utils/misc/guc.c
@@ -364,13 +365,13 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_global_stats",
     "enable_hypo_index",
     "td_compatible_truncation",
-    "gds_debug_mod",
     "ngram_punctuation_ignore",
     "ngram_grapsymbol_ignore",
     "ngram_gram_size",
     "enable_orc_cache",
 #ifdef ENABLE_MULTIPLE_NODES
     "enable_cluster_resize",
+    "gds_debug_mod",
 #endif
     "enable_compress_spill",
     "resource_track_level",
@@ -411,9 +412,13 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "sql_use_spacelimit",
     "default_limit_rows",
     "sql_beta_feature",
+#ifndef ENABLE_MULTIPLE_NODES
+    "plsql_show_all_error",
+#endif 
     "track_stmt_session_slot",
     "track_stmt_stat_level",
-    "track_stmt_details_size"};
+    "track_stmt_details_size"
+    };
 
 static void set_config_sourcefile(const char* name, char* sourcefile, int sourceline);
 static bool call_bool_check_hook(struct config_bool* conf, bool* newval, void** extra, GucSource source, int elevel);
@@ -775,7 +780,8 @@ static const struct config_enum_entry xmloption_options[] = {
 /*
  * Define remote connection types for PGXC
  */
-static const struct config_enum_entry pgxc_conn_types[] = {{"application", REMOTE_CONN_APP, false},
+static const struct config_enum_entry pgxc_conn_types[] = {
+    {"application", REMOTE_CONN_APP, false},
     {"coordinator", REMOTE_CONN_COORD, false},
     {"datanode", REMOTE_CONN_DATANODE, false},
     {"gtm", REMOTE_CONN_GTM, false},
@@ -798,6 +804,11 @@ static const struct config_enum_entry sync_config_strategy_options[] = {
     {NULL, 0, false}
 };
 #endif
+
+static const struct config_enum_entry cluster_run_mode_options[] = {
+    {"cluster_primary", RUN_MODE_PRIMARY, false}, 
+    {"cluster_standby", RUN_MODE_STANDBY, false},
+    {NULL, 0, false}};
 
 /*
  * GUC option variables that are exported from this module
@@ -1034,6 +1045,19 @@ static void InitCommonConfigureNames()
 static void InitConfigureNamesBool()
 {
     struct config_bool localConfigureNamesBool[] = {
+#ifndef ENABLE_MULTIPLE_NODES
+        {{"enable_auto_clean_unique_sql",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            INSTRUMENTS_OPTIONS,
+            gettext_noop("Enable auto clean unique sql entry when the UniqueSQL hash table is full."),
+            NULL},
+            &g_instance.attr.attr_common.enable_auto_clean_unique_sql,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
         {{"enable_wdr_snapshot",
             PGC_SIGHUP,
             NODE_ALL,
@@ -1609,7 +1633,19 @@ static void InitConfigureNamesBool()
             check_gpc_syscache_threshold,
             NULL,
             NULL},
-
+#ifdef ENABLE_MULTIPLE_NODES
+        {{"enable_gpc_grayrelease_mode",
+            PGC_SIGHUP,
+            NODE_ALL,
+            CLIENT_CONN,
+            gettext_noop("in distribute cluster, enable grayly change guc enable_global_plancache in three stage."),
+            NULL},
+            &u_sess->attr.attr_common.enable_gpc_grayrelease_mode,
+            false,
+            NULL,
+            NULL,
+            NULL},
+#endif
         {{"enable_router",
             PGC_SIGHUP,
             NODE_DISTRIBUTE,
@@ -2194,6 +2230,32 @@ static void InitConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"pset_lob_length",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("GUC parameter of pset_lob_length."),
+            NULL},
+            &u_sess->attr.attr_common.pset_lob_length,
+            0,
+            0,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL},
+        {{"pset_num_width",
+            PGC_USERSET,
+            NODE_ALL,
+            CLIENT_CONN_STATEMENT,
+            gettext_noop("GUC parameter of pset_num_width."),
+            NULL},
+            &u_sess->attr.attr_common.pset_num_width,
+            0,
+            0,
+            128,
+            NULL,
+            NULL,
+            NULL},
         {{"tcp_keepalives_idle",
             PGC_USERSET,
             NODE_ALL,
@@ -2272,7 +2334,7 @@ static void InitConfigureNamesInt()
         /* Can't be set in postgresql.conf */
         {{"backend_version",
             PGC_USERSET,
-            NODE_ALL,
+            NODE_DISTRIBUTE,
             PRESET_OPTIONS,
             gettext_noop("Set and show the backend version as an integer."),
             NULL,
@@ -3708,7 +3770,7 @@ static void InitConfigureNamesString()
             &u_sess->attr.attr_common.ts_compaction_strategy,
             "3,6,6,12,0", 
             check_compaciton_strategy,
-            NULL},
+            NULL}, 
 #endif
         {{NULL,
             (GucContext)0,
@@ -3980,6 +4042,18 @@ static void InitConfigureNamesEnum()
             NULL,
             NULL,
             NULL},
+        {{"cluster_run_mode",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            PRESET_OPTIONS,
+            gettext_noop("Sets how binary values are to be encoded in XML."),
+            NULL},
+            &g_instance.attr.attr_common.cluster_run_mode,
+            RUN_MODE_PRIMARY,
+            cluster_run_mode_options,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -4021,7 +4095,7 @@ static void ReportGUCOption(struct config_generic* record);
 static void reapply_stacked_values(struct config_generic* variable, struct config_string* pHolder, GucStack* stack,
     const char* curvalue, GucContext curscontext, GucSource cursource);
 static void ShowGUCConfigOption(const char* name, DestReceiver* dest);
-static void ShowAllGUCConfig(DestReceiver* dest);
+static void ShowAllGUCConfig(const char* likename, DestReceiver* dest);
 static char* _ShowOption(struct config_generic* record, bool use_units);
 static bool validate_option_array_item(const char* name, const char* value, bool skipIfNoPermissions);
 #ifndef ENABLE_MULTIPLE_NODES
@@ -4775,16 +4849,6 @@ void InitializePostmasterGUC()
     g_instance.attr.attr_network.PoolerPort = g_instance.attr.attr_network.PostPortNumber + 1;
 }
 
-int get_fixed_bgwriter_thread_num()
-{
-    /*
-     * We launch one extra bgwriter for segment buffers automatically,
-     * so there should be at least two bgworkers one for shared buffers,
-     * the other for segment buffers.
-     */
-    return (g_instance.attr.attr_storage.bgwriter_thread_num > 1) ?
-        (g_instance.attr.attr_storage.bgwriter_thread_num + 1) : 2;
-}
 /*
  * Initialize GUC options during program startup.
  *
@@ -6054,6 +6118,18 @@ void AtEOXact_GUC(bool isCommit, int nestLevel)
      * GUC at prepare or commit. These connections will always be closed.
      */
     if (isCommit && nestLevel == 1 && !u_sess->attr.attr_common.IsInplaceUpgrade) {
+        const char* setStr = get_set_string();
+
+        if (setStr != NULL) {
+            char tmpName[MAX_PARAM_LEN + 1] = {0};
+            const char *gucName = GetGucName(setStr, tmpName);
+            int rs = PoolManagerSetCommand(POOL_CMD_GLOBAL_SET, setStr, gucName);
+            if (rs < 0) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CONNECTION_EXCEPTION),
+                        errmsg("Communication failure, failed to send set commands to pool in transaction commit.")));
+            }
+        }
         /* reset input_set_message  when current transaction is in top level and isCommit is true.*/
         reset_set_message(isCommit);
     }
@@ -9186,12 +9262,13 @@ void EmitWarningsOnPlaceholders(const char* className)
 /*
  * SHOW command
  */
-void GetPGVariable(const char* name, DestReceiver* dest)
+void GetPGVariable(const char* name, const char* likename, DestReceiver* dest)
 {
-    if (guc_name_compare(name, "all") == 0)
-        ShowAllGUCConfig(dest);
-    else
+    if (guc_name_compare(name, "all") == 0) {
+        ShowAllGUCConfig(likename, dest);
+    } else {
         ShowGUCConfigOption(name, dest);
+    }
 }
 
 TupleDesc GetPGVariableResultDesc(const char* name)
@@ -9247,7 +9324,7 @@ static void ShowGUCConfigOption(const char* name, DestReceiver* dest)
 /*
  * SHOW ALL command
  */
-static void ShowAllGUCConfig(DestReceiver* dest)
+static void ShowAllGUCConfig(const char* likename, DestReceiver* dest)
 {
     bool am_superuser = superuser();
     int i;
@@ -9268,9 +9345,14 @@ static void ShowAllGUCConfig(DestReceiver* dest)
     for (i = 0; i < u_sess->num_guc_variables; i++) {
         struct config_generic* conf = u_sess->guc_variables[i];
         char* setting = NULL;
+        unsigned int flags = (unsigned int)conf->flags;
 
-        if ((conf->flags & GUC_NO_SHOW_ALL) || ((conf->flags & GUC_SUPERUSER_ONLY) && !am_superuser))
+        if ((flags & GUC_NO_SHOW_ALL) || ((flags & GUC_SUPERUSER_ONLY) && !am_superuser))
             continue;
+
+        if (likename != NULL && strstr((char*)conf->name, likename) == NULL) {
+            continue;
+        }
 
         /* assign to the values array */
         values[0] = PointerGetDatum(cstring_to_text(conf->name));
@@ -11347,6 +11429,12 @@ static void assign_application_name(const char* newval, void* extra)
 {
     /* Update the pg_stat_activity view */
     pgstat_report_appname(newval);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (AmPostmasterProcess() && newval[0] != '\0' && g_instance.exec_cxt.global_application_name[0] == '\0') {
+        g_instance.exec_cxt.global_application_name = pstrdup(newval);
+    }
+#endif
 }
 
 static const char* show_log_file_mode(void)

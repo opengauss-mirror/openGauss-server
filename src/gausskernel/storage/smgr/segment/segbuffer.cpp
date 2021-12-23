@@ -32,6 +32,7 @@
 #include "storage/smgr/smgr.h"
 #include "utils/resowner.h"
 #include "tsan_annotation.h"
+#include "pgstat.h"
 
 /* 
  * Segment buffer, used for segment meta data, e.g., segment head, space map head. We separate segment
@@ -128,7 +129,7 @@ static void SegTerminateBufferIO(BufferDesc *buf, bool clear_dirty, uint32 set_f
 
     buf_state &= ~(BM_IO_IN_PROGRESS | BM_IO_ERROR);
     if (clear_dirty) {
-        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+        if (ENABLE_INCRE_CKPT) {
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
                 remove_dirty_page_from_queue(buf);
             } else {
@@ -314,7 +315,7 @@ void SegMarkBufferDirty(Buffer buf)
      * Check the BufferDesc rec_lsn to determine whether the dirty page is in the dirty page queue.
      * If the rec_lsn is valid, dirty page is already in the queue, don't need to push it again.
      */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         for (;;) {
             buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&bufHdr->rec_lsn))) {
@@ -500,6 +501,12 @@ static BufferDesc *SegBufferAlloc(SegSpace *spc, RelFileNode rnode, ForkNumber f
         SegPinBufferLocked(buf, &new_tag);
 
         if (old_flags & BM_DIRTY) {
+            /* backend should not flush dirty pages if working version less than DW_SUPPORT_NEW_SINGLE_FLUSH */
+            if (!backend_can_flush_dirty_page()) {
+                SegUnpinBuffer(buf);
+                (void)sched_yield();
+                continue;
+            }
             if (LWLockConditionalAcquire(buf->content_lock, LW_SHARED)) {
                 FlushOneSegmentBuffer(buf->buf_id + 1);
                 LWLockRelease(buf->content_lock);
@@ -583,45 +590,49 @@ static inline uint32 ClockSweepTick(void)
 static BufferDesc* get_segbuf_from_candidate_list(uint32* buf_state)
 {
     BufferDesc* buf = NULL;
-    int bgwriter_num = g_instance.bgwriter_cxt.bgwriter_num;
     uint32 local_buf_state;
     int buf_id = 0;
+    int list_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+    int list_id = beentry->st_tid > 0 ? (beentry->st_tid % list_num) : (beentry->st_sessionid % list_num);
 
-    BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[bgwriter_num - 1];
-    while (candidate_buf_pop(&buf_id, bgwriter_num - 1)) {
-        buf = GetBufferDescriptor(buf_id);
-        local_buf_state = LockBufHdr(buf);
-        SegmentCheck(buf_id >= SegmentBufferStartID);
-        if (g_instance.bgwriter_cxt.candidate_free_map[buf_id]) {
-            g_instance.bgwriter_cxt.candidate_free_map[buf_id] = false;
-            bool available_buffer = BUF_STATE_GET_REFCOUNT(local_buf_state) == 0
-                && !(local_buf_state & BM_IS_META)
-                && !(local_buf_state & BM_DIRTY);
-            if (available_buffer) {
-                *buf_state = local_buf_state;
-                return buf;
+    if (ENABLE_INCRE_CKPT && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
+        for (int i = 0; i < list_num; i++) {
+            /* the pagewriter sub thread store normal buffer pool, sub thread starts from 1 */
+            int thread_id = (list_id + i) % list_num + 1;
+            Assert(thread_id > 0 && thread_id <= list_num);
+            while (seg_candidate_buf_pop(&buf_id, thread_id)) {
+                buf = GetBufferDescriptor(buf_id);
+                local_buf_state = LockBufHdr(buf);
+                SegmentCheck(buf_id >= SegmentBufferStartID);
+                if (g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id]) {
+                    g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] = false;
+                    bool available_buffer = BUF_STATE_GET_REFCOUNT(local_buf_state) == 0
+                        && !(local_buf_state & BM_IS_META)
+                        && !(local_buf_state & BM_DIRTY);
+                    if (available_buffer) {
+                        *buf_state = local_buf_state;
+                        return buf;
+                    }
+                }
+                UnlockBufHdr(buf, local_buf_state);
             }
         }
-        UnlockBufHdr(buf, local_buf_state);
     }
-
-    /* The current candidate list is empty, wake up the buffer writer. */
-    if (bgwriter->proc != NULL) {
-        SetLatch(&bgwriter->proc->procLatch);
-    }
-
+    wakeup_pagewriter_thread();
     return NULL;
 }
 
 /* lock the buffer descriptor before return */
+const int RETRY_COUNT = 3;
 static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state) 
 {
     // todo: add free list
     BufferDesc *buf = get_segbuf_from_candidate_list(buf_state);
-    int try_counter = SEGMENT_BUFFER_NUM;
+    int try_counter = SEGMENT_BUFFER_NUM * RETRY_COUNT;
 
     if (buf != NULL) {
-        (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
+        (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->seg_get_buf_num_candidate_list, 1);
         return buf;
     }
 
@@ -633,7 +644,7 @@ static BufferDesc *SegStrategyGetBuffer(uint32 *buf_state)
 
         if (BUF_STATE_GET_REFCOUNT(state) == 0) {
             *buf_state = state;
-            (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_clock_sweep, 1);
+            (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->seg_get_buf_num_clock_sweep, 1);
             return buf;
         } else if (--try_counter == 0) {
             UnlockBufHdr(buf, state);
@@ -683,12 +694,19 @@ void FlushOneSegmentBuffer(Buffer buffer)
                                buf_desc->tag.blockNum, relpathperm(buf_desc->tag.rnode, buf_desc->tag.forkNum),
                                PageGetPageLayoutVersion(BufferGetBlock(buffer)))));
     }
-    if (dw_enabled()) {
+    /* during initdb, not need flush dw file */
+    if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
         uint32 pos = 0;
-        pos = dw_single_flush(buf_desc);
+        bool flush_old_file = false;
+        pos = seg_dw_single_flush(buf_desc, &flush_old_file);
         t_thrd.proc->dw_pos = pos;
+        t_thrd.proc->flush_new_dw = !flush_old_file;
         SegFlushBuffer(buf_desc, NULL);
-        g_instance.dw_single_cxt.single_flush_state[pos].data_flush = true;
+        if (flush_old_file) {
+            g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
+        } else {
+            g_instance.dw_single_cxt.single_flush_state[pos] = true;
+        }
         t_thrd.proc->dw_pos = -1;
     } else {
         SegFlushBuffer(buf_desc, NULL);
@@ -699,10 +717,16 @@ void FlushOneSegmentBuffer(Buffer buffer)
 void FlushOneBufferIncludeDW(BufferDesc *buf_desc)
 {
     if (dw_enabled()) {
-        uint32 pos = dw_single_flush(buf_desc);
+        bool flush_old_file = false;
+        uint32 pos = seg_dw_single_flush(buf_desc, &flush_old_file);
         t_thrd.proc->dw_pos = pos;
+        t_thrd.proc->flush_new_dw = !flush_old_file;
         FlushBuffer(buf_desc, NULL);
-        g_instance.dw_single_cxt.single_flush_state[pos].data_flush = true;
+        if (flush_old_file) {
+            g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
+        } else {
+            g_instance.dw_single_cxt.single_flush_state[pos] = true;
+        }
         t_thrd.proc->dw_pos = -1;
     } else {
         FlushBuffer(buf_desc, NULL);

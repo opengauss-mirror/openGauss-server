@@ -1,6 +1,8 @@
 ------------------------------------------------------------------------------
 -----7 test implicit cursor attributes for DML: select,insert,update,delete-----
 ------------------------------------------------------------------------------
+create database pl_test_cursor_part2 DBCOMPATIBILITY 'pg';
+\c pl_test_cursor_part2;
 create schema hw_cursor_part2;
 set current_schema = hw_cursor_part2;
 
@@ -344,3 +346,5 @@ drop procedure pro_refcursor_001;
 
 DROP TABLE t1;
 DROP SCHEMA hw_cursor_part2 CASCADE;
+\c regression;
+drop database IF EXISTS pl_test_cursor_part2;

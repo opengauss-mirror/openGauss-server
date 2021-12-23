@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -117,9 +118,15 @@ const module_data module_map[] = {{MOD_ALL, "ALL"},
     {MOD_COMM_PROXY, "COMM_PROXY"},
     {MOD_COMM_POOLER, "COMM_POOLER"},
     {MOD_VACUUM, "VACUUM"},
+    {MOD_JOB, "JOB"},
+    {MOD_SPI, "SPI"},
+    {MOD_NEST_COMPILE, "NEST_COMPILE"},
+    {MOD_RESOWNER, "RESOWNER"},
 
     /* add your module name above */
     {MOD_MAX, "BACKEND"}};
+
+static_assert(MOD_MAX == sizeof(module_map)/sizeof(module_map[0]) - 1, "invalid module_map size.");
 
 /*
  * @Description: check whether module name is unique

@@ -38,7 +38,6 @@
 #include "utils/rel.h"
 
 /* Not needed now that this file is compiled as part of bootparse. */
-/* #include "bootparse.h" */
 
 
 /* Avoid exit() on fatal scanner errors (a bit ugly -- see yy_fatal_error) */

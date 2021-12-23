@@ -1219,7 +1219,7 @@ CREATE VIEW dbe_perf.statio_all_sequences AS
     pg_stat_get_blocks_hit(C.oid) AS blks_hit
   FROM pg_class C
        LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind = 'S';
+    WHERE C.relkind = 'S' or C.relkind = 'L';
 
 CREATE OR REPLACE FUNCTION dbe_perf.get_global_statio_all_sequences
   (OUT node_name name, OUT relid oid, OUT schemaname name, 
@@ -4440,6 +4440,10 @@ DECLARE
   END; $$
 LANGUAGE 'plpgsql';
 
+CREATE VIEW dbe_perf.global_candidate_status AS
+       SELECT node_name, candidate_slots, get_buf_from_list, get_buf_clock_sweep, seg_candidate_slots, seg_get_buf_from_list, seg_get_buf_clock_sweep
+       FROM pg_catalog.local_candidate_stat();
+
 CREATE VIEW dbe_perf.global_ckpt_status AS
         SELECT node_name,ckpt_redo_point,ckpt_clog_flush_num,ckpt_csnlog_flush_num,ckpt_multixact_flush_num,ckpt_predicate_flush_num,ckpt_twophase_flush_num
         FROM pg_catalog.local_ckpt_stat();
@@ -4449,6 +4453,10 @@ CREATE OR REPLACE VIEW dbe_perf.global_double_write_status AS
            total_writes, low_threshold_writes, high_threshold_writes,
            total_pages, low_threshold_pages, high_threshold_pages
     FROM pg_catalog.local_double_write_stat();
+
+CREATE OR REPLACE VIEW DBE_PERF.global_single_flush_dw_status AS
+    SELECT node_name, curr_dwn, curr_start_page, total_writes, file_trunc_num, file_reset_num
+    FROM pg_catalog.local_single_flush_dw_stat();
 
 CREATE VIEW dbe_perf.global_pagewriter_status AS
         SELECT node_name,pgwr_actual_flush_total_num,pgwr_last_flush_num,remain_dirty_page_num,queue_head_page_rec_lsn,queue_rec_lsn,current_xlog_insert_lsn,ckpt_redo_point
@@ -4469,6 +4477,10 @@ CREATE OR REPLACE VIEW dbe_perf.global_redo_status AS
 CREATE OR REPLACE VIEW dbe_perf.global_rto_status AS
 SELECT node_name, rto_info
 FROM pg_catalog.local_rto_stat();
+
+CREATE OR REPLACE VIEW dbe_perf.global_streaming_hadr_rto_and_rpo_stat AS
+SELECT hadr_sender_node_name, hadr_receiver_node_name, current_rto, target_rto, current_rpo, target_rpo, current_sleep_time
+FROM pg_catalog.gs_hadr_local_rto_and_rpo_stat();
 
 CREATE OR REPLACE VIEW dbe_perf.global_recovery_status AS
 SELECT node_name, standby_node_name, source_ip, source_port, dest_ip, dest_port, current_rto, target_rto, current_sleep_time

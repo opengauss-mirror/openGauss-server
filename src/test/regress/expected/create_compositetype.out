@@ -54,19 +54,19 @@ SELECT * FROM t_group WHERE b = cast((1,'Simon1') as compfoo);
 CREATE FUNCTION compositetype_func1(compfoo) RETURNS compfoo
 AS 'select b from t_group where b = $1;'
 LANGUAGE SQL;
-call compositetype_func1(cast((1,'syr1') as compfoo));
- f1 | f2 
-----+----
-    | 
+select compositetype_func1(cast((1,'syr1') as compfoo));
+ compositetype_func1 
+---------------------
+ 
 (1 row)
 
 CREATE FUNCTION compositetype_func2() RETURNS compfoo
 AS 'select b from t_group where a = 3;'
 LANGUAGE SQL;
-call compositetype_func2();
- f1 |   f2   
-----+--------
-  3 | Simon3
+select compositetype_func2();
+ compositetype_func2 
+---------------------
+ (3,Simon3)
 (1 row)
 
 create table t_func1 (c int, b compfoo);
@@ -543,7 +543,72 @@ drop table if exists compos;
 drop type compfoo_nesting cascade;
 drop table if exists fullname;
 --row表达式
+--
+-- IS [NOT] NULL should not recurse into nested composites (bug #14235)
+--
+explain (verbose, costs off)
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+                                                                                                         QUERY PLAN                                                                                                          
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Values Scan on "*VALUES*"
+   Output: ROW("*VALUES*".column1, "*VALUES*".column2), (("*VALUES*".column1 IS NULL) AND ("*VALUES*".column2 IS NOT DISTINCT FROM NULL)), (("*VALUES*".column1 IS NOT NULL) AND ("*VALUES*".column2 IS DISTINCT FROM NULL))
+(2 rows)
+
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+      r      | isnull | isnotnull 
+-------------+--------+-----------
+ (1,"(1,2)") | f      | t
+ (1,"(,)")   | f      | t
+ (1,)        | f      | f
+ (,"(1,2)")  | f      | f
+ (,"(,)")    | f      | f
+ (,)         | t      | f
+(6 rows)
+
+explain (verbose, costs off)
 with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+                                                                                                         QUERY PLAN                                                                                                          
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Values Scan on "*VALUES*"
+   Output: ROW("*VALUES*".column1, "*VALUES*".column2), (("*VALUES*".column1 IS NULL) AND ("*VALUES*".column2 IS NOT DISTINCT FROM NULL)), (("*VALUES*".column1 IS NOT NULL) AND ("*VALUES*".column2 IS DISTINCT FROM NULL))
+(2 rows)
+
+with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+      r      | isnull | isnotnull 
+-------------+--------+-----------
+ (1,"(1,2)") | f      | t
+ (1,"(,)")   | f      | t
+ (1,)        | f      | f
+ (,"(1,2)")  | f      | f
+ (,"(,)")    | f      | f
+ (,)         | t      | f
+(6 rows)
+
+explain (verbose, costs off)
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+                        QUERY PLAN                        
+----------------------------------------------------------
+ CTE Scan on r
+   Output: r.*, (r.* IS NULL), (r.* IS NOT NULL)
+   CTE r
+     ->  Values Scan on "*VALUES*"
+           Output: "*VALUES*".column1, "*VALUES*".column2
+(5 rows)
+
+with r(a,b) as materialized
   (values (1,row(1,2)), (1,row(null,null)), (1,null),
           (null,row(1,2)), (null,row(null,null)), (null,null) )
 select r, r is null as isnull, r is not null as isnotnull from r;

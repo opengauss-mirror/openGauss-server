@@ -23,7 +23,7 @@ GRANT { {{ SELECT | INSERT | UPDATE | REFERENCES | COMMENT } ( column_name [, ..
     [ WITH GRANT OPTION ];
 GRANT { { SELECT | UPDATE | USAGE | ALTER | DROP | COMMENT } [, ...]
     | ALL [ PRIVILEGES ] }
-    ON { [ SEQUENCE ] sequence_name [, ...]
+    ON { [ [ LARGE ] SEQUENCE ] sequence_name [, ...]
     | ALL SEQUENCES IN SCHEMA schema_name [, ...] }
     TO { [ GROUP ] role_name | PUBLIC } [, ...]
     [ WITH GRANT OPTION ];
@@ -85,7 +85,7 @@ GRANT { USAGE | ALL [PRIVILEGES] }
     ON DATA SOURCE src_name [, ...]
     TO { [GROUP] role_name | PUBLIC } [, ...]
     [WITH GRANT OPTION];
-GRANT { { READ | WRITE } [, ...] | ALL [PRIVILEGES] }
+GRANT { { READ | WRITE | ALTER | DROP } [, ...] | ALL [PRIVILEGES] }
     ON DIRECTORY directory_name [, ...]
     TO { [GROUP] role_name | PUBLIC } [, ...]
     [WITH GRANT OPTION];

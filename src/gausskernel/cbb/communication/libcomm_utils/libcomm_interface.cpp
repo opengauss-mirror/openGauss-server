@@ -1668,6 +1668,7 @@ int gs_wait_poll(gsocket* gs_sock_array,  // array of producers node index
     // step 1: initialize local variables
     //
     int ret = 0;
+    const int interruptTimeOut = 60;
     // if waked by other threads, the flag is set to 1
     struct libcomm_time_record time_record = {0};
     time_record.time_enter = COMM_STAT_TIME();
@@ -1696,6 +1697,12 @@ int gs_wait_poll(gsocket* gs_sock_array,  // array of producers node index
         int time_out = -1;
         if (timeout > 0) {
             time_out = timeout;
+        }
+
+        /* If a cancel signal is received, we set gs_poll the default timeout 60s to avoid falling into wait(). */
+        if (InterruptPending || t_thrd.int_cxt.ProcDiePending) {
+            time_out = (timeout > 0) ? timeout : interruptTimeOut;
+            LIBCOMM_ELOG(WARNING, "(r|wait poll)\t The gs_wait_poll receive Cancel Interrupt.");
         }
 
         time_record.wait_data_start = COMM_STAT_TIME();

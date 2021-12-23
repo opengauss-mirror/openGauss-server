@@ -371,8 +371,7 @@ Datum rawlike(PG_FUNCTION_ARGS)
     p = VARDATA_ANY(pat);
     plen = VARSIZE_ANY_EXHDR(pat);
 
-    result = (GenericMatchText(s, slen, p, plen) == LIKE_TRUE);
-
+    result = SB_MatchText(s, slen, p, plen, 0, true) == LIKE_TRUE;
     PG_RETURN_BOOL(result);
 }
 
@@ -389,7 +388,7 @@ Datum rawnlike(PG_FUNCTION_ARGS)
     p = VARDATA_ANY(pat);
     plen = VARSIZE_ANY_EXHDR(pat);
 
-    result = (GenericMatchText(s, slen, p, plen) != LIKE_TRUE);
+    result = SB_MatchText(s, slen, p, plen, 0, true) != LIKE_TRUE;
 
     PG_RETURN_BOOL(result);
 }

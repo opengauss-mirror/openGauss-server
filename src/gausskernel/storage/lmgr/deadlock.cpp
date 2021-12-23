@@ -62,6 +62,7 @@ typedef struct DEADLOCK_INFO {
     ThreadId pid;      /* PID of blocked backend */
 } DEADLOCK_INFO;
 
+static const int MIN_BLOCKING_AUTOVACUUM_PROC_NUM = 64;
 static bool DeadLockCheckRecurse(PGPROC *proc);
 static int TestConfiguration(PGPROC *startProc);
 static bool FindLockCycle(PGPROC *checkProc, EDGE *softEdges, int *nSoftEdges);
@@ -164,8 +165,10 @@ void InitDeadLockChecking(void)
     t_thrd.storage_cxt.possibleConstraints = (EDGE *)palloc(t_thrd.storage_cxt.maxPossibleConstraints * sizeof(EDGE));
 
     t_thrd.storage_cxt.blocking_autovacuum_proc_num = 0;
+    t_thrd.storage_cxt.max_blocking_autovacuum_proc_num =
+        Max(MIN_BLOCKING_AUTOVACUUM_PROC_NUM, g_instance.attr.attr_storage.autovacuum_max_workers * 2);
     t_thrd.storage_cxt.blocking_autovacuum_proc =
-        (PGPROC **)palloc(g_instance.attr.attr_storage.autovacuum_max_workers * sizeof(PGPROC *));
+        (PGPROC **)palloc(t_thrd.storage_cxt.max_blocking_autovacuum_proc_num * sizeof(PGPROC *));
 
     MemoryContextSwitchTo(oldcxt);
 }
@@ -271,7 +274,7 @@ PGPROC *GetBlockingAutoVacuumPgproc(void)
 {
     PGPROC *ptr = NULL;
 
-    Assert(t_thrd.storage_cxt.blocking_autovacuum_proc_num <= g_instance.attr.attr_storage.autovacuum_max_workers);
+    Assert(t_thrd.storage_cxt.blocking_autovacuum_proc_num <= t_thrd.storage_cxt.max_blocking_autovacuum_proc_num);
     if (t_thrd.storage_cxt.blocking_autovacuum_proc_num > 0) {
         --t_thrd.storage_cxt.blocking_autovacuum_proc_num;
         ptr = t_thrd.storage_cxt.blocking_autovacuum_proc[t_thrd.storage_cxt.blocking_autovacuum_proc_num];
@@ -635,11 +638,11 @@ static bool FindLockCycleRecurseMember(PGPROC *checkProc,
                                     break;
                                 }
                             }
-                            if (!found) {
+                            if (!found &&
+                                t_thrd.storage_cxt.blocking_autovacuum_proc_num <
+                                t_thrd.storage_cxt.max_blocking_autovacuum_proc_num) {
                                 t_thrd.storage_cxt
                                 .blocking_autovacuum_proc[t_thrd.storage_cxt.blocking_autovacuum_proc_num++] = proc;
-                                Assert(t_thrd.storage_cxt.blocking_autovacuum_proc_num <=
-                                       g_instance.attr.attr_storage.autovacuum_max_workers);
                             }
                         }
                         /* vacuumFlags is set to PROC_IS_REDIST only at redistribution time */
@@ -656,6 +659,41 @@ static bool FindLockCycleRecurseMember(PGPROC *checkProc,
         }
 
         proclock = (PROCLOCK *)SHMQueueNext(procLocks, &proclock->lockLink, offsetof(PROCLOCK, lockLink));
+    }
+
+    /*
+     * Append wait lock autovacuum procs into blocking_autovacuum_proc
+     * list if current proc is blocking by some autovacuum procs.
+     */
+    if (checkProc == t_thrd.proc && t_thrd.storage_cxt.blocking_autovacuum_proc_num > 0) {
+        PROC_QUEUE *waitQueue = &(lock->waitProcs);
+        proc = (PGPROC *)waitQueue->links.next;
+        for (int j = 0; j < waitQueue->size; j++) {
+            if (proc == checkProc) {
+                break;
+            }
+            PGPROC *leader = (proc->lockGroupLeader == NULL) ? proc : proc->lockGroupLeader;
+            pgxact = &g_instance.proc_base_all_xacts[proc->pgprocno];
+            LWLockAcquire(ProcArrayLock, LW_EXCLUSIVE);
+            if (leader != checkProcLeader && (conflictMask & LOCKBIT_ON((unsigned int)proc->waitLockMode)) &&
+                (pgxact->vacuumFlags & PROC_IS_AUTOVACUUM)) {
+                bool found = false;
+                for (int k = 0; k < t_thrd.storage_cxt.blocking_autovacuum_proc_num; k++) {
+                    if (t_thrd.storage_cxt.blocking_autovacuum_proc[k] == proc) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found &&
+                    t_thrd.storage_cxt.blocking_autovacuum_proc_num <
+                    t_thrd.storage_cxt.max_blocking_autovacuum_proc_num) {
+                    t_thrd.storage_cxt
+                        .blocking_autovacuum_proc[t_thrd.storage_cxt.blocking_autovacuum_proc_num++] = proc;
+                }
+            }
+            LWLockRelease(ProcArrayLock);
+            proc = (PGPROC *)waitQueue->links.next;
+        }
     }
 
     /*
@@ -746,7 +784,7 @@ static bool FindLockCycleRecurseMember(PGPROC *checkProc,
             leader = (proc->lockGroupLeader == NULL) ? proc : proc->lockGroupLeader;
 
             /* Done when we reach the target proc */
-            if (proc == checkProcLeader)
+            if (proc == lastGroupMember)
                 break;
 
             /* Is there a conflict with this guy's request? */

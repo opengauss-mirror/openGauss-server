@@ -282,7 +282,7 @@ static void UBTreeXlogInsert(bool isleaf, bool ismeta, XLogReaderState *record, 
     }
 }
 
-static void UBTreeXlogSplitUpdate(bool onleft, bool isroot, XLogReaderState *record)
+static void UBTreeXlogSplitUpdate(bool onleft, bool isroot, XLogReaderState *record, bool hasOpaque)
 {
     Size datalen;
     char *datapos = NULL;
@@ -297,7 +297,7 @@ static void UBTreeXlogSplitUpdate(bool onleft, bool isroot, XLogReaderState *rec
         rnext = P_NONE;
     }
 
-    xl_btree_split *xlrec = (xl_btree_split *)XLogRecGetData(record);
+    xl_ubtree_split *xlrec = (xl_ubtree_split *)XLogRecGetData(record);
     bool isleaf = (xlrec->level == 0);
 
     if (!isleaf) {
@@ -309,13 +309,13 @@ static void UBTreeXlogSplitUpdate(bool onleft, bool isroot, XLogReaderState *rec
     XLogInitBufferForRedo(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &rbuf);
 
     datapos = XLogRecGetBlockData(record, BTREE_SPLIT_RIGHT_BLOCK_NUM, &datalen);
-    UBTreeXlogSplitOperatorRightpage(&rbuf, (void *)xlrec, leftsib, rnext, (void *)datapos, datalen);
+    UBTreeXlogSplitOperatorRightPage(&rbuf, (void *)xlrec, leftsib, rnext, (void *)datapos, datalen, hasOpaque);
     MarkBufferDirty(rbuf.buf);
 
     RedoBufferInfo lbuf;
     if (XLogReadBufferForRedo(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &lbuf) == BLK_NEEDS_REDO) {
         datapos = XLogRecGetBlockData(record, BTREE_SPLIT_LEFT_BLOCK_NUM, &datalen);
-        UBTreeXlogSplitOperatorLeftpage(&lbuf, (void *)xlrec, rightsib, onleft, (void *)datapos, datalen);
+        UBTreeXlogSplitOperatorLeftpage(&lbuf, (void *)xlrec, rightsib, onleft, (void *)datapos, datalen, hasOpaque);
         MarkBufferDirty(lbuf.buf);
     }
 
@@ -337,15 +337,15 @@ static void UBTreeXlogSplitUpdate(bool onleft, bool isroot, XLogReaderState *rec
     }
 }
 
-static void UBTreeXlogSplit(bool onleft, bool isroot, XLogReaderState *record, bool issplitupgrade)
+static void UBTreeXlogSplit(bool onleft, bool isroot, XLogReaderState *record, bool issplitupgrade, bool hasOpaque)
 {
     if (issplitupgrade) {
-        UBTreeXlogSplitUpdate(onleft, isroot, record);
+        UBTreeXlogSplitUpdate(onleft, isroot, record, hasOpaque);
         return;
     }
 
     XLogRecPtr lsn = record->EndRecPtr;
-    xl_btree_split *xlrec = (xl_btree_split *)XLogRecGetData(record);
+    xl_ubtree_split *xlrec = (xl_ubtree_split *)XLogRecGetData(record);
     bool isleaf = (xlrec->level == 0);
     RedoBufferInfo lbuf;
     RedoBufferInfo rbuf;
@@ -455,6 +455,10 @@ static void UBTreeXlogSplit(bool onleft, bool isroot, XLogReaderState *record, b
         if (PageAddItem(newlpage, left_hikey, left_hikeysz, P_HIKEY, false, false) == InvalidOffsetNumber)
             ereport(PANIC, (errmsg("failed to add high key to left page after split")));
         leftoff = OffsetNumberNext(leftoff);
+
+        if (xlrec->firstright > MaxIndexTuplesPerPage) {
+            ereport(ERROR, (errmodule(MOD_REDO), errmsg("Exceeded the maximum number of tuples on the page")));
+        }
 
         for (off = P_FIRSTDATAKEY(lopaque); off < xlrec->firstright; off++) {
             ItemId itemid;
@@ -1098,6 +1102,7 @@ static void UBTree2XlogFreeze(XLogReaderState *record)
 void UBTreeRedo(XLogReaderState* record)
 {
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
+    bool hasOpaque = ((XLogRecGetInfo(record) & BTREE_SPLIT_OPAQUE_FLAG) != 0);
     bool issplitupgrade = true;
     bool isdelupgrade = true;
 
@@ -1112,16 +1117,16 @@ void UBTreeRedo(XLogReaderState* record)
             UBTreeXlogInsert(false, true, record, issplitupgrade);
             break;
         case XLOG_UBTREE_SPLIT_L:
-            UBTreeXlogSplit(true, false, record, issplitupgrade);
+            UBTreeXlogSplit(true, false, record, issplitupgrade, hasOpaque);
             break;
         case XLOG_UBTREE_SPLIT_R:
-            UBTreeXlogSplit(false, false, record, issplitupgrade);
+            UBTreeXlogSplit(false, false, record, issplitupgrade, hasOpaque);
             break;
         case XLOG_UBTREE_SPLIT_L_ROOT:
-            UBTreeXlogSplit(true, true, record, issplitupgrade);
+            UBTreeXlogSplit(true, true, record, issplitupgrade, hasOpaque);
             break;
         case XLOG_UBTREE_SPLIT_R_ROOT:
-            UBTreeXlogSplit(false, true, record, issplitupgrade);
+            UBTreeXlogSplit(false, true, record, issplitupgrade, hasOpaque);
             break;
         case XLOG_UBTREE_VACUUM:
             UBTreeXlogVacuum(record);

@@ -114,6 +114,16 @@ bool gs_memory_enjection(void)
 }
 #endif
 
+bool compressed_mem_reserve(Size sz, bool protect)
+{
+    return MemoryProtectFunctions::gs_memprot_reserve<MEM_SHRD>(sz, protect);
+}
+
+void compressed_mem_release(Size sz)
+{
+    MemoryProtectFunctions::gs_memprot_release<MEM_SHRD>(sz);
+
+}
 
 /*
  * check if the node is on heavy memory status now?

@@ -178,7 +178,6 @@ int CommCreateTransportPair(CommSockDesc* comm_sock)
 
     if (comm_sock->m_transport[ChannelRX] == NULL) {
         comm_sock->m_transport[ChannelRX] = CommCreateTransport(comm_sock->m_trans_mode,
-            // phy_proto_tcp);
             comm_sock->m_communicator->m_proto_type);
     }
 

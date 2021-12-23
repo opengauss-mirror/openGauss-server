@@ -81,7 +81,6 @@
 
 #define MAX_NUMA_NODE 16
 
-
 extern THR_LOCAL uint32 *g_workingVersionNum;
 
 static void RemoveProcFromArray(int code, Datum arg);
@@ -270,6 +269,7 @@ void InitProcGlobal(void)
     g_instance.proc_base->checkpointerLatch = NULL;
     g_instance.proc_base->bgworkerFreeProcs  = NULL;	
     g_instance.proc_base->cbmwriterLatch = NULL;
+    g_instance.proc_base->ShareStoragexlogCopyerLatch = NULL;
     pg_atomic_init_u32(&g_instance.proc_base->procArrayGroupFirst, INVALID_PGPROCNO);
     pg_atomic_init_u32(&g_instance.proc_base->clogGroupFirst, INVALID_PGPROCNO);
 
@@ -499,7 +499,7 @@ static inline void ReleaseChildSlot(void)
         t_thrd.role == WLM_CPMONITOR) ||
         IsJobAspProcess() || t_thrd.role == STREAMING_BACKEND || IsStatementFlushProcess() || IsJobSnapshotProcess() ||
         t_thrd.postmaster_cxt.IsRPCWorkerThread || IsJobPercentileProcess() || t_thrd.role == ARCH ||
-        IsTxnSnapCapturerProcess() || IsTxnSnapWorkerProcess() || IsRbCleanerProcess() || IsRbWorkerProcess() || t_thrd.role == GLOBALSTATS_THREAD ||
+        IsTxnSnapCapturerProcess() || IsRbCleanerProcess() || t_thrd.role == GLOBALSTATS_THREAD ||
         t_thrd.role == BARRIER_ARCH || t_thrd.role == BARRIER_CREATOR || t_thrd.role == APPLY_LAUNCHER)) {
         (void)ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
     }
@@ -965,22 +965,18 @@ int GetAuxProcEntryIndex(int baseIdx)
         index = baseIdx + NUM_SINGLE_AUX_PROC;
         if (t_thrd.bootstrap_cxt.MyAuxProcType == PageWriterProcess) {
             index += get_pagewriter_thread_id();
-        } else if (t_thrd.bootstrap_cxt.MyAuxProcType == MultiBgWriterProcess) {
-            index += get_bgwriter_thread_id() + MAX_PAGE_WRITER_THREAD_NUM;
         } else if (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess) {
-            index += MultiRedoGetWorkerId() + MAX_PAGE_WRITER_THREAD_NUM + MAX_BG_WRITER_THREAD_NUM; 
+            index += MultiRedoGetWorkerId() + MAX_PAGE_WRITER_THREAD_NUM;
         } else if (t_thrd.bootstrap_cxt.MyAuxProcType == TpoolListenerProcess) {
             /* thread pool listerner slots follow page redo threads */
             index += t_thrd.threadpool_cxt.listener->GetGroup()->GetGroupId() +
                      MAX_PAGE_WRITER_THREAD_NUM +
-                     MAX_BG_WRITER_THREAD_NUM +
                      MAX_RECOVERY_THREAD_NUM;
         }
 #ifdef ENABLE_MULTIPLE_NODES
         else if (t_thrd.bootstrap_cxt.MyAuxProcType == TsCompactionConsumerProcess) {
             index += CompactionWorkerProcess::GetMyCompactionConsumerOrignId() +
                      MAX_PAGE_WRITER_THREAD_NUM +
-                     MAX_BG_WRITER_THREAD_NUM +
                      MAX_RECOVERY_THREAD_NUM +
                      g_instance.shmem_cxt.ThreadPoolGroupNum;
         }
@@ -1225,11 +1221,8 @@ static void ProcKill(int code, Datum arg)
         if (dlist_is_empty(&leader->lockGroupMembers)) {
             leader->lockGroupLeader = NULL;
             if (leader != t_thrd.proc) {
-                /* Leader exited first; return its PGPROC. */
-                pthread_mutex_lock(&g_instance.proc_base_lock);
-                leader->links.next = (SHM_QUEUE*)g_instance.proc_base->freeProcs;
-                g_instance.proc_base->freeProcs = leader;
-                pthread_mutex_unlock(&g_instance.proc_base_lock);
+                /* The leader must be the last one. */
+                ereport(PANIC, (errmsg("The bgworker exits last, it can't happen")));
             }
         } else if (leader != t_thrd.proc) {
             t_thrd.proc->lockGroupLeader = NULL;
@@ -1255,6 +1248,7 @@ static void ProcKill(int code, Datum arg)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to release mutex lock for deleMemContextMutex.")));
 
+    clean_proc_dw_buf();
     pthread_mutex_lock(&g_instance.proc_base_lock);
 
     /*
@@ -1277,7 +1271,6 @@ static void ProcKill(int code, Datum arg)
 
     /* Clean subxid cache if needed. */
     ProcSubXidCacheClean();
-    clean_proc_dw_buf();
     /* PGPROC struct isn't mine anymore */
     t_thrd.proc = NULL;
 
@@ -1345,6 +1338,8 @@ static void AuxiliaryProcKill(int code, Datum arg)
         ereport(ERROR,
                 (errcode(ERRCODE_LOCK_NOT_AVAILABLE), errmsg("failed to release mutex lock for deleMemContextMutex.")));
 
+    clean_proc_dw_buf();
+
     pthread_mutex_lock(&g_instance.proc_base_lock);
 
     /* Mark auxiliary proc no longer in use */
@@ -1352,8 +1347,6 @@ static void AuxiliaryProcKill(int code, Datum arg)
 
     errno_t rc = memset_s(t_thrd.proc->myProgName, sizeof(t_thrd.proc->myProgName), 0, sizeof(t_thrd.proc->myProgName));
     securec_check(rc, "", "");
-
-    clean_proc_dw_buf();
 
     /* PGPROC struct isn't mine anymore */
     t_thrd.proc = NULL;

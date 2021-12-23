@@ -2186,7 +2186,7 @@ begin
     return true;     
 end;
 $$ language plpgsql;
-call redis_func_0000(168);
+select redis_func_0000(168);
  redis_func_0000 
 -----------------
  t

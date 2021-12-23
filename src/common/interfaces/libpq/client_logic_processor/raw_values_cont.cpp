@@ -339,7 +339,9 @@ bool RawValues::get_unprocessed_data(const RawValuesList *raw_values_list, const
             raw_value->m_processed_data_size <= 3) {
             return false;
         }
-        int x = strncmp((const char *)raw_value->m_processed_data + 1, (const char *)processed_data,
+
+        unsigned char offset = raw_value->m_is_param ? 0 : 1;
+        int x = strncmp((const char *)raw_value->m_processed_data + offset, (const char *)processed_data,
             raw_value->m_processed_data_size - 3);
         if (x == 0) {
             if (raw_value->m_data[0] == '\'') {

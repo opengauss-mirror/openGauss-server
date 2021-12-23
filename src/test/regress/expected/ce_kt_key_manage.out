@@ -1,7 +1,5 @@
 -- clean before test
 \! gs_ktool -d all
---?NOTICE: created new log file :.*
---?NOTICE: created new key store file :.*
 DELETE ALL
 
 \! rm -rf export_import_ksf && mkdir export_import_ksf

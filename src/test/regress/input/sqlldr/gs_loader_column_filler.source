@@ -1,0 +1,35 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+
+create table SQLLDR_TBL2
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20)
+);
+
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler1.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler2.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler3.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_TBL2 order by 1,2,3;
+
+-- teardown
+drop table SQLLDR_TBL;
+drop table SQLLDR_TBL2;

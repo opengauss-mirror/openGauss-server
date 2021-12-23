@@ -226,7 +226,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #ifdef USE_ASSERT_CHECKING
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -w -v -r -j %d -l %s >> %s 2>&1",
+                    "gs_clean -a -p %d -h localhost -v -r -j %d -l %s >> %s 2>&1",
                     g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers,
                     getGsCleanLogLevel(),
@@ -235,7 +235,7 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 #else
                 rc = sprintf_s(cmd,
                     sizeof(cmd),
-                    "gs_clean -a -p %d -h localhost -w -v -r -j %d -l %s > /dev/null 2>&1",
+                    "gs_clean -a -p %d -h localhost -v -r -j %d -l %s > /dev/null 2>&1",
                     g_instance.attr.attr_network.PoolerPort,
                     u_sess->attr.attr_storage.twophase_clean_workers,
                     getGsCleanLogLevel());
@@ -740,14 +740,15 @@ static void DropTempSchema(PGconn* conn, char* nspname)
 
     char toastnspName[NAMEDATALEN] = {0};
     /* SQL Statement */
-    char STMT_DROP_TEMP_SCHEMA[2 * NAMEDATALEN + 64] = {0}; // A secure enough size to concat DROP statements.
+    char STMT_DROP_TEMP_SCHEMA[2 * NAMEDATALEN + 64] = {0};
 
-    rc = sprintf_s(toastnspName, NAMEDATALEN, "pg_toast_temp_%s", nspname + strlen("pg_temp_"));
+    rc = snprintf_s(toastnspName, NAMEDATALEN, strlen(nspname) + 7, "pg_toast_temp_%s", nspname + 8);
     securec_check_ss_c(rc, "\0", "\0");
 
-    rc = sprintf_s(STMT_DROP_TEMP_SCHEMA,
+    rc = snprintf_s(STMT_DROP_TEMP_SCHEMA,
         sizeof(STMT_DROP_TEMP_SCHEMA),
-        "DROP SCHEMA \"%s\", \"%s\" CASCADE;",
+        2 * strlen(nspname) + 30,
+        "DROP SCHEMA %s, %s CASCADE;",
         nspname,
         toastnspName);
     securec_check_ss_c(rc, "\0", "\0");

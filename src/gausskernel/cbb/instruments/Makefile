@@ -24,7 +24,7 @@ subdir = src/gausskernel/cbb/instruments
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
-SUBDIRS     = utils unique_sql workload event user percentile wdr slow_query ash capture_view statement
+SUBDIRS     = utils unique_sql workload event user percentile wdr slow_query ash capture_view statement func_control 
 
 include $(top_srcdir)/src/gausskernel/common.mk
 

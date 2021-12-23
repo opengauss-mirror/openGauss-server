@@ -62,7 +62,7 @@ void CBMWriterMain(void)
     ResourceOwner cbmwriter_resourceOwner;
 
     ereport(LOG, (errmsg("cbm writer started")));
-    u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
+    u_sess->attr.attr_storage.CheckPointTimeout = ENABLE_INCRE_CKPT
                                                       ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                       : u_sess->attr.attr_storage.fullCheckPointTimeout;
 
@@ -131,6 +131,8 @@ void CBMWriterMain(void)
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -206,7 +208,7 @@ void CBMWriterMain(void)
         if (t_thrd.cbm_cxt.got_SIGHUP) {
             t_thrd.cbm_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
-            u_sess->attr.attr_storage.CheckPointTimeout = g_instance.attr.attr_storage.enableIncrementalCheckpoint
+            u_sess->attr.attr_storage.CheckPointTimeout = ENABLE_INCRE_CKPT
                                                               ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                               : u_sess->attr.attr_storage.fullCheckPointTimeout;
         }

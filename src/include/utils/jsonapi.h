@@ -3,7 +3,7 @@
  * jsonapi.h
  *      Declarations for JSON API support.
  *
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
@@ -17,8 +17,7 @@
 
 #include "lib/stringinfo.h"
 
-typedef enum
-{
+typedef enum {
     JSON_TOKEN_INVALID,
     JSON_TOKEN_STRING,
     JSON_TOKEN_NUMBER,
@@ -34,7 +33,6 @@ typedef enum
     JSON_TOKEN_END,
 } JsonTokenType;
 
-
 /*
  * All the fields in this structure should be treated as read-only.
  *
@@ -48,8 +46,7 @@ typedef enum
  * AFTER the end of the token, i.e. where there would be a nul byte
  * if we were using nul-terminated strings.
  */
-typedef struct JsonLexContext
-{
+typedef struct JsonLexContext {
     char *input;
     int input_length;
     char *token_start;
@@ -67,7 +64,6 @@ typedef void (*json_ofield_action) (void *state, char *fname, bool isnull);
 typedef void (*json_aelem_action) (void *state, bool isnull);
 typedef void (*json_scalar_action) (void *state, char *token, JsonTokenType tokentype);
 
-
 /*
  * Semantic Action structure for use in parsing json.
  * Any of these actions can be NULL, in which case nothing is done at that
@@ -75,8 +71,7 @@ typedef void (*json_scalar_action) (void *state, char *token, JsonTokenType toke
  * to doing a pure parse with no side-effects, and is therefore exactly
  * what the json input routines do.
  */
-typedef struct JsonSemAction
-{
+typedef struct JsonSemAction {
     void *semstate;
     json_struct_action object_start;
     json_struct_action object_end;
@@ -110,8 +105,6 @@ extern void pg_parse_json(JsonLexContext *lex, JsonSemAction *sem);
  * functions, otherwise use  makeJsonLexContextCstringLen().
  */
 extern JsonLexContext *makeJsonLexContext(text *json, bool need_escapes);
-extern JsonLexContext *makeJsonLexContextCstringLen(char *json,
-                                                    int len,
-                                                    bool need_escapes);
+extern JsonLexContext *makeJsonLexContextCstringLen(char *json, int len, bool need_escapes);
 
 #endif   /* JSONAPI_H */

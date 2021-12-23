@@ -196,6 +196,7 @@ List *kmeanspp(KMeansStateDescription *description, List *centroids_candidates, 
     uint32_t current_centroid_idx = description->current_centroid;
     uint32_t tries_until_next_centroid = 0;
     bool no_more_candidates = false;
+    errno_t rc = EOK;
 
     /*
      * we expect to produce all centroids in one go and to be able to produce them because
@@ -258,8 +259,9 @@ List *kmeanspp(KMeansStateDescription *description, List *centroids_candidates, 
             if (unlikely((current_centroid_pgarray != nullptr) and (current_candidate_pgarray != nullptr))) {
                 auto point_coordinates_to = reinterpret_cast<double *>(ARR_DATA_PTR(current_centroid_pgarray));
                 auto point_coordinates_from = reinterpret_cast<double *>(ARR_DATA_PTR(current_candidate_pgarray));
-                memset_s(point_coordinates_to, size_centroid_bytes, 0, size_centroid_bytes);
-                errno_t rc = memcpy_s(point_coordinates_to,
+                rc = memset_s(point_coordinates_to, size_centroid_bytes, 0, size_centroid_bytes);
+                securec_check(rc, "\0", "\0");
+                rc = memcpy_s(point_coordinates_to,
                                         size_centroid_bytes, point_coordinates_from, size_centroid_bytes);
                 securec_check(rc, "\0", "\0");
             }
@@ -381,12 +383,14 @@ void reset_centroids(KMeansStateDescription *description, uint32_t const idx_cen
     Centroid *centroids = description->centroids[idx_centroids];
     Centroid *centroid = nullptr;
     double *centroid_coordinates = nullptr;
+    errno_t rc = EOK;
 
     for (uint32_t c = 0; c < num_centroids; ++c) {
         centroid = centroids + c;
         centroid->statistics.reset();
         centroid_coordinates = reinterpret_cast<double *>(ARR_DATA_PTR(centroid->coordinates));
-        memset_s(centroid_coordinates, size_centroid_bytes, 0, size_centroid_bytes);
+        rc = memset_s(centroid_coordinates, size_centroid_bytes, 0, size_centroid_bytes);
+        securec_check(rc, "\0", "\0");
     }
 }
 

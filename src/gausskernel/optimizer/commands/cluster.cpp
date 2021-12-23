@@ -9,6 +9,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994-5, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -167,10 +168,11 @@ static void RebuildCStoreRelation(
 extern void Start_Prefetch(TableScanDesc scan, SeqScanAccessor* pAccessor, ScanDirection dir);
 extern void SeqScan_Init(TableScanDesc Scan, SeqScanAccessor* pAccessor, Relation relation);
 
-static void swap_partition_relfilenode( Oid partitionOid1, Oid partitionOid2, bool swapToastByContent,
+static void swap_partition_relfilenode(Oid partitionOid1, Oid partitionOid2, bool swapToastByContent,
     TransactionId frozenXid, MultiXactId multiXid, Oid* mappedTables);
 static void partition_relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch);
-static void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch);
+static void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch, TransactionId relfrozenxid,
+    MultiXactId relMultiXid);
 #ifdef ENABLE_MULTIPLE_NODES
 static Datum pgxc_parallel_execution(const char* query, ExecNodes* exec_nodes);
 static int switch_relfilenode_execnode(Oid relOid1, Oid relOid2, bool isbucket, RedisSwitchNode* rsn);
@@ -505,9 +507,21 @@ void cluster_rel(Oid tableOid, Oid partitionOid, Oid indexOid, bool recheck, boo
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot vacuum temporary tables of other sessions")));
     }
 
+    if (RelationIsSubPartitioned(OldHeap)) {
+            ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot cluster a subpartition table")));
+    }
+
     if (RELATION_IS_GLOBAL_TEMP(OldHeap) && !gtt_storage_attached(RelationGetRelid(OldHeap))) {
         relation_close(OldHeap, lockMode);
         gstrace_exit(GS_TRC_ID_cluster_rel);
+        return;
+    }
+
+    if (OldHeap->storage_type == SEGMENT_PAGE) {
+        ereport(LOG, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
+            "to recycle segment space.", RelationGetRelationName(OldHeap))));
+        relation_close(OldHeap, lockMode);
         return;
     }
 
@@ -727,7 +741,7 @@ void mark_index_clustered(Relation rel, Oid indexOid)
      */
     pg_index = heap_open(IndexRelationId, RowExclusiveLock);
 
-    foreach (index, RelationGetIndexList(rel)) {
+    foreach (index, RelationGetIndexList(rel, true)) {
         Oid thisIndexOid = lfirst_oid(index);
 
         indexTuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(thisIndexOid));
@@ -2303,7 +2317,9 @@ static void copy_heap_data(Oid OIDNewHeap, Oid OIDOldHeap, Oid OIDOldIndex, int 
         } else {
             bool isNull = false;
             TransactionId relfrozenxid;
+#ifndef ENABLE_MULTIPLE_NODES
             MultiXactId relminmxid;
+#endif
             Relation rel = heap_open(RelationRelationId, AccessShareLock);
             HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(OIDOldHeap));
             if (!HeapTupleIsValid(tuple)) {
@@ -3653,6 +3669,13 @@ void CBIVacuumFullMainPartiton(Oid parentOid)
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot vacuum temporary tables of other sessions")));
     }
+
+    /* If vacuum full partitioned segment table, give hint here */
+    if (parentHeap->storage_type == SEGMENT_PAGE) {
+        ereport(LOG, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
+            "to recycle segment space.", RelationGetRelationName(parentHeap))));
+    }
+
     /*
      * Also check for active uses of the relation in the current transaction,
      * including open scans and pending AFTER trigger events.
@@ -3741,7 +3764,12 @@ void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int fr
      * case, since cluster() already did it.)  The index lock is taken inside
      * check_index_is_clusterable.
      */
-    oldRelOid = partid_get_parentid(partOid);
+    if (!vacstmt->issubpartition) {
+        oldRelOid = partid_get_parentid(partOid);
+    } else {
+        Oid subparentid = partid_get_parentid(partOid);
+        oldRelOid = partid_get_parentid(subparentid);
+    }
 
     /// to promote the concurrency of vacuum full on partitions in mppdb version,
     /// degrade lockmode from AccessExclusiveLock to AccessShareLock.
@@ -3760,6 +3788,11 @@ void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int fr
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot vacuum temporary tables of other sessions")));
     }
 
+    if (oldHeap->storage_type == SEGMENT_PAGE) {
+        relation_close(oldHeap, AccessShareLock);
+        return;
+    }
+
     /*
      * Also check for active uses of the relation in the current transaction,
      * including open scans and pending AFTER trigger events.
@@ -3767,7 +3800,7 @@ void vacuumFullPart(Oid partOid, VacuumStmt* vacstmt, int freeze_min_age, int fr
     CheckTableNotInUse(oldHeap, "VACUUM");
 
 #ifdef ENABLE_MULTIPLE_NODES
-    if (unlikely(RelationIsTsStore(oldHeap))) {
+    if (unlikely(RelationIsTsStore(oldHeap)) && g_instance.attr.attr_common.enable_tsdb) {
         Tsdb::VacFullCompaction(oldHeap, partOid);
     } else {
         rebuildPartVacFull(oldHeap, partOid, freeze_min_age, freeze_table_age, vacstmt);
@@ -3855,6 +3888,9 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
     bool isNull = false;
     Partition partition = NULL;
     Relation partRel = NULL;
+    Partition parentpartition = NULL;
+    Relation parentpartRel = NULL;
+    Oid subparentid = InvalidOid;
     Relation newHeap = NULL;
     int reindexFlags = 0;
     ObjectAddress object;
@@ -3876,8 +3912,16 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
         partTabRelOptions = (Datum)0;
     }
 
-    partition = partitionOpen(oldHeap, partOid, ExclusiveLock);
-    partRel = partitionGetRelation(oldHeap, partition);
+    if (!vacstmt->issubpartition) {
+        partition = partitionOpen(oldHeap, partOid, ExclusiveLock);
+        partRel = partitionGetRelation(oldHeap, partition);
+    } else {
+        subparentid = partid_get_parentid(partOid);
+        parentpartition = partitionOpen(oldHeap, subparentid, ExclusiveLock);
+        parentpartRel = partitionGetRelation(oldHeap, parentpartition);
+        partition = partitionOpen(parentpartRel, partOid, ExclusiveLock);
+        partRel = partitionGetRelation(parentpartRel, partition);
+    }
     is_shared = partRel->rd_rel->relisshared;
 
     /*
@@ -3934,7 +3978,14 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
     heap_close(newHeap, NoLock);
 
     t_thrd.storage_cxt.EnlargeDeadlockTimeout = true;
-    LockPartition(oldHeap->rd_id, partOid, AccessExclusiveLock, PARTITION_LOCK);
+    List* indexGPIRelList = LockAllGlobalIndexes(oldHeap, AccessExclusiveLock);
+
+    if (!vacstmt->issubpartition) {
+        LockPartition(oldHeap->rd_id, partOid, AccessExclusiveLock, PARTITION_LOCK);
+    } else {
+        LockPartition(parentpartRel->rd_id, partOid, AccessExclusiveLock, PARTITION_LOCK);
+        LockPartition(oldHeap->rd_id, subparentid, AccessExclusiveLock, PARTITION_LOCK);
+    }
 
     /*
      * Swap the physical files of the target and transient tables, then
@@ -3943,14 +3994,22 @@ static void rebuildPartVacFull(Relation oldHeap, Oid partOid, int freezeMinAge, 
     finishPartitionHeapSwap(partRel->rd_id, OIDNewHeap, swapToastByContent, frozenXid, multiXid);
 
     /* Close relcache entry, but keep lock until transaction commit */
-    releaseDummyRelation(&partRel);
-    partitionClose(oldHeap, partition, NoLock);
+    if (!vacstmt->issubpartition) {
+        releaseDummyRelation(&partRel);
+        partitionClose(oldHeap, partition, NoLock);
+    } else {
+        releaseDummyRelation(&partRel);
+        partitionClose(parentpartRel, partition, NoLock);
+        releaseDummyRelation(&parentpartRel);
+        partitionClose(oldHeap, parentpartition, NoLock);
+    }
+    ReleaseLockAllGlobalIndexes(&indexGPIRelList, NoLock);
     heap_close(oldHeap, NoLock);
 
     /* Rebuild index of partitioned table */
     reindexFlags = REINDEX_REL_SUPPRESS_INDEX_USE;
-    (void)reindexPartition(tableOid, partOid, reindexFlags, REINDEX_ALL_INDEX);
     (void)ReindexRelation(tableOid, reindexFlags, REINDEX_ALL_INDEX, NULL, NULL, false, GLOBAL_INDEX);
+    (void)reindexPartition(tableOid, partOid, reindexFlags, REINDEX_ALL_INDEX);
 
 #ifndef ENABLE_MULTIPLE_NODES
     if (RelationIsCUFormatByOid(tableOid)) {
@@ -5165,8 +5224,11 @@ static int64 execute_relfilenode_swap(Oid relOid1, Oid relOid2, uint8 needSwitch
         /* Partition table */
         partition_relfilenode_swap(relOid1, relOid2, needSwitch);
     } else {
+        TransactionId relfrozenxid;
+        MultiXactId relMultiXid;
+        getRelationRelxids(rel, &relfrozenxid, &relMultiXid);
         /* Ordinary table */
-        relfilenode_swap(relOid1, relOid2, needSwitch);
+        relfilenode_swap(relOid1, relOid2, needSwitch, relfrozenxid, relMultiXid);
     }
 
     /* swap bucket info while doing data redis */
@@ -5829,7 +5891,8 @@ void swapRelationIndicesRelfileNode(Relation rel1, Relation rel2, uint8 needSwit
  * @out         : None
  * @return      : None
  */
-void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch)
+void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch, TransactionId relfrozenxid,
+    MultiXactId relMultiXid)
 {
     Oid mapped_tables[4];
     int i;
@@ -5847,8 +5910,8 @@ void relfilenode_swap(Oid OIDOldHeap, Oid OIDNewHeap, uint8 needSwitch)
         OIDNewHeap,
         (OIDOldHeap == RelationRelationId),
         false,
-        u_sess->utils_cxt.RecentGlobalXmin,
-        GetOldestMultiXactId(),
+        relfrozenxid,
+        relMultiXid,
         mapped_tables);
     /*
      * Now we must remove any relation mapping entries that we set up for the

@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -230,7 +231,7 @@ Oid exprType(const Node* expr)
             type = INT4OID;
             break;
         case T_Rownum:
-            type = INT8OID;
+            type = NUMERICOID;
             break;
         case T_GradientDescentExpr:
             type = ((const GradientDescentExpr*)expr)->fieldtype;

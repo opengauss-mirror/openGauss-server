@@ -35,7 +35,8 @@ partition location_4 values less than (5000),
 partition location_5 values less than (7000),
 partition location_7 values less than (maxvalue)
 );
-ERROR:  relation "vec_hashjoin_table_01_num" already exists
+ERROR:  relation "vec_hashjoin_table_01_num" already exists in schema "sonic_hashjoin_test_number"
+DETAIL:  creating new table with existing name in the same schema
 CREATE TABLE sonic_hashjoin_test_number.VEC_HASHJOIN_TABLE_02_NUM(
 C_INT INT,
 C_BIGINT BIGINT,
@@ -51,11 +52,13 @@ h real,
 i double precision,
 j boolean
 ) with(orientation = column) ;
-ERROR:  relation "vec_hashjoin_table_02_num" already exists
+ERROR:  relation "vec_hashjoin_table_02_num" already exists in schema "sonic_hashjoin_test_number"
+DETAIL:  creating new table with existing name in the same schema
 CREATE TABLE sonic_hashjoin_test_number.VEC_HASHJOIN_TABLE_03_NUM(
 C_INT INT
 ) with(orientation = column) ;
-ERROR:  relation "vec_hashjoin_table_03_num" already exists
+ERROR:  relation "vec_hashjoin_table_03_num" already exists in schema "sonic_hashjoin_test_number"
+DETAIL:  creating new table with existing name in the same schema
 CREATE TABLE sonic_hashjoin_test_number.VEC_HASHJOIN_TABLE_04_NUM(
 C_INT INT,
 C_BIGINT BIGINT,
@@ -71,7 +74,8 @@ h real,
 i double precision,
 j boolean
 ) with(orientation = column) ;
-ERROR:  relation "vec_hashjoin_table_04_num" already exists
+ERROR:  relation "vec_hashjoin_table_04_num" already exists in schema "sonic_hashjoin_test_number"
+DETAIL:  creating new table with existing name in the same schema
 select * from VEC_HASHJOIN_TABLE_01_NUM t1 join VEC_HASHJOIN_TABLE_01_NUM t2 on t1.c_int = t2.c_int and t2.c_bigint=t2.c_bigint and t1.c_smallint = t2.c_smallint where t1.a is not null order by 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15 limit 1000;
  c_int | c_bigint | c_smallint |    a     |   b    |     c      |     d      |   e    |      f       |     g     |    h    |      i       | j | c_int | c_bigint | c_smallint |    a     |   b    |     c      |              d               |        e         |      f       |     g     |    h    |      i       | j 
 -------+----------+------------+----------+--------+------------+------------+--------+--------------+-----------+---------+--------------+---+-------+----------+------------+----------+--------+------------+------------------------------+------------------+--------------+-----------+---------+--------------+---

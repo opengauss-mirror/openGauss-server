@@ -233,6 +233,8 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
         /* since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
 
+        t_thrd.log_cxt.call_stack = NULL;
+
         /* Prevents interrupts while cleaning up */
         HOLD_INTERRUPTS();
 
@@ -260,8 +262,8 @@ NON_EXEC_STATIC void GlobalStatsTrackerMain()
         MemoryContext oldStatLocalContext = u_sess->stat_cxt.pgStatLocalContext;
 
         u_sess->stat_cxt.pgStatLocalContext =
-            AllocSetContextCreate(g_instance.stat_cxt.tableStat->global_stats_cxt, "Global Statistics snapshot",
-                ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE, SHARED_CONTEXT);
+            AllocSetContextCreate(u_sess->top_mem_cxt, "Global Statistics snapshot",
+                ALLOCSET_SMALL_MINSIZE, ALLOCSET_SMALL_INITSIZE, ALLOCSET_SMALL_MAXSIZE);
         
         pgstat_fetch_global();
 

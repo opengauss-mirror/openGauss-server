@@ -1045,26 +1045,24 @@ restart:
         }
     }
 
-    if (P_ISLEAF(opaque) && !P_RIGHTMOST(opaque)) {
-        /*
-         * vacuum logic for multi-version index. we use UBTreePagePruneOpt() instead
-         * of original vacuum.
-         *
-         *      Note: we don't prune or delete right most page here. Since the logic
-         *            is complicated, and there is not much benefit.
-         */
-        Assert(P_ISLEAF(opaque));
-
+    /*
+     * vacuum logic for multi-version index. We use UBTreePagePruneOpt() instead
+     * of original vacuum.
+     *
+     *      Note: we only prune leaf pages and never delete right most page.
+     */
+    if (P_ISLEAF(opaque)) {
         /* acquire the write lock for clean up */
         LockBuffer(buf, BUFFER_LOCK_UNLOCK);
         LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
 
-        if (UBTreePagePruneOpt(rel, buf, false)) {
-            if (PageGetMaxOffsetNumber(page) == 1) {
-                /* already empty (only HIKEY left), ok to delete */
-                /* Note: this is not right most page */
-                deleteNow = true;
-            }
+        bool ignore;
+        /* prune and freeze this index page */
+        FreezeSingleIndexPage(rel, buf, &ignore);
+
+        if (!P_RIGHTMOST(opaque) && PageGetMaxOffsetNumber(page) == 1) {
+            /* already empty (only HIKEY left), ok to delete */
+            deleteNow = true;
         }
     }
 
@@ -1129,6 +1127,7 @@ Datum ubtmerge(PG_FUNCTION_ARGS)
     IndexScanDesc srcIdxRelScan = NULL;
     BTOrderedIndexListElement *ele = NULL;
     TupleDesc tupdes = RelationGetDescr(dstIdxRel);
+    int keysz = IndexRelationGetNumberOfKeyAttributes(dstIdxRel);
     BTScanInsert itupKey = UBTreeMakeScanKey(dstIdxRel, NULL);
     BTWriteState wstate;
     BTPageState *state = NULL;
@@ -1150,7 +1149,7 @@ Datum ubtmerge(PG_FUNCTION_ARGS)
         offsetItup = (BlockNumber)lfirst_int(cell2);
 
         loadItup = UBTreeGetIndexTuple(srcIdxRelScan, dir, offsetItup);
-        orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, itupKey->scankeys, itupKey->keysz,
+        orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, itupKey->scankeys, keysz,
             loadItup, offsetItup, srcIdxRelScan);
     }
 
@@ -1193,7 +1192,7 @@ Datum ubtmerge(PG_FUNCTION_ARGS)
             // load next index tuple
             loadItup = UBTreeGetIndexTuple(srcIdxRelScan, dir, offsetItup);
             // insert load index tuple into orderedTupleList
-            orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, itupKey->scankeys, itupKey->keysz,
+            orderedTupleList = insert_ordered_index(orderedTupleList, tupdes, itupKey->scankeys, keysz,
                 loadItup, offsetItup, srcIdxRelScan);
         }
     };
@@ -1279,7 +1278,7 @@ static bool IndexPageXidMinMax(Page page, ShortTransactionId* min, ShortTransact
         UstoreIndexXid uxid;
 
         itemid = PageGetItemId(page, offnum);
-        if (!ItemIdIsNormal(itemid) && !IndexItemIdIsFrozen(itemid)) {
+        if (!ItemIdHasStorage(itemid)) {
             continue;
         }
 
@@ -1332,13 +1331,16 @@ static void IndexPageShiftBase(Page page, int64 delta, bool needWal, Buffer buf)
     /* Do the update.  No ereport(ERROR) until changes are logged */
     START_CRIT_SECTION();
 
+    /* reset pd_prune_xid for prune hint */
+    ((PageHeader)page)->pd_prune_xid = InvalidTransactionId;
+
     for (offnum = P_FIRSTDATAKEY(opaque); offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
         ItemId itemid;
         IndexTuple itup;
         UstoreIndexXid uxid;
 
         itemid = PageGetItemId(page, offnum);
-        if (!ItemIdIsNormal(itemid) && !IndexItemIdIsFrozen(itemid)) {
+        if (!ItemIdHasStorage(itemid)) {
             continue;
         }
 
@@ -1386,12 +1388,11 @@ static void IndexPageShiftBase(Page page, int64 delta, bool needWal, Buffer buf)
     WHITEBOX_TEST_STUB("IndexPageShiftBase-end", WhiteboxDefaultErrorEmit);
 }
 
-static void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned)
+void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned)
 {
     int nfrozen = 0;
     OffsetNumber nowfrozen[MaxIndexTuplesPerPage];
     TransactionId oldestXmin = u_sess->utils_cxt.RecentGlobalDataXmin;
-    TransactionId latestRemovedXid = InvalidTransactionId;
 
     WHITEBOX_TEST_STUB("FreezeSingleIndexPage", WhiteboxDefaultErrorEmit);
 
@@ -1405,7 +1406,7 @@ static void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned)
 
     for (OffsetNumber offnum = P_FIRSTDATAKEY(opaque); offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
         ItemId itemid = PageGetItemId(page, offnum);
-        if (!ItemIdIsNormal(itemid) && !IndexItemIdIsFrozen(itemid)) {
+        if (!ItemIdHasStorage(itemid)) {
             continue;
         }
 
@@ -1422,7 +1423,6 @@ static void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned)
                 }
                 uxid->xmin = FrozenTransactionId;
                 nowfrozen[nfrozen++] = offnum;
-                latestRemovedXid = Max(latestRemovedXid, xmin);
             }
         }
         /* check xmax */
@@ -1434,34 +1434,29 @@ static void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned)
                         (errcode(ERRCODE_DATA_CORRUPTED), errmsg_internal("cannot freeze commited xmax %lu", xmax)));
                 }
                 uxid->xmax = InvalidTransactionId;
-                latestRemovedXid = Max(latestRemovedXid, xmax);
             }
         }
     }
 
-    if (nfrozen > 0) {
-        START_CRIT_SECTION();
+    START_CRIT_SECTION();
 
-        MarkBufferDirty(buf);
-        /* Write WAL record if needed */
-        if (RelationNeedsWAL(rel)) {
-            xl_ubtree2_freeze xlrec;
-            xlrec.latestRemovedXid = latestRemovedXid;
-            xlrec.blkno = BufferGetBlockNumber(buf);
-            xlrec.nfrozen = nfrozen;
+    MarkBufferDirty(buf);
+    /* Write WAL record if needed */
+    if (RelationNeedsWAL(rel)) {
+        xl_ubtree2_freeze xlrec;
+        xlrec.oldestXmin = oldestXmin;
+        xlrec.blkno = BufferGetBlockNumber(buf);
+        xlrec.nfrozen = nfrozen;
 
-            XLogBeginInsert();
-            XLogRegisterData((char*)&xlrec, SizeOfUBTree2Freeze);
-            XLogRegisterData((char*)&nowfrozen, nfrozen * sizeof(OffsetNumber));
+        XLogBeginInsert();
+        XLogRegisterData((char*)&xlrec, SizeOfUBTree2Freeze);
+        XLogRegisterData((char*)&nowfrozen, nfrozen * sizeof(OffsetNumber));
 
-            XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
+        XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 
-            XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_FREEZE);
+        XLogRecPtr recptr = XLogInsert(RM_UBTREE2_ID, XLOG_UBTREE2_FREEZE);
 
-            PageSetLSN(page, recptr);
-        }
-
-        END_CRIT_SECTION();
+        PageSetLSN(page, recptr);
     }
 
     END_CRIT_SECTION();
@@ -1479,7 +1474,6 @@ static void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned)
  */
 bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool needWal, Buffer buf)
 {
-    TransactionId base = InvalidTransactionId;
     ShortTransactionId min = InvalidTransactionId;
     ShortTransactionId max = InvalidTransactionId;
     bool found = false;
@@ -1492,69 +1486,46 @@ bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool nee
     if (!P_ISLEAF(opaque)) {
         return false;
     }
-    /*
-     * if the first change to pd_xid_base or pd_multi_base fails ,
-     * will attempt to freeze this page.
-     */
-    const int tryTimes = 2;
-    for (int i = 0; i < tryTimes; i++) {
-        base = opaque->xid_base;
 
-        /* Can we already store this xid? */
-        if (xid >= base + FirstNormalTransactionId && xid <= base + MaxShortTransactionId) {
-            return hasPruned;
-        }
-
-        /* Find minimum and maximum xids in the page */
-        found = IndexPageXidMinMax(page, &min, &max);
-        /* No items on the page? */
-        if (!found) {
-            int64 delta;
-
-            delta = (xid - FirstNormalTransactionId) - opaque->xid_base;
-
-            IndexPageShiftBase(page, delta, needWal, buf);
-            return hasPruned;
-        }
-
-        TransactionId trueMin = ShortTransactionIdToNormal(base, min);
-        TransactionId trueMax = ShortTransactionIdToNormal(base, max);
-        trueMin = Min(trueMin, xid);
-        trueMax = Max(trueMax, xid);
-        bool needFreezePage = (trueMax - trueMin > MaxShortTransactionId - FirstNormalTransactionId);
-        if (needFreezePage) {
-            /* can't fit all xid in the same page */
-            Assert(rel != NULL && BufferIsValid(buf));
-            FreezeSingleIndexPage(rel, buf, &hasPruned);
-            continue;
-        }
-
-        /* Can we just shift base on the page */
-        if (xid < base + FirstNormalTransactionId) {
-            int64 freeDelta = MaxShortTransactionId - max;
-            int64 requiredDelta = (base + FirstNormalTransactionId) - xid;
-
-            if (requiredDelta <= freeDelta) {
-                IndexPageShiftBase(page, -(freeDelta + requiredDelta) / 2, needWal, buf);
-                return hasPruned;
-            }
-        } else {
-            int64 freeDelta = min - FirstNormalTransactionId;
-            int64 requiredDelta = xid - (base + MaxShortTransactionId);
-
-            if (requiredDelta <= freeDelta) {
-                IndexPageShiftBase(page, (freeDelta + requiredDelta) / 2, needWal, buf);
-                return hasPruned;
-            }
-        }
-
-        if (i == 1) {
-            break;
-        }
-
-        /* Have to try freeing the page... */
-        Assert(0);
+    TransactionId base = opaque->xid_base;
+    /* Can we already store this xid? */
+    if (xid >= base + FirstNormalTransactionId && xid <= base + MaxShortTransactionId) {
+        return false;
     }
+
+    /* remove old xids first. we don't need to do this when creating index without valid rel and buf */
+    if (rel != NULL && BufferIsValid(buf)) {
+        FreezeSingleIndexPage(rel, buf, &hasPruned);
+    }
+
+    /* Find minimum and maximum xids in the page */
+    found = IndexPageXidMinMax(page, &min, &max);
+    /* No items on the page? */
+    if (!found) {
+        int64 delta = (xid - FirstNormalTransactionId) - opaque->xid_base;
+        IndexPageShiftBase(page, delta, needWal, buf);
+        return hasPruned;
+    }
+
+    /* Can we just shift base on the page */
+    if (xid < base + FirstNormalTransactionId) {
+        int64 freeDelta = MaxShortTransactionId - max;
+        int64 requiredDelta = (base + FirstNormalTransactionId) - xid;
+
+        if (requiredDelta <= freeDelta) {
+            IndexPageShiftBase(page, -(freeDelta + requiredDelta) / 2, needWal, buf);
+            return hasPruned;
+        }
+    } else {
+        int64 freeDelta = min - FirstNormalTransactionId;
+        int64 requiredDelta = xid - (base + MaxShortTransactionId);
+
+        if (requiredDelta <= freeDelta) {
+            IndexPageShiftBase(page, (freeDelta + requiredDelta) / 2, needWal, buf);
+            return hasPruned;
+        }
+    }
+
     ereport(ERROR, (errcode(ERRCODE_CANNOT_MODIFY_XIDBASE),
         errmsg("Can't fit xid into page. now xid is %lu, base is %lu, min is %u, max is %u",
             xid, base, min, max)));

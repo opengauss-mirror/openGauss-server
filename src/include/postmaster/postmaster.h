@@ -217,7 +217,7 @@ extern void set_disable_conn_mode(void);
 #endif
 
 bool IsFromLocalAddr(Port* port);
-extern bool IsMatchSocketAddr(struct sockaddr* sock_addr, int compare_port);
+extern bool IsMatchSocketAddr(const struct sockaddr* sock_addr, int compare_port);
 extern bool IsHAPort(Port* port);
 extern bool IsConnectBasePort(const Port* port);
 extern ThreadId initialize_util_thread(knl_thread_role role, void* payload = NULL);
@@ -238,6 +238,7 @@ extern uint64_t mc_timers_us(void);
 extern bool SetDBStateFileState(DbState state, bool optional);
 extern void GPCResetAll();
 extern void initRandomState(TimestampTz start_time, TimestampTz stop_time);
+extern bool PMstateIsRun(void);
 extern ServerMode GetHaShmemMode(void);
 extern void InitProcessAndShareMemory();
 extern void InitShmemForDcfCallBack();

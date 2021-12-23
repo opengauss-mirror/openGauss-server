@@ -1444,11 +1444,7 @@ static HbaLine* parse_hba_line(const char* line, int line_num, HbaLine* parsedli
         unsupauth = "ident";
 #endif
     else if (strncmp(token->string, "peer", sizeof("peer")) == 0)
-#ifdef USE_IDENT
         parsedline->auth_method = uaPeer;
-#else
-        unsupauth = "peer";
-#endif
     else if (strncmp(token->string, "krb5", sizeof("krb5")) == 0)
 #ifdef KRB5
         parsedline->auth_method = uaKrb5;

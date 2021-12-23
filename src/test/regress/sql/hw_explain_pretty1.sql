@@ -51,7 +51,7 @@ begin
    explain performance select count(*) from explain_table_03 where a = param_1;
 end;
 /
-select * from test_explain_param(123);
+call test_explain_param(123);
 
 ----
 --- test 1: Insert with nonzero rows

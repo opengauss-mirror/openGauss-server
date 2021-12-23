@@ -29,7 +29,7 @@
 #include "commands/sequence.h"
 
 extern bool IsGTMConnected(void);
-extern GtmHostIndex InitGTM(void);
+extern GtmHostIndex InitGTM(bool useCache = true);
 extern void CloseGTM(void);
 extern void ResetGtmHandleXmin(GTM_TransactionKey txnKey);
 extern int SetGTMVacuumFlag(GTM_TransactionKey txnKey, bool is_vacuum);

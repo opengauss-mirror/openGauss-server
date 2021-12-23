@@ -1615,3 +1615,9 @@ select length(md5((f1[1]).c2)) from dest;
 
 drop table dest;
 drop type textandtext;
+CREATE TABLE array_test1(
+COL24 SMALLDATETIME[]);
+INSERT INTO array_test1 values(
+array[TO_DATE('1995-08-08', 'YYYY-MM-DD')] 
+);
+DROP TABLE array_test1;

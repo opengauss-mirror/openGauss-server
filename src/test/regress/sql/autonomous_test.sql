@@ -4,14 +4,13 @@
 /* transaction declaration is supported, and anonymous block nesting    */
 /* is not supported.                                                    */
 /************************************************************************/
-
 /* Normal anonymous block printing */
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 	res int;
 	res2 text;
 BEGIN
-	raise notice 'just use call.';
+	dbe_output.print_line('just use call.');
 	res2 := 'aa55';
 	res := 55;
 END;
@@ -22,7 +21,7 @@ create table t1(a int ,b text);
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-	raise notice 'just use call.';
+	dbe_output.print_line('just use call.');
 	insert into t1 values(1,'you are so cute!');
 END;
 /
@@ -39,7 +38,7 @@ START TRANSACTION;
 DECLARE 
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-	raise notice 'just use call.';
+	dbe_output.print_line('just use call.');
 	insert into t1 values(1,'you are so cute,will commit!');
 END;
 /
@@ -61,7 +60,7 @@ BEGIN
 	DECLARE 
 		PRAGMA AUTONOMOUS_TRANSACTION;
 	BEGIN
-		raise notice 'just use call.';
+		dbe_output.print_line('just use call.');
 		insert into t1 values(1,'can you rollback!');
 	END;
 	insert into t1 values(2,'I will rollback!');
@@ -81,7 +80,7 @@ DECLARE
 	res int := 0;
 	res2 int := 1;
 BEGIN
-	raise notice 'just use call.';
+	dbe_output.print_line('just use call.');
 	res2 = res2/res;
 END;
 /
@@ -94,11 +93,11 @@ DECLARE
 	res int := 0;
 	res2 int := 1;
 BEGIN
-	raise notice 'just use call.';
+	dbe_output.print_line('just use call.');
 	res2 = res2/res;
 EXCEPTION
 	WHEN division_by_zero THEN
-	    raise notice 'autonomous throw exception.';
+		dbe_output.print_line('autonomous throw exception.');
 END;
 /
 
@@ -106,33 +105,27 @@ END;
 /************************************************************************/
 /*                              PROCEDURE                               */
 /************************************************************************/
-/* int return value */
-CREATE OR REPLACE PROCEDURE autonomous_1(out res int)  AS 
-DECLARE 
-	PRAGMA AUTONOMOUS_TRANSACTION;
-BEGIN
-	res := 55;
-END;
-/
-select autonomous_1();
- 
 /* text return value */
-CREATE OR REPLACE PROCEDURE autonomous_2(proc_name VARCHAR2(10), out res2 text)  AS 
+CREATE OR REPLACE function autonomous_2(proc_name VARCHAR2(10)) return text  AS 
 DECLARE 
+res2 text;
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	res2 := 'aa55';
+        return res2;
 END;
 /
 select autonomous_2('');
 
 /* record return value */
-CREATE OR REPLACE PROCEDURE autonomous_3(out res int, out res2 text)  AS 
+CREATE OR REPLACE function autonomous_3(out res int) return text  AS 
 DECLARE 
+        res2 text;
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	res2 := 'aa55';
 	res := 55;
+        return res2;
 END;
 /
 select autonomous_3();
@@ -152,13 +145,13 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t2 values(num3, num4); 
-	raise notice 'just use call.';
+	dbe_output.print_line('just use call.');
 END;
 /
 CREATE OR REPLACE PROCEDURE autonomous_5(a int, b int)  AS 
 DECLARE 
 BEGIN
-	raise notice 'just no use call.';
+	dbe_output.print_line('just no use call.');
 	insert into t2 values(666, 666);
 	autonomous_4(a,b);
 	rollback;
@@ -181,14 +174,14 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t2 values(num3, num4); 
-	raise notice 'just use call.';
+	dbe_output.print_line('just use call.');
 	rollback;
 END;
 /
 CREATE OR REPLACE PROCEDURE autonomous_7(a int, b int)  AS 
 DECLARE 
 BEGIN
-	raise notice 'just no use call.';
+	dbe_output.print_line('just no use call.');
 	insert into t2 values(666, 666);
 	autonomous_6(a,b);
 END;
@@ -221,7 +214,7 @@ BEGIN
 	autonomous_8();
 EXCEPTION
 	WHEN division_by_zero THEN
-		raise notice 'autonomous throw exception.';
+		dbe_output.print_line('autonomous throw exception.');
 END;
 /
 
@@ -242,7 +235,7 @@ BEGIN
 	b := b/a;
 EXCEPTION
 	WHEN division_by_zero THEN
-		raise notice 'inner autonomous exception.';
+		dbe_output.print_line('inner autonomous exception.');
 END;
 /
 select autonomous_10();
@@ -253,7 +246,7 @@ BEGIN
 	autonomous_10();
 EXCEPTION
 	WHEN division_by_zero THEN
-	    raise notice 'autonomous throw exception.';
+		dbe_output.print_line('autonomous throw exception.');
 END;
 /
 
@@ -322,7 +315,7 @@ DECLARE
 	PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
 	insert into t3 values(a, b, c);
-	raise notice 'inner autonomous exception.';
+	dbe_output.print_line('inner autonomous exception.');
 	autonomous_15(a, b, c);
 END;
 /
@@ -490,7 +483,7 @@ SET SESSION AUTHORIZATION jim PASSWORD 'gauss_123';
 DECLARE
 PRAGMA AUTONOMOUS_TRANSACTION;
 BEGIN
-raise notice 'just use call.';
+dbe_output.print_line('just use call.');
 insert into t5 values(1,'aaa');
 END;
 /
@@ -531,7 +524,7 @@ end;
 end datatype_test;
 /
 
-call datatype_test.datatype_test_func();
+select datatype_test.datatype_test_func();
 
 create table test_in (id int,a date);
 
@@ -566,3 +559,735 @@ RETURN num1;
 END;
 $$;
 
+CREATE OR REPLACE PROCEDURE autonomous_p_086(num1 int,out num2 int)
+AS
+DECLARE
+PRAGMA AUTONOMOUS_TRANSACTION;
+BEGIN
+num2:=num1*10;
+END;
+/
+
+SELECT * FROM autonomous_p_086(10);
+
+/************************************************************************/ 
+/*                              package value                           */
+/************************************************************************/
+-- 1. own package var
+create or replace package pck1 as
+type r1 is record(a int, b int);
+va int;
+vb r1;
+vc varchar2(20);
+procedure p1;
+procedure p2;
+end pck1;
+/
+
+create or replace package body pck1 as
+vd int;
+ve r1;
+vf varchar2(20);
+procedure p1 as
+begin
+va := 1;
+vb := (2,3);
+vc := 'before auto';
+vd := 4;
+ve := (5,6);
+vf := 'before auto';
+raise info 'before auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+p2();
+raise info 'after auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+va := 11;
+vb := (22,33);
+vc := 'after auto';
+vd := 44;
+ve := (55,68);
+vf := 'after auto';
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+DROP PACKAGE pck1;
+
+-- 2. another package var
+create or replace package pck2 as
+type r1 is record(a int, b int);
+va int;
+vb r1;
+vc varchar2(20);
+end pck2;
+/
+
+create or replace package pck1 as
+procedure p1;
+procedure p2;
+end pck1;
+/
+
+create or replace package body pck1 as
+procedure p1 as
+begin
+pck2.va := 1;
+pck2.vb := (2,3);
+pck2.vc := 'before auto';
+raise info 'before auto: %, %, %', pck2.va,pck2.vb,pck2.vc;
+p2();
+raise info 'after auto: %, %, %', pck2.va,pck2.vb,pck2.vc;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in auto: %, %, %', pck2.va,pck2.vb,pck2.vc;
+pck2.va := 11;
+pck2.vb := (22,33);
+pck2.vc := 'after auto';
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+-- 3. test auto alter package not exist in main session
+create or replace package pck2 as
+type r1 is record(a int, b int);
+va int;
+vb r1;
+vc varchar2(20);
+procedure p1;
+end pck2;
+/
+
+create or replace package  body pck2 as
+procedure p1 as
+begin
+raise info 'pck2 value: %, %, %', va, vb, vc;
+end;
+end pck2;
+/
+
+create or replace procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in auto: %, %, %', pck2.va,pck2.vb,pck2.vc;
+pck2.va := 11;
+pck2.vb := (22,33);
+pck2.vc := 'after auto';
+end;
+/
+
+create or replace procedure p1 as
+begin
+p2();
+end;
+/
+
+-- need reload session
+call p1();
+call pck2.p1();
+
+DROP PROCEDURE p1;
+DROP PROCEDURE p2;
+DROP PACKAGE pck2;
+
+-- 4. test nested auto
+-- (a) p1<->p3
+create or replace package pck2 as
+va int;
+vb varchar2(20);
+end pck2;
+/
+
+
+create or replace package pck1 as
+va int;
+type r1 is record(a int, b int);
+vb r1;
+procedure p1;
+procedure p2;
+procedure p3;
+end pck1;
+/
+
+create or replace package body pck1 as
+vc int;
+vd r1;
+procedure p1 as
+begin
+va := 1;
+vb := (2,3);
+vc := 4;
+vd := (5,6);
+pck2.va := 7;
+pck2.vb := 'before auto';
+raise info 'pck1 value(before auto): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(before auto): %, %', pck2.va, pck2.vb;
+p2();
+raise info 'pck1 value(after auto): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after auto): %, %', pck2.va, pck2.vb;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+p3();
+end;
+
+procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in auto): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in auto): %, %', pck2.va, pck2.vb;
+va := 11;
+vb := (22,33);
+vc := 44;
+vd := (55,66);
+pck2.va := 77;
+pck2.vb := 'after auto';
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+DROP PACKAGE pck1;
+DROP PACKAGE pck2;
+
+-- (b) p2<->p3
+create or replace package pck2 as
+va int;
+vb varchar2(20);
+end pck2;
+/
+
+
+create or replace package pck1 as
+va int;
+type r1 is record(a int, b int);
+vb r1;
+procedure p1;
+procedure p2;
+procedure p3;
+end pck1;
+/
+
+create or replace package body pck1 as
+vc int;
+vd r1;
+procedure p1 as
+begin
+
+p2();
+raise info 'pck1 value(after auto): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after auto): %, %', pck2.va, pck2.vb;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+va := 1;
+vb := (2,3);
+vc := 4;
+vd := (5,6);
+pck2.va := 7;
+pck2.vb := 'before auto';
+raise info 'pck1 value(in p2): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in p2): %, %', pck2.va, pck2.vb;
+p3();
+raise info 'pck1 value(after p3): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after p3): %, %', pck2.va, pck2.vb;
+end;
+
+procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in p3): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in p3): %, %', pck2.va, pck2.vb;
+va := 11;
+vb := (22,33);
+vc := 44;
+vd := (55,66);
+pck2.va := 77;
+pck2.vb := 'after auto';
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+DROP PACKAGE pck1;
+DROP PACKAGE pck2;
+
+-- 5. test table of and array value
+-- (a) array of int;
+create or replace package pck1 as
+type t1 is varray(10) of int;
+type t2 is table of int;
+type t3 is table of int index by varchar2(10);
+va t1;
+vb t2;
+vc t3;
+procedure p1;
+procedure p2;
+end pck1;
+/
+
+create or replace package body pck1 as
+vd t1;
+ve t2;
+vf t3;
+procedure p1 as
+begin
+va(1) := 1;
+va(2) := 2;
+vb(1) := 3;
+vb(2) := 4;
+vc('a') := 5;
+vc('aa') := 6;
+vd(1) := 1;
+vd(2) := 2;
+ve(1) := 3;
+ve(2) := 4;
+vf('a') := 5;
+vf('aa') := 6;
+raise info 'before auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+p2();
+raise info 'after auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+va.delete;
+vb(1) := 33;
+vb(2) := 44;
+vc('a') := 55;
+vc('aa') := 66;
+vd(1) := 11;
+vd(2) := 22;
+ve.delete;
+vf.delete;
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+DROP PACKAGE pck1;
+
+-- (b) array of record;
+create or replace package pck1 as
+type r1 is record  (a int, b int);
+type t1 is varray(10) of r1;
+type t2 is table of r1;
+type t3 is table of r1 index by varchar2(10);
+va t1;
+vb t2;
+vc t3;
+procedure p1;
+procedure p2;
+end pck1;
+/
+
+create or replace package body pck1 as
+vd t1;
+ve t2;
+vf t3;
+procedure p1 as
+begin
+va(1) := (1,1);
+va(2) := (2,2);
+vb(1) := (3,3);
+vb(2) := (4,4);
+vc('a') := (5,5);
+vc('aa') := (6,6);
+vd(1) := (1,1);
+vd(2) := (2,2);
+ve(1) := (3,3);
+ve(2) := (4,4);
+vf('a') := (5,5);
+vf('aa') := (6,6);
+raise info 'before auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+p2();
+raise info 'after auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+va.delete;
+vb(1).a := 33;
+vb(2) := (44,44);
+vc('a').a := 55;
+vc('aa') := (66,66);
+vd(1).a := 11;
+vd(2) := (22,22);
+ve.delete;
+vf.delete;
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+DROP PACKAGE pck1;
+
+-- 5. procedure with errors
+-- (a) p2 with error
+create or replace package pck1 as
+type r1 is record(a int, b int);
+va int;
+vb r1;
+vc varchar2(20);
+procedure p1;
+procedure p2;
+end pck1;
+/
+
+create or replace package body pck1 as
+vd int;
+ve r1;
+vf varchar2(20);
+procedure p1 as
+begin
+va := 1;
+vb := (2,3);
+vc := 'before auto';
+vd := 4;
+ve := (5,6);
+vf := 'before auto';
+raise info 'before auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+p2();
+raise info 'after auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'in auto: %, %, %, %, %, %', va,vb,vc,vd,ve,vf;
+va := 11;
+vb := (22,33);
+vc := 'after auto';
+vd := 44;
+ve := (55,68);
+vf := 'after auto';
+va := 3/0;
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+declare
+begin
+raise info 'current pck1 value: %, %, %,', pck1.va,pck1.vb,pck1.vc;
+end;
+/
+
+DROP PACKAGE pck1;
+
+-- (b) p3 with error
+create or replace package pck2 as
+va int;
+vb varchar2(20);
+end pck2;
+/
+
+
+create or replace package pck1 as
+va int;
+type r1 is record(a int, b int);
+vb r1;
+procedure p1;
+procedure p2;
+procedure p3;
+end pck1;
+/
+
+create or replace package body pck1 as
+vc int;
+vd r1;
+procedure p1 as
+begin
+va := 1;
+vb := (2,3);
+vc := 4;
+vd := (5,6);
+pck2.va := 7;
+pck2.vb := 'before auto';
+raise info 'pck1 value(before auto): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(before auto): %, %', pck2.va, pck2.vb;
+p2();
+raise info 'pck1 value(after auto): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after auto): %, %', pck2.va, pck2.vb;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+p3();
+end;
+
+procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in auto): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in auto): %, %', pck2.va, pck2.vb;
+va := 11;
+vb := (22,33);
+vc := 44;
+vd := (55,66);
+pck2.va := 77;
+pck2.vb := 'after auto';
+va := 3/0;
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+declare
+begin
+raise info 'current pck1 value: %, %, ', pck1.va,pck1.vb;
+raise info 'current pck2 value: %, %, ', pck2.va,pck2.vb;
+end;
+/
+
+DROP PACKAGE pck2;
+DROP PACKAGE pck1;
+
+-- 6. multi auto procedure
+create or replace package pck2 as
+va int;
+vb varchar2(20);
+end pck2;
+/
+
+
+create or replace package pck1 as
+va int;
+type r1 is record(a int, b int);
+vb r1;
+procedure p1;
+procedure p2;
+procedure p3;
+end pck1;
+/
+
+create or replace package body pck1 as
+vc int;
+vd r1;
+procedure p1 as
+begin
+va := 1;
+vb := (2,3);
+vc := 4;
+vd := (5,6);
+pck2.va := 7;
+pck2.vb := 'before auto';
+raise info 'pck1 value(before p2): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(before p2): %, %', pck2.va, pck2.vb;
+p2();
+raise info 'pck1 value(after p2): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after p2): %, %', pck2.va, pck2.vb;
+p3();
+raise info 'pck1 value(after p3): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after p3): %, %', pck2.va, pck2.vb;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in p2): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in p2): %, %', pck2.va, pck2.vb;
+va := 11;
+vb := (22,33);
+vc := 44;
+vd := (55,66);
+pck2.va := 77;
+pck2.vb := 'after auto';
+end;
+
+procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in p3): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in p3): %, %', pck2.va, pck2.vb;
+va := 111;
+vb := (222,333);
+vc := 444;
+vd := (555,666);
+pck2.va := 777;
+pck2.vb := 'after p3';
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+DROP PACKAGE pck1;
+DROP PACKAGE pck2;
+
+-- 6. multi nested auto procedure
+create or replace package pck2 as
+va int;
+vb varchar2(20);
+end pck2;
+/
+
+
+create or replace package pck1 as
+va int;
+type r1 is record(a int, b int);
+vb r1;
+procedure p1;
+procedure p2;
+procedure p3;
+procedure p4;
+end pck1;
+/
+
+create or replace package body pck1 as
+vc int;
+vd r1;
+procedure p1 as
+begin
+va := 1;
+vb := (2,3);
+vc := 4;
+vd := (5,6);
+pck2.va := 7;
+pck2.vb := 'before auto';
+raise info 'pck1 value(before p2): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(before p2): %, %', pck2.va, pck2.vb;
+p2();
+raise info 'pck1 value(after p2): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after p2): %, %', pck2.va, pck2.vb;
+end;
+
+procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in p2): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in p2): %, %', pck2.va, pck2.vb;
+va := 11;
+vb := (22,33);
+p3();
+raise info 'pck1 value(after p3): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after p3): %, %', pck2.va, pck2.vb;
+p4();
+raise info 'pck1 value(after p4): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(after p4): %, %', pck2.va, pck2.vb;
+end;
+
+procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in p3): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in p3): %, %', pck2.va, pck2.vb;
+va := 111;
+vb := (222,333);
+vc := 444;
+vd := (555,666);
+pck2.va := 777;
+pck2.vb := 'after p3';
+end;
+
+procedure p4 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1 value(in p4): %, %, %, %', va, vb, vc, vd;
+raise info 'pck2 value(in p4): %, %', pck2.va, pck2.vb;
+va := 1111;
+vb := (2222,3333);
+vc := 4444;
+vd := (5555,6666);
+pck2.va := 7777;
+pck2.vb := 'after p4';
+end;
+end pck1;
+/
+
+call pck1.p1();
+
+
+DROP PACKAGE pck1;
+DROP PACKAGE pck2;
+
+-- 7. test with out package
+create or replace procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'now in p2';
+end;
+/
+
+create or replace procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'now in p3';
+end;
+/
+
+create or replace procedure p1 as
+begin
+raise info 'now in p1';
+p2();
+p3();
+end;
+/
+
+call p1();
+
+DROP PROCEDURE p1;
+DROP PROCEDURE p2;
+DROP PROCEDURE p3;
+
+-- 7. test only p3 call package
+create or replace package pck2 as
+va int;
+vb varchar2(20);
+end pck2;
+/
+
+create or replace procedure p3 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+pck2.va := 3;
+pck2.vb := 'assign in p3';
+end;
+/
+
+create or replace procedure p2 as
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+p3;
+end;
+/
+
+create or replace procedure p1 as
+begin
+raise info 'pck2 value(in p1): %, %', pck2.va, pck2.vb;
+p2();
+raise info 'pck2 value(after p2): %, %', pck2.va, pck2.vb;
+end;
+/
+
+call p1();
+
+DROP PROCEDURE p1;
+DROP PROCEDURE p2;
+DROP PROCEDURE p3;
+DROP PACKAGE pck2;

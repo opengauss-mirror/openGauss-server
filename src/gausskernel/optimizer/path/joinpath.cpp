@@ -2496,6 +2496,12 @@ static void getBoundaryFromBaseRel(PlannerInfo* root, PartIteratorPath* itrpath)
     AssertEreport(map->partitionKey->dim1 == 1, MOD_OPT_JOIN, "partition key dim1 is incorrect");
 
     tuple = SearchSysCache2((int)ATTNUM, ObjectIdGetDatum(partitionedtableid), Int16GetDatum(map->partitionKey->values[0]));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for attribute %d of relation %u",
+                    map->partitionKey->values[0], partitionedtableid)));
+    }
     att = (Form_pg_attribute)GETSTRUCT(tuple);
 
     part_seqs = rel->pruning_result->ls_rangeSelectedPartitions;

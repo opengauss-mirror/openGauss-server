@@ -48,7 +48,15 @@ public:
         m_data_value = data_value;
         m_data_value_size = size;
     }
+    bool original_value_emtpy() {
+        return (!m_data_value || m_data_size == 0);
+    }
 
+    void inc_ref_count();
+    void dec_ref_count();
+    bool safe_to_delete() {
+        return ref_count == 0;
+    }
 public:
     bool m_is_param;
 
@@ -75,5 +83,6 @@ public:
 
 private:
     void free_processed_data();
+    int ref_count;
 };
 #endif /* RAW_VALUE_H */

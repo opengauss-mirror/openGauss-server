@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -157,7 +158,6 @@ TupleTableSlot* ExecVecToRow(VecToRowState* state) /* return: a tuple or NULL */
         state->m_currentRow = 0;
         // Convert the batch into row based tuple
         DevectorizeOneBatch(state);
-        outer_plan->ps_rownum += current_batch->m_rows;
     }
 
     // retrieve rows from current batch
@@ -187,19 +187,13 @@ void RecordCstorePartNum(VecToRowState* state, const VecToRow* node)
     } else {
         switch (nodeTag(outerPlan(node))) {
             case T_CStoreScan:
-                state->part_id = ((CStoreScanState*)outerPlanState(state))->part_id;
-                break;
             case T_DfsIndexScan:
-                state->part_id = ((DfsIndexScanState*)outerPlanState(state))->part_id;
-                break;
             case T_CStoreIndexScan:
-                state->part_id = ((CStoreIndexScanState*)outerPlanState(state))->part_id;
-                break;
             case T_CStoreIndexCtidScan:
-                state->part_id = ((CStoreIndexCtidScanState*)outerPlanState(state))->part_id;
-                break;
             case T_CStoreIndexHeapScan:
-                state->part_id = ((CStoreIndexHeapScanState*)outerPlanState(state))->part_id;
+                state->part_id = ((ScanState*)outerPlanState(state))->part_id;
+                state->subpartitions = ((ScanState*)outerPlanState(state))->subpartitions;
+                state->subPartLengthList = ((ScanState*)outerPlanState(state))->subPartLengthList;
                 break;
 
 #ifdef ENABLE_MULTIPLE_NODES

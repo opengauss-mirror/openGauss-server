@@ -154,4 +154,20 @@ end loop;
 end;
 /
 
+drop table test_index_ht;
+create table test_index_ht (a int, b int, c int)
+partition by hash(a)
+(
+ PARTITION p1,
+ PARTITION p2
+);
+insert into test_index_ht select generate_series(3,6);
+explain (costs off, verbose on) select * from test_index_ht order by 1;
+select * from test_index_ht order by 1;
+create index test_exchange_index_lt_ha on test_index_ht (a) local;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain (costs off, verbose on) select * from test_index_ht order by 1;
+select * from test_index_ht order by 1;
+drop table test_index_ht;
 drop schema fvt_other_cmd cascade;

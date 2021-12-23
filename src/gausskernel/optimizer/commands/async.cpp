@@ -1410,13 +1410,9 @@ void AtSubStart_Notify(void)
 
     t_thrd.asy_cxt.upperPendingActions = lcons(t_thrd.asy_cxt.pendingActions, t_thrd.asy_cxt.upperPendingActions);
 
-    Assert(list_length(t_thrd.asy_cxt.upperPendingActions) == GetCurrentTransactionNestLevel() - 1);
-
     t_thrd.asy_cxt.pendingActions = NIL;
 
     t_thrd.asy_cxt.upperPendingNotifies = lcons(t_thrd.asy_cxt.pendingNotifies, t_thrd.asy_cxt.upperPendingNotifies);
-
-    Assert(list_length(t_thrd.asy_cxt.upperPendingNotifies) == GetCurrentTransactionNestLevel() - 1);
 
     t_thrd.asy_cxt.pendingNotifies = NIL;
 
@@ -1436,8 +1432,6 @@ void AtSubCommit_Notify(void)
     parentPendingActions = (List*)linitial(t_thrd.asy_cxt.upperPendingActions);
     t_thrd.asy_cxt.upperPendingActions = list_delete_first(t_thrd.asy_cxt.upperPendingActions);
 
-    Assert(list_length(t_thrd.asy_cxt.upperPendingActions) == GetCurrentTransactionNestLevel() - 2);
-
     /*
      * Mustn't try to eliminate duplicates here --- see queue_listen()
      */
@@ -1445,8 +1439,6 @@ void AtSubCommit_Notify(void)
 
     parentPendingNotifies = (List*)linitial(t_thrd.asy_cxt.upperPendingNotifies);
     t_thrd.asy_cxt.upperPendingNotifies = list_delete_first(t_thrd.asy_cxt.upperPendingNotifies);
-
-    Assert(list_length(t_thrd.asy_cxt.upperPendingNotifies) == GetCurrentTransactionNestLevel() - 2);
 
     /*
      * We could try to eliminate duplicates here, but it seems not worthwhile.

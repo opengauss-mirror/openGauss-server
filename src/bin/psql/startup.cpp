@@ -45,9 +45,15 @@ PsqlSettings pset;
 /* Used for change child process name in gsql parallel execute mode. */
 char* argv_para;
 int argv_num;
+static int PASSWORD_STR_LEN = 9;
+static bool dbname_alloced = false;
 static bool is_pipeline = false;
 static bool is_interactive = true;
-
+#ifndef ENABLE_MULTIPLE_NODES
+static const char *g_queryNodeState = "select local_role, db_state from pg_stat_get_stream_replications();";
+static const char *g_expectedLocalRole = "Primary";
+static const char *g_expectedDbState = "Normal";
+#endif
 /* The version of libpq */
 extern const char* libpqVersionString;
 
@@ -81,6 +87,11 @@ struct adhoc_opts {
     bool no_readline;
     bool no_psqlrc;
     bool single_txn;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool multi_host;
+    uint32 hostCount;
+    List *hostList;
+#endif
 };
 
 static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* options);
@@ -113,6 +124,122 @@ static void set_aes_key(const char* dencrypt_key);
 #else
 #define PARAMS_ARRAY_SIZE 11
 #endif
+
+#ifndef ENABLE_MULTIPLE_NODES
+static bool IsPrimaryOfCentralizedCluster(PGconn *conn)
+{
+    PGresult* res = PQexec(conn, g_queryNodeState);
+    if (res == NULL) {
+        return false;
+    }
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        return false;
+    }
+    if (PQntuples(res) <= 0) {
+        PQclear(res);
+        return false;
+    }
+    if (PQgetisnull(res, 0, 0)) {
+        PQclear(res);
+        return false;
+    }
+    char *localRole = pg_strdup(PQgetvalue(res, 0, 0));
+    if (localRole == NULL) {
+        PQclear(res);
+        return false;
+    }
+    if (strcmp(localRole, g_expectedLocalRole) != 0) {
+        free(localRole);
+        PQclear(res);
+        return false;
+    }
+    free(localRole);
+    if (PQgetisnull(res, 0, 1)) {
+        PQclear(res);
+        return false;
+    }
+    char *dbState = pg_strdup(PQgetvalue(res, 0, 1));
+    if (dbState == NULL) {
+        PQclear(res);
+        return false;
+    }
+    if (strcmp(dbState, g_expectedDbState) != 0) {
+        free(dbState);
+        PQclear(res);
+        return false;
+    }
+    free(dbState);
+    PQclear(res);
+    return true;
+}
+PGconn* PQconnectdbMultiHostParams(const char** keywords,
+                                   char** values,
+                                   struct adhoc_opts *option,
+                                   char **password,
+                                   const char *password_prompt)
+{
+    PGconn* conn = NULL;
+    bool pass = false;
+    ConnStatusType status = CONNECTION_BAD;
+    char *hostname = NULL;
+    List *hostList = NULL;
+    bool isParseOnly = false;
+    while (option->hostCount > 0) {
+        hostList = option->hostList;
+        hostname = (char *)linitial(hostList);
+        values[0] = hostname;
+        do {
+            conn = PQconnectdbParams(keywords, values, (int)true);
+            pass = false;
+            status = CONNECTION_BAD;
+            if (conn == NULL || conn->sock < 0) {
+                fprintf(stderr,
+                    "failed to connect %s:%s.\n",
+                    ((conn->pghost == NULL) ? "Unknown" : conn->pghost),
+                    ((conn->pgport == NULL) ? "Unknown" : conn->pgport));
+                break;
+            }
+            status = PQstatus(conn);
+            if (status == CONNECTION_BAD
+                && (strstr(PQerrorMessage(conn), "password") != NULL)
+                && (*password == NULL)
+                && (pset.getPassword != TRI_NO)) {
+                PQfinish(conn);
+                *password = simple_prompt(password_prompt, MAX_PASSWORD_LENGTH, false);
+                pass = true;
+                values[3] = *password;
+            }
+        } while (pass);
+        if ((status == CONNECTION_OK) && IsPrimaryOfCentralizedCluster(conn)) {
+            fprintf(stderr, "Connect primary node %s\n", hostname);
+            break;
+        }
+        if (hostname != NULL) {
+            free(hostname);
+        }
+        if (option->hostCount > 1) {
+            option->hostList = list_delete_first(hostList);
+            option->hostCount--;
+            PQfinish(conn);
+        } else {
+#if defined(USE_ASSERT_CHECKING) || defined(FASTCHECK)
+            isParseOnly = check_parseonly_parameter(*option);
+#endif
+            option->hostCount--;
+            if (status == CONNECTION_BAD && !isParseOnly) {
+                fprintf(stderr, "%s: %s", pset.progname, PQerrorMessage(conn));
+                PQfinish(conn);
+                exit(EXIT_BADCONN);
+            }
+            PQfinish(conn);
+            conn = NULL;
+        }
+    }
+    return conn;
+}
+#endif
+
 /*
  *
  * main
@@ -127,6 +254,7 @@ int main(int argc, char* argv[])
     bool new_pass = false;
     errno_t rc;
     bool isparseonly = false;
+    bool has_action = false;
 
     /* Database Security: Data importing/dumping support AES128. */
     struct timeval aes_start_time;
@@ -320,7 +448,19 @@ int main(int argc, char* argv[])
         keywords[PARAMS_ARRAY_SIZE - 1] = NULL;
         values[PARAMS_ARRAY_SIZE - 1] = NULL;
         new_pass = false;
+#ifdef ENABLE_MULTIPLE_NODES
         pset.db = PQconnectdbParams(keywords, values, (int)true);
+#else
+        if (options.multi_host && options.hostCount > 1) {
+            pset.db = PQconnectdbMultiHostParams(keywords, values, &options, &password, password_prompt);
+            if (pset.db == NULL) {
+                fprintf(stderr, "failed to connect %s:%s.\n", options.host, options.port);
+                exit(EXIT_BADCONN);
+            }
+        } else {
+            pset.db = PQconnectdbParams(keywords, values, (int)true);
+        }
+#endif
 
         if (pset.db->sock < 0) {
             fprintf(stderr,
@@ -370,7 +510,12 @@ int main(int argc, char* argv[])
             free(values_free);
             values_free = NULL;
         }
-    } while (new_pass);
+    }
+#ifdef ENABLE_MULTIPLE_NODES
+    while (new_pass);
+#else
+    while (new_pass && options.multi_host == false);
+#endif
     if (options.passwd == NULL) {
         if (password == pset.connInfo.values[3]) {
             pset.connInfo.values_free[3] = false;
@@ -557,7 +702,8 @@ int main(int argc, char* argv[])
 
     pset.guc_stmt = NULL;
     /* Free options.action_string, because it alloced memory when options.action is ACT_FILE*/
-    if (options.action == ACT_FILE && (options.action_string != NULL)) {
+    has_action = (options.action == ACT_FILE) && (options.action_string != NULL);
+    if (has_action) {
         free(options.action_string);
         options.action_string = NULL;
     }
@@ -566,6 +712,13 @@ int main(int argc, char* argv[])
     pset.max_retry_times = 0;
     ResetQueryRetryController();
     EmptyRetryErrcodesList(pset.errcodes_list);
+
+    if (dbname_alloced) {
+        rc = memset_s(options.dbname, strlen(options.dbname), 0, strlen(options.dbname));
+        securec_check_c(rc, "\0", "\0");
+        free(options.dbname);
+        options.dbname = NULL;
+    }
 
     return successResult;
 }
@@ -601,6 +754,63 @@ static void get_password_pipeline(struct adhoc_opts* options)
     free(pass_buf);
     pass_buf = NULL;
 }
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void TrimHost(char *src)
+{
+    char *begin = src;
+    char *end   = src + strlen(src);
+    if (begin == end) {
+        return;
+    }
+    while (isspace(*begin)) {
+        ++begin;
+    }
+    while (isspace(*end)) {
+        --end;
+    }
+    if (begin > end) {
+        *src =  0;
+        return;
+    }
+    while (begin != end) {
+        *src = *begin;
+        src++;
+        begin++;
+    }
+    *src = *end;
+    src++;
+    *src =  '\0';
+    return;
+}
+
+static void ParseHostArg(const char *arg, struct adhoc_opts *options)
+{
+    const char *sep = ",";
+    options->multi_host = false;
+    options->hostList = NULL;
+    options->hostCount = 0;
+    if ((arg == NULL) || (strstr(arg, sep) == NULL)) {
+        return;
+    }
+    char *inputStr = pg_strdup(arg);
+    char *host = NULL;
+    for (char *subStr = strtok(inputStr, sep); subStr != NULL; subStr = strtok(NULL, sep)) {
+        host = pg_strdup(subStr);
+        TrimHost(host);
+        if (strlen(host) == 0) {
+            free(host);
+            continue;
+        }
+        options->hostList = (options->hostList == NULL) ? list_make1(host) : lappend(options->hostList, host);
+        options->hostCount++;
+    }
+    if (options->hostCount > 1) {
+        options->multi_host = true;
+    }
+    free(inputStr);
+}
+#endif
 
 /*
  * Parse command line options
@@ -656,6 +866,7 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
     extern char* optarg;
     extern int optind;
     int c;
+    bool is_action_file = false;
     /* Database Security: Data importing/dumping support AES128. */
     char* dencrypt_key = NULL;
     errno_t rc = EOK;
@@ -712,7 +923,8 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                     break;
                 }
                 is_interactive = false;
-                if ((options->action_string != NULL) && options->action == ACT_FILE)
+                is_action_file = (options->action_string != NULL) && (options->action == ACT_FILE);
+                if (is_action_file)
                     free(options->action_string);
                 options->action_string = pg_strdup(optarg);
                 options->action = ACT_FILE;
@@ -725,6 +937,9 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
                 break;
             case 'h':
                 options->host = optarg;
+#ifndef ENABLE_MULTIPLE_NODES
+                ParseHostArg(options->host, options);
+#endif
                 break;
             case 'H':
                 pset.popt.topt.format = PRINT_HTML;
@@ -900,7 +1115,15 @@ static void parse_psql_options(int argc, char* const argv[], struct adhoc_opts* 
      */
     while (argc - optind >= 1) {
         if (options->dbname == NULL) {
+            char *temp = NULL;
             options->dbname = argv[optind];
+            if ((temp = strstr(argv[optind], "password")) != NULL) {
+                options->dbname = pg_strdup(argv[optind]);
+                rc = memset_s(temp + PASSWORD_STR_LEN, strlen(argv[optind]),
+                              0, strlen(temp + PASSWORD_STR_LEN));
+                check_memset_s(rc);
+                dbname_alloced = true;
+            }
             /* mask informations in URI string. */
             if (strncmp(options->dbname, "postgresql://", strlen("postgresql://")) == 0) {
                 options->dbname = pg_strdup(argv[optind]);
@@ -1313,25 +1536,24 @@ static void EstablishVariableSpace(void)
  */
 static void set_aes_key(const char* dencrypt_key)
 {
-    int tmpkeylen = 0;
     errno_t rc;
 
-    if (dencrypt_key != NULL) {
-        tmpkeylen = (int)strlen(dencrypt_key);
-    } else {
+    if (dencrypt_key == NULL) {
         fprintf(stderr, _("%s: missing key\n"), pset.progname);
         exit(EXIT_FAILURE);
     }
-    if (tmpkeylen  == KEY_LEN && check_key((const char*)dencrypt_key, KEY_LEN)) {
+    if (check_input_password(dencrypt_key)) {
         rc = memset_s(pset.decryptInfo.Key, KEY_MAX_LEN, 0, KEY_MAX_LEN);
         securec_check_c(rc, "\0", "\0");
         rc = strncpy_s((char*)pset.decryptInfo.Key, KEY_MAX_LEN, dencrypt_key, KEY_MAX_LEN - 1);
         securec_check_c(rc, "\0", "\0");
     } else {
         fprintf(stderr,
-            _("%s:  the key is illegal,must be letters or numbers and the length must be %d\n"),
+            _("%s:  The input key must be %d~%d bytes and "
+            "contain at least three kinds of characters!\n"),
             pset.progname,
-            KEY_LEN);
+            MIN_KEY_LEN,
+            MAX_KEY_LEN);
         exit(EXIT_FAILURE);
     }
 }

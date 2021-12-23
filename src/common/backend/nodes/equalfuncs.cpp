@@ -109,11 +109,13 @@ static bool _equalRangeVar(const RangeVar* a, const RangeVar* b)
     COMPARE_STRING_FIELD(schemaname);
     COMPARE_STRING_FIELD(relname);
     COMPARE_STRING_FIELD(partitionname);
+    COMPARE_STRING_FIELD(subpartitionname);
     COMPARE_SCALAR_FIELD(inhOpt);
     COMPARE_SCALAR_FIELD(relpersistence);
     COMPARE_NODE_FIELD(alias);
     COMPARE_LOCATION_FIELD(location);
     COMPARE_SCALAR_FIELD(ispartition);
+    COMPARE_SCALAR_FIELD(issubpartition);
     COMPARE_NODE_FIELD(partitionKeyValuesList);
     COMPARE_SCALAR_FIELD(isbucket);
     COMPARE_NODE_FIELD(buckets);
@@ -186,6 +188,8 @@ static bool _equalParam(const Param* a, const Param* b)
     COMPARE_SCALAR_FIELD(paramtypmod);
     COMPARE_SCALAR_FIELD(paramcollid);
     COMPARE_LOCATION_FIELD(location);
+    COMPARE_SCALAR_FIELD(tableOfIndexType);
+    COMPARE_SCALAR_FIELD(recordVarTypOid);
 
     return true;
 }
@@ -652,6 +656,14 @@ static bool _equalTargetEntry(const TargetEntry* a, const TargetEntry* b)
     return true;
 }
 
+static bool _equalPseudoTargetEntry(const PseudoTargetEntry * a, const PseudoTargetEntry * b)
+{
+    COMPARE_NODE_FIELD(tle);
+    COMPARE_NODE_FIELD(srctle);
+
+    return true;
+}
+
 static bool _equalRangeTblRef(const RangeTblRef* a, const RangeTblRef* b)
 {
     COMPARE_SCALAR_FIELD(rtindex);
@@ -698,7 +710,7 @@ static bool _equalUpsertExpr(const UpsertExpr* a, const UpsertExpr* b)
     COMPARE_NODE_FIELD(updateTlist);
     COMPARE_NODE_FIELD(exclRelTlist);
     COMPARE_SCALAR_FIELD(exclRelIndex);
-    COMPARE_SCALAR_FIELD(partKeyUpsert);
+
     return true;
 }
 /*
@@ -937,6 +949,7 @@ static bool _equalSelectStmt(const SelectStmt* a, const SelectStmt* b)
     COMPARE_NODE_FIELD(intoClause);
     COMPARE_NODE_FIELD(targetList);
     COMPARE_NODE_FIELD(fromClause);
+    COMPARE_NODE_FIELD(startWithClause);
     COMPARE_NODE_FIELD(whereClause);
     COMPARE_NODE_FIELD(groupClause);
     COMPARE_NODE_FIELD(havingClause);
@@ -1232,10 +1245,12 @@ static bool _equalDistFdwDataNodeTask(const DistFdwDataNodeTask* a, const DistFd
 
 static bool _equalSplitPartitionState(const SplitPartitionState* a, const SplitPartitionState* b)
 {
+    COMPARE_SCALAR_FIELD(splitType);
     COMPARE_SCALAR_FIELD(src_partition_name);
     COMPARE_NODE_FIELD(partition_for_values);
     COMPARE_NODE_FIELD(split_point);
     COMPARE_NODE_FIELD(dest_partition_define_list);
+    COMPARE_NODE_FIELD(newListSubPartitionBoundry);
     return true;
 }
 
@@ -1488,6 +1503,14 @@ static bool _equalCompositeTypeStmt(const CompositeTypeStmt* a, const CompositeT
     return true;
 }
 
+static bool _equalTableOfTypeStmt(const TableOfTypeStmt* a, const TableOfTypeStmt* b)
+{
+    COMPARE_NODE_FIELD(typname);
+    COMPARE_NODE_FIELD(reftypname);
+
+    return true;
+}
+
 static bool _equalCreateEnumStmt(const CreateEnumStmt* a, const CreateEnumStmt* b)
 {
     COMPARE_NODE_FIELD(typname);
@@ -1532,6 +1555,14 @@ static bool _equalViewStmt(const ViewStmt* a, const ViewStmt* b)
 static bool _equalLoadStmt(const LoadStmt* a, const LoadStmt* b)
 {
     COMPARE_STRING_FIELD(filename);
+
+    COMPARE_NODE_FIELD(pre_load_options);
+    COMPARE_SCALAR_FIELD(is_load_data);
+    COMPARE_SCALAR_FIELD(is_only_special_filed);
+    COMPARE_NODE_FIELD(load_options);
+    COMPARE_SCALAR_FIELD(load_type);
+    COMPARE_NODE_FIELD(relation);
+    COMPARE_NODE_FIELD(rel_options);
 
     return true;
 }
@@ -1691,6 +1722,7 @@ static bool _equalCreateSeqStmt(const CreateSeqStmt* a, const CreateSeqStmt* b)
 #endif
     COMPARE_SCALAR_FIELD(uuid);
     COMPARE_SCALAR_FIELD(canCreateTempSeq);
+    COMPARE_SCALAR_FIELD(is_large);
 
     return true;
 }
@@ -1700,6 +1732,7 @@ static bool _equalAlterSeqStmt(const AlterSeqStmt* a, const AlterSeqStmt* b)
     COMPARE_NODE_FIELD(sequence);
     COMPARE_NODE_FIELD(options);
     COMPARE_SCALAR_FIELD(missing_ok);
+    COMPARE_SCALAR_FIELD(is_large);
 
     return true;
 }
@@ -1717,6 +1750,7 @@ static bool _equalVariableSetStmt(const VariableSetStmt* a, const VariableSetStm
 static bool _equalVariableShowStmt(const VariableShowStmt* a, const VariableShowStmt* b)
 {
     COMPARE_STRING_FIELD(name);
+    COMPARE_STRING_FIELD(likename);
 
     return true;
 }
@@ -2225,6 +2259,7 @@ static bool _equalAExpr(const A_Expr* a, const A_Expr* b)
 static bool _equalColumnRef(const ColumnRef* a, const ColumnRef* b)
 {
     COMPARE_NODE_FIELD(fields);
+    COMPARE_SCALAR_FIELD(prior);
     COMPARE_LOCATION_FIELD(location);
 
     return true;
@@ -2555,6 +2590,8 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
     COMPARE_SCALAR_FIELD(relid);
     COMPARE_SCALAR_FIELD(partitionOid);
     COMPARE_SCALAR_FIELD(isContainPartition);
+    COMPARE_SCALAR_FIELD(subpartitionOid);
+    COMPARE_SCALAR_FIELD(isContainSubPartition);
     COMPARE_SCALAR_FIELD(refSynOid);
     COMPARE_NODE_FIELD(partid_list);
     COMPARE_SCALAR_FIELD(relkind);
@@ -2575,9 +2612,14 @@ static bool _equalRangeTblEntry(const RangeTblEntry* a, const RangeTblEntry* b)
     COMPARE_STRING_FIELD(ctename);
     COMPARE_SCALAR_FIELD(ctelevelsup);
     COMPARE_SCALAR_FIELD(self_reference);
+    COMPARE_SCALAR_FIELD(cterecursive);
     COMPARE_NODE_FIELD(ctecoltypes);
     COMPARE_NODE_FIELD(ctecoltypmods);
     COMPARE_NODE_FIELD(ctecolcollations);
+    COMPARE_SCALAR_FIELD(swConverted);
+    COMPARE_NODE_FIELD(origin_index);
+    COMPARE_SCALAR_FIELD(swAborted);
+    COMPARE_SCALAR_FIELD(swSubExist);
     COMPARE_NODE_FIELD(alias);
     COMPARE_NODE_FIELD(eref);
     COMPARE_NODE_FIELD(pname);
@@ -2695,6 +2737,20 @@ static bool _equalWithClause(const WithClause* a, const WithClause* b)
     COMPARE_NODE_FIELD(ctes);
     COMPARE_SCALAR_FIELD(recursive);
     COMPARE_LOCATION_FIELD(location);
+    COMPARE_NODE_FIELD(sw_clause);
+
+    return true;
+}
+
+static bool _equalStartWithClause(const StartWithClause * a, const StartWithClause * b)
+{
+    COMPARE_NODE_FIELD(startWithExpr);
+    COMPARE_NODE_FIELD(connectByExpr);
+    COMPARE_NODE_FIELD(siblingsOrderBy);
+
+    COMPARE_SCALAR_FIELD(priorDirection);
+    COMPARE_SCALAR_FIELD(nocycle);
+    COMPARE_SCALAR_FIELD(opt);
 
     return true;
 }
@@ -2706,10 +2762,19 @@ static bool _equalUpsertClause(const UpsertClause* a, const UpsertClause* b)
 
    return true;
 }
+
+static bool _equalStartWithTargetRelInfo(const StartWithTargetRelInfo *a,
+                                                       const StartWithTargetRelInfo *b)
+{
+    /* simple compare pointer */
+    return a == b;
+}
+
 static bool _equalCommonTableExpr(const CommonTableExpr* a, const CommonTableExpr* b)
 {
     COMPARE_STRING_FIELD(ctename);
     COMPARE_NODE_FIELD(aliascolnames);
+    COMPARE_SCALAR_FIELD(ctematerialized);
     COMPARE_NODE_FIELD(ctequery);
     COMPARE_LOCATION_FIELD(location);
     COMPARE_SCALAR_FIELD(cterecursive);
@@ -2719,6 +2784,22 @@ static bool _equalCommonTableExpr(const CommonTableExpr* a, const CommonTableExp
     COMPARE_NODE_FIELD(ctecoltypmods);
     COMPARE_NODE_FIELD(ctecolcollations);
     COMPARE_SCALAR_FIELD(locator_type);
+    COMPARE_NODE_FIELD(swoptions);
+    COMPARE_SCALAR_FIELD(self_reference);
+    COMPARE_SCALAR_FIELD(referenced_by_subquery);
+    return true;
+}
+
+static bool _equalStartWithOptions(const StartWithOptions * a, const StartWithOptions * b)
+{
+    COMPARE_NODE_FIELD(siblings_orderby_clause);
+    COMPARE_NODE_FIELD(prior_key_index);
+    COMPARE_NODE_FIELD(prior_key_index);
+
+    COMPARE_SCALAR_FIELD(connect_by_type);
+    COMPARE_NODE_FIELD(connect_by_level_quals);
+    COMPARE_NODE_FIELD(connect_by_other_quals);
+    COMPARE_SCALAR_FIELD(nocycle);
 
     return true;
 }
@@ -3254,6 +3335,9 @@ bool equal(const void* a, const void* b)
         case T_TargetEntry:
             retval = _equalTargetEntry((TargetEntry*)a, (TargetEntry*)b);
             break;
+        case T_PseudoTargetEntry:
+            retval = _equalPseudoTargetEntry((PseudoTargetEntry*) a, (PseudoTargetEntry*) b);
+            break;
         case T_RangeTblRef:
             retval = _equalRangeTblRef((RangeTblRef*)a, (RangeTblRef*)b);
             break;
@@ -3475,6 +3559,9 @@ bool equal(const void* a, const void* b)
             break;
         case T_CompositeTypeStmt:
             retval = _equalCompositeTypeStmt((CompositeTypeStmt*)a, (CompositeTypeStmt*)b);
+            break;
+        case T_TableOfTypeStmt:
+            retval = _equalTableOfTypeStmt((TableOfTypeStmt*)a, (TableOfTypeStmt*)b);
             break;
         case T_CreateEnumStmt:
             retval = _equalCreateEnumStmt((CreateEnumStmt*)a, (CreateEnumStmt*)b);
@@ -3880,11 +3967,21 @@ bool equal(const void* a, const void* b)
         case T_WithClause:
             retval = _equalWithClause((WithClause*)a, (WithClause*)b);
             break;
+        case T_StartWithClause:
+            retval = _equalStartWithClause((StartWithClause*) a, (StartWithClause*) b);
+            break;
         case T_UpsertClause:
             retval = _equalUpsertClause((UpsertClause*)a, (UpsertClause*)b);
             break;
+        case T_StartWithTargetRelInfo:
+            retval = _equalStartWithTargetRelInfo((StartWithTargetRelInfo *)a,
+                                                  (StartWithTargetRelInfo *)b);
+            break;
         case T_CommonTableExpr:
             retval = _equalCommonTableExpr((CommonTableExpr*)a, (CommonTableExpr*)b);
+            break;
+        case T_StartWithOptions:
+            retval = _equalStartWithOptions((StartWithOptions*) a, (StartWithOptions*) b);
             break;
         case T_PrivGrantee:
             retval = _equalPrivGrantee((PrivGrantee*)a, (PrivGrantee*)b);

@@ -11,6 +11,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/common/backend/catalog/namespace.cpp
@@ -70,6 +71,7 @@
 #include "utils/memutils.h"
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
+#include "utils/pl_package.h"
 #include "tcop/utility.h"
 #include "nodes/nodes.h"
 #include "c.h"
@@ -79,7 +81,7 @@
 #ifdef ENABLE_MULTIPLE_NODES
 #include "streaming/planner.h"
 #endif
-
+#define MAXSTRLEN ((1 << 11) - 1)
 /*
  * The namespace search path is a possibly-empty list of namespace OIDs.
  * In addition to the explicit list, implicitly-searched namespaces
@@ -160,7 +162,9 @@ static bool CheckTSObjectVisible(NameData name, SysCacheIdentifier id, Oid nmspa
 static bool InitTempTblNamespace();
 static void CheckTempTblAlias();
 static Oid GetTSObjectOid(const char* objname, SysCacheIdentifier id);
-
+static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, HeapTuple procTup, List* argNames,
+    Oid namespaceId, Oid objNsp, int nargs, CatCList* catList, bool expandVariadic, bool expandDefaults,
+    bool includeOut, Oid refSynOid, bool enable_outparam_override = false);
 #ifdef ENABLE_UT
 void dropExistTempNamespace(char* namespaceName);
 #else
@@ -796,6 +800,21 @@ Oid TypenameGetTypid(const char *typname)
         return TypenameGetTypidExtended(typname, true);
 }
 
+Oid TryLookForSynonymType(const char* typname, const Oid namespaceId)
+{
+    Oid typid = InvalidOid;
+    RangeVar* objVar = SearchReferencedObject(typname, namespaceId);
+    if (objVar != NULL) {
+        char* synTypname = objVar->relname;
+        Oid objNamespaceOid = get_namespace_oid(objVar->schemaname, true);
+        ereport(DEBUG3, (errmodule(MOD_PARSER),
+            errmsg("Found synonym %s in namespace %ud", synTypname, objNamespaceOid)));
+        typid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(synTypname), ObjectIdGetDatum(objNamespaceOid));
+    }
+    pfree_ext(objVar);
+    return typid;
+}
+
 /*
  * TypenameGetTypidExtended
  *		Try to resolve an unqualified datatype name.
@@ -820,6 +839,10 @@ Oid TypenameGetTypidExtended(const char* typname, bool temp_ok)
             continue;
 
         typid = GetSysCacheOid2(TYPENAMENSP, PointerGetDatum(typname), ObjectIdGetDatum(namespaceId));
+        if (!OidIsValid(typid)) {
+            typid = TryLookForSynonymType(typname, namespaceId);
+        }
+
         if (OidIsValid(typid)) {
             list_free_ext(tempActiveSearchPath);
             return typid;
@@ -896,10 +919,13 @@ bool TypeIsVisible(Oid typid)
 
 static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, HeapTuple procTup, List* argNames,
     Oid namespaceId, Oid objNsp, int nargs, CatCList* catList, bool expandVariadic, bool expandDefaults,
-    bool includeOut, Oid refSynOid)
+    bool includeOut, Oid refSynOid, bool enable_outparam_override)
 {
     Form_pg_proc procForm = (Form_pg_proc)GETSTRUCT(procTup);
-    int proNargs = procForm->pronargs;
+#ifndef ENABLE_MULTIPLE_NODES
+    oidvector* allArgTypes = NULL;
+#endif
+    int proNargs = -1;
     int effectiveNargs;
     int pathPos = 0;
     bool variadic = false;
@@ -908,6 +934,33 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     Oid vaElemType;
     int* argNumbers = NULL;
     FuncCandidateList newResult;
+    bool isNull = false;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (enable_outparam_override) {
+        Datum argTypes = ProcedureGetAllArgTypes(procTup, &isNull);
+        if (!isNull) {
+            allArgTypes = (oidvector *)PG_DETOAST_DATUM(argTypes);
+            proNargs = allArgTypes->dim1;
+            
+            // For compatiable with the non-A special cases, for example function with out
+            // param can't be called by SQL in A, but some of these are stilled called by
+            // such as gsql in SQL.
+            Datum pprokind = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_prokind, &isNull);
+            if ((!isNull && PROC_IS_FUNC(pprokind)) || isNull) {
+                proNargs = procForm->pronargs;
+                allArgTypes = NULL;
+                includeOut = false;
+            }
+        } else {
+            proNargs = procForm->pronargs;
+        }
+    } else {
+        proNargs = procForm->pronargs;
+    }
+#else
+    proNargs = procForm->pronargs;
+#endif
 
     if (OidIsValid(namespaceId)) {
         /* Consider only procs in specified namespace */
@@ -934,12 +987,15 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     }
 
     Datum proAllArgTypes;
-    Datum packageOidDatum;
-    bool isNull = false;
+    Datum packageOidDatum;	
     ArrayType* arr = NULL;
     int numProcAllArgs = proNargs;
     packageOidDatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_packageid, &isNull);
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!enable_outparam_override && includeOut) {
+#else
     if (includeOut) {
+#endif
         proAllArgTypes = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_proallargtypes, &isNull);
 
         if (!isNull) {
@@ -1049,13 +1105,26 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
     /* record the referenced synonym oid for building view dependency. */
     newResult->refSynOid = refSynOid;
 
-    Oid* proargtypes = NULL;
+    Oid* proargtypes = NULL;	
+#ifndef ENABLE_MULTIPLE_NODES
+    if (!enable_outparam_override || allArgTypes == NULL) {
+        if (!includeOut || arr == NULL) {
+            oidvector* proargs = ProcedureGetArgTypes(procTup);
+            proargtypes = proargs->values;
+        } else {
+            proargtypes = (Oid*)ARR_DATA_PTR(arr);
+        }
+    } else {
+        proargtypes = allArgTypes->values;
+    }
+#else
     if (!includeOut) {
         oidvector* proargs = ProcedureGetArgTypes(procTup);
         proargtypes = proargs->values;
     } else {
         proargtypes = (Oid*)ARR_DATA_PTR(arr);
     }
+#endif
 
     if (argNumbers != NULL) {
         /* Re-order the argument types into call's logical order */
@@ -1264,25 +1333,36 @@ static FuncCandidateList FuncnameAddCandidates(FuncCandidateList resultList, Hea
  * such an entry it should react as though the call were ambiguous.
  */
 FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, bool expand_variadic,
-    bool expand_defaults, bool func_create, bool include_out)
+    bool expand_defaults, bool func_create, bool include_out, char expect_prokind)
 {
     FuncCandidateList resultList = NULL;
     char* schemaname = NULL;
     char* funcname = NULL;
     Oid namespaceId;
-    CatCList* catlist = NULL;
     char* pkgname = NULL;
     int i;
     bool isNull;
     Oid funcoid;
     Oid caller_pkg_oid = InvalidOid;
-    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
-        caller_pkg_oid = u_sess->plsql_cxt.plpgsql_curr_compile_package->pkg_oid;
+    Oid initNamesapceId = InvalidOid;
+    bool enable_outparam_override = false;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    enable_outparam_override = enable_out_param_override();
+    if (enable_outparam_override) {
+        include_out = true;
+    }
+#endif
+	
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+        caller_pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
     } else {
         caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
     }
     /* check for caller error */
     Assert(nargs >= 0 || !(expand_variadic || expand_defaults));
+
 
     /* deconstruct the name list */
     DeconstructQualifiedName(names, &schemaname, &funcname, &pkgname);
@@ -1293,33 +1373,34 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
         else
             /* use exact schema given */
             namespaceId = LookupExplicitNamespace(schemaname);
-    } else if (OidIsValid(caller_pkg_oid)) {
-        HeapTuple pkgtup = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(caller_pkg_oid));
-        if (!HeapTupleIsValid(pkgtup)) {
-            ereport(ERROR,
-                (errmodule(MOD_PLSQL), errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                    errmsg("cache lookup failed for package %u, while compile package", caller_pkg_oid),
-                    errdetail("cache lookup failed"),
-                    errcause("System error"),
-                    erraction("Drop and rebuild package")));
-        }
-        Form_gs_package packageform = (Form_gs_package)GETSTRUCT(pkgtup);
-        namespaceId = packageform->pkgnamespace;
-        ReleaseSysCache(pkgtup);
     } else {
         /* flag to indicate we need namespace search */
         namespaceId = InvalidOid;
         recomputeNamespacePath();
     }
+    initNamesapceId = namespaceId;
 
     /* Step1. search syscache by name only and add candidates from pg_proc */
+    CatCList* catlist = NULL;
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
     for (i = 0; i < catlist->n_members; i++) {
 
+        namespaceId = initNamesapceId;
         HeapTuple proctup = &catlist->members[i]->tuple;
         if (!OidIsValid(HeapTupleGetOid(proctup)) || !HeapTupleIsValid(proctup)) {
             continue;
         }
+
+#ifndef ENABLE_MULTIPLE_NODES
+        Datum pprokind = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_prokind, &isNull);
+        if (!isNull) {
+            char prokind = CharGetDatum(pprokind);
+            if (!PROC_IS_UNKNOWN(expect_prokind) && prokind != expect_prokind) {
+                continue;
+            }
+        }
+#endif
+
         /* judge the function in package is called by a function in same package or another package.
            if it's called by another package,it will continue*/
         funcoid = HeapTupleGetOid(proctup);
@@ -1343,17 +1424,15 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
                 if (pkg_oid != package_oid) {
                     continue;
                 }
+                namespaceId = GetPackageNamespace(pkg_oid);
             } else if (caller_pkg_oid == package_oid) {
-               if (pkgname != NULL) {
-                    if (namespaceId == InvalidOid) {
-                        pkg_oid = PackageNameGetOid(pkgname);
-                    } else {
-                        pkg_oid = PackageNameGetOid(pkgname, namespaceId);
-                    }
+                if (pkgname != NULL) {
+                    pkg_oid = PackageNameGetOid(pkgname, namespaceId);
                     if (pkg_oid != caller_pkg_oid) {
                         continue;
                     }
-               } 
+                }
+                namespaceId = GetPackageNamespace(caller_pkg_oid);
             }
         } else if (!OidIsValid(package_oid)) {
             if (pkgname != NULL) {
@@ -1373,8 +1452,9 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
                     expand_variadic,
                     expand_defaults,
                     include_out,
-                    InvalidOid);
-            continue;
+                    InvalidOid,
+                    enable_outparam_override);
+                    continue;
             }
         }
 
@@ -1388,51 +1468,71 @@ FuncCandidateList FuncnameGetCandidates(List* names, int nargs, List* argnames, 
             expand_variadic,
             expand_defaults,
             include_out,
-            InvalidOid);
+            InvalidOid,
+            enable_outparam_override);
     }
     ReleaseSysCacheList(catlist);
+
+    /* avoid POC error temporary */
+    if (resultList != NULL) {
+        return resultList;
+    }
+
     /* Step2. try to add candidates with referenced name if funcname is regarded as synonym object. */
-    if (IsNormalProcessingMode() && !IsInitdb && t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM) {
+    if (IsNormalProcessingMode() && !IsInitdb
+        && t_thrd.proc->workingVersionNum >= SYNONYM_VERSION_NUM && pkgname == NULL) {
         if (SearchSysCacheExists1(RELOID, PgSynonymRelationId)) {
             HeapTuple synTuple = NULL;
+            List* tempActiveSearchPath = NIL;
+            ListCell* l = NULL;
 
             /* Recompute and fill up the default namespace.*/
-            if (!OidIsValid(namespaceId)) {
+            if (schemaname == NULL) {
                 recomputeNamespacePath();
-
-                if (u_sess->catalog_cxt.activeTempCreationPending) {
-                    InitTempTableNamespace();
-                    namespaceId = u_sess->catalog_cxt.myTempNamespace;
-                } else {
-                    namespaceId = u_sess->catalog_cxt.activeCreationNamespace;
-                }
+                tempActiveSearchPath = list_copy(u_sess->catalog_cxt.activeSearchPath);
+            } else {
+                tempActiveSearchPath = list_make1_oid(namespaceId);
             }
+            foreach (l, tempActiveSearchPath) {
+                Oid tempnamespaceId = lfirst_oid(l);
+                synTuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(funcname),
+                    ObjectIdGetDatum(tempnamespaceId));
 
-            synTuple = SearchSysCache2(SYNONYMNAMENSP, PointerGetDatum(funcname), ObjectIdGetDatum(namespaceId));
-
-            if (HeapTupleIsValid(synTuple)) {
-                Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(synTuple);
-                catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(NameStr(synForm->synobjname)));
-
-                for (i = 0; i < catlist->n_members; i++) {
-                    HeapTuple procTuple = &catlist->members[i]->tuple;
-                    if (!OidIsValid(HeapTupleGetOid(procTuple))) {
-                        continue;
+                if (HeapTupleIsValid(synTuple)) {
+                    Form_pg_synonym synForm = (Form_pg_synonym)GETSTRUCT(synTuple);
+#ifndef ENABLE_MULTIPLE_NODES
+                    if (t_thrd.proc->workingVersionNum < 92470) {
+                        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(NameStr(synForm->synobjname)));
+                    } else {
+                        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(NameStr(synForm->synobjname)));
                     }
-                    resultList = FuncnameAddCandidates(resultList,
-                        procTuple,
-                        argnames,
-                        get_namespace_oid(NameStr(synForm->synobjschema), false),
-                        ((Form_pg_proc)GETSTRUCT(procTuple))->pronamespace,
-                        nargs,
-                        catlist,
-                        expand_variadic,
-                        expand_defaults,
-                        include_out,
-                        HeapTupleGetOid(synTuple));
+#else
+                    catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(NameStr(synForm->synobjname)));
+#endif
+                    for (i = 0; i < catlist->n_members; i++) {
+                        HeapTuple procTuple = &catlist->members[i]->tuple;
+                        if (!OidIsValid(HeapTupleGetOid(procTuple))) {
+                            continue;
+                        }
+                        if (!OidIsValid(get_namespace_oid(NameStr(synForm->synobjschema), true))) {
+                            continue;
+                        }
+                        resultList = FuncnameAddCandidates(resultList,
+                            procTuple,
+                            argnames,
+                            get_namespace_oid(NameStr(synForm->synobjschema), false),
+                            ((Form_pg_proc)GETSTRUCT(procTuple))->pronamespace,
+                            nargs,
+                            catlist,
+                            expand_variadic,
+                            expand_defaults,
+                            include_out,
+                            HeapTupleGetOid(synTuple),
+                            enable_outparam_override);
+                    }
+                    ReleaseSysCache(synTuple);
+                    ReleaseSysCacheList(catlist);
                 }
-                ReleaseSysCache(synTuple);
-                ReleaseSysCacheList(catlist);
             }
         }
     }
@@ -1627,7 +1727,7 @@ static bool MatchNamedCall(HeapTuple proctup, int nargs, List* argnames, int** a
     Assert(nargs <= pronargs);
 
     /* initialize state for matching */
-    *argnumbers = (int*)palloc(pronargs * sizeof(int));
+    *argnumbers = (int*)palloc(FUNC_MAX_ARGS * sizeof(int));
     errno_t rc = memset_s(arggiven, FUNC_MAX_ARGS, false, pronargs * sizeof(bool));
     securec_check(rc, "", "");
 
@@ -2761,9 +2861,13 @@ void DeconstructQualifiedName(const List* names, char** nspname_p, char** objnam
             }   
             pkgname = strVal(linitial(names));
             if (!OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
-                schemaname = strVal(linitial(names));
-                pkgname = NULL;
-                break;
+                pkgname = strVal(lsecond(names));
+                if (OidIsValid(PackageNameGetOid(pkgname, nspoid))) {
+                    schemaname = strVal(linitial(names));
+                    objname = pkgname;
+                } else {
+                    pkgname = NULL;
+                }
             } else {
                 schemaname = NULL;
             }
@@ -2822,6 +2926,8 @@ bool IsPackageFunction(List* funcname)
     bool result = false;
     Oid namespaceId = InvalidOid;
     char *pkgname = NULL;   
+    bool isFirstFunction = true; 
+
     /* deconstruct the name list */
     DeconstructQualifiedName(funcname, &schemaname, &func_name, &pkgname);
 
@@ -2833,8 +2939,15 @@ bool IsPackageFunction(List* funcname)
         recomputeNamespacePath();
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(func_name));
+    }
+#else
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
-    bool isFirstFunction = true;
+#endif
     bool isFirstPackageFunction = false;
     for (int i = 0; i < catlist->n_members; i++) {
         HeapTuple proctup = &catlist->members[i]->tuple;
@@ -2871,6 +2984,9 @@ bool IsPackageFunction(List* funcname)
         proctup = &catlist->members[i]->tuple;
         Datum ispackage = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_package, &isNull);
         result = DatumGetBool(ispackage);
+        if (IsSystemObjOid(HeapTupleGetOid(proctup))) {
+            continue;
+        }
         if (isFirstFunction && !OidIsValid(packageid)) {
             isFirstFunction = false;
             if (result) {
@@ -3157,11 +3273,17 @@ Oid get_namespace_oid(const char* nspname, bool missing_ok)
     Oid oid = InvalidOid;
 
     oid = GetSysCacheOid1(NAMESPACENAME, CStringGetDatum(nspname));
-    if (!OidIsValid(oid) && !missing_ok)
+    if (!OidIsValid(oid) && !missing_ok) {      
+        char message[MAXSTRLEN]; 
+        errno_t rc = sprintf_s(message, MAXSTRLEN, "schema \"%s\" does not exist", nspname);
+        securec_check_ss_c(rc, "", "");
+        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_SCHEMA), errmsg("schema \"%s\" does not exist", nspname)));
+    }
 
     return oid;
 }
+
 
 /*
  * makeRangeVarFromNameList
@@ -3584,10 +3706,12 @@ void PopOverrideSearchPath(void)
     /* Sanity checks. */
     if (u_sess->catalog_cxt.overrideStack == NIL)
         ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("bogus PopOverrideSearchPath call")));
+
+    /*
+     * With the creation or release of savepoint after pushing, CurrentTransactionNestLevel can either greater
+     * than or less than stack level.
+     */
     entry = (OverrideStackEntry*)linitial(u_sess->catalog_cxt.overrideStack);
-    if (entry->nestLevel != GetCurrentTransactionNestLevel())
-        ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NODE_STATE), errmsg("bogus PopOverrideSearchPath call, stack level %d, xact level %d",
-            entry->nestLevel, GetCurrentTransactionNestLevel())));
 
     /* Pop the stack and free storage. */
     u_sess->catalog_cxt.overrideStack = list_delete_first(u_sess->catalog_cxt.overrideStack);
@@ -4035,6 +4159,11 @@ static void InitTempTableNamespace(void)
     int ret;
     errno_t rc;
 
+#ifndef ENABLE_MULTIPLE_NODES
+    Assert(g_instance.exec_cxt.global_application_name != NULL);
+    nameLen = strlen(g_instance.exec_cxt.global_application_name);
+#endif
+
     Assert(!OidIsValid(u_sess->catalog_cxt.myTempNamespace));
 
     /*
@@ -4081,7 +4210,11 @@ static void InitTempTableNamespace(void)
      */
     ret = strncpy_s(PGXCNodeNameSimplified,
         sizeof(PGXCNodeNameSimplified),
+#ifndef ENABLE_MULTIPLE_NODES
+        g_instance.exec_cxt.global_application_name,
+#else
         g_instance.attr.attr_common.PGXCNodeName,
+#endif
         nameLen >= NAME_SIMPLIFIED_LEN ? NAME_SIMPLIFIED_LEN : nameLen);
     securec_check(ret, "\0", "\0");
 

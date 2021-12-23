@@ -148,7 +148,7 @@ recheck:
                 errmsg("could not read file \"%s\": %m", filename)));
     }
 
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && isNeedCheck && need_check) {
+    if (ENABLE_INCRE_CKPT && isNeedCheck && need_check) {
         uint32 check_loc = 0;
         BlockNumber blkno = 0;
         uint16 checksum = 0;

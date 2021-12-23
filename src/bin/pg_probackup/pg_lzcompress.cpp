@@ -317,8 +317,7 @@ do {                                    \
             /* scribble on the unused entry if it was not, but that's */    \
             /* harmless. Avoiding the branch in this critical path */        \
             /* speeds this up a little bit. */                                \
-            /* if (*__myhsp != INVALID_ENTRY) */                            \
-                (_he)[(*__myhsp)].prev = __myhe;                            \
+            (_he)[(*__myhsp)].prev = __myhe;                            \
             *__myhsp = _hn;                                                    \
             if (++(_hn) >= PGLZ_HISTORY_SIZE + 1) {                            \
                 (_hn) = 1;                                                    \

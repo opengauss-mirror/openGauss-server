@@ -138,3 +138,188 @@ SELECT * FROM t_trigger ORDER BY key;
    9 | yellow
 (9 rows)
 
+create table test_range_pt (key int primary key, color text)
+partition by range(key)
+(
+	partition p1 values less than (2000),
+	partition p2 values less than (3000),
+	partition p3 values less than (4000),
+	partition p4 values less than (5000),
+	partition p5 values less than (6000)
+)ENABLE ROW MOVEMENT;
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "test_range_pt_pkey" for table "test_range_pt"
+CREATE TRIGGER upsert_before_trig_for_pt BEFORE INSERT OR UPDATE ON test_range_pt
+  FOR EACH ROW EXECUTE procedure upsert_before_func();
+CREATE TRIGGER upsert_after_trig_for_pt AFTER INSERT OR UPDATE ON test_range_pt
+  FOR EACH ROW EXECUTE procedure upsert_after_func();
+INSERT INTO test_range_pt values(1, 'black') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (1,black)
+WARNING:  after insert (new): (1,black)
+INSERT INTO test_range_pt values(2, 'red') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (2,red)
+WARNING:  before insert (new, modified): (2,"red trig modified")
+WARNING:  after insert (new): (2,"red trig modified")
+INSERT INTO test_range_pt values(3, 'orange') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (3,orange)
+WARNING:  after insert (new): (3,orange)
+INSERT INTO test_range_pt values(4, 'green') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (4,green)
+WARNING:  before insert (new, modified): (4,"green trig modified")
+WARNING:  after insert (new): (4,"green trig modified")
+INSERT INTO test_range_pt values(5, 'purple') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (5,purple)
+WARNING:  after insert (new): (5,purple)
+INSERT INTO test_range_pt values(6, 'white') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (6,white)
+WARNING:  before insert (new, modified): (6,"white trig modified")
+WARNING:  after insert (new): (6,"white trig modified")
+INSERT INTO test_range_pt values(7, 'pink') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (7,pink)
+WARNING:  after insert (new): (7,pink)
+INSERT INTO test_range_pt values(8, 'yellow') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (8,yellow)
+WARNING:  before insert (new, modified): (8,"yellow trig modified")
+WARNING:  after insert (new): (8,"yellow trig modified")
+SELECT * FROM test_range_pt ORDER BY key;
+ key |        color         
+-----+----------------------
+   1 | black
+   2 | red trig modified
+   3 | orange
+   4 | green trig modified
+   5 | purple
+   6 | white trig modified
+   7 | pink
+   8 | yellow trig modified
+(8 rows)
+
+INSERT INTO test_range_pt values(2, 'black') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (2,black)
+WARNING:  before insert (new, modified): (2,"black trig modified")
+WARNING:  before update (old): (2,"red trig modified")
+WARNING:  before update (new): (2,"updated red trig modified")
+WARNING:  after update (old): (2,"red trig modified")
+WARNING:  after update (new): (2,"updated red trig modified")
+INSERT INTO test_range_pt values(3, 'red') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (3,red)
+WARNING:  before update (old): (3,orange)
+WARNING:  before update (new): (3,"updated orange")
+WARNING:  after update (old): (3,orange)
+WARNING:  after update (new): (3,"updated orange")
+INSERT INTO test_range_pt values(4, 'orange') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (4,orange)
+WARNING:  before insert (new, modified): (4,"orange trig modified")
+WARNING:  before update (old): (4,"green trig modified")
+WARNING:  before update (new): (4,"updated green trig modified")
+WARNING:  after update (old): (4,"green trig modified")
+WARNING:  after update (new): (4,"updated green trig modified")
+INSERT INTO test_range_pt values(5, 'green') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (5,green)
+WARNING:  before update (old): (5,purple)
+WARNING:  before update (new): (5,"updated purple")
+WARNING:  after update (old): (5,purple)
+WARNING:  after update (new): (5,"updated purple")
+INSERT INTO test_range_pt values(6, 'purple') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (6,purple)
+WARNING:  before insert (new, modified): (6,"purple trig modified")
+WARNING:  before update (old): (6,"white trig modified")
+WARNING:  before update (new): (6,"updated white trig modified")
+WARNING:  after update (old): (6,"white trig modified")
+WARNING:  after update (new): (6,"updated white trig modified")
+INSERT INTO test_range_pt values(7, 'white') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (7,white)
+WARNING:  before update (old): (7,pink)
+WARNING:  before update (new): (7,"updated pink")
+WARNING:  after update (old): (7,pink)
+WARNING:  after update (new): (7,"updated pink")
+INSERT INTO test_range_pt values(8, 'pink') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (8,pink)
+WARNING:  before insert (new, modified): (8,"pink trig modified")
+WARNING:  before update (old): (8,"yellow trig modified")
+WARNING:  before update (new): (8,"updated yellow trig modified")
+WARNING:  after update (old): (8,"yellow trig modified")
+WARNING:  after update (new): (8,"updated yellow trig modified")
+INSERT INTO test_range_pt values(9, 'yellow') ON DUPLICATE KEY UPDATE color = 'updated ' || test_range_pt.color;
+WARNING:  before insert (new): (9,yellow)
+WARNING:  after insert (new): (9,yellow)
+DELETE FROM test_range_pt;
+SELECT * FROM test_range_pt ORDER BY key;
+ key | color 
+-----+-------
+(0 rows)
+
+INSERT INTO test_range_pt values(2, 'black')  ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (2,black)
+WARNING:  before insert (new, modified): (2,"black trig modified")
+WARNING:  after insert (new): (2,"black trig modified")
+INSERT INTO test_range_pt values(3, 'red')    ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (3,red)
+WARNING:  after insert (new): (3,red)
+INSERT INTO test_range_pt values(4, 'orange') ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (4,orange)
+WARNING:  before insert (new, modified): (4,"orange trig modified")
+WARNING:  after insert (new): (4,"orange trig modified")
+INSERT INTO test_range_pt values(5, 'green')  ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (5,green)
+WARNING:  after insert (new): (5,green)
+INSERT INTO test_range_pt values(6, 'purple') ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (6,purple)
+WARNING:  before insert (new, modified): (6,"purple trig modified")
+WARNING:  after insert (new): (6,"purple trig modified")
+INSERT INTO test_range_pt values(7, 'white')  ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (7,white)
+WARNING:  after insert (new): (7,white)
+INSERT INTO test_range_pt values(8, 'pink')   ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (8,pink)
+WARNING:  before insert (new, modified): (8,"pink trig modified")
+WARNING:  after insert (new): (8,"pink trig modified")
+INSERT INTO test_range_pt values(9, 'yellow') ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (9,yellow)
+WARNING:  after insert (new): (9,yellow)
+SELECT * FROM test_range_pt ORDER BY key;
+ key |        color         
+-----+----------------------
+   2 | black trig modified
+   3 | red
+   4 | orange trig modified
+   5 | green
+   6 | purple trig modified
+   7 | white
+   8 | pink trig modified
+   9 | yellow
+(8 rows)
+
+INSERT INTO test_range_pt values(2, 'black')  ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (2,black)
+WARNING:  before insert (new, modified): (2,"black trig modified")
+INSERT INTO test_range_pt values(3, 'red')    ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (3,red)
+INSERT INTO test_range_pt values(4, 'orange') ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (4,orange)
+WARNING:  before insert (new, modified): (4,"orange trig modified")
+INSERT INTO test_range_pt values(5, 'green')  ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (5,green)
+INSERT INTO test_range_pt values(6, 'purple') ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (6,purple)
+WARNING:  before insert (new, modified): (6,"purple trig modified")
+INSERT INTO test_range_pt values(7, 'white')  ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (7,white)
+INSERT INTO test_range_pt values(8, 'pink')   ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (8,pink)
+WARNING:  before insert (new, modified): (8,"pink trig modified")
+INSERT INTO test_range_pt values(9, 'yellow') ON DUPLICATE KEY UPDATE nothing;
+WARNING:  before insert (new): (9,yellow)
+SELECT * FROM test_range_pt ORDER BY key;
+ key |        color         
+-----+----------------------
+   2 | black trig modified
+   3 | red
+   4 | orange trig modified
+   5 | green
+   6 | purple trig modified
+   7 | white
+   8 | pink trig modified
+   9 | yellow
+(8 rows)
+
+drop table test_range_pt;

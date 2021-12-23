@@ -1,3 +1,5 @@
+create database pl_test DBCOMPATIBILITY 'pg';
+\c pl_test;
 create schema plus_outerjoin;
 set current_schema='plus_outerjoin';
 create table t11(c1 int, c2 int, c3 int);
@@ -368,3 +370,5 @@ drop table t13;
 drop table t14;
 drop table t15;
 drop schema plus_outerjoin;
+\c regression;
+drop database IF EXISTS pl_test;

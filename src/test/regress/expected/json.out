@@ -79,12 +79,6 @@ SELECT '"\uaBcD"'::json;		-- OK, uppercase and lower case both OK
  "\uaBcD"
 (1 row)
 
-SELECT '"哈1哈"'::jsonb;                -- OK
-  jsonb  
----------
- "哈1哈"
-(1 row)
-
 -- Numbers.
 SELECT '1'::json;				-- OK
  json 
@@ -414,11 +408,12 @@ FROM (SELECT $$a$$ || x AS b,
   "z":[{"f1":2,"f2":[1,2,3]},{"f1":5,"f2":[4,5,6]}]}
 (4 rows)
 
+-- Enforce use of COMMIT instead of 2PC for temporary objects
 CREATE TEMP TABLE rows AS
 SELECT x, 'txt' || x as y
 FROM generate_series(1,3) AS x;
 SELECT row_to_json(q,true)
-FROM rows q;
+FROM rows q order by x;
  row_to_json  
 --------------
  {"x":1,     +

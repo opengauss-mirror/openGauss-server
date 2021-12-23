@@ -43,6 +43,7 @@ public:
 
     bool load_cache(PGconn *conn) override;
     void clear() override;
+    void reload_cache_if_needed(PGconn *conn) override;
     const GlobalHookExecutor** get_global_hook_executors(size_t& global_hook_executors_size) const override;
     const CachedGlobalSetting* get_global_setting_by_fqdn(const char* globalSettingFqdn) const override;
     size_t get_object_fqdn(const char* object_name, bool is_global_setting, char* object_fqdn) const override;

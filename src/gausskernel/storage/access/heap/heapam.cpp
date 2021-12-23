@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -122,15 +123,28 @@ static void HeapParallelscanStartblockInit(HeapScanDesc scan);
 static BlockNumber HeapParallelscanNextpage(HeapScanDesc scan);
 static HeapTuple heap_prepare_insert(Relation relation, HeapTuple tup, CommandId cid, int options);
 static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf, HeapTuple newtup,
-    HeapTuple old_key_tuple, bool all_visible_cleared, bool new_all_visible_cleared);
-static void HeapSatisfiesHOTUpdate(Relation relation, Bitmapset* hot_attrs, Bitmapset *key_attrs, Bitmapset* id_attrs,
+    HeapTuple old_key_tup, bool all_visible_cleared, bool new_all_visible_cleared);
+static void HeapSatisfiesHOTUpdate(Relation relation, Bitmapset* hot_attrs, Bitmapset* key_attrs, Bitmapset* id_attrs,
     bool* satisfies_hot, bool *satisfies_key, bool* satisfies_id, HeapTuple oldtup, HeapTuple newtup, char* page);
 static HeapTuple ExtractReplicaIdentity(Relation rel, HeapTuple tup, bool key_modified, bool* copy);
 static void SkipToNewPage(
     HeapScanDesc scan, ScanDirection dir, BlockNumber page, bool* finished, bool* isValidRelationPage);
 static bool VerifyHeapGetTup(HeapScanDesc scan, ScanDirection dir);
 static XLogRecPtr log_heap_new_cid(Relation relation, HeapTuple tup);
+extern void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_table_age, TransactionId *oldestXmin,
+                                  TransactionId *freezeLimit, TransactionId *freezeTableLimit,
+                                  MultiXactId* multiXactFrzLimit);
 extern void Start_Prefetch(TableScanDesc scan, SeqScanAccessor* pAccessor, ScanDirection dir);
+
+static TM_Result heap_lock_updated_tuple(Relation rel, HeapTuple tuple, ItemPointer ctid, TransactionId xid,
+    LockTupleMode mode);
+static void ComputeNewXmaxInfomask(TransactionId xmax, uint16 old_infomask, uint16 old_infomask2,
+    TransactionId add_to_xmax, LockTupleMode mode, bool is_update, TransactionId *result_xmax,
+    uint16 *result_infomask, uint16 *result_infomask2);
+
+static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask, uint16 *new_infomask2);
+static TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2);
+static bool DoesMultiXactIdConflict(MultiXactId multi, LockTupleMode lockmode);
 
 /* ----------------
  *		initscan - scan code common to heap_beginscan and heap_rescan
@@ -197,17 +211,6 @@ static void SkipToNewPage(HeapScanDesc scan, ScanDirection dir, BlockNumber page
 static bool VerifyHeapGetTup(HeapScanDesc scan, ScanDirection dir);
 static XLogRecPtr log_heap_new_cid(Relation relation, HeapTuple tup);
 extern void Start_Prefetch(TableScanDesc scan, SeqScanAccessor *pAccessor, ScanDirection dir);
-extern void vacuum_set_xid_limits(Relation rel, int64 freeze_min_age, int64 freeze_table_age, TransactionId *oldestXmin,
-                                  TransactionId *freezeLimit, TransactionId *freezeTableLimit, MultiXactId* multiXactFrzLimit);
-static TM_Result heap_lock_updated_tuple(Relation rel, HeapTuple tuple, ItemPointer ctid, TransactionId xid,
-    LockTupleMode mode);
-static void ComputeNewXmaxInfomask(TransactionId xmax, uint16 old_infomask, uint16 old_infomask2,
-    TransactionId add_to_xmax, LockTupleMode mode, bool is_update, TransactionId *result_xmax,
-    uint16 *result_infomask, uint16 *result_infomask2);
-
-static void GetMultiXactIdHintBits(MultiXactId multi, uint16 *new_infomask, uint16 *new_infomask2);
-static TransactionId MultiXactIdGetUpdateXid(TransactionId xmax, uint16 t_infomask, uint16 t_infomask2);
-static bool DoesMultiXactIdConflict(MultiXactId multi, LockTupleMode lockmode);
 
 /* ----------------
  *		initscan - scan code common to heap_beginscan and heap_rescan
@@ -4555,6 +4558,10 @@ l1:
             char relreplident;
             Relation rel = heap_open(RelationRelationId, AccessShareLock);
             Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
+            Oid tmpRelid = partid_get_parentid(relid);
+            if (OidIsValid(tmpRelid)) {
+                relid = tmpRelid;
+            }
             HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
             if (!HeapTupleIsValid(tuple)) {
                 ereport(ERROR,
@@ -7976,8 +7983,8 @@ XLogRecPtr log_heap_visible(RelFileNode rnode, BlockNumber block, Buffer heap_bu
  * Perform XLogInsert for a heap-update operation.	Caller must already
  * have modified the buffer(s) and marked them dirty.
  */
-static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf, HeapTuple newtup,
-    HeapTuple old_key_tuple, bool all_visible_cleared, bool new_all_visible_cleared)
+static XLogRecPtr log_heap_update(Relation reln, Buffer oldbuf, HeapTuple oldtup, Buffer newbuf,
+    HeapTuple newtup, HeapTuple old_key_tuple, bool all_visible_cleared, bool new_all_visible_cleared)
 {
     xl_heap_update xlrec;
     xl_heap_header xlhdr;
@@ -8147,6 +8154,10 @@ static HeapTuple ExtractReplicaIdentity(Relation relation, HeapTuple tp, bool ke
     bool is_null = true;
     Relation rel = heap_open(RelationRelationId, AccessShareLock);
     Oid relid = RelationIsPartition(relation) ? relation->parentId : relation->rd_id;
+    Oid tmpRelid = partid_get_parentid(relid);
+    if (OidIsValid(tmpRelid)) {
+        relid = tmpRelid;
+    }
     HeapTuple tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
     if (!HeapTupleIsValid(tuple)) {
         ereport(ERROR,
@@ -9380,7 +9391,11 @@ Partition partitionOpenWithRetry(Relation relation, Oid partition_id, LOCKMODE l
         ereport(ERROR,
             (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open partition with OID %u", partition_id)));
     }
-    Assert(relation->rd_id == p->pd_part->parentid);
+
+    /* Insert TDE key to buffer cache for tde table */
+    if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE && RelationisEncryptEnable(relation)) {
+        PartitionInsertTdeInfoToCache(relation, p);
+    }
 
     PartitionOpenSmgr(p);
 
@@ -9450,7 +9465,11 @@ Partition partitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmode, 
         ereport(ERROR,
             (errcode(ERRCODE_RELATION_OPEN_ERROR), errmsg("could not open partition with OID %u", partition_id)));
     }
-    Assert(relation->rd_id == p->pd_part->parentid);
+
+    /* Insert TDE key to buffer cache for tde table */
+    if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE && RelationisEncryptEnable(relation)) {
+        PartitionInsertTdeInfoToCache(relation, p);
+    }
 
     PartitionOpenSmgr(p);
 
@@ -9563,6 +9582,13 @@ Partition tryPartitionOpen(Relation relation, Oid partition_id, LOCKMODE lockmod
     }
     Assert(relation->rd_id == p->pd_part->parentid);
 
+    /* Insert TDE key to buffer cache for tde table */
+    bool is_need_insert_key =
+        g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE && RelationisEncryptEnable(relation);
+    if (is_need_insert_key) {
+        PartitionInsertTdeInfoToCache(relation, p);
+    }
+
     PartitionOpenSmgr(p);
 
 #ifdef PGXC
@@ -9594,10 +9620,15 @@ void partitionClose(Relation relation, Partition partition, LOCKMODE lockmode)
     Assert(lockmode >= NoLock && lockmode < MAX_LOCKMODES);
     Assert(PointerIsValid(relation));
     Assert(PointerIsValid(part));
-    Assert(relation->rd_id == part->pd_part->parentid);
 
     /* The partcache does the real work... */
     PartitionClose(part);
+
+    /*
+     * If we are executing select for update/share operation,
+     * directly hold RowShareLock to avoid deadlock with vacuum full
+     */
+    lockmode = GetPartitionLockMode(lockmode);
 
     if (lockmode != NoLock) {
         if (relation->rd_rel->relkind == RELKIND_RELATION) {

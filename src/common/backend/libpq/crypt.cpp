@@ -148,6 +148,54 @@ bool get_stored_password(const char* role, password_info* pass_info)
     return true;
 }
 
+/*
+*Funcation  : GetValidPeriod
+*Description: ONLY get user valid peroid information
+*/
+static bool GetValidPeriod(const char *role, password_info *passInfo)
+{
+    bool save_ImmediateInterruptOK = t_thrd.int_cxt.ImmediateInterruptOK;
+    
+    /*
+     * Disable immediate interrupts while doing database access.  (Note we
+     * don't bother to turn this back on if we hit one of the failure
+     * conditions, since we can expect we'll just exit right away anyway.)
+     */
+    t_thrd.int_cxt.ImmediateInterruptOK = false;
+    
+    /* Get role info from pg_authid */
+    HeapTuple roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
+    if (!HeapTupleIsValid(roleTup)) {
+        t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
+        return false;	/* no such user */
+    }
+    
+    /*Get the date validation of password, including starting and expiration time */
+    Datum datum1 = SysCacheGetAttr(AUTHNAME, roleTup,
+                                   Anum_pg_authid_rolvalidbegin, &(passInfo->isnull_begin));
+    
+    if (!(passInfo->isnull_begin)) {
+        passInfo->vbegin = DatumGetTimestampTz(datum1);
+    }
+    
+    Datum datum2 = SysCacheGetAttr(AUTHNAME, roleTup,
+                                   Anum_pg_authid_rolvaliduntil, &(passInfo->isnull_until));
+    
+    if (!(passInfo->isnull_until)) {
+        passInfo->vuntil = DatumGetTimestampTz(datum2);
+    }
+    
+    ReleaseSysCache(roleTup);
+    
+    /* Resume response to SIGTERM/SIGINT/timeout interrupts */
+    t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
+    /* And don't forget to detect one that already arrived */
+    CHECK_FOR_INTERRUPTS();
+    
+    return true;
+}
+
+
 /* Database Security: check user valid state */
 int CheckUserValid(Port* port, const char* role)
 {
@@ -695,6 +743,7 @@ int get_stored_iteration(const char* role)
     return iteration_count;
 }
 
+#ifdef USE_IAM
 /*
  * @Description: read auth file to buffer for iam token authenication.
  * @in file_path : the file path with filename.
@@ -1215,51 +1264,4 @@ bool check_token(iam_token token, char* rolname)
 
     return true;
 }
-
-/*
-*Funcation  : GetValidPeriod
-*Description: ONLY get user valid peroid information
-*/
-static bool GetValidPeriod(const char *role, password_info *passInfo)
-{
-    bool save_ImmediateInterruptOK = t_thrd.int_cxt.ImmediateInterruptOK;
-    
-    /*
-     * Disable immediate interrupts while doing database access.  (Note we
-     * don't bother to turn this back on if we hit one of the failure
-     * conditions, since we can expect we'll just exit right away anyway.)
-     */
-    t_thrd.int_cxt.ImmediateInterruptOK = false;
-    
-    /* Get role info from pg_authid */
-    HeapTuple roleTup = SearchSysCache1(AUTHNAME, PointerGetDatum(role));
-    if (!HeapTupleIsValid(roleTup)) {
-        t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
-        return false;	/* no such user */
-    }
-    
-    /*Get the date validation of password, including starting and expiration time */
-    Datum datum1 = SysCacheGetAttr(AUTHNAME, roleTup,
-                                   Anum_pg_authid_rolvalidbegin, &(passInfo->isnull_begin));
-    
-    if (!(passInfo->isnull_begin)) {
-        passInfo->vbegin = DatumGetTimestampTz(datum1);
-    }
-    
-    Datum datum2 = SysCacheGetAttr(AUTHNAME, roleTup,
-                                   Anum_pg_authid_rolvaliduntil, &(passInfo->isnull_until));
-    
-    if (!(passInfo->isnull_until)) {
-        passInfo->vuntil = DatumGetTimestampTz(datum2);
-    }
-    
-    ReleaseSysCache(roleTup);
-    
-    /* Resume response to SIGTERM/SIGINT/timeout interrupts */
-    t_thrd.int_cxt.ImmediateInterruptOK = save_ImmediateInterruptOK;
-    /* And don't forget to detect one that already arrived */
-    CHECK_FOR_INTERRUPTS();
-    
-    return true;
-}
-
+#endif

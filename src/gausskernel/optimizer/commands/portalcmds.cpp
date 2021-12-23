@@ -302,6 +302,35 @@ void PortalCleanup(Portal portal)
     }
 }
 
+#ifdef ENABLE_MULTIPLE_NODES
+static bool check_remote_plan(Plan* plan)
+{
+    if (plan == NULL)
+        return false;
+
+    if (IsA(plan, RemoteQuery) || IsA(plan, VecRemoteQuery)) {
+        RemoteQuery* remote_query = (RemoteQuery*)plan;
+        if (remote_query->exec_type != EXEC_ON_COORDS)
+            return true;
+    }
+    return check_remote_plan(plan->lefttree) || check_remote_plan(plan->righttree);
+}
+
+static bool PortalCheckRemotePlan(PlannedStmt* plannedstmt)
+{
+    bool is_remote_plan = false;
+
+    if (IsA(plannedstmt, PlannedStmt)) {
+        if (check_remote_plan(plannedstmt->planTree)) {
+            is_remote_plan = true;
+        }
+    }
+    return is_remote_plan;
+}
+
+#endif
+
+
 /*
  * PersistHoldablePortal
  *
@@ -386,6 +415,9 @@ void PersistHoldablePortal(Portal portal)
 
         /* Fetch the result set into the tuplestore */
         ExecutorRun(queryDesc, ForwardScanDirection, 0L);
+#ifdef ENABLE_MULTIPLE_NODES
+        bool is_remote_plan = PortalCheckRemotePlan(queryDesc->plannedstmt);
+#endif
 
         (*queryDesc->dest->rDestroy)(queryDesc->dest);
         queryDesc->dest = NULL;
@@ -416,7 +448,7 @@ void PersistHoldablePortal(Portal portal)
          */
 
 #ifdef ENABLE_MULTIPLE_NODES
-        if (portal->cursorOptions & CURSOR_OPT_HOLD) {
+        if ((portal->cursorOptions & CURSOR_OPT_HOLD) || (!is_remote_plan)) {
 #endif
             if (portal->atEnd) {
                 /* we can handle this case even if posOverflow */

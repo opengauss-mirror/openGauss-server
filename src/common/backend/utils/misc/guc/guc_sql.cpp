@@ -9,6 +9,7 @@
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
  * Written by Peter Eisentraut <peter_e@gmx.net>.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  * src/backend/utils/misc/guc/guc_sql.cpp
@@ -164,6 +165,7 @@ static void assign_convert_string_to_digit(bool newval, void* extra);
 static void AssignUStoreAttr(const char* newval, void* extra);
 static bool check_snapshot_delimiter(char** newval, void** extra, GucSource source);
 static bool check_snapshot_separator(char** newval, void** extra, GucSource source);
+static bool check_numformat_arg(char** numformat, void** extra, GucSource source);
 
 
 static void InitSqlConfigureNamesBool();
@@ -172,6 +174,14 @@ static void InitSqlConfigureNamesInt64();
 static void InitSqlConfigureNamesReal();
 static void InitSqlConfigureNamesString();
 static void InitSqlConfigureNamesEnum();
+
+double str_to_num(char *format_str);
+double my_pow(double base, int exp);
+void extract_deci_part_width(double num, int width, int int_places, StringInfo result, bool is_negative);
+void extract_part(double num, StringInfo result, bool is_negative, bool extract_deci, int int_places, int deci_places);
+void extract_int_part(double num, int places, StringInfo space_part, StringInfo int_part);
+void extract_deci_part(double num, int deci_places, StringInfo deci_part);
+void out_of_range(StringInfo result, int len, bool amend_length);
 
 /*
  * Although only "on", "off", and "safe_encoding" are documented, we
@@ -286,6 +296,9 @@ static const struct config_enum_entry sql_beta_options[] = {
     {"canonical_pathkey", CANONICAL_PATHKEY, false},
     {"index_cost_with_leaf_pages_only", INDEX_COST_WITH_LEAF_PAGES_ONLY, false},
     {"partition_opfusion", PARTITION_OPFUSION , false},
+    {"spi_debug", SPI_DEBUG, false},
+    {"resowner_debug", RESOWNER_DEBUG, false},
+    {"a_style_coerce", A_STYLE_COERCE, false},
     {NULL, 0, false}
 };
 
@@ -305,7 +318,12 @@ static const struct behavior_compat_entry behavior_compat_options[OPT_MAX] = {
     {"correct_to_number", OPT_CORRECT_TO_NUMBER},
     {"compat_concat_variadic", OPT_CONCAT_VARIADIC},
     {"merge_update_multi", OPT_MEGRE_UPDATE_MULTI},
-    {"convert_string_digit_to_numeric", OPT_CONVERT_TO_NUMERIC}
+    {"convert_string_digit_to_numeric", OPT_CONVERT_TO_NUMERIC},
+    {"plstmt_implicit_savepoint", OPT_PLSTMT_IMPLICIT_SAVEPOINT},
+    {"hide_tailing_zero", OPT_HIDE_TAILING_ZERO},
+    {"plsql_security_definer", OPT_SECURITY_DEFINER},
+    {"skip_insert_gs_source", OPT_SKIP_GS_SOURCE},
+    {"proc_outparam_override", OPT_PROC_OUTPARAM_OVERRIDE}
 };
 
 /*
@@ -648,6 +666,17 @@ static void InitSqlConfigureNamesBool()
             NULL},
             &u_sess->attr.attr_sql.enable_material,
             true,
+            NULL,
+            NULL,
+            NULL},
+        {{"enable_startwith_debug",
+            PGC_USERSET,
+            NODE_ALL,
+            QUERY_TUNING_METHOD,
+            gettext_noop("Enables debug infomation for start with."),
+            NULL},
+            &u_sess->attr.attr_sql.enable_startwith_debug,
+            false,
             NULL,
             NULL,
             NULL},
@@ -1492,6 +1521,20 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+#ifndef ENABLE_MULTIPLE_NODES
+        {{"plsql_show_all_error",
+            PGC_USERSET,
+            NODE_SINGLENODE,
+            QUERY_TUNING,
+            gettext_noop("Enable plsql debug mode"),
+            NULL},
+            &u_sess->attr.attr_common.plsql_show_all_error,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
+#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -2159,6 +2202,20 @@ static void InitSqlConfigureNamesInt()
             NULL,
             NULL,
             NULL},
+        {{"pldebugger_timeout",
+            PGC_USERSET,
+            NODE_ALL,
+            DEVELOPER_OPTIONS,
+            gettext_noop("Sets the receive timeout (s) of pldebugger."),
+            NULL,
+            GUC_UNIT_S},
+            &u_sess->attr.attr_sql.pldebugger_timeout,
+            15 * 60,
+            1,
+            24 * 60 * 60,
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -2597,6 +2654,17 @@ static void InitSqlConfigureNamesString()
             check_snapshot_delimiter,
             NULL,
             NULL},
+        {{"pset_num_format",
+            PGC_USERSET,
+            NODE_ALL,
+            CUSTOM_OPTIONS,
+            gettext_noop("GUC parameter of pset_num_format."),
+            NULL},
+            &u_sess->attr.attr_common.pset_num_format,
+            "\0",
+            check_numformat_arg,
+            NULL,
+            NULL},
         {{NULL,
             (GucContext)0,
             (GucNodeType)0,
@@ -2753,7 +2821,7 @@ static void InitSqlConfigureNamesEnum()
             QUERY_TUNING,
             gettext_noop("Sets the beta feature for SQL engine."), NULL, GUC_LIST_INPUT},
             &u_sess->attr.attr_sql.sql_beta_feature,
-            PARTITION_OPFUSION,
+            NO_BETA_FEATURE,
             sql_beta_options,
             NULL,
             NULL,
@@ -3236,4 +3304,275 @@ static bool check_snapshot_separator(char** newval, void** extra, GucSource sour
 {
     return (strlen(*newval) == 1 && (!u_sess->attr.attr_sql.db4ai_snapshot_version_delimiter
                                      || **newval != *u_sess->attr.attr_sql.db4ai_snapshot_version_delimiter));
+}
+
+/*
+ * @@GaussDB@@
+ * Brief			: Check numformat (strlen(numformat) is known to greater than 0).
+ * Description		: If numformat is not right, then return false.
+ */
+static bool check_numformat_arg(char** numformat, void** extra, GucSource source)
+{
+    if (NULL == numformat) {
+        return false;
+    }
+
+    if (strlen(*numformat) > 128) {
+        GUC_check_errdetail("The numformat is too long!");
+        return false;
+    }
+
+    bool point_appeared = false;
+    char *numformat_copy = *numformat;
+    while (*numformat_copy != '\0') {
+        if (*numformat_copy != '9' && *numformat_copy != '.') {
+            return false;
+        }
+        if (*numformat_copy == '.') {
+            if (unlikely(point_appeared)) {
+                return false;
+            }
+            point_appeared = true;
+        }
+		numformat_copy++;
+    }
+    return true;
+}
+
+char* apply_num_width(double num)
+{
+    StringInfoData result;
+    initStringInfo(&result);
+    bool is_negative = false;
+    int width = u_sess->attr.attr_common.pset_num_width;
+    const int decimal = 10;
+    if (num < 0) {
+        num = -num;
+        is_negative = true;
+        width--;
+    }
+
+    int int_places = 0;
+    double num_copy = num;
+    while ((int)num_copy > 0) {
+        int_places++;
+        num_copy = num_copy / decimal;
+    }
+
+    if (int_places > width) {
+        out_of_range(&result, width, is_negative);
+    } else if (int_places == width || int_places == width - 1) {
+        int value = (int)(num * decimal) % decimal;
+        if (value >= 5) {
+            num += 1;
+        }
+        if ((int)num == (int)my_pow(decimal, width) && int_places == width) {
+            out_of_range(&result, width, is_negative);
+        } else {
+            if (unlikely(is_negative)) {
+                appendStringInfo(&result, "%s", "-");
+            }
+            appendStringInfo(&result, "%d", (int)num);
+        }
+    } else {
+        extract_deci_part_width(num, width, int_places, &result, is_negative);
+    }
+
+    return result.data;
+}
+
+void extract_deci_part_width(double num, int width, int int_places, StringInfo result, bool is_negative)
+{
+    int deci_places = width - 1 - int_places;
+    const int decimal = 10;
+    int value = (int)(num * my_pow(decimal, deci_places + 1)) % decimal;
+    if (value >= 5) {
+        num += my_pow(decimal, -deci_places);
+        int_places = 0;
+        double num_copy = num;
+        while ((int)num_copy > 0) {
+            int_places++;
+            num_copy = num_copy / decimal;
+        }
+        deci_places = width - 1 - int_places;
+    }
+
+    StringInfoData int_part, deci_part;
+    initStringInfo(&int_part);
+    initStringInfo(&deci_part);
+
+    if (unlikely(is_negative)) {
+        appendStringInfo(&int_part, "%s", "-");
+    }
+
+    for (int i = int_places - 1; i >= 0; i--) {
+        int value = (int)(num / my_pow(decimal, i)) % decimal;
+        appendStringInfo(&int_part, "%d", value);
+    }
+
+    int last_not_zero = 0;
+    for (int i = 1; i <= deci_places; i++) {
+        int value = (int)(num * my_pow(decimal, i)) % decimal;
+        if (value != 0) {
+            last_not_zero = i;
+        }
+    }
+
+    if (last_not_zero == 0) {
+        for (int i = 0; i < deci_places + 1; i++) {
+            appendStringInfo(result, "%s", " ");
+        }
+        if (int_part.len == 0) {
+            appendStringInfo(&int_part, "%s", "0");
+        }
+        appendStringInfo(result, "%s", int_part.data);
+    } else {
+        for (int i = 0; i < deci_places - last_not_zero; i++) {
+            appendStringInfo(result, "%s", " ");
+        }
+        appendStringInfo(result, "%s", int_part.data);
+        appendStringInfo(result, "%s", ".");
+        extract_deci_part(num, last_not_zero, &deci_part);
+        appendStringInfo(result, "%s", deci_part.data);
+    }
+
+    pfree(int_part.data);
+    pfree(deci_part.data);
+}
+
+char* apply_num_format(double num)
+{
+    char *format_str = u_sess->attr.attr_common.pset_num_format;
+    double format_num = str_to_num(format_str);
+    const int decimal = 10;
+    
+    StringInfoData result;
+    initStringInfo(&result);
+    bool is_negative = false;
+
+    if (num < 0) {
+        num = -num;
+        is_negative = true;
+    }
+
+    char *decimal_str = strrchr(format_str, '.');
+    if (decimal_str == NULL) {
+        int remainder = (int)(num * decimal) % decimal;
+        if (remainder >= 5) {
+            num += 1;
+        }
+        if ((int)num > (int)format_num) {
+            out_of_range(&result, strlen(format_str) + 1, false);
+        } else {
+            extract_part(num, &result, is_negative, false, strlen(format_str), 0);
+        }
+    } else {
+        int deci_places = strlen(decimal_str) - 1;
+        int remainder = (int)(num * my_pow(decimal, deci_places + 1)) % decimal;
+        if (remainder >= 5) {
+            num += my_pow(decimal, -deci_places);
+        }
+        num = (double)(int)(num * my_pow(decimal, deci_places)) / my_pow(decimal, deci_places);
+        if (num > format_num) {
+            out_of_range(&result, strlen(format_str) + 1, false);
+        } else {
+            extract_part(num, &result, is_negative, true, strlen(format_str) - strlen(decimal_str), deci_places);
+        }
+    }
+
+    return result.data;
+}
+
+double str_to_num(char *format_str)
+{
+    double num;
+    const int decimal = 10;
+
+    char *decimal_str = strrchr(format_str, '.');
+    if (decimal_str == NULL) {
+        num = my_pow(decimal, strlen(format_str)) - 1;
+    } else {
+        num = my_pow(decimal, strlen(format_str) - strlen(decimal_str)) - 1 + (1 - my_pow(decimal, 1 - strlen(decimal_str)));
+    }
+
+    return num;
+}
+
+double my_pow(double base, int exp)
+{
+    double result = 1;
+    bool is_negative = false;
+    if (exp < 0) {
+        exp = -exp;
+        is_negative = true;
+    }
+    while (exp) {
+        if (exp & 1) {
+            result *= base;
+        }
+        exp >>= 1;
+        base *= base;
+    }
+    return is_negative ? (1 / result) : result;
+}
+
+void extract_part(double num, StringInfo result, bool is_negative, bool extract_deci, int int_places, int deci_places)
+{
+    StringInfoData space_part, int_part, deci_part;
+    initStringInfo(&space_part);
+    initStringInfo(&int_part);
+    initStringInfo(&deci_part);
+
+    extract_int_part(num, int_places, &space_part, &int_part);
+
+    appendStringInfo(result, "%s", space_part.data);
+    if (unlikely(is_negative)) {
+        appendStringInfo(result, "%s", "-");
+    }
+    appendStringInfo(result, "%s", int_part.data);
+
+    if (extract_deci) {
+        extract_deci_part(num, deci_places, &deci_part);
+        appendStringInfo(result, "%s", ".");
+        appendStringInfo(result, "%s", deci_part.data);
+    }
+
+    pfree(space_part.data);
+    pfree(int_part.data);
+    pfree(deci_part.data);
+}
+
+void extract_int_part(double num, int places, StringInfo space_part, StringInfo int_part)
+{
+    bool can_append_space = true;
+     const int decimal = 10;
+    for (int i = places - 1; i >= 0; i--) {
+        int value = (int)(num / my_pow(decimal, i)) % decimal;
+        if (value == 0 && unlikely(can_append_space)) {
+            appendStringInfo(space_part, "%s", " ");
+        } else {
+            appendStringInfo(int_part, "%d", value);
+            can_append_space = false;
+        }
+    }
+}
+
+void extract_deci_part(double num, int deci_places, StringInfo deci_part)
+{
+    const int decimal = 10;
+
+    for (int i = 1; i <= deci_places; i++) {
+        int value = (int)(num * my_pow(decimal, i)) % decimal;
+        appendStringInfo(deci_part, "%d", value);
+    }
+}
+
+void out_of_range(StringInfo result, int len, bool amend_length)
+{
+    if (unlikely(amend_length)) {
+        len++;
+    }
+    for (int i = 0; i < len; i++) {
+        appendStringInfo(result, "%s", "#");
+    }
 }

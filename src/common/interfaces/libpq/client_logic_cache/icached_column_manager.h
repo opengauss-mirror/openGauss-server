@@ -50,6 +50,7 @@ public:
     virtual ~ICachedColumnManager() = default;
     virtual bool load_cache(PGconn *conn) = 0;
     virtual void clear() = 0;
+    virtual void reload_cache_if_needed(PGconn *conn) = 0;
     virtual const GlobalHookExecutor** get_global_hook_executors(size_t& global_hook_executors_size) const = 0;
     virtual const CachedGlobalSetting* get_global_setting_by_fqdn(const char* globalSettingFqdn) const = 0;
     virtual size_t get_object_fqdn(const char* object_name, bool is_global_setting, char* object_fqdn) const = 0;

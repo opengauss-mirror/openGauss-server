@@ -8,6 +8,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/gausskernel/storage/access/common/printtup.cpp
@@ -1037,8 +1038,19 @@ void printtup(TupleTableSlot *slot, DestReceiver *self)
             if (thisState->format == 0) {
                 /* Text output */
                 char *outputstr = NULL;
+                u_sess->attr.attr_sql.for_print_tuple = true;
+                PG_TRY();
+                {
+                    outputstr = OutputFunctionCall(&thisState->finfo, attr);
+                }
+                PG_CATCH();
+                {
+                    u_sess->attr.attr_sql.for_print_tuple = false;
+                    PG_RE_THROW();
+                }
+                PG_END_TRY();
+                u_sess->attr.attr_sql.for_print_tuple = false;
 
-                outputstr = OutputFunctionCall(&thisState->finfo, attr);
                 if (thisState->typisvarlena && self->forAnalyzeSampleTuple &&
                     (typeinfo->attrs[i]->atttypid == BYTEAOID || typeinfo->attrs[i]->atttypid == CHAROID ||
                      typeinfo->attrs[i]->atttypid == TEXTOID || typeinfo->attrs[i]->atttypid == BLOBOID ||

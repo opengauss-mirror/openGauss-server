@@ -28,6 +28,11 @@
 
 extern void resetOperatorPlusFlag();
 
+static void resetCreateFuncFlag()
+{
+    u_sess->parser_cxt.isCreateFuncOrProc = false;
+}
+
 /*
  * raw_parser
  *        Given a query in string form, do lexical and grammatical analysis.
@@ -42,6 +47,9 @@ List* raw_parser(const char* str, List** query_string_locationlist)
 
     /* reset u_sess->parser_cxt.stmt_contains_operator_plus */
     resetOperatorPlusFlag();
+
+    /* reset u_sess->parser_cxt.isCreateFuncOrProc */
+    resetCreateFuncFlag();
 
     /* initialize the flex scanner */
     yyscanner = scanner_init(str, &yyextra.core_yy_extra, ScanKeywords, NumScanKeywords);

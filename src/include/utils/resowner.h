@@ -11,6 +11,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/utils/resowner.h
  *
@@ -123,7 +124,7 @@ extern void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
 /* support for snapshot refcount management */
 extern void ResourceOwnerEnlargeSnapshots(ResourceOwner owner);
 extern void ResourceOwnerRememberSnapshot(ResourceOwner owner, Snapshot snapshot);
-extern void ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot);
+extern bool ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot, bool ereport);
 extern void ResourceOwnerDecrementNsnapshots(ResourceOwner owner, void* queryDesc);
 extern void ResourceOwnerDecrementNPlanRefs(ResourceOwner owner, bool useResOwner);
 
@@ -162,5 +163,23 @@ extern void ResourceOwnerEnlargeGMemContext(ResourceOwner owner);
 extern void ResourceOwnerRememberGMemContext(ResourceOwner owner, MemoryContext memcontext);
 extern void ResourceOwnerForgetGMemContext(ResourceOwner owner, MemoryContext memcontext);
 extern void PrintGMemContextLeakWarning(MemoryContext memcontext);
+
+extern void ResourceOwnerMarkInvalid(ResourceOwner owner);
+extern bool ResourceOwnerIsValid(ResourceOwner owner);
+
+
+inline void resowner_record_log(const char* action, const char* filename, int lineno, const char* funcname,
+                                ResourceOwner owner)
+{
+    if (u_sess->attr.attr_common.log_min_messages >= DEBUG3 && module_logging_is_on(MOD_RESOWNER)) {
+        ereport(DEBUG3, (errmodule(MOD_RESOWNER), errcode(ERRCODE_LOG),
+            errmsg("RESOWNER(Action:%s, Location %s,%d, Funcname:%s): owner: %p",
+                    action, filename, lineno, funcname, owner)));
+    }
+}
+
+#define RESOWNER_LOG(action, owner) \
+    (resowner_record_log(action, __FILE__, __LINE__, __func__, owner))
+
 
 #endif /* RESOWNER_H */

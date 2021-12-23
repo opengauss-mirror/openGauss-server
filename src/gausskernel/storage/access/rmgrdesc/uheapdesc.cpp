@@ -21,25 +21,37 @@
 #include "access/xlog.h"
 #include "access/ustore/knl_upage.h"
 
-char *GetUndoHeader(XlUndoHeader *xlundohdr, Oid *partitionOid, UndoRecPtr *blkprev)
+char *GetUndoHeader(XlUndoHeader *xlundohdr, Oid *partitionOid, UndoRecPtr *blkprev, UndoRecPtr *prevUrp,
+                    TransactionId *subXid)
 {
+    Assert(xlundohdr != NULL && partitionOid != NULL && blkprev != NULL && prevUrp != NULL && subXid != NULL);
     char *currLogPtr = ((char *)xlundohdr + SizeOfXLUndoHeader);
 
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_SUB_XACT) != 0) {
         currLogPtr += sizeof(bool);
     }
+
     if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_BLK_PREV) != 0) {
-        currLogPtr += sizeof(UndoRecPtr);
-        blkprev = (UndoRecPtr *) ((char *)currLogPtr);
+        *blkprev = *(UndoRecPtr *) ((char *)currLogPtr);
         Assert(*blkprev != INVALID_UNDO_REC_PTR);
-    }
-    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_PREV_URP) != 0) {
         currLogPtr += sizeof(UndoRecPtr);
     }
-    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_PARTITION_OID) != 0) {
-        currLogPtr += sizeof(Oid);
-        partitionOid = (Oid *) ((char *)currLogPtr);
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_PREV_URP) != 0) {
+        *prevUrp = *(UndoRecPtr *) ((char *)currLogPtr);
+        currLogPtr += sizeof(UndoRecPtr);
     }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_PARTITION_OID) != 0) {
+        *partitionOid = *(Oid *) ((char *)currLogPtr);
+        currLogPtr += sizeof(Oid);
+    }
+
+    if ((xlundohdr->flag & XLOG_UNDO_HEADER_HAS_CURRENT_XID) != 0) {
+        *subXid = *(TransactionId *) ((char *)currLogPtr);
+        currLogPtr += sizeof(TransactionId);
+    }
+
     return currLogPtr;
 }
 
@@ -51,10 +63,10 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
     char *rec = XLogRecGetData(record);
     uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
     TransactionId xid = XLogRecGetXid(record);
-    UndoRecPtr invalidUrp = INVALID_UNDO_REC_PTR;
-    Oid invalidPartitionOid = 0;
-    Oid *partitionOid = &invalidPartitionOid;
-    UndoRecPtr* blkprev = &invalidUrp;
+    TransactionId subXid = InvalidTransactionId;
+    Oid partitionOid = InvalidOid;
+    UndoRecPtr blkprev = INVALID_UNDO_REC_PTR;
+    UndoRecPtr prevUrp = INVALID_UNDO_REC_PTR;
     char *currLogPtr;
 
     info &= XLOG_UHEAP_OPMASK;
@@ -69,9 +81,10 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
             }
             appendStringInfo(buf, "off %u, flag %u. ", (uint16)xlrec->offnum, (uint8)xlrec->flags);
             XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)rec + SizeOfUHeapInsert);
-            currLogPtr = GetUndoHeader(xlundohdr, partitionOid, blkprev);
-            appendStringInfo(buf, "urecptr %016lx, blkprev %016lx, relOid %u, partitionOid %u, flag %u. ",
-                xlundohdr->urecptr, *blkprev, xlundohdr->relOid, *partitionOid, xlundohdr->flag);
+            currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid);
+            appendStringInfo(buf,
+                "urecptr %016lx, blkprev %016lx, prevurp %016lx, relOid %u, partitionOid %u, flag %u, subXid %lu. ",
+                xlundohdr->urecptr, blkprev, prevUrp, xlundohdr->relOid, partitionOid, xlundohdr->flag, subXid);
             undo::XlogUndoMeta *xlundometa = (undo::XlogUndoMeta *)((char *)currLogPtr);
 
             if (isInit) {
@@ -89,7 +102,7 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
         case XLOG_UHEAP_MULTI_INSERT: {
             XlUndoHeader *xlundohdr = (XlUndoHeader *)rec;
             char *curxlogptr = (char *)xlundohdr + SizeOfXLUndoHeader;
-            curxlogptr = GetUndoHeader(xlundohdr, partitionOid, blkprev);
+            curxlogptr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid);
 
             UndoRecPtr *last_urecptr = (UndoRecPtr *)curxlogptr;
             curxlogptr = (char *)last_urecptr + sizeof(*last_urecptr);
@@ -119,10 +132,10 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
             }
             appendStringInfo(buf, "ntuples %u, flag %u, nranges %d. ", (int)xlrec->ntuples, (uint8)xlrec->flags,
                 nranges);
-            appendStringInfo(buf, "urecptr %016lx, blkprev %016lx, last_urecptr %016lx, ",
-                xlundohdr->urecptr, *blkprev, *last_urecptr);
+            appendStringInfo(buf, "urecptr %016lx, blkprev %016lx, prevurp %016lx, last_urecptr %016lx, subXid %lu,",
+                xlundohdr->urecptr, blkprev, prevUrp, *last_urecptr, subXid);
             appendStringInfo(buf, "relOid %u, partitionOid %u, flag %u. ",
-                xlundohdr->relOid, *partitionOid, xlundohdr->flag);
+                xlundohdr->relOid, partitionOid, xlundohdr->flag);
 
             if (isinit) {
                 appendStringInfo(buf, "xidBase %lu tdCount %u. ", *xidBase, *tdCount);
@@ -141,9 +154,10 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
                 (uint16)xlrec->offnum, (uint8)xlrec->td_id, (uint8)xlrec->flag);
 
             XlUndoHeader *xlundohdr = (XlUndoHeader *)((char *)rec + SizeOfUHeapDelete);
-            currLogPtr = GetUndoHeader(xlundohdr, partitionOid, blkprev);
-            appendStringInfo(buf, "urecptr %016lx, blkprev %016lx, relOid %u, partitionOid %u. ",
-                xlundohdr->urecptr, *blkprev, xlundohdr->relOid, *partitionOid);
+            currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid);
+            appendStringInfo(buf,
+                "urecptr %016lx, blkprev %016lx, prevurp %016lx, relOid %u, partitionOid %u, subXid %lu. ",
+                xlundohdr->urecptr, blkprev, prevUrp, xlundohdr->relOid, partitionOid, subXid);
             undo::XlogUndoMeta *xlundometa = (undo::XlogUndoMeta *)currLogPtr;
             appendStringInfo(buf,
                 "zone %d slot offset %lu: dbid %u, xid %lu, lastrecsize %u, allocate %d switch zone %d.",
@@ -166,15 +180,17 @@ void UHeapDesc(StringInfo buf, XLogReaderState *record)
                 xlrec->oldxid, (uint16)xlrec->old_offnum, (uint16)xlrec->new_offnum,
                 (uint8)xlrec->old_tuple_td_id, (uint16)xlrec->old_tuple_flag);
             xlundohdr = (XlUndoHeader *)((char *)rec + SizeOfUHeapUpdate);
-            currLogPtr = GetUndoHeader(xlundohdr, partitionOid, blkprev);
-            appendStringInfo(buf, "urecptr %016lx, blkprev %016lx, relOid %u, partitionOid %u, flag %u. ",
-                xlundohdr->urecptr, *blkprev, xlundohdr->relOid, *partitionOid, xlundohdr->flag);
+            currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid);
+            appendStringInfo(buf,
+                "urecptr %016lx, blkprev %016lx, prevurp %016lx, relOid %u, partitionOid %u, flag %u, subXid %lu. ",
+                xlundohdr->urecptr, blkprev, prevUrp, xlundohdr->relOid, partitionOid, xlundohdr->flag, subXid);
 
             if (xlrec->flags & XLZ_NON_INPLACE_UPDATE) {
                 xlundohdr = (XlUndoHeader *)((char *)currLogPtr);
-                currLogPtr = GetUndoHeader(xlundohdr, partitionOid, blkprev);
-                appendStringInfo(buf, "relOid %u, urecptr %016lx, blkprev %016lx, newflag %u, ", xlundohdr->relOid,
-                    xlundohdr->urecptr, *blkprev, xlundohdr->flag);
+                currLogPtr = GetUndoHeader(xlundohdr, &partitionOid, &blkprev, &prevUrp, &subXid);
+                appendStringInfo(buf,
+                    "relOid %u, urecptr %016lx, blkprev %016lx, prevurp %016lx, newflag %u, subXid %lu,",
+                    xlundohdr->relOid, xlundohdr->urecptr, blkprev, prevUrp, xlundohdr->flag, subXid);
             }
 
             undo::XlogUndoMeta *xlundometa = (undo::XlogUndoMeta *)currLogPtr;
@@ -291,6 +307,16 @@ void UHeap2Desc(StringInfo buf, XLogReaderState *record)
 
     info &= XLOG_UHEAP_OPMASK;
     switch (info) {
+        case XLOG_UHEAP2_BASE_SHIFT: {
+            XlUHeapBaseShift *xlrec = (XlUHeapBaseShift *)XLogRecGetData(record);
+            appendStringInfo(buf, "XLOG_UHEAP2_BASE_SHIFT: delta: %ld%s", xlrec->delta, (xlrec->multi ? " multi": ""));
+            break;
+        }
+        case XLOG_UHEAP2_FREEZE: {
+            XlUHeapFreeze *xlrec = (XlUHeapFreeze *)XLogRecGetData(record);
+            appendStringInfo(buf, "XLOG_UHEAP2_FREEZE: curoff_xid: %lu", xlrec->cutoff_xid);
+            break;
+        }
         case XLOG_UHEAP2_EXTEND_TD_SLOTS: {
             XlUHeapExtendTdSlots *xlrec = (XlUHeapExtendTdSlots *)XLogRecGetData(record);
             appendStringInfo(buf, "XLOG_UHEAP2_EXTEND_TD_SLOTS: nExtended: %u, nPrevSlot: %u xid: %lu. ",

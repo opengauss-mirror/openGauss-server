@@ -1,3 +1,5 @@
+create database pl_test_cursor_part8 DBCOMPATIBILITY 'pg';
+\c pl_test_cursor_part8;
 CREATE schema hw_cursor_part8;
 SET current_schema = hw_cursor_part8;
 
@@ -430,7 +432,6 @@ AS $$ DECLARE
 	return;
 end$$;
 select pro_base12_01() from test_cursor_table;
-
-
 drop schema hw_cursor_part8 CASCADE;
-
+\c regression;
+drop database IF EXISTS pl_test_cursor_part8;

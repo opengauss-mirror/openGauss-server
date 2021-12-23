@@ -1,0 +1,93 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+create table SQLLDR_TBL2
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20)
+);
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 7 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_filler.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id |     name     |      con       | dt 
+----+--------------+----------------+----
+  1 | OK           | 1-OK           | 
+  2 | OK           | 2-OK           | 
+  3 | OK           | 3-OK           | 
+  4 | OK           | 4-OK           | 
+  5 | OK           | 5-OK           | 
+  8 | ERROR date   | 8-ERROR date   | 
+  8 | ERROR fields | 8-ERROR fields | 
+(7 rows)
+
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler1.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 6 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_filler1.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id |   name    |    con     |            dt            
+----+-----------+------------+--------------------------
+    | ERROR int | -ERROR int | Sun Jul 08 00:00:00 2007
+    | OK        | -OK        | Sun Jul 08 00:00:00 2007
+    | OK        | -OK        | Sun Jul 08 00:00:00 2007
+    | OK        | -OK        | Tue Jul 08 00:00:00 2008
+    | OK        | -OK        | Wed Jul 08 00:00:00 2009
+    | OK        | -OK        | Fri Jul 30 00:00:00 2021
+(6 rows)
+
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler2.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+ERROR: after transform: BEGIN;
+\COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '100' WHEN (2-2) = ',' DELIMITER ',' FILL_MISSING_FIELDS 'multi' FILLER( name) TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
+select 'copy_txid:'||txid_current();
+COMMIT;
+ERROR: BEGIN
+gsql:.gs_loader_file.tmp:2: ERROR:  Col "name" is not in the col list
+LINE 1: ...lti' FILLER( name) TRANSFORM(con AS :id || '-' || :name) IGN...
+                                                             ^
+gsql:.gs_loader_file.tmp:3: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con | dt 
+----+------+-----+----
+(0 rows)
+
+-- filler
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_filler3.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 7 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_filler3.log
+select * from SQLLDR_TBL2 order by 1,2,3;
+ id |     name     |      con       
+----+--------------+----------------
+  1 | OK           | 1-OK
+  2 | OK           | 2-OK
+  3 | OK           | 3-OK
+  4 | OK           | 4-OK
+  5 | OK           | 5-OK
+  8 | ERROR date   | 8-ERROR date
+  8 | ERROR fields | 8-ERROR fields
+(7 rows)
+
+-- teardown
+drop table SQLLDR_TBL;
+drop table SQLLDR_TBL2;

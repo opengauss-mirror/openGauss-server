@@ -36,11 +36,14 @@
 #include "replication/walreceiver.h"
 #include "replication/slot.h"
 #include "replication/dcf_replication.h"
+#include "replication/walsender_private.h"
 #include "storage/pmsignal.h"
 #include "storage/shmem.h"
 #include "utils/guc.h"
 #include "utils/timestamp.h"
 #include "gssignal/gs_signal.h"
+#include "cipher.h"
+#include "openssl/ssl.h"
 
 /*
  * There are several concepts in stream replication connection:
@@ -58,6 +61,7 @@ extern bool dummyStandbyMode;
 
 static void SetWalRcvConninfo(ReplConnTarget conn_target);
 static void SetFailoverFailedState(void);
+static int cmp_min_lsn(const void *a, const void *b);
 extern void SetDataRcvDummyStandbySyncPercent(int percent);
 
 /*
@@ -213,10 +217,13 @@ static void SetWalRcvConninfo(ReplConnTarget conn_target)
         walrcv->conn_errno = NONE_ERROR;
         walrcv->conn_target = conn_target;
         SpinLockRelease(&walrcv->mutex);
-
+        ereport(LOG, (errmsg("wal receiver try to connect to %s.", walrcv->conninfo)));
         SpinLockAcquire(&hashmdata->mutex);
-        hashmdata->current_repl = t_thrd.walreceiverfuncs_cxt.WalReplIndex;
-        hashmdata->disconnect_count[t_thrd.walreceiverfuncs_cxt.WalReplIndex] = 0;
+        if (!IS_SHARED_STORAGE_STANBY_CLUSTER_MODE)
+            hashmdata->current_repl = t_thrd.walreceiverfuncs_cxt.WalReplIndex;
+        else
+            hashmdata->current_repl = MAX_REPLNODE_NUM + t_thrd.walreceiverfuncs_cxt.WalReplIndex;
+        hashmdata->disconnect_count[hashmdata->current_repl] = 0;
         SpinLockRelease(&hashmdata->mutex);
         t_thrd.walreceiverfuncs_cxt.WalReplIndex++;
     }
@@ -250,9 +257,21 @@ void WalRcvShmemInit(void)
         t_thrd.walreceiverfuncs_cxt.WalRcv->ntries = 0;
         t_thrd.walreceiverfuncs_cxt.WalRcv->dummyStandbySyncPercent = 0;
         t_thrd.walreceiverfuncs_cxt.WalRcv->dummyStandbyConnectFailed = false;
+        t_thrd.walreceiverfuncs_cxt.WalRcv->rcvDoneFromShareStorage = false;
+        t_thrd.walreceiverfuncs_cxt.WalRcv->shareStorageTerm = 1;
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->mutex);
         SpinLockInit(&t_thrd.walreceiverfuncs_cxt.WalRcv->exitLock);
     }
+}
+
+bool WalRcvIsRunning(void)
+{
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    WalRcvState state;
+    SpinLockAcquire(&walrcv->mutex);
+    state = walrcv->walRcvState;
+    SpinLockRelease(&walrcv->mutex);
+    return (state == WALRCV_RUNNING);
 }
 
 /* Is walreceiver in progress (or starting up)? */
@@ -331,7 +350,9 @@ static void set_rcv_slot_name(const char *slotname)
     SpinLockAcquire(&hashmdata->mutex);
     replIdx = hashmdata->current_repl;
     SpinLockRelease(&hashmdata->mutex);
-
+    if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE && replIdx >= MAX_REPLNODE_NUM) {
+        replIdx = replIdx - MAX_REPLNODE_NUM;
+    }
     conninfo = GetRepConnArray(&replIdx);
 
     SpinLockAcquire(&walrcv->mutex);
@@ -473,11 +494,19 @@ void ShutdownWalRcv(void)
  */
 void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarget conn_target, const char *slotname)
 {
+    if (HasBuildReason()) {
+        ereport(LOG, (errmsg("Stop to start walreceiver due to have build reason")));
+        pg_usleep(500000L);
+        return;
+    }
+    SpinLockAcquire(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
     knl_g_disconn_node_context_data disconn_node =
-	g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+        g_instance.comm_cxt.localinfo_cxt.disable_conn_node.disable_conn_node_data;
+    SpinLockRelease(&g_instance.comm_cxt.localinfo_cxt.disable_conn_node.info_lck);
 
     if (disconn_node.conn_mode == PROHIBIT_CONNECTION) {
         ereport(LOG, (errmsg("Stop to start walreceiver in disable connect mode")));
+        pg_usleep(500000L);
         return;
     }
 
@@ -496,7 +525,9 @@ void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarg
      * the segment is e.g archived.
      * Prev the requested segment if request xlog from the beginning of a segment.
      */
-    if (Lcrecptr % XLogSegSize != 0) {
+    if (conn_target == REPCONNTARGET_SHARED_STORAGE) {
+        Lcrecptr -= Lcrecptr % XLogSegSize;
+    } else if (Lcrecptr % XLogSegSize != 0) {
         Lcrecptr -= Lcrecptr % XLogSegSize;
     } else if (!dummyStandbyMode) {
         XLogSegNo _logSeg;
@@ -546,6 +577,7 @@ void RequestXLogStreaming(XLogRecPtr *recptr, const char *conninfo, ReplConnTarg
 
     walrcv->latestValidRecord = latestValidRecord;
     walrcv->latestRecordCrc = latestRecordCrc;
+    walrcv->latestRecordLen = latestRecordLen;
     SpinLockRelease(&walrcv->mutex);
     WalRcvSetPercentCountStartLsn(walrcv->latestValidRecord);
     if (XLByteLT(latestValidRecord, Lcrecptr))
@@ -730,24 +762,43 @@ void SetWalRcvDummyStandbySyncPercent(int percent)
 ReplConnInfo *GetRepConnArray(int *cur_idx)
 {
     int loop_retry = 0;
+    ReplConnInfo *replConnInfo = NULL;
+    replconninfo** replConnInfoArray;
 
     if (*cur_idx < 0 || *cur_idx > MAX_REPLNODE_NUM) {
         ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid replication node index:%d", *cur_idx)));
     }
+    if (!IS_SHARED_STORAGE_STANBY_CLUSTER_MODE)
+        replConnInfoArray = &t_thrd.postmaster_cxt.ReplConnArray[0];
+    else
+        replConnInfoArray = &t_thrd.postmaster_cxt.CrossClusterReplConnArray[0];
 
     /* do ... while  until the node is avaliable to me */
     while (loop_retry++ < MAX_REPLNODE_NUM) {
         if (*cur_idx == MAX_REPLNODE_NUM)
             *cur_idx = 1;
 
-        if (t_thrd.postmaster_cxt.ReplConnArray[(*cur_idx)] != NULL) {
-            break;
+        replConnInfo = replConnInfoArray[*cur_idx];
+        if (replConnInfo != NULL) {
+            if (t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
+                if (t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
+                    if (replConnInfo->isCrossRegion) {
+                        break;
+                    }
+                } else {
+                    if (replConnInfo->isCascade) {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
         }
         (*cur_idx)++;
     }
 
-    return (*cur_idx < MAX_REPLNODE_NUM) ? t_thrd.postmaster_cxt.ReplConnArray[*cur_idx] : NULL;
+    return replConnInfo;
 }
 
 void get_failover_host_conninfo_for_dummy(int *repl)
@@ -889,4 +940,347 @@ void set_wal_rcv_write_rec_ptr(XLogRecPtr rec_ptr)
         walrcv->latestChunkStart = rec_ptr;
     }
     SpinLockRelease(&walrcv->mutex);
+}
+
+/*
+ * Set the specified rebuild reason in HaShmData. when set the rebuild reason,
+ * the hashmdata->current_repl implys the current replconnlist.
+ * Then set the reason in the corresponding variable.
+ */
+static void ha_set_rebuild_reason(HaRebuildReason reason)
+{
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    SpinLockAcquire(&hashmdata->mutex);
+    hashmdata->repl_reason[hashmdata->current_repl] = reason;
+    SpinLockRelease(&hashmdata->mutex);
+}
+
+/* set the rebuild reason and walreceiver connerror. */
+void ha_set_rebuild_connerror(HaRebuildReason reason, WalRcvConnError connerror)
+{
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    ha_set_rebuild_reason(reason);
+    SpinLockAcquire(&walrcv->mutex);
+    walrcv->conn_errno = connerror;
+    if (reason == NONE_REBUILD && connerror == NONE_ERROR)
+        walrcv->node_state = NODESTATE_NORMAL;
+    SpinLockRelease(&walrcv->mutex);
+    /* Only postmaster can update gaussdb.state file */
+    SendPostmasterSignal(PMSIGNAL_UPDATE_HAREBUILD_REASON);
+}
+
+static bool am_cascade_standby(void)
+{
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+        t_thrd.postmaster_cxt.HaShmData->is_cascade_standby) {
+        return true;
+    }
+
+    return false;
+}
+
+/*
+ * transfer the server mode to string.
+ */
+const char* wal_get_role_string(ServerMode mode, bool getPeerRole)
+{
+    switch (mode) {
+        case NORMAL_MODE:
+            return "Normal";
+        case PRIMARY_MODE:
+            return "Primary";
+        case STANDBY_MODE:
+        {
+            if (am_cascade_standby() && !getPeerRole) {
+                return "Cascade Standby";
+            } else if (AM_HADR_WAL_RECEIVER && !getPeerRole) {
+                return "Main Standby";
+            } else {
+                return "Standby";
+            }
+        }
+        case CASCADE_STANDBY_MODE:
+            return "Cascade Standby";
+        case MAIN_STANDBY_MODE:
+            return "Main Standby";
+        case PENDING_MODE:
+            return "Pending";
+        case UNKNOWN_MODE:
+            return "Unknown";
+        default:
+            ereport(WARNING, (errmsg("invalid server mode:%d", (int)mode)));
+            break;
+    }
+    return "Unknown";
+}
+
+const char *wal_get_rebuild_reason_string(HaRebuildReason reason)
+{
+    switch (reason) {
+        case NONE_REBUILD:
+            return "Normal";
+        case WALSEGMENT_REBUILD:
+            return "WAL segment removed";
+        case CONNECT_REBUILD:
+            return "Disconnected";
+        case VERSION_REBUILD:
+            return "Version not matched";
+        case MODE_REBUILD:
+            return "Mode not matched";
+        case SYSTEMID_REBUILD:
+            return "System id not matched";
+        case TIMELINE_REBUILD:
+            return "Timeline not matched";
+        case DCF_LOG_LOSS_REBUILD:
+            return "DCF log loss";
+        default:
+            break;
+    }
+    return "Unknown";
+}
+
+static void wal_get_ha_rebuild_reason_with_dummy(char *buildReason, ServerMode local_role, bool isRunning)
+{
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    int nRet = 0;
+    load_server_mode();
+    if (local_role == NORMAL_MODE || local_role == PRIMARY_MODE || IS_DISASTER_RECOVER_MODE) {
+        nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
+        securec_check_ss(nRet, "\0", "\0");
+        return;
+    }
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[1] != NULL && walrcv->conn_target == REPCONNTARGET_PRIMARY) {
+        if (hashmdata->repl_reason[1] == NONE_REBUILD && isRunning) {
+            nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
+            securec_check_ss(nRet, "\0", "\0");
+        } else if (hashmdata->repl_reason[1] == NONE_REBUILD && !isRunning) {
+            nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Connecting...");
+            securec_check_ss(nRet, "\0", "\0");
+        } else {
+            nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s",
+                              wal_get_rebuild_reason_string(hashmdata->repl_reason[1]));
+            securec_check_ss(nRet, "\0", "\0");
+        }
+    } else if (t_thrd.postmaster_cxt.ReplConnArray[2] != NULL && walrcv->conn_target == REPCONNTARGET_DUMMYSTANDBY) {
+        if (hashmdata->repl_reason[2] == NONE_REBUILD && isRunning) {
+            nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
+            securec_check_ss(nRet, "\0", "\0");
+        } else if (hashmdata->repl_reason[2] == NONE_REBUILD && !isRunning) {
+            nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Connecting...");
+            securec_check_ss(nRet, "\0", "\0");
+        } else {
+            nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s",
+                              wal_get_rebuild_reason_string(hashmdata->repl_reason[2]));
+            securec_check_ss(nRet, "\0", "\0");
+        }
+    } else {
+        nRet = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Disconnected");
+        securec_check_ss(nRet, "\0", "\0");
+    }
+}
+
+static void wal_get_ha_rebuild_reason_with_multi(char *buildReason, ServerMode local_role, bool isRunning)
+{
+    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
+    int rcs = 0;
+    load_server_mode();
+    if (local_role == NORMAL_MODE || local_role == PRIMARY_MODE) {
+        rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
+        securec_check_ss(rcs, "\0", "\0");
+        return;
+    }
+    ReplConnInfo *replConnInfo = NULL;
+    if (hashmdata->current_repl >= MAX_REPLNODE_NUM) {
+        replConnInfo = t_thrd.postmaster_cxt.CrossClusterReplConnArray[hashmdata->current_repl - MAX_REPLNODE_NUM];
+    } else {
+        replConnInfo = t_thrd.postmaster_cxt.ReplConnArray[hashmdata->current_repl];
+    }
+    if ((replConnInfo != NULL &&
+        (walrcv->conn_target == REPCONNTARGET_PRIMARY || am_cascade_standby() || IS_SHARED_STORAGE_MODE)) ||
+        IS_DISASTER_RECOVER_MODE) {
+        if (hashmdata->repl_reason[hashmdata->current_repl] == NONE_REBUILD && isRunning) {
+            rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
+            securec_check_ss(rcs, "\0", "\0");
+        } else if (hashmdata->repl_reason[hashmdata->current_repl] == NONE_REBUILD && !isRunning) {
+            rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Connecting...");
+            securec_check_ss(rcs, "\0", "\0");
+        } else {
+            rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s",
+                             wal_get_rebuild_reason_string(hashmdata->repl_reason[hashmdata->current_repl]));
+            securec_check_ss(rcs, "\0", "\0");
+        }
+    } else {
+        rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Disconnected");
+        securec_check_ss(rcs, "\0", "\0");
+    }
+}
+
+void wal_get_ha_rebuild_reason(char *buildReason, ServerMode local_role, bool isRunning)
+{
+    if (IS_DN_DUMMY_STANDYS_MODE())
+        wal_get_ha_rebuild_reason_with_dummy(buildReason, local_role, isRunning);
+    else
+        wal_get_ha_rebuild_reason_with_multi(buildReason, local_role, isRunning);
+}
+
+static int cmp_min_lsn(const void *a, const void *b)
+{
+    XLogRecPtr lsn1 = *((const XLogRecPtr *)a);
+    XLogRecPtr lsn2 = *((const XLogRecPtr *)b);
+
+    if (!XLByteLE(lsn1, lsn2))
+        return -1;
+    else if (XLByteEQ(lsn1, lsn2))
+        return 0;
+    else
+        return 1;
+}
+
+void GetMinLsnRecordsFromHadrCascadeStandby(void)
+{
+    XLogRecPtr standbyReceiveList[g_instance.attr.attr_storage.max_wal_senders];
+    XLogRecPtr standbyFlushList[g_instance.attr.attr_storage.max_wal_senders];
+    XLogRecPtr standbyApplyList[g_instance.attr.attr_storage.max_wal_senders];
+    int i;
+    XLogRecPtr applyLoc;
+    XLogRecPtr ReplayReadPtr;
+    bool needReport = false;
+    errno_t rc = EOK;
+
+    rc = memset_s(standbyReceiveList, sizeof(standbyReceiveList), 0, sizeof(standbyReceiveList));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(standbyFlushList, sizeof(standbyFlushList), 0, sizeof(standbyFlushList));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(standbyApplyList, sizeof(standbyApplyList), 0, sizeof(standbyApplyList));
+    securec_check(rc, "\0", "\0");
+
+    for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        SpinLockAcquire(&walsnd->mutex);
+        if (walsnd->pid != 0 && walsnd->pid != t_thrd.proc_cxt.MyProcPid &&
+            walsnd->sendRole == SNDROLE_PRIMARY_STANDBY) {
+            standbyApplyList[i] = walsnd->apply;
+            standbyReceiveList[i] = walsnd->receive;
+            standbyFlushList[i] = walsnd->flush;
+        }
+        SpinLockRelease(&walsnd->mutex);
+    }
+
+    qsort(standbyReceiveList, g_instance.attr.attr_storage.max_wal_senders, sizeof(XLogRecPtr), cmp_min_lsn);
+    qsort(standbyFlushList, g_instance.attr.attr_storage.max_wal_senders, sizeof(XLogRecPtr), cmp_min_lsn);
+    qsort(standbyApplyList, g_instance.attr.attr_storage.max_wal_senders, sizeof(XLogRecPtr), cmp_min_lsn);
+    applyLoc = GetXLogReplayRecPtr(NULL, &ReplayReadPtr);
+    t_thrd.walreceiver_cxt.reply_message->applyRead = ReplayReadPtr;
+    for (i = t_thrd.syncrep_cxt.SyncRepConfig->num_sync - 1; i >= 0; i--) {
+        if (i < t_thrd.syncrep_cxt.SyncRepConfig->num_sync - 1) {
+            needReport = true;
+        }
+        if (standbyReceiveList[i] != InvalidXLogRecPtr) {
+            t_thrd.walreceiver_cxt.reply_message->receive = standbyReceiveList[i];
+            if (needReport) {
+                ereport(DEBUG1, (errmsg(
+                    "In disaster cluster, some cascade standbys are abnormal, using min valid receive location.")));
+            }
+        } else if (standbyReceiveList[i] == InvalidXLogRecPtr && i == 0) {
+            ereport(DEBUG1, (errmsg(
+                "In disaster cluster, all cascade standbys are abnormal, using local receive location.")));
+        }
+        if (standbyFlushList[i] != InvalidXLogRecPtr) {
+            t_thrd.walreceiver_cxt.reply_message->flush = standbyFlushList[i];
+            if (needReport) {
+                ereport(DEBUG1, (errmsg(
+                    "In disaster cluster, some cascade standbys are abnormal, using min valid flush location.")));
+            }
+        } else if (standbyFlushList[i] == InvalidXLogRecPtr && i == 0) {
+            ereport(DEBUG1, (errmsg(
+                "In disaster cluster, all cascade standbys are abnormal, using local flush location.")));
+        }
+        if (standbyApplyList[i] != InvalidXLogRecPtr) {
+            t_thrd.walreceiver_cxt.reply_message->apply = standbyApplyList[i];
+            if (needReport) {
+                ereport(DEBUG1, (errmsg(
+                    "In disaster cluster, some cascade standbys are abnormal, using min valid apply location.")));
+            }
+        } else if (standbyApplyList[i] == InvalidXLogRecPtr && i == 0) {
+            t_thrd.walreceiver_cxt.reply_message->apply = applyLoc;
+            ereport(DEBUG1, (errmsg(
+                "In disaster cluster, all cascade standbys are abnormal, using local apply location.")));
+        }
+    }
+}
+
+void GetPasswordForHadrStreamingReplication(char user[], char password[])
+{
+    char superUserKeyCipherFile[MAXPGPATH] = {0};
+    char superUserKeyRandFile[MAXPGPATH] = {0};
+    char fileIndex[MAXPGPATH] = {0};
+    char* username = NULL;
+    struct stat cipherFileStat;
+    struct stat randFileStat;
+    int num = 0;
+    int rcs = 0;
+
+    if (u_sess->attr.attr_storage.hadr_super_user_record_path == NULL ||
+        u_sess->attr.attr_storage.hadr_super_user_record_path[0] == '\0') {
+        ereport(ERROR, (errmsg(
+                "In disaster cluster, main standby could not get user record path, so there is not invalid user.")));
+        return;
+    }
+    username = strrchr(u_sess->attr.attr_storage.hadr_super_user_record_path, '/');
+    username = username + 1;
+    rcs = strcat_s(user, MAXPGPATH - 1, username);
+    securec_check_ss(rcs, "\0", "\0");
+    while (true) {
+        rcs = snprintf_s(superUserKeyCipherFile, MAXPGPATH, MAXPGPATH - 1, "%s/cipher/key_%d/server.key.cipher",
+            u_sess->attr.attr_storage.hadr_super_user_record_path, num);
+        securec_check_ss(rcs, "\0", "\0");
+        canonicalize_path(superUserKeyCipherFile);
+
+        rcs = snprintf_s(superUserKeyRandFile, MAXPGPATH, MAXPGPATH - 1, "%s/rand/key_%d/server.key.rand",
+            u_sess->attr.attr_storage.hadr_super_user_record_path, num);
+        securec_check_ss(rcs, "\0", "\0");
+        canonicalize_path(superUserKeyRandFile);
+        if (lstat(superUserKeyCipherFile, &cipherFileStat) != 0) {
+            if (errno == ENOENT) {
+                if (lstat(superUserKeyRandFile, &randFileStat) != 0) {
+                    if (errno == ENOENT) {
+                        break;
+                    } else {
+                        ereport(ERROR, (errmsg(
+                            "In disaster cluster, main standby could not get password without stat rand file.")));
+                        return;
+                    }
+                } else {
+                    ereport(ERROR, (errmsg(
+                        "In disaster cluster, main standby could not get password without cipher file.")));
+                    return;
+                }
+            } else {
+                ereport(ERROR, (errmsg(
+                    "In disaster cluster, main standby could not get password without stat cipher file.")));
+                return;
+            }
+        }
+        if (lstat(superUserKeyRandFile, &randFileStat) != 0) {
+            ereport(ERROR, (errmsg("In disaster cluster, main standby could not lstat rand file.")));
+            return;
+        }
+        rcs = snprintf_s(fileIndex, MAXPGPATH, MAXPGPATH - 1, "key_%d", num);
+        securec_check_ss(rcs, "\0", "\0");
+        GS_UCHAR* plaintext = NULL;
+        plaintext = (GS_UCHAR*)palloc(RANDOM_LEN + 1);
+        if (plaintext == NULL) {
+            ereport(ERROR, (errmsg("In disaster cluster, main standby memory is temporarily unavailable.")));
+        }
+        decode_cipher_files(HADR_MODE, u_sess->attr.attr_storage.hadr_super_user_record_path, fileIndex, plaintext);
+
+        rcs = strcat_s(password, MAXPGPATH - 1, (char*)plaintext);
+        securec_check_ss(rcs, "\0", "\0");
+        pfree(plaintext);
+        plaintext = NULL;
+        num++;
+    }
 }

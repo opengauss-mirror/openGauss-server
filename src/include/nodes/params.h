@@ -14,6 +14,8 @@
 #ifndef PARAMS_H
 #define PARAMS_H
 
+#include "nodes/pg_list.h"
+
 /* To avoid including a pile of parser headers, reference ParseState thus: */
 struct ParseState;
 
@@ -58,12 +60,16 @@ typedef struct Cursor_Data {
     bool null_fetch;
 } Cursor_Data;
 
+typedef struct HTAB HTAB;
 typedef struct ParamExternData {
     Datum value;   /* parameter value */
     bool isnull;   /* is it NULL? */
     uint16 pflags; /* flag bits, see above */
     Oid ptype;     /* parameter's datatype, or 0 */
     Cursor_Data cursor_data;
+    bool isnestedtable = false;
+    Oid tableOfIndexType = InvalidOid; /* type Oid of table of */
+    HTAB* tableOfIndex = NULL; /* mapping of table of index */
 } ParamExternData;
 
 typedef struct ParamListInfoData* ParamListInfo;
@@ -112,5 +118,6 @@ enum { CURSOR_ISOPEN = 1, CURSOR_FOUND, CURSOR_NOTFOUND, CURSOR_ROWCOUNT };
 
 /* Functions found in src/backend/nodes/params.c */
 extern ParamListInfo copyParamList(ParamListInfo from);
+extern HTAB* copyTableOfIndex(HTAB* oldValue);
 
 #endif /* PARAMS_H */

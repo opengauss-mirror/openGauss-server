@@ -128,6 +128,7 @@ List* transformWithClause(ParseState* pstate, WithClause* withClause)
 
         cte->cterecursive = false;
         cte->cterefcount = 0;
+        cte->referenced_by_subquery = false;
 
         if (!IsA(cte->ctequery, SelectStmt)) {
             /* must be a data-modifying statement */

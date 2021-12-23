@@ -141,6 +141,10 @@ static Node* convert_expr_sublink_with_limit_clause(PlannerInfo *root,
                                     Node *all_quals, const char *refname);
 static bool CanExprHashable(List *pullUpEqualExpr);
 
+static bool contain_dml_walker(Node *node, void *context);
+static bool recursive_reference_recursive_walker(Node* node);
+static bool contain_outer_selfref_walker(Node *node, Index *depth);
+
 #define PLANNAMELEN 64
 
 static char *denominate_sublink_name(int sublink_counter)
@@ -1358,6 +1362,311 @@ static bool hash_ok_operator(OpExpr* expr)
     }
 }
 
+static bool recursive_reference_recursive(Query* parse)
+{
+    /* recursive ctes references itself in as the right argument of the first tier */
+    if (parse->setOperations == NULL || !IsA(parse->setOperations, SetOperationStmt) ||
+        ((SetOperationStmt*)parse->setOperations)->rarg == NULL ||
+        !IsA(((SetOperationStmt*)parse->setOperations)->rarg, RangeTblRef)) {
+        return false;
+    }
+    RangeTblRef* rtr = (RangeTblRef*)((SetOperationStmt*)parse->setOperations)->rarg;
+    RangeTblEntry *rte = rt_fetch(rtr->rtindex, parse->rtable);
+    List* rightArgs = list_make1(rte);
+    return range_table_walker(rightArgs, (bool (*)())recursive_reference_recursive_walker, NULL, 0);
+}
+
+static bool recursive_reference_recursive_walker(Node* node)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, Query))
+    {
+        Query *query = (Query *) node;
+
+        if (query->rtable != NIL) {
+            ListCell* lc = NULL;
+            foreach(lc, query->rtable) {
+                RangeTblEntry *rte = (RangeTblEntry*)lfirst(lc);
+                if (rte->cterecursive && !rte->self_reference) {
+                    return true;
+                }
+            }
+        }
+        return query_tree_walker(query, (bool (*)())recursive_reference_recursive_walker, NULL, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())recursive_reference_recursive_walker, NULL);
+}
+
+/*
+ * contain_dml: is any subquery not a plain SELECT?
+ *
+ * We reject SELECT FOR UPDATE/SHARE as well as INSERT etc.
+ */
+static bool contain_dml(Node* node)
+{
+    return contain_dml_walker(node, NULL);
+}
+
+static bool contain_dml_walker(Node *node, void *context)
+{
+    if (node == NULL) {
+        return false;
+    }
+    if (IsA(node, Query))
+    {
+        Query *query = (Query *) node;
+
+        if (query->commandType != CMD_SELECT || query->rowMarks != NIL)
+            return true;
+
+        return query_tree_walker(query, (bool (*)())contain_dml_walker, context, 0);
+    }
+    return expression_tree_walker(node, (bool (*)())contain_dml_walker, context);
+}
+
+/*
+ * contain_outer_selfref: is there an external recursive self-reference?
+ */
+static bool contain_outer_selfref(Node* node)
+{
+    Index depth = 0;
+
+    /*
+     * We should be starting with a Query, so that depth will be 1 while
+     * examining its immediate contents.
+     */
+    Assert(IsA(node, Query));
+
+    return contain_outer_selfref_walker(node, &depth);
+}
+
+static bool contain_outer_selfref_walker(Node *node, Index *depth)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, RangeTblEntry)) {
+        RangeTblEntry* rte = (RangeTblEntry*)node;
+        /*
+         * Check for a self-reference to a CTE that's above the Query that our
+         * search started at.
+         */
+        if (rte->rtekind == RTE_CTE && rte->self_reference && rte->ctelevelsup >= *depth)
+            return true;
+        return false; /* allow range_table_walker to continue */
+    }
+
+    if (IsA(node, Query)) {
+        /* Recurse into subquery, tracking nesting depth properly */
+        Query* query = (Query*)node;
+        bool result = false;
+        (*depth)++;
+        result = query_tree_walker(query, (bool (*)())contain_outer_selfref_walker, (void*)depth,  QTW_EXAMINE_RTES);
+        (*depth)--;
+        return result;
+    }
+    return expression_tree_walker(node, (bool (*)())contain_outer_selfref_walker, (void*)depth);
+}
+
+typedef struct UnderGroupingCxt {
+    char* ctename;
+    int depth;
+    bool under_grouping;
+    Query* subroot;
+} UnderGroupingCxt;
+
+static bool under_grouping_func_walker(Node* node, UnderGroupingCxt* cxt)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    /* increase query depth along with encountered subquery */
+    if (IsA(node, Query)) {
+        Query* query = (Query*)node;
+        bool result = false;
+        Query* save_subroot = cxt->subroot;
+        cxt->subroot = query;
+        cxt->depth++;
+        result = query_tree_walker(query, (bool (*)())under_grouping_func_walker, (void*)cxt, 0);
+        cxt->depth--;
+        cxt->subroot = save_subroot;
+        return result;
+    }
+
+    if (IsA(node, GroupingFunc)) {
+        bool result = false;
+        bool save_flag = cxt->under_grouping;
+        cxt->under_grouping = true;
+        result = expression_tree_walker(node, (bool (*)())under_grouping_func_walker, (void*)cxt);
+        cxt->under_grouping = save_flag;
+        return result;
+    }
+
+    if (IsA(node, Var) && cxt->under_grouping) {
+        Var* var = (Var*)node;
+        RangeTblEntry* rte = rt_fetch(var->varno, cxt->subroot->rtable);
+        if ((int)rte->ctelevelsup == cxt->depth && rte->ctename != NULL && strcmp(rte->ctename, cxt->ctename) == 0) {
+            return true;
+        }
+    }
+
+    return expression_tree_walker(node, (bool (*)())under_grouping_func_walker, (void*)cxt);
+}
+
+/* walk through the parent query tree to see if the CTE is referenced within grouping functions */
+static bool under_grouping_func(Query* parse, CommonTableExpr* cte)
+{
+    if (cte->ctename == NULL) {
+        return false;
+    }
+    UnderGroupingCxt cxt = {cte->ctename, -1, false, parse};
+    return under_grouping_func_walker((Node*)parse, &cxt);
+}
+
+static bool cte_inline_common(CommonTableExpr* cte, char** reason, Query* parse)
+{
+    /*
+     * Consider inlining the CTE (creating RTE_SUBQUERY RTE(s)) instead of
+     * implementing it as a separately-planned CTE for common cases.
+     *
+     * We cannot inline if any of these conditions hold:
+     *
+     * 1. The user said not to (the CTEMaterializeAlways option).
+     *
+     * 2. The CTE has side-effects; this includes either not being a plain
+     * SELECT, or containing volatile functions.  Inlining might change
+     * the side-effects, which would be bad.
+     *
+     * 3. The CTE is multiply-referenced and contains a self-reference to
+     * a recursive CTE outside itself.  Inlining would result in multiple
+     * recursive self-references, which we don't support.
+     *
+     * 4. Note that recursive CTE cannot be inlined. But how we handle them
+     * depend upon whether it is stream-recursive plan or other scenario, so
+     * it is checked externally by cte_inline() and cte_inline_stream().
+     *
+     * 5. CTE that contains subqueries cannot be inlined if they appears in
+     * grouping functions.
+     *
+     * Note: we check for volatile functions last, because that's more
+     * expensive than the other tests needed.
+     */
+    if (cte->ctematerialized == CTEMaterializeAlways) {
+        *reason = pstrdup("explicitly declared as materialized");
+        return false;
+    } else if (((Query*)cte->ctequery)->commandType != CMD_SELECT || contain_dml(cte->ctequery)) {
+        *reason = pstrdup("not a plain SELECT statement.");
+        return false;
+    } else if ((cte->cterefcount > 1 && contain_outer_selfref(cte->ctequery))) {
+        *reason = pstrdup("contains a self-reference to a recursive CTE outside");
+        return false;
+    } else if (contain_volatile_functions(cte->ctequery, true)) {
+        *reason = pstrdup("contains volatile function");
+        return false;
+    } else if (under_grouping_func(parse, cte)) {
+        contain_subquery_context context = init_contain_subquery_context();
+        List* subquery_list = contains_subquery((Node*)cte->ctequery, &context);
+        if (list_length(subquery_list) != 0) {
+            *reason = pstrdup("contains subquery while in grouping function");
+            list_free(subquery_list);
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool cte_inline(CommonTableExpr* cte, Query* parse)
+{
+    /*
+     * cte_inline common is passed if there is no side effect for inlining.
+     *
+     * We have an option whether to inline or not.  That should
+     * always be a win if there's just a single reference, but if the CTE
+     * is multiply-referenced then it's unclear: inlining adds duplicate
+     * computations, but the ability to absorb restrictions from the outer
+     * query level could outweigh that.  We do not have nearly enough
+     * information at this point to tell whether that's true, so we let
+     * the user express a preference.  Our default behavior is to inline
+     * only singly-referenced CTEs, but a CTE marked CTEMaterializeNever
+     * will be inlined even if multiply referenced.
+     * Also, if a singly-referenced CTE is referenced by a subquery, it
+     * will be not be inlined as default behavior. This is because we do
+     * not know if this subquery can be pulled up. If it cannot be pulled
+     * up, we may risk nested subplan execution, which can be disastrous.
+     */
+    char* buf = NULL;
+    bool ret = cte_inline_common(cte, &buf, parse);
+    if (ret) {
+        Assert(buf == NULL);
+        if (cte->ctematerialized == CTEMaterializeDefault) {
+            if (cte->referenced_by_subquery) {
+                buf = pstrdup("CTE is not inlined by default if referenced by subquery");
+                ret = false;
+            } else if (cte->cterefcount > 1) {
+                buf = pstrdup("CTE is not inlined by default if referenced more than once");
+                ret = false;
+            }
+        } else if (cte->cterecursive) {
+            buf = pstrdup("recursive CTE cannot be inlined");
+            ret = false;
+        }
+    }
+    if (!ret) {
+        ereport(DEBUG2,
+            (errmodule(MOD_OPT_REWRITE),
+                (errmsg("CTE \"%s\"is not inlined. Reason: %s", cte->ctename, buf))));
+    }
+    pfree_ext(buf);
+    return ret;
+}
+
+static bool cte_inline_stream(CommonTableExpr* cte, Query* parse)
+{
+    char* buf = NULL;
+
+    Assert(IS_STREAM_PLAN);
+
+    if (!u_sess->attr.attr_sql.enable_stream_recursive && cte->cterecursive) {
+        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+            NOTPLANSHIPPING_LENGTH,
+            "Unsupported CTE substitution causes SQL unshipped");
+        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        mark_stream_unsupport();
+    }
+
+    if (recursive_reference_recursive((Query*)cte->ctequery)) {
+        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+            NOTPLANSHIPPING_LENGTH,
+            "Recursive CTE references recursive CTE \"%s\"",
+            cte->ctename);
+        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        mark_stream_unsupport();
+    }
+    /*
+     * For stream plan, CTEs only support inline execution. Fallback to pgxc
+     * plan if inline criteria are violated.
+     *
+     * In preference of stream plan, we DO NOT obey the rule of thumb if there
+     * is no explicit expression of (not) materialized.
+     */
+    if (cte->cterecursive) { /* Recursive CTE will be handled */
+        return false;
+    } else if (!cte_inline_common(cte, &buf, parse)) {
+        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+            NOTPLANSHIPPING_LENGTH,
+            "CTE \"%s\" cannot be inlined. Reason: %s",
+            cte->ctename, buf);
+        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        pfree_ext(buf);
+        mark_stream_unsupport();
+    }
+    return true;
+}
+
 /*
  * SS_process_one_cte: process a cte in query's WITH list
  *
@@ -1455,6 +1764,110 @@ static void SS_process_one_cte(PlannerInfo* root, CommonTableExpr* cte, Query* s
     cost_subplan(root, splan, plan);
 }
 
+typedef struct inline_cte_walker_context
+{
+    const char *ctename;        /* name and relative level of target CTE */
+    Index varlevelsup;
+    int refcount;               /* number of remaining references */
+    Query *ctequery;            /* query to substitute */
+} inline_cte_walker_context;
+
+static bool inline_cte_walker(Node *node, inline_cte_walker_context *context)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    if (IsA(node, Query))
+    {
+        Query *query = (Query *) node;
+
+        context->varlevelsup++;
+
+        /*
+         * Visit the query's RTE nodes after their contents; otherwise
+         * query_tree_walker would descend into the newly inlined CTE query,
+         * which we don't want.
+         */
+        (void) query_tree_walker(query, (bool (*)())inline_cte_walker, context, QTW_EXAMINE_RTES);
+
+        context->varlevelsup--;
+
+        return false;
+    }
+    else if (IsA(node, RangeTblEntry))
+    {
+        RangeTblEntry *rte = (RangeTblEntry *) node;
+
+        if (rte->rtekind == RTE_CTE &&
+            strcmp(rte->ctename, context->ctename) == 0 &&
+            rte->ctelevelsup == context->varlevelsup) {
+            /*
+             * Found a reference to replace.  Generate a copy of the CTE query
+             * with appropriate level adjustment for outer references (e.g.,
+             * to other CTEs).
+             */
+            Query *newquery = (Query*)copyObject(context->ctequery);
+
+            /*
+             * if correlated cte is referenced in different subquery level,
+             * we should also adjust correlated params in cte parse tree
+             */
+            if (context->varlevelsup > 0)
+                IncrementVarSublevelsUp((Node *) newquery, context->varlevelsup, 1);
+
+            /*
+             * Convert the RTE_CTE RTE into a RTE_SUBQUERY.
+             *
+             * Historically, a FOR UPDATE clause has been treated as extending
+             * into views and subqueries, but not into CTEs.  We preserve this
+             * distinction by not trying to push rowmarks into the new
+             * subquery.
+             */
+            rte->rtekind = RTE_SUBQUERY;
+            rte->subquery = newquery;
+            rte->security_barrier = false;
+
+            /* Zero out CTE-specific fields */
+            rte->ctename = NULL;
+            rte->ctelevelsup = 0;
+            rte->self_reference = false;
+
+            /* Count the number of replacements we've done */
+            context->refcount--;
+        }
+
+        return false;
+    }
+
+    return expression_tree_walker(node, (bool (*)())inline_cte_walker, context);
+}
+
+/*
+ * inline_cte: convert RTE_CTE references to given CTE into RTE_SUBQUERYs
+ */
+static void inline_cte(PlannerInfo *root, CommonTableExpr *cte)
+{
+    struct inline_cte_walker_context context;
+
+    context.ctename = cte->ctename;
+    /* Start at varlevelsup = -1 because we'll immediately increment it */
+    context.varlevelsup = -1;
+    context.refcount = cte->cterefcount;
+    context.ctequery = castNode(Query, cte->ctequery);
+
+    (void) inline_cte_walker((Node*)root->parse, &context);
+
+    /*
+     * We would expect the reference number to be zero after inline, however, the 
+     * reference count of cte are not accurate for re-entry issues at parsing stage
+     * Until fixed, we only check for non-negative refcnt result.
+     */
+    Assert(context.refcount >= 0);
+    /* Mark this CTE as inlined */
+    cte->cterefcount = -1;
+}
+
 /*
  * SS_process_ctes: process a query's WITH list
  *
@@ -1475,11 +1888,6 @@ void SS_process_ctes(PlannerInfo* root)
         CmdType cmdType = ((Query*)cte->ctequery)->commandType;
         Query* subquery = NULL;
 
-        /* For the none-recursive CTE, we keep the processing logic as its origin */
-        if (IS_STREAM_PLAN && !cte->cterecursive) {
-            continue;
-        }
-
         /*
          * Ignore SELECT CTEs that are not actually referenced anywhere.
          */
@@ -1499,7 +1907,13 @@ void SS_process_ctes(PlannerInfo* root)
         AssertEreport(
             root->plan_params == NIL, MOD_OPT_SUBPLAN, "Plan_params should not be in use in current query level");
 
-        if (STREAM_RECURSIVECTE_SUPPORTED) {
+        if (STREAM_RECURSIVECTE_SUPPORTED && cte->cterecursive) {
+            if (cte_inline_stream(cte, root->parse)) {
+                inline_cte(root, cte);
+                /* Make a dummy entry in cte_plan_ids */
+                root->cte_plan_ids = lappend_int(root->cte_plan_ids, -1);
+                continue;
+            }
             int save_plan_current_seed = u_sess->opt_cxt.plan_current_seed;
 
             /*
@@ -1541,6 +1955,17 @@ void SS_process_ctes(PlannerInfo* root)
                 cterefcount--;
             }
         } else {
+             /* cte which contains dml should always be processed whether referenced or not */
+            if (cte->cterefcount < 1 && !contain_dml(cte->ctequery)) {
+                continue;
+            }
+            if ((IS_STREAM_PLAN && cte_inline_stream(cte, root->parse)) ||
+                (!IS_STREAM_PLAN && cte_inline(cte, root->parse))) {
+                inline_cte(root, cte);
+                /* Make a dummy entry in cte_plan_ids */
+                root->cte_plan_ids = lappend_int(root->cte_plan_ids, -1);
+                continue;
+            }
             SS_process_one_cte(root, cte, subquery);
         }
     }
@@ -2784,6 +3209,7 @@ static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_
         case T_Group:
         case T_Stream:
         case T_PartIterator:
+        case T_StartWithOp:
             break;
 
         default:
@@ -3281,7 +3707,15 @@ void convert_multi_count_distinct(PlannerInfo* root)
         partial_query->hintState = (HintState*)copyObject(parse->hintState);
         partial_query->hasSubLinks = parse->hasSubLinks;
         partial_query->hasRowSecurity = parse->hasRowSecurity;
-        partial_query->cteList = (List*)copyObject(parse->cteList);
+        /* CTEs may be inlined as subqueries, only inherit CTEs with non-zero refcounts */
+        ListCell* lcCte = NULL;
+        partial_query->cteList = NIL;
+        foreach(lcCte, parse->cteList) {
+            CommonTableExpr* cte = (CommonTableExpr*)lfirst(lcCte);
+            if (cte->cterefcount > 0) { /* neither inlined nor ignored */
+                partial_query->cteList = lappend(partial_query->cteList, cte);
+            }
+        }
 
         /*
          * For the non-last expr, we generate count(distinct) expressions related to
@@ -4652,6 +5086,7 @@ static Node* build_op_expr(PlannerInfo* root, int relid, List* pullUpEqualExpr, 
             param->paramtypmod = exprTypmod((Node*)targetExpr);
             param->paramcollid = exprCollation((Node*)targetExpr);
             param->location = -1;
+            param->tableOfIndexType = InvalidOid;
 
             expr = (OpExpr*)make_op(NULL, list_make1(makeString("=")), left_arg, (Node*)param, 0);
 
@@ -5808,12 +6243,6 @@ void convert_ORCLAUSE_to_join(PlannerInfo *root, BoolExpr *or_clause, Node **jtl
                         continue;
                     }
 
-                    /* For subquery will pulled up, we should substitute ctes */
-                    if (IS_STREAM_PLAN) {
-                        substitute_ctes_with_subqueries(root, (Query *) sublink->subselect,
-                                                        root->is_under_recursive_tree);
-                    }
-
                     notNullExpr = convert_OREXPR_to_join(root, or_clause, clause, sublink,
                                             jtlink1, available_rels1, replace, isnull);
 
@@ -5849,12 +6278,6 @@ void convert_ORCLAUSE_to_join(PlannerInfo *root, BoolExpr *or_clause, Node **jtl
             case T_SubLink:
                 if (IsA(clause, SubLink)) {
                     sublink = (SubLink *) clause;
-                }
-
-                /* For subquery will pulled up, we should substitute ctes */
-                if (IS_STREAM_PLAN) {
-                    substitute_ctes_with_subqueries(root, (Query *) sublink->subselect,
-                                                    root->is_under_recursive_tree);
                 }
 
                 root->glob->sublink_counter++;

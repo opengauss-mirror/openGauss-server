@@ -23,6 +23,7 @@
 #ifndef _GS_POLICY_COMMON_H
 #define _GS_POLICY_COMMON_H
 #include "nodes/parsenodes.h"
+#include "nodes/plannodes.h"
 
 #include "postgres.h"
 #include "gs_set.h"
@@ -98,6 +99,12 @@ extern PGDLLIMPORT LoadPoliciesPtr load_security_policies_hook;
 
 typedef void (*LightUnifiedAuditExecutorPtr)(const Query *query);
 extern THR_LOCAL PGDLLIMPORT LightUnifiedAuditExecutorPtr light_unified_audit_executor_hook;
+
+/* hooks for sqlbypass */
+typedef void (*OpFusionUnifiedAuditExecutorPtr)(const PlannedStmt *plannedStmt);
+extern PGDLLIMPORT OpFusionUnifiedAuditExecutorPtr opfusion_unified_audit_executor_hook;
+typedef void (*OpFusionUnifiedAuditFlushLogsPtr)(AuditResult audit_result);
+extern PGDLLIMPORT OpFusionUnifiedAuditFlushLogsPtr opfusion_unified_audit_flush_logs_hook;
 
 typedef bool (*LoadPolicyAccessPtr)(bool);
 extern PGDLLIMPORT LoadPolicyAccessPtr load_policy_access_hook;

@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -1092,8 +1093,6 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
 
     /* Does not allow commit in pre setting scenario */
     bool savedisAllowCommitRollback = false;
-    bool needResetErrMsg = false;
-    needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_OF_SECURE_DEFINER);
 
     if (!fcinfo->flinfo->fn_extra) {
         HeapTuple tuple;
@@ -1207,7 +1206,6 @@ static Datum fmgr_security_definer(PG_FUNCTION_ARGS)
     }
 
     /* restore is_allow_commit_rollback */
-    stp_reset_xact_state_and_err_msg(savedisAllowCommitRollback, needResetErrMsg);
     return result;
 }
 
@@ -2124,6 +2122,7 @@ Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmo
         return (Datum)0; /* just return null result */
     }
 
+    SPI_STACK_LOG("push cond", NULL, NULL);
     pushed = SPI_push_conditional();
 
     InitFunctionCallInfoData(fcinfo, flinfo, 3, InvalidOid, NULL, NULL);
@@ -2140,6 +2139,7 @@ Datum InputFunctionCall(FmgrInfo* flinfo, char* str, Oid typioparam, int32 typmo
     /* Should get null result if and only if str is NULL */
     CheckNullResult(fcinfo.flinfo->fn_oid, fcinfo.isnull, str);
 
+    SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(pushed);
 
     return result;
@@ -2165,6 +2165,7 @@ Datum InputFunctionCallForDateType(FmgrInfo* flinfo, char* str, Oid typioparam, 
         return (Datum)0; /* just return null result */
     }
 
+    SPI_STACK_LOG("push cond", NULL, NULL);
     pushed = SPI_push_conditional();
 
     InitFunctionCallInfoData(fcinfo, flinfo, 4, InvalidOid, NULL, NULL);
@@ -2183,6 +2184,7 @@ Datum InputFunctionCallForDateType(FmgrInfo* flinfo, char* str, Oid typioparam, 
 
     /* Should get null result if and only if str is NULL */
     CheckNullResult(fcinfo.flinfo->fn_oid, fcinfo.isnull, str);
+    SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(pushed);
 
     return result;
@@ -2201,10 +2203,12 @@ char* OutputFunctionCall(FmgrInfo* flinfo, Datum val)
     char* result = NULL;
     bool pushed = false;
 
+    SPI_STACK_LOG("push cond", NULL, NULL);
     pushed = SPI_push_conditional();
 
     result = DatumGetCString(FunctionCall1(flinfo, val));
 
+    SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(pushed);
 
     return result;
@@ -2229,6 +2233,7 @@ Datum ReceiveFunctionCall(FmgrInfo* flinfo, StringInfo buf, Oid typioparam, int3
         return (Datum)0; /* just return null result */
     }
 
+    SPI_STACK_LOG("push cond", NULL, NULL);
     pushed = SPI_push_conditional();
 
     InitFunctionCallInfoData(fcinfo, flinfo, 3, InvalidOid, NULL, NULL);
@@ -2255,6 +2260,7 @@ Datum ReceiveFunctionCall(FmgrInfo* flinfo, StringInfo buf, Oid typioparam, int3
         }
     }
 
+    SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(pushed);
 
     return result;
@@ -2275,10 +2281,12 @@ bytea* SendFunctionCall(FmgrInfo* flinfo, Datum val)
     bytea* result = NULL;
     bool pushed = false;
 
+    SPI_STACK_LOG("push cond", NULL, NULL);
     pushed = SPI_push_conditional();
 
     result = DatumGetByteaP(FunctionCall1(flinfo, val));
 
+    SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(pushed);
 
     return result;
@@ -2401,6 +2409,13 @@ Datum Int64GetDatum(int64 X)
     return PointerGetDatum(retval);
 }
 #endif /* USE_FLOAT8_BYVAL */
+
+Datum Int128GetDatum(int128 X)
+{
+    int128* retval = (int128*)palloc(sizeof(int128));
+    *retval = X;
+    return PointerGetDatum(retval);
+}
 
 Datum Float4GetDatum(float4 X)
 {

@@ -158,6 +158,7 @@ const int GENERAL_OID_LIST_LENGTH = 2;
 const int MS_PER_S = 1000;
 const int BUFSIZE = 1024;
 const int MAX_CPU_NUMS = 104;
+const int MAXLENS = 5;
 
 static bool check_and_assign_catalog_oids(List* elemlist);
 static const char* show_archive_command(void);
@@ -177,9 +178,25 @@ static void assign_replconninfo4(const char* newval, void* extra);
 static void assign_replconninfo5(const char* newval, void* extra);
 static void assign_replconninfo6(const char* newval, void* extra);
 static void assign_replconninfo7(const char* newval, void* extra);
-#ifndef ENABLE_MULTIPLE_NODES
 static void assign_replconninfo8(const char* newval, void* extra);
-#endif
+static void assign_replconninfo9(const char* newval, void* extra);
+static void assign_replconninfo10(const char* newval, void* extra);
+static void assign_replconninfo11(const char* newval, void* extra);
+static void assign_replconninfo12(const char* newval, void* extra);
+static void assign_replconninfo13(const char* newval, void* extra);
+static void assign_replconninfo14(const char* newval, void* extra);
+static void assign_replconninfo15(const char* newval, void* extra);
+static void assign_replconninfo16(const char* newval, void* extra);
+static void assign_replconninfo17(const char* newval, void* extra);
+static void assign_replconninfo18(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo1(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo2(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo3(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo4(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo5(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo6(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo7(const char* newval, void* extra);
+static void assign_cross_cluster_replconninfo8(const char* newval, void* extra);
 static const char* logging_module_guc_show(void);
 static bool check_inplace_upgrade_next_oids(char** newval, void** extra, GucSource source);
 static bool check_autovacuum_max_workers(int* newval, void** extra, GucSource source);
@@ -199,6 +216,8 @@ static void assign_dcf_flow_control_cpu_threshold(int newval, void* extra);
 static void assign_dcf_flow_control_net_queue_message_num_threshold(int newval, void* extra);
 static void assign_dcf_flow_control_disk_rawait_threshold(int newval, void* extra);
 static void assign_dcf_log_backup_file_count(int newval, void* extra);
+static void assign_dcf_flow_control_rto(int newval, void *extra);
+static void assign_dcf_flow_control_rpo(int newval, void *extra);
 #endif
 
 static void InitStorageConfigureNamesBool();
@@ -671,7 +690,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
         {{"enable_twophase_commit",
             PGC_USERSET,
-            NODE_ALL,
+            NODE_DISTRIBUTE,
             XC_HOUSEKEEPING_OPTIONS,
             gettext_noop("Enable two phase commit when gtm free is on."),
             NULL},
@@ -733,7 +752,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
 
         {{"enable_adio_function",
-            PGC_POSTMASTER,
+            PGC_INTERNAL,
             NODE_ALL,
             DEVELOPER_OPTIONS,
             gettext_noop("Enable adio function."),
@@ -745,7 +764,7 @@ static void InitStorageConfigureNamesBool()
             NULL},
         {{"gds_debug_mod",
             PGC_USERSET,
-            NODE_ALL,
+            NODE_DISTRIBUTE,
             LOGGING_WHEN,
             gettext_noop("Enable GDS-related troubleshoot-logging."),
             NULL},
@@ -897,6 +916,20 @@ static void InitStorageConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+
+        {{"enable_consider_usecount",
+            PGC_SIGHUP,
+            NODE_ALL,
+            RESOURCES_KERNEL,
+            gettext_noop("Whether consider buffer usecount when get buffer slot"),
+            NULL,
+            },
+            &u_sess->attr.attr_storage.enable_candidate_buf_usage_count,
+            false,
+            NULL,
+            NULL,
+            NULL},
+
 #ifdef USE_ASSERT_CHECKING
         {{"enable_hashbucket",
             PGC_SUSET,
@@ -1007,13 +1040,13 @@ static void InitStorageConfigureNamesInt()
             NULL,
             NULL},
         {{"catchup2normal_wait_time",
-            PGC_POSTMASTER,
+            PGC_SIGHUP,
             NODE_ALL,
             REPLICATION_STANDBY,
             gettext_noop("The maximal allowed duration for waiting from catchup to normal state."),
             NULL,
             GUC_UNIT_MS},
-            &g_instance.attr.attr_storage.catchup2normal_wait_time,
+            &u_sess->attr.attr_storage.catchup2normal_wait_time,
             -1,
             -1,
             10000,
@@ -1044,7 +1077,7 @@ static void InitStorageConfigureNamesInt()
             NULL,
             GUC_UNIT_MS},
             &u_sess->attr.attr_storage.LockWaitTimeout,
-            3000,
+            1200000,
             0,
             INT_MAX,
             NULL,
@@ -1776,7 +1809,7 @@ static void InitStorageConfigureNamesInt()
 #ifdef PGXC
             10,
             0,
-            INT_MAX / 4,
+            MAX_BACKENDS,
             NULL,
             NULL,
             NULL
@@ -2105,7 +2138,11 @@ static void InitStorageConfigureNamesInt()
             0,
             3600,
             NULL,
+#ifndef ENABLE_MULTIPLE_NODES
+            assign_dcf_flow_control_rto,
+#else
             NULL,
+#endif
             NULL},
         {{"time_to_target_rpo",
             PGC_SIGHUP,
@@ -2114,6 +2151,36 @@ static void InitStorageConfigureNamesInt()
             gettext_noop("The time to the target recovery point in seconds"),
             NULL},
             &u_sess->attr.attr_storage.time_to_target_rpo,
+            0,
+            0,
+            3600,
+            NULL,
+#ifndef ENABLE_MULTIPLE_NODES
+            assign_dcf_flow_control_rpo,
+#else
+            NULL,
+#endif
+            NULL},
+        {{"hadr_recovery_time_target",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("The target redo time in seconds for recovery in disaster mode"),
+            NULL},
+            &u_sess->attr.attr_storage.hadr_recovery_time_target,
+            0,
+            0,
+            3600,
+            NULL,
+            NULL,
+            NULL},
+        {{"hadr_recovery_point_target",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("The time to the target recovery point in seconds in disaster mode"),
+            NULL},
+            &u_sess->attr.attr_storage.hadr_recovery_point_target,
             0,
             0,
             3600,
@@ -2656,23 +2723,9 @@ static void InitStorageConfigureNamesInt()
             NULL,
             0},
             &g_instance.attr.attr_storage.pagewriter_thread_num,
-            2,
+            4,
             1,
-            8,
-            NULL,
-            NULL,
-            NULL},
-        {{"bgwriter_thread_num",
-            PGC_POSTMASTER,
-            NODE_ALL,
-            WAL_CHECKPOINTS,
-            gettext_noop("Sets the number of background writer threads with incremental checkpoint on."),
-            NULL,
-            0},
-            &g_instance.attr.attr_storage.bgwriter_thread_num,
-            2,
-            0,
-            8,
+            16,
             NULL,
             NULL,
             NULL},
@@ -2919,7 +2972,7 @@ static void InitStorageConfigureNamesInt()
             NULL},
         {{"twophase_clean_workers",
             PGC_SIGHUP,
-            NODE_ALL,
+            NODE_DISTRIBUTE,
             RESOURCES_KERNEL,
             gettext_noop("Sets the parallel job number of gs_clean to clean prepared transactions."),
             NULL},
@@ -3230,6 +3283,20 @@ static void InitStorageConfigureNamesInt64()
             NULL,
             NULL,
             NULL},
+        {{"xlog_file_size",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            WAL,
+            gettext_noop("share storage xlog file size"),
+            NULL,
+            GUC_NOT_IN_SAMPLE | GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.xlog_file_size,
+            INT64CONST(0x8000000000),  // 512*1024*1024*1024
+            INT64CONST(128 * 1024 * 1024),
+            INT64CONST(0x7FFFFFFFFFFFFFF),
+            NULL,
+            NULL,
+            NULL},
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -3487,7 +3554,6 @@ static void InitStorageConfigureNamesString()
             check_replconninfo,
             assign_replconninfo7,
             NULL},
-#ifndef ENABLE_MULTIPLE_NODES
         /* Get the ReplConnInfo8 from postgresql.conf and assign to ReplConnArray8. */
         {{"replconninfo8",
             PGC_SIGHUP,
@@ -3501,7 +3567,137 @@ static void InitStorageConfigureNamesString()
             check_replconninfo,
             assign_replconninfo8,
             NULL},
-#endif
+        /* Get the ReplConnInfo9 from postgresql.conf and assign to ReplConnArray9. */
+        {{"replconninfo9",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo9 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[9],
+            "",
+            check_replconninfo,
+            assign_replconninfo9,
+            NULL},
+        /* Get the ReplConnInfo10 from postgresql.conf and assign to ReplConnArray10. */
+        {{"replconninfo10",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo10 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[10],
+            "",
+            check_replconninfo,
+            assign_replconninfo10,
+            NULL},
+        /* Get the ReplConnInfo11 from postgresql.conf and assign to ReplConnArray11. */
+        {{"replconninfo11",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo11 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[11],
+            "",
+            check_replconninfo,
+            assign_replconninfo11,
+            NULL},
+        /* Get the ReplConnInfo12 from postgresql.conf and assign to ReplConnArray12. */
+        {{"replconninfo12",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo12 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[12],
+            "",
+            check_replconninfo,
+            assign_replconninfo12,
+            NULL},
+        /* Get the ReplConnInfo13 from postgresql.conf and assign to ReplConnArray13. */
+        {{"replconninfo13",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo13 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[13],
+            "",
+            check_replconninfo,
+            assign_replconninfo13,
+            NULL},
+        /* Get the ReplConnInfo14 from postgresql.conf and assign to ReplConnArray14. */
+        {{"replconninfo14",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo14 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[14],
+            "",
+            check_replconninfo,
+            assign_replconninfo14,
+            NULL},
+        /* Get the ReplConnInfo15 from postgresql.conf and assign to ReplConnArray15. */
+        {{"replconninfo15",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo15 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[15],
+            "",
+            check_replconninfo,
+            assign_replconninfo15,
+            NULL},
+        /* Get the ReplConnInfo16 from postgresql.conf and assign to ReplConnArray16. */
+        {{"replconninfo16",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo16 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[16],
+            "",
+            check_replconninfo,
+            assign_replconninfo16,
+            NULL},
+        /* Get the ReplConnInfo17 from postgresql.conf and assign to ReplConnArray17. */
+        {{"replconninfo17",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo17 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[17],
+            "",
+            check_replconninfo,
+            assign_replconninfo17,
+            NULL},
+        /* Get the ReplConnInfo18 from postgresql.conf and assign to ReplConnArray18. */
+        {{"replconninfo18",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the replconninfo18 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.ReplConnInfoArr[18],
+            "",
+            check_replconninfo,
+            assign_replconninfo18,
+            NULL},
+
         {{"primary_slotname",
             PGC_SIGHUP,
             NODE_ALL,
@@ -3551,7 +3747,148 @@ static void InitStorageConfigureNamesString()
             NULL,
             NULL,
             NULL},
+        /* Get the cross_cluster_ReplConnInfo1 from postgresql.conf and assign to cross_cluster_ReplConnArray1. */
+        {{"cross_cluster_replconninfo1",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo1 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[1],
+            "",
+            check_replconninfo,
+            assign_cross_cluster_replconninfo1,
+            NULL},
+        /* Get the cross_cluster_ReplConnInfo2 from postgresql.conf and assign to cross_cluster_ReplConnArray2. */
+        {{"cross_cluster_replconninfo2",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo2 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[2],
+            "",
+            check_replconninfo,
+            assign_cross_cluster_replconninfo2,
+            NULL},
+        /* Get the cross_cluster_ReplConnInfo3 from postgresql.conf and assign to cross_cluster_ReplConnArray3. */
+        {{"cross_cluster_replconninfo3",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo3 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[3],
+            "",
+            check_replconninfo,
+            assign_cross_cluster_replconninfo3,
+            NULL},
+        /* Get the cross_cluster_ReplConnInfo4 from postgresql.conf and assign to cross_cluster_ReplConnArray4. */
+        {{"cross_cluster_replconninfo4",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo4 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[4],
+            "",
+            check_replconninfo,
+            assign_cross_cluster_replconninfo4,
+            NULL},
+        /* Get the cross_cluster_ReplConnInfo5 from postgresql.conf and assign to cross_cluster_ReplConnArray5. */
+        {{"cross_cluster_replconninfo5",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo5 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[5],
+            "",
+            check_replconninfo,
+            assign_cross_cluster_replconninfo5,
+            NULL},
+        /* Get the cross_cluster_ReplConnInfo6 from postgresql.conf and assign to cross_cluster_ReplConnArray6. */
+        {{"cross_cluster_replconninfo6",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo6 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[6],
+            "",
+            check_replconninfo,
+            assign_cross_cluster_replconninfo6,
+            NULL},
+        /* Get the cross_cluster_ReplConnInfo7 from postgresql.conf and assign to cross_cluster_ReplConnArray7. */
+        {{"cross_cluster_replconninfo7",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo7 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+            &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[7],
+            "",
+            check_replconninfo,
+            assign_cross_cluster_replconninfo7,
+            NULL},
 
+        /* Get the cross_cluster_ReplConnInfo8 from postgresql.conf and assign to cross_cluster_ReplConnArray8. */
+        {{
+            "cross_cluster_replconninfo8",
+            PGC_SIGHUP,
+            NODE_SINGLENODE,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the cross_cluster_replconninfo8 of the HA to listen and authenticate."),
+            NULL,
+            GUC_LIST_INPUT},
+        &u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[8],
+        "",
+        check_replconninfo,
+        assign_cross_cluster_replconninfo8,
+        NULL},
+
+        {{"xlog_file_path",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            WAL,
+            gettext_noop("use only one xlog file, the path of it"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.xlog_file_path,
+            NULL,
+            NULL,
+            NULL,
+            NULL},
+        {{"hadr_super_user_record_path",
+            PGC_SIGHUP,
+            NODE_ALL,
+            REPLICATION_SENDING,
+            gettext_noop("Sets the secure file path for initial user."),
+            NULL},
+            &u_sess->attr.attr_storage.hadr_super_user_record_path,
+            "",
+            NULL,
+            NULL,
+            NULL},
+        {{"xlog_lock_file_path",
+            PGC_POSTMASTER,
+            NODE_SINGLENODE,
+            WAL,
+            gettext_noop("used to control write to xlog_file_path"),
+            NULL,
+            GUC_SUPERUSER_ONLY},
+            &g_instance.attr.attr_storage.xlog_lock_file_path,
+            NULL,
+            NULL,
+            NULL,
+            NULL},
         {{NULL,
             (GucContext)0,
             (GucNodeType)0,
@@ -3700,7 +4037,6 @@ static void InitStorageConfigureNamesEnum()
             assign_dcf_run_mode,
             NULL},
 #endif
-
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -4083,7 +4419,6 @@ static void assign_replconninfo7(const char* newval, void* extra)
     }
 }
 
-#ifndef ENABLE_MULTIPLE_NODES
 static void assign_replconninfo8(const char* newval, void* extra)
 {
     int repl_length = 0;
@@ -4098,7 +4433,269 @@ static void assign_replconninfo8(const char* newval, void* extra)
         t_thrd.postmaster_cxt.ReplConnChanged[8] = true;
     }
 }
-#endif
+
+static void assign_replconninfo9(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[9]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[9]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[9] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[9] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[9], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[9] = true;
+    }
+}
+
+static void assign_replconninfo10(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[10]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[10]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[10] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[10] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[10], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[10] = true;
+    }
+}
+
+static void assign_replconninfo11(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[11]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[11]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[11] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[11] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[11], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[11] = true;
+    }
+}
+
+static void assign_replconninfo12(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[12]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[12]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[12] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[12] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[12], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[12] = true;
+    }
+}
+
+static void assign_replconninfo13(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[13]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[13]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[13] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[13] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[13], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[13] = true;
+    }
+}
+
+static void assign_replconninfo14(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[14]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[14]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[14] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[14] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[14], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[14] = true;
+    }
+}
+
+static void assign_replconninfo15(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[15]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[15]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[15] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[15] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[15], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[15] = true;
+    }
+}
+
+static void assign_replconninfo16(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[16]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[16]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[16] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[16] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[16], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[16] = true;
+    }
+}
+
+static void assign_replconninfo17(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[17]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[17]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[17] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[17] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[17], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[17] = true;
+    }
+}
+
+static void assign_replconninfo18(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[18]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[18]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[18] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[18] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[18], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[18] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo1(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[1] != NULL)
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[1]);
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[1] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[1] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[1], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[1] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo2(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[2] != NULL)
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[2]);
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[2] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[2] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[2], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[2] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo3(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[3])
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[3]);
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[3] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[3] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[3], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[3] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo4(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[4])
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[4]);
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[4] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[4] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[4], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[4] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo5(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[5])
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[5]);
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[5] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[5] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[5], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[5] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo6(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[6])
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[6]);
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[6] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[6] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[6], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[6] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo7(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[7])
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[7]);
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[7] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[7] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[7], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[7] = true;
+    }
+}
+
+static void assign_cross_cluster_replconninfo8(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.CrossClusterReplConnArray[8]) {
+        pfree(t_thrd.postmaster_cxt.CrossClusterReplConnArray[8]);
+    }
+
+    t_thrd.postmaster_cxt.CrossClusterReplConnArray[8] = ParseReplConnInfo(newval, &repl_length);
+    if (u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[8] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.CrossClusterReplConnInfoArr[8], newval) != 0) {
+        t_thrd.postmaster_cxt.CrossClusterReplConnChanged[8] = true;
+    }
+}
 
 /*
  * @Description: show the content of GUC "logging_module"
@@ -4243,6 +4840,8 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
     char* ReplStr = NULL;
     char* token = NULL;
     char* tmp_token = NULL;
+    char cascadeToken[MAXLENS] = {0};
+    char crossRegionToken[MAXLENS] = {0};
     char* ptr = NULL;
     int parsed = 0;
     int iplen = 0;
@@ -4251,6 +4850,7 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
     int local_heartbeat_len = strlen("localheartbeatport");
     int remote_heartbeat_len = strlen("remoteheartbeatport");
     int cascadeLen = strlen("iscascade");
+    int corssRegionLen = strlen("isCrossRegion");
 
     errno_t errorno = EOK;
 
@@ -4405,9 +5005,27 @@ static ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength
             iter = strstr(token, "iscascade");
             if (NULL != iter) {
                 iter += cascadeLen;
-
-                if (strstr(iter, "true") != NULL) {
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+                errorno = strncpy_s(cascadeToken, MAXLENS, iter, strlen("true"));
+                securec_check(errorno, "\0", "\0");
+                if (strcmp(cascadeToken, "true") == 0) {
                     repl[parsed].isCascade = true;
+                }
+            }
+
+            /* is cross region */
+            iter = strstr(token, "iscrossregion");
+            if (iter != NULL) {
+                iter += corssRegionLen;
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+                strncpy_s(crossRegionToken, MAXLENS, iter, strlen("true"));
+                securec_check(errorno, "\0", "\0");
+                if (strcmp(crossRegionToken, "true") == 0) {
+                    repl[parsed].isCrossRegion = true;
                 }
             }
 
@@ -4583,6 +5201,20 @@ static void assign_dcf_log_backup_file_count(int newval, void* extra)
     u_sess->attr.attr_storage.dcf_attr.dcf_log_backup_file_count = newval;
     if (t_thrd.proc_cxt.MyProcPid == PostmasterPid)
         dcf_set_param("LOG_BACKUP_FILE_COUNT", std::to_string(newval).c_str());
+}
+
+static void assign_dcf_flow_control_rto(int newval, void *extra)
+{
+    if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
+        dcf_set_param("DN_FLOW_CONTROL_RTO", std::to_string(newval).c_str());
+    }
+}
+
+static void assign_dcf_flow_control_rpo(int newval, void *extra)
+{
+    if (t_thrd.proc_cxt.MyProcPid == PostmasterPid) {
+        dcf_set_param("DN_FLOW_CONTROL_RPO", std::to_string(newval).c_str());
+    }
 }
 
 #endif

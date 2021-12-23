@@ -7,6 +7,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -575,6 +576,10 @@ static Plan* set_plan_refs(PlannerInfo* root, Plan* plan, int rtoffset)
                 default:
                     set_dummy_tlist_references(plan, rtoffset);
             }
+        } break;
+
+        case T_StartWithOp: {
+            set_dummy_tlist_references(plan, rtoffset);
         } break;
 
         case T_Hash:

@@ -22,7 +22,6 @@ source ./initialize_certificate.sh
 
 CA_CRT="${CURRENT_DIR}/${CA}/ca.crt"
 CA_KEY="${CURRENT_DIR}/${CA}/ca.key"
-pwf="${CURRENT_DIR}/${PW_FILE}"
 local_host=""
 ca_password=""
 ssl_password=""
@@ -51,6 +50,7 @@ fi
 key="${base_dir}/${file_name}.key"
 crt="${base_dir}/${file_name}.crt"
 req="${base_dir}/${file_name}.req"
+pwf="${base_dir}"
 
 expect <<-EOF
     spawn /bin/openssl genrsa -aes256 -out ${key} 2048
@@ -77,7 +77,7 @@ EOF
 
 rm ${req}
 
-echo "${ssl_password}">${pwf}
+encrypt "${ssl_password}" ${pwf} ${pwf}
 chmod 600 ${key}
 chmod 600 ${crt}
-chmod 600 ${pwf}
+chmod 700 ${pwf}

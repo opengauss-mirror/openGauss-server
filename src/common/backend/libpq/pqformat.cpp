@@ -23,6 +23,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *	src/common/backend/libpq/pqformat.cpp
  *
@@ -477,6 +478,25 @@ int64 pq_getmsgint64(StringInfo msg)
     result |= l32;
 
     return (int64)result;
+}
+
+/* --------------------------------
+ *		pq_getmsgint128	- get a binary 16-byte int from a message buffer
+ *
+ * It is tempting to merge this with pq_getmsgint, but we'd have to make the
+ * result int128 for all data widths --- that could be a big performance
+ * hit on machines where int64 isn't efficient.
+ * --------------------------------
+ */
+int128 pq_getmsgint128(StringInfo msg)
+{
+    uint128 n128;
+
+    const int int128bytes = 4;
+
+    pq_copymsgbytes(msg, (char*)&n128, int128bytes);
+
+    return (int128)pg_ntoh128(n128);
 }
 
 /* --------------------------------

@@ -271,7 +271,8 @@ DROP TABLE hw_create_as_test3;
 DROP TABLE hw_create_as_test1;
 CREATE TABLE hw_create_as_test1(C_INT int);
 CREATE TABLE hw_create_as_test2(C_INT) as SELECT C_INT FROM hw_create_as_test1;
-ERROR:  relation "hw_create_as_test2" already exists
+ERROR:  relation "hw_create_as_test2" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
 CREATE TABLE hw_create_as_test3 (C_INT int);
 ALTER TABLE hw_create_as_test3 INHERIT hw_create_as_test2;
 ERROR:  child table is missing column "c_char"

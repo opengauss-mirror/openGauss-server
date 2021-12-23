@@ -30,7 +30,8 @@
 #include "client_logic_cache/dataTypes.def"
 #include "client_logic_cache/icached_column_manager.h"
 bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, size_t processed_data_size,
-    const int* original_typesid, int format, unsigned char** plain_text, size_t& plain_text_size, bool* is_decrypted)
+    const int* original_typesid, int format, unsigned char** plain_text,
+    size_t& plain_text_size, bool* is_decrypted)
 {
     DecryptDataRes dec_dat_res = DEC_DATA_ERR;
     if (!original_typesid) {
@@ -77,8 +78,9 @@ bool RecordProcessor::DeProcessRecord(PGconn* conn, const char* processed_data, 
         unsigned char* plain = NULL;
         size_t plain_size = 0;
         int original_id = original_typesid[idx];
+        ProcessStatus process_status = ONLY_VALUE;
         dec_dat_res = ValuesProcessor::deprocess_value(conn, (unsigned char*)pdata, end - pdata, original_id, format,
-            &plain, plain_size, false);
+            &plain, plain_size, process_status);
         if (dec_dat_res == DEC_DATA_SUCCEED) {
             *is_decrypted = true;
 

@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/parser/parse_clause.h
  *
@@ -46,5 +47,12 @@ extern bool targetIsInSortList(TargetEntry* tle, Oid sortop, List* sortList);
 extern List* addTargetToSortList(
     ParseState* pstate, TargetEntry* tle, List* sortlist, List* targetlist, SortBy* sortby, bool resolveUnknown);
 extern ParseNamespaceItem *makeNamespaceItem(RangeTblEntry *rte, bool lateral_only, bool lateral_ok);
+
+/*
+ * StartWith support transformStartWith() is the only entry point for START WITH...CONNECT BY
+ * processing in parser/transformar layer
+ */
+extern void transformStartWith(ParseState *pstate, SelectStmt *stmt, Query *qry);
+extern void AddStartWithCTEPseudoReturnColumns(CommonTableExpr *cte, RangeTblEntry *rte, Index rte_index);
 
 #endif /* PARSE_CLAUSE_H */

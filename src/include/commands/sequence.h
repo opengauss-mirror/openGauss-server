@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/commands/sequence.h
  *
@@ -50,6 +51,22 @@ typedef struct FormData_pg_sequence {
 
 typedef FormData_pg_sequence* Form_pg_sequence;
 
+typedef struct FormData_pg_large_sequence {
+    NameData sequence_name;
+    int128 last_value;
+    int128 start_value;
+    int128 increment_by;
+    int128 max_value;
+    int128 min_value;
+    int128 cache_value;
+    int64 log_cnt;
+    bool is_cycled;
+    bool is_called;
+    GTM_UUID uuid;
+} FormData_pg_large_sequence;
+
+typedef FormData_pg_large_sequence* Form_pg_large_sequence;
+
 /*
  * Columns of a sequence relation
  */
@@ -69,6 +86,42 @@ typedef FormData_pg_sequence* Form_pg_sequence;
 #define SEQ_COL_FIRSTCOL SEQ_COL_NAME
 #define SEQ_COL_LASTCOL SEQ_COL_UUID
 
+#define GS_NUM_OF_BUCKETS 1024
+
+/*
+ * The "special area" of a old version sequence's buffer page looks like this.
+ */
+
+/*
+ * We store a SeqTable item for every sequence we have touched in the current
+ * session.  This is needed to hold onto nextval/currval state.  (We can't
+ * rely on the relcache, since it's only, well, a cache, and may decide to
+ * discard entries.)
+ *
+ * XXX We use linear search to find pre-existing SeqTable entries.	This is
+ * good when only a small number of sequences are touched in a session, but
+ * would suck with many different sequences.  Perhaps use a hashtable someday.
+ */
+typedef struct SeqTableData {
+    struct SeqTableData* next; /* link to next SeqTable object */
+    Oid relid;                 /* pg_class OID of this sequence */
+    Oid filenode;              /* last seen relfilenode of this sequence */
+    LocalTransactionId lxid;   /* xact in which we last did a seq op */
+    bool last_valid;           /* do we have a valid "last" value? */
+    bool is_cycled;
+    int128 last;   /* value last returned by nextval */
+    int128 cached; /* last value already cached for nextval */
+    /* if last != cached, we have not used up all the cached values */
+    int128 increment; /* copy of sequence's increment field */
+    /* note that increment is zero until we first do read_seq_tuple() */
+    int128 minval;
+    int128 maxval;
+    int128 startval;
+    int64 uuid;
+} SeqTableData;
+
+typedef SeqTableData* SeqTable;
+
 /* XLOG stuff */
 #define XLOG_SEQ_LOG 0x00
 
@@ -87,7 +140,7 @@ typedef struct xl_seq_rec {
  * so we pre-log a few fetches in advance. In the event of
  * crash we can lose (skip over) as many values as we pre-logged.
  */
-#define SEQ_LOG_VALS 32
+const int SEQ_LOG_VALS = 32;
 
 
 /*
@@ -107,9 +160,10 @@ extern Datum setval3_oid(PG_FUNCTION_ARGS);
 extern Datum lastval(PG_FUNCTION_ARGS);
 
 extern Datum pg_sequence_parameters(PG_FUNCTION_ARGS);
+extern Datum pg_sequence_last_value(PG_FUNCTION_ARGS);
 
-extern void DefineSequence(CreateSeqStmt* stmt);
-extern void AlterSequence(AlterSeqStmt* stmt);
+extern void DefineSequenceWrapper(CreateSeqStmt* stmt);
+extern void AlterSequenceWrapper(AlterSeqStmt* stmt);
 extern void PreventAlterSeqInTransaction(bool isTopLevel, AlterSeqStmt* stmt);
 extern void ResetSequence(Oid seq_relid);
 
@@ -161,8 +215,18 @@ extern char* gen_hybirdmsg_for_CreateSchemaStmt(CreateSchemaStmt* stmt, const ch
 extern void gen_uuid_for_CreateStmt(CreateStmt* stmt, List* uuids);
 extern void gen_uuid_for_CreateSchemaStmt(List* stmts, List* uuids);
 extern void processUpdateSequenceMsg(List* nameList, int64 lastvalue);
+extern void flushSequenceMsg();
 extern void checkAndDoUpdateSequence();
-
 #endif
+
+/* Sequence util */
+extern void fill_seq_with_data(Relation rel, HeapTuple tuple);
+extern void ResetvalGlobal(Oid relid);
+extern Relation lock_and_open_seq(SeqTable seq);
+extern void init_sequence(Oid relid, SeqTable* p_elm, Relation* p_rel);
+extern SeqTable GetSessSeqElm(Oid relid);
+extern char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname);
+extern uint32 RelidGetHash(Oid seq_relid);
+extern SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket);
 
 #endif /* SEQUENCE_H */

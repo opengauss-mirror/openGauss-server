@@ -434,6 +434,11 @@ static void free_restoreopts(RestoreOptions* opts)
         free(opts->pgport);
         opts->pgport = NULL;
 
+        if (opts->idWanted != NULL) {
+            free(opts->idWanted);
+            opts->idWanted = NULL;
+        }
+
         /* free index names */
         free_SimpleStringList(&opts->indexNames);
 

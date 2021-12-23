@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/nodes/relation.h
  *
@@ -389,6 +390,8 @@ typedef struct PlannerInfo {
     List* curOuterParams; /* not-yet-assigned NestLoopParams */
 
     Index curIteratorParamIndex;
+    bool isPartIteratorPruning;
+    Index curSubPartIteratorParamIndex;
     bool isPartIteratorPlanning;
     int curItrs;
     List* subqueryRestrictInfo; /* Subquery RestrictInfo, which only be used in wondows agg. */
@@ -434,6 +437,7 @@ typedef struct PlannerInfo {
     Bitmapset *param_upper;
 	
 	bool hasRownumQual;
+    List *origin_tlist;
 } PlannerInfo;
 
 /*
@@ -1615,6 +1619,9 @@ typedef struct RestrictInfo {
     /* cache space for hashclause processing; -1 if not yet set */
     BucketSize left_bucketsize;  /* avg bucketsize of left side */
     BucketSize right_bucketsize; /* avg bucketsize of right side */
+
+    /* Is this restrict info converted from index matching process */
+    bool converted;
 } RestrictInfo;
 
 /*

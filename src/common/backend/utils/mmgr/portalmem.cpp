@@ -10,6 +10,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/backend/utils/mmgr/portalmem.c
@@ -205,7 +206,7 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
             ereport(ERROR, (errcode(ERRCODE_DUPLICATE_CURSOR), errmsg("cursor \"%s\" already exists", name)));
         if (dupSilent == false)
             ereport(WARNING, (errcode(ERRCODE_DUPLICATE_CURSOR), errmsg("closing existing cursor \"%s\"", name)));
-        PortalDrop(portal, false);
+        PortalDrop(portal, false, true);
     }
 
     /* make new portal structure */
@@ -221,6 +222,7 @@ Portal CreatePortal(const char* name, bool allowDup, bool dupSilent, bool is_fro
     /* create a resource owner for the portal */
     portal->resowner = ResourceOwnerCreate(t_thrd.utils_cxt.CurTransactionResourceOwner, "Portal",
         THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR));
+    RESOWNER_LOG("create", portal->resowner);
 
     /* initialize portal fields that don't start off zero */
     portal->status = PORTAL_NEW;
@@ -425,6 +427,9 @@ void MarkPortalActive(Portal portal)
             (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE), errmsg("portal \"%s\" cannot be run", portal->name)));
     /* Perform the state transition */
     portal->status = PORTAL_ACTIVE;
+    ereport(DEBUG2, (errmodule(MOD_SPI), errcode(ERRCODE_LOG),
+                     errmsg("MarkPortalActive(portal name:%s, status %d, portalPinned %d, autoHeld %d)",
+                                portal->name, portal->status, portal->portalPinned, portal->autoHeld)));
     portal->activeSubid = GetCurrentSubTransactionId();
 }
 
@@ -439,6 +444,9 @@ void MarkPortalDone(Portal portal)
     /* Perform the state transition */
     Assert(portal->status == PORTAL_ACTIVE);
     portal->status = PORTAL_DONE;
+    ereport(DEBUG2, (errmodule(MOD_SPI), errcode(ERRCODE_LOG),
+                     errmsg("MarkPortalDone(portal:%p, portal name:%s, status %d, portalPinned %d, autoHeld %d)",
+                                portal, portal->name, portal->status, portal->portalPinned, portal->autoHeld)));
 
     /*
      * Allow portalcmds.c to clean up the state it knows about.  We might as
@@ -465,6 +473,9 @@ void MarkPortalFailed(Portal portal)
     /* Perform the state transition */
     Assert(portal->status != PORTAL_DONE);
     portal->status = PORTAL_FAILED;
+    ereport(DEBUG2, (errmodule(MOD_SPI), errcode(ERRCODE_LOG),
+                     errmsg("MarkPortalFailed(portal:%p, portal name:%s, status %d, portalPinned %d, autoHeld %d)",
+                                portal, portal->name, portal->status, portal->portalPinned, portal->autoHeld)));
 
     /*
      * Allow portalcmds.c to clean up the state it knows about.  We might as
@@ -484,7 +495,7 @@ void MarkPortalFailed(Portal portal)
  * PortalDrop
  *		Destroy the portal.
  */
-void PortalDrop(Portal portal, bool isTopCommit)
+void PortalDrop(Portal portal, bool isTopCommit, bool isInCreate)
 {
     if (!PortalIsValid(portal)) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("portal is NULL")));
@@ -542,11 +553,19 @@ void PortalDrop(Portal portal, bool isTopCommit)
      */
     if (portal->resowner && (!isTopCommit || portal->status == PORTAL_FAILED)) {
         bool isCommit = (portal->status != PORTAL_FAILED);
-
-        ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_BEFORE_LOCKS, isCommit, false);
-        ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_LOCKS, isCommit, false);
-        ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_AFTER_LOCKS, isCommit, false);
-        ResourceOwnerDelete(portal->resowner);
+        if (portal->resowner && isInCreate && ENABLE_SQL_BETA_FEATURE(RESOWNER_DEBUG)) {
+            RESOWNER_LOG("delete for create", portal->resowner);
+            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_BEFORE_LOCKS, isCommit, false);
+            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_LOCKS, isCommit, false);
+            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_AFTER_LOCKS, isCommit, false);
+            portal->resowner = NULL;
+        } else {
+            RESOWNER_LOG("delete", portal->resowner);
+            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_BEFORE_LOCKS, isCommit, false);
+            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_LOCKS, isCommit, false);
+            ResourceOwnerRelease(portal->resowner, RESOURCE_RELEASE_AFTER_LOCKS, isCommit, false);
+            ResourceOwnerDelete(portal->resowner);
+        }
     }
     portal->resowner = NULL;
 
@@ -836,7 +855,7 @@ void AtAbort_Portals(bool STP_rollback)
          * upcoming transaction-wide cleanup; they will be gone before we run
          * PortalDrop. Can not reset resonwer to NUll if
          * we are in STP_rollback, because the Portal is still alive. If we set 
-	 * resowner to NUll it will cause leak snapshots reference error, because
+         * resowner to NUll it will cause leak snapshots reference error, because
          * the new snapshots does not have owner.
          */
         if(!STP_rollback) {
@@ -970,8 +989,8 @@ void AtSubCommit_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
  *
  * We don't destroy any portals here; that's done in AtSubCleanup_Portals.
  */
-void AtSubAbort_Portals(
-    SubTransactionId mySubid, SubTransactionId parentSubid, ResourceOwner myXactOwner, ResourceOwner parentXactOwner)
+void AtSubAbort_Portals(SubTransactionId mySubid, SubTransactionId parentSubid,
+    ResourceOwner myXactOwner, ResourceOwner parentXactOwner, bool inSTP)
 {
     HASH_SEQ_STATUS status;
     PortalHashEnt* hentry = NULL;
@@ -1035,35 +1054,57 @@ void AtSubAbort_Portals(
          * changed in the failed subtransaction, leading to crashes within
          * ExecutorEnd when portalcmds.cpp tries to close down the portal.
          */
-        if (portal->status == PORTAL_READY || portal->status == PORTAL_ACTIVE)
+        if (portal->status == PORTAL_READY)
             MarkPortalFailed(portal);
 
-        /*
-         * Allow portalcmds.c to clean up the state it knows about, if we
-         * haven't already.
-         */
-        if (PointerIsValid(portal->cleanup)) {
-            (*portal->cleanup)(portal);
-            portal->cleanup = NULL;
+        if (!inSTP || portal->is_from_spi) {
+            /*
+             * Force any active portals into FAILED state, see comments above.
+             */
+            if (portal->status == PORTAL_ACTIVE) {
+                MarkPortalFailed(portal);
+            }
+
+            /*
+             * Allow portalcmds.c to clean up the state it knows about, if we
+             * haven't already.
+             */
+            if (PointerIsValid(portal->cleanup)) {
+                (*portal->cleanup)(portal);
+                portal->cleanup = NULL;
+            }
+
+            /* drop cached plan reference, if any */
+            PortalReleaseCachedPlan(portal);
+
+            /*
+             * Any resources belonging to the portal will be released in the
+             * upcoming transaction-wide cleanup; they will be gone before we run
+             * PortalDrop.
+             */
+             portal->resowner = NULL;
+
+            /*
+             * Although we can't delete the portal data structure proper, we can
+             * release any memory in subsidiary contexts, such as executor state.
+             * The cleanup hook was the last thing that might have needed data
+             * there.
+             */
+            MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
+        } else {
+            /* clean up snapshots before release its reource owner. */
+            if (portal->resowner != NULL) {
+                ResourceOwnerDecrementNsnapshots(portal->resowner, portal->queryDesc);
+            }
+
+            /*
+             * While rollback to savepoint outside STP, stmt top portal is still active.
+             * don't destory its memory context.
+             */
+            if (portal->status != PORTAL_ACTIVE) {
+                MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
+            }
         }
-
-        /* drop cached plan reference, if any */
-        PortalReleaseCachedPlan(portal);
-
-        /*
-         * Any resources belonging to the portal will be released in the
-         * upcoming transaction-wide cleanup; they will be gone before we run
-         * PortalDrop.
-         */
-        portal->resowner = NULL;
-
-        /*
-         * Although we can't delete the portal data structure proper, we can
-         * release any memory in subsidiary contexts, such as executor state.
-         * The cleanup hook was the last thing that might have needed data
-         * there.
-         */
-        MemoryContextDeleteChildren(PortalGetHeapMemory(portal));
     }
 }
 
@@ -1088,6 +1129,14 @@ void AtSubCleanup_Portals(SubTransactionId mySubid)
 
         if (portal->createSubid != mySubid)
             continue;
+
+        /*
+         * Do not touch active portals --- this can only happen in the case of
+         * a multi-transaction command.
+         */
+        if (portal->status == PORTAL_ACTIVE) {
+            continue;
+        }
 
         /*
          * If a portal is still pinned, forcibly unpin it. PortalDrop will not
@@ -1279,11 +1328,16 @@ HoldPinnedPortals(void)
                 ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_TERMINATION),
                     errmsg("cannot perform transaction commands inside a cursor loop that is not read-only")));
             }
-       
+
+            /* skip portal got error */
+            if (portal->status == PORTAL_FAILED)
+                continue;
+
             /* Verify it's in a suitable state to be held */
             if (portal->status != PORTAL_READY)
-                ereport(ERROR, (errmsg("pinned portal is not ready to be auto-held")));
-       
+                ereport(ERROR, (errmsg("pinned portal(%s) is not ready to be auto-held, with status[%d]",
+                                portal->name, portal->status)));
+
             HoldPortal(portal);
             portal->autoHeld = true;
         }

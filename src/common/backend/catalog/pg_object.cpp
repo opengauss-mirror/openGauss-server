@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -424,6 +425,9 @@ PgObjectType GetPgObjectTypePgClass(char relkind)
         case RELKIND_SEQUENCE:
             objectType = OBJECT_TYPE_SEQUENCE;
             break;
+        case RELKIND_LARGE_SEQUENCE:
+            objectType = OBJECT_TYPE_LARGE_SEQUENCE;
+            break;
         case RELKIND_INDEX:
         case RELKIND_GLOBAL_INDEX:
             objectType = OBJECT_TYPE_INDEX;
@@ -465,6 +469,7 @@ void recordCommentObjectTime(ObjectAddress addr, Relation rel, ObjectType objTyp
     switch (objType) {
         case OBJECT_INDEX:
         case OBJECT_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
         case OBJECT_CONTQUERY:

@@ -76,6 +76,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_ash>
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_capture_view>
     $<TARGET_OBJECTS:gausskernel_cbb_instruments_statement>
+    $<TARGET_OBJECTS:gausskernel_cbb_instruments_func_control>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_libcomm_core>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_comm_proxy>
     $<TARGET_OBJECTS:gausskernel_cbb_communication_libcomm_utils>
@@ -99,6 +100,7 @@ set(gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_optimizer_util>
     $<TARGET_OBJECTS:gausskernel_optimizer_rewrite>
     $<TARGET_OBJECTS:gausskernel_optimizer_commands>
+    $<TARGET_OBJECTS:gausskernel_optimizer_commands_sequence>
     $<TARGET_OBJECTS:gausskernel_optimizer_sqladvisor>
     $<TARGET_OBJECTS:gausskernel_process_datasource>
     $<TARGET_OBJECTS:gausskernel_process_job>
@@ -171,6 +173,7 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_access_transam_extreme_rto>
     $<TARGET_OBJECTS:gausskernel_storage_access_transam>
     $<TARGET_OBJECTS:gausskernel_storage_access_obs>
+    $<TARGET_OBJECTS:gausskernel_storage_access_archive>
     $<TARGET_OBJECTS:gausskernel_storage_access_hash>
     $<TARGET_OBJECTS:gausskernel_storage_access_spgist>
     $<TARGET_OBJECTS:gausskernel_storage_access_gist>
@@ -203,6 +206,8 @@ list(APPEND gaussdb_objects
     $<TARGET_OBJECTS:gausskernel_storage_access_ubtree>
     $<TARGET_OBJECTS:gausskernel_storage_tcap>
     $<TARGET_OBJECTS:gausskernel_storage_sync>
+    $<TARGET_OBJECTS:gausskernel_storage_dorado_operation>
+    $<TARGET_OBJECTS:gausskernel_storage_xlog_share_storage>
     $<TARGET_OBJECTS:common_timezone>
     $<TARGET_OBJECTS:contrib_file_fdw>
     $<TARGET_OBJECTS:contrib_hdfs_fdw>
@@ -260,12 +265,7 @@ if(${ENABLE_MEMORY_CHECK})
     list(APPEND gaussdb_LINK_LIBS ${MEMCHECK_LIBS})
     list(APPEND gaussdb_LINK_DIRS ${MEMCHECK_LINK_DIRECTORIES})
 endif()
-list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lorc -lparquet -larrow -lthrift -l${SNAPPY_LIB_NAME} -lzstd -l${PROTOBUF_LIB_NAME} -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++)
-if("${ENABLE_UT}" STREQUAL "ON")
-    list(APPEND gaussdb_LINK_LIBS -lboost_thread_pic -lboost_chrono_pic -lboost_system_pic -lboost_atomic_pic -lxml2_pic -laio -lncurses -ltinfo)
-else()
-    list(APPEND gaussdb_LINK_LIBS -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo)
-endif()
+list(APPEND gaussdb_LINK_LIBS -lz -lminiunz -leSDKOBS -leSDKLogAPI -lpcre -liconv -lnghttp2 -llog4cpp -lcurl -llz4 -lcjson -l${JEMALLOC_LIB_NAME} -lcgroup -lorc -lparquet -larrow -lthrift -lsnappy -lzstd -lprotobuf -lcom_err_gauss -lgssapi_krb5_gauss -lkrb5_gauss -lgssrpc_gauss -lk5crypto_gauss -lkadm5clnt_mit -lkadm5srv_mit -lkdb5 -lkrb5support_gauss -lstdc++ -lboost_thread -lboost_chrono -lboost_system -lboost_atomic -lxml2 -laio -lncurses -ltinfo)
 
 include_directories(
     ${BOOST_INCLUDE_PATH}

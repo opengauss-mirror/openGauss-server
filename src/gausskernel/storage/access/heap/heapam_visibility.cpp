@@ -360,13 +360,21 @@ bool HeapTupleSatisfiesSelf(HeapTuple htup, Snapshot snapshot, Buffer buffer)
     return false;
 }
 
-/* Don't sync pgxc node table, it will hold NodeTableLock to read tuple and it's only useful in local node */
-static inline bool NeedSyncXact(uint32 syncFlag, Oid tableOid) 
+/* Only sync pg_class. */
+static inline bool NeedSyncXact(uint32 syncFlag, Oid tableOid, Snapshot snapshot)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    /* Skip sync when seqscan on pg_class */
+    if (snapshot == SnapshotNowNoSync) {
+        return false;
+    }
     return ((syncFlag & SNAPSHOT_NOW_NEED_SYNC) && IsNormalProcessingMode()) &&
-        (tableOid != PgxcNodeRelationId) &&
-        (tableOid != PgxcGroupRelationId) &&
+        (tableOid == RelationRelationId) && !u_sess->storage_cxt.twoPhaseCommitInProgress &&
+        !IsAnyAutoVacuumProcess() && !IS_SINGLE_NODE &&
         !u_sess->attr.attr_common.xc_maintenance_mode && !t_thrd.xact_cxt.bInAbortTransaction;
+#else
+    return false;
+#endif
 }
 /*
  * HeapTupleSatisfiesNow
@@ -458,8 +466,9 @@ restart:
                 return true; /* deleted after scan started */
             else
                 return false; /* deleted before scan started */
-        } else if (TransactionIdIsInProgress(HeapTupleHeaderGetXmin(page, tuple),  &needSync, false, false)) {
-            if (NeedSyncXact(needSync, htup->t_tableOid)) {
+        } else if (TransactionIdIsInProgress(HeapTupleHeaderGetXmin(page, tuple),
+            &needSync, false, false, false, false)) {
+            if (NeedSyncXact(needSync, htup->t_tableOid, snapshot)) {
                 needSync = 0;
                 SyncWaitXidEnd(HeapTupleHeaderGetXmin(page, tuple), buffer);
                 goto restart;
@@ -524,8 +533,8 @@ restart:
     }
 
     needSync = 0;
-    if (TransactionIdIsInProgress(HeapTupleHeaderGetXmax(page, tuple), &needSync, false, false)) {
-        if (NeedSyncXact(needSync, htup->t_tableOid)) {
+    if (TransactionIdIsInProgress(HeapTupleHeaderGetXmax(page, tuple), &needSync, false, false, false, false)) {
+        if (NeedSyncXact(needSync, htup->t_tableOid, snapshot)) {
             needSync = 0;
             SyncWaitXidEnd(HeapTupleHeaderGetXmax(page, tuple), buffer);
             goto restart;
@@ -721,10 +730,11 @@ restart:
                 return TM_SelfModified; /* updated after scan started */
             else
                 return TM_Invisible; /* updated before scan started */
-        } else if (TransactionIdIsInProgress(HeapTupleHeaderGetXmin(page, tuple), &needSync, false, false)) {
+        } else if (TransactionIdIsInProgress(HeapTupleHeaderGetXmin(page, tuple),
+            &needSync, false, false, false, false)) {
             if (needSync & SNAPSHOT_UPDATE_NEED_SYNC) {
                 needSync = 0;
-                SyncLocalXidWait(HeapTupleHeaderGetXmin(page, tuple));
+                SyncWaitXidEnd(HeapTupleHeaderGetXmin(page, tuple), buffer);
                 goto restart;
             }
             return TM_Invisible;
@@ -1708,6 +1718,11 @@ bool HeapTupleSatisfiesVisibility(HeapTuple tup, Snapshot snapshot, Buffer buffe
         case SNAPSHOT_NOW:
             return HeapTupleSatisfiesNow(tup, snapshot, buffer);
             break;
+#ifdef ENABLE_MULTIPLE_NODES
+        case SNAPSHOT_NOW_NO_SYNC:
+            return HeapTupleSatisfiesNow(tup, snapshot, buffer);
+            break;
+#endif
         case SNAPSHOT_SELF:
             return HeapTupleSatisfiesSelf(tup, snapshot, buffer);
             break;

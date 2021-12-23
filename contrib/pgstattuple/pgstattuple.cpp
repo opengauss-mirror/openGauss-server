@@ -2,6 +2,7 @@
  * contrib/pgstattuple/pgstattuple.c
  *
  * Copyright (c) 2001,2002	Tatsuo Ishii
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * Permission to use, copy, modify, and distribute this software and
  * its documentation for any purpose, without fee, and without a
@@ -196,6 +197,7 @@ static Datum pgstat_relation(Relation rel, FunctionCallInfo fcinfo)
         case RELKIND_TOASTVALUE:
         case RELKIND_UNCATALOGED:
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
             return pgstat_heap(rel, fcinfo);
         case RELKIND_INDEX:
             switch (rel->rd_rel->relam) {

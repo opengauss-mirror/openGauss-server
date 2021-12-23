@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -445,11 +446,13 @@ RangeVar* makeRangeVar(char* schemaname, char* relname, int location)
     r->schemaname = schemaname;
     r->relname = relname;
     r->partitionname = NULL;
+    r->subpartitionname = NULL;
     r->inhOpt = INH_DEFAULT;
     r->relpersistence = RELPERSISTENCE_PERMANENT;
     r->alias = NULL;
     r->location = location;
     r->ispartition = false;
+    r->issubpartition = false;
     r->partitionKeyValuesList = NIL;
     r->isbucket = false;
     r->buckets = NIL;
@@ -484,6 +487,7 @@ TypeName* makeTypeNameFromNameList(List* names)
     n->typmods = NIL;
     n->typemod = -1;
     n->location = -1;
+    n->pct_rowtype = false;
     return n;
 }
 

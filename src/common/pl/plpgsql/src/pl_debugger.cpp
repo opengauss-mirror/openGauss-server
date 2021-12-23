@@ -1,5 +1,6 @@
 /* -------------------------------------------------------------------------
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -30,21 +31,24 @@
 #include "utils/syscache.h"
 #include "utils/builtins.h"
 #include <sys/time.h>
+#include "catalog/gs_package.h"
 
 const char* PG_DEBUG_FILES_DIR = "base/plpgsql_debug";
+
 const char* DEFAULT_UNKNOWN_VALUE = "<UNKNOWN>";
 
 #define IS_AFTER_OPT(opt) (((opt) <= 'Z') && ((opt) >= 'A'))
 
 static void server_debug_main(PLpgSQL_function* func, PLpgSQL_execstate* estate);
-static void init_debug_server(PLpgSQL_function* func, int socketId, int debugStackIdx);
+static void init_debug_server(PLpgSQL_function* func, int socketId, int debugStackIdx, PLpgSQL_execstate* estate);
 
 static bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* estate);
 
 static char* get_stmt_query(PLpgSQL_stmt* stmt);
 static bool get_cur_info(StringInfo str, PLpgSQL_execstate* estate, DebugInfo* debug);
 static bool send_cur_info(DebugInfo* debug, PLpgSQL_execstate* estate, bool stop_next);
-static int CheckExistedBreakPoint(DebugInfo* debug, Oid funcOid, int lineno, bool activate);
+static bool ActiveBPInFunction(DebugInfo* debug, Oid funcOid);
+static bool IsBreakPointExisted(DebugInfo* debug, Oid funcOid, int lineno, bool ignoreDisabled);
 static char* ResizeDebugCommBufferIfNecessary(char* buffer, int* oldSize, int needSize);
 static void set_debugger_procedure_state(int commIdx, bool state);
 
@@ -53,12 +57,15 @@ static void debug_server_rec_msg(DebugInfo* debug, char* firstChar);
 static void debug_server_send_msg(DebugInfo* debug, const char* msg, int msg_len);
 /* server manage client msg */
 static void debug_server_attach(DebugInfo* debug, PLpgSQL_execstate* estate);
-static void debug_server_local_variables(DebugInfo* debug, PLpgSQL_execstate* estate, bool show_all);
+static void debug_server_local_variables(DebugInfo* debug);
 static void debug_server_abort(DebugInfo* debug);
 static void debug_server_add_breakpoint(DebugInfo* debug);
 static void debug_server_delete_breakpoint(DebugInfo* debug);
+static void debug_server_enable_breakpoint(DebugInfo* debug);
+static void debug_server_disable_breakpoint(DebugInfo* debug);
 static void debug_server_info_breakpoint(DebugInfo* debug);
 static void debug_server_backtrace();
+static void debug_server_set_variable(DebugInfo* debug, PLpgSQL_execstate* estate);
 
 /* close each debug function's resource if necessary */
 void PlDebugerCleanUp(int code, Datum arg)
@@ -79,7 +86,7 @@ void PlDebugerCleanUp(int code, Datum arg)
     clean_up_debug_client(true);
 }
 
-static void init_debug_server(PLpgSQL_function* func, int socketId, int debugStackIdx)
+static void init_debug_server(PLpgSQL_function* func, int socketId, int debugStackIdx, PLpgSQL_execstate* estate)
 {
     Assert(func->debug == NULL);
     MemoryContext debug_context = NULL;
@@ -106,6 +113,7 @@ static void init_debug_server(PLpgSQL_function* func, int socketId, int debugSta
     debug->comm = NULL;
     debug->inner_called_debugger = NULL;
     debug->cur_stmt = NULL;
+    debug->estate = estate;
     /* create connection if is base function */
     if (socketId >= 0) {
         /*
@@ -128,13 +136,13 @@ static void init_debug_server(PLpgSQL_function* func, int socketId, int debugSta
     (void)MemoryContextSwitchTo(old_context);
 }
 
-void check_debug(PLpgSQL_function* func)
+void check_debug(PLpgSQL_function* func, PLpgSQL_execstate* estate)
 {
     if (func->fn_oid == InvalidOid)
         return;
     bool found = false;
     bool need_continue_into = u_sess->plsql_cxt.cur_debug_server != NULL &&
-        CheckExistedBreakPoint(u_sess->plsql_cxt.cur_debug_server, func->fn_oid, -1, false) >= 0;
+        ActiveBPInFunction(u_sess->plsql_cxt.cur_debug_server, func->fn_oid);
     bool is_stepinto = u_sess->plsql_cxt.has_step_into;
     PlDebugEntry* entry = has_debug_func(func->fn_oid, &found);
     if ((found && u_sess->plsql_cxt.cur_debug_server == NULL) || is_stepinto || need_continue_into) {
@@ -162,7 +170,7 @@ void check_debug(PLpgSQL_function* func)
         }
         int socketIdx = found ? entry->commIdx : -1;
         if (func->debug == NULL) {
-            init_debug_server(func, socketIdx, stackIdx);
+            init_debug_server(func, socketIdx, stackIdx, estate);
         }
         
         if (stackIdx > 0) {
@@ -203,7 +211,6 @@ static void set_debugger_procedure_state(int commIdx, bool state)
         debug_comm->hasClientErrorOccured = false;
         debug_comm->clientId = 0;
         debug_comm->bufLen = 0;
-        debug_comm->startPos = 0;
     }
     debuglock.unLock();
 }
@@ -217,7 +224,7 @@ void server_debug_main(PLpgSQL_function* func, PLpgSQL_execstate* estate)
     Assert(debug_ptr != NULL);
     /* stop to wait client conn if need */
     debug_ptr->stop_next_stmt = debug_ptr->stop_next_stmt ||
-        CheckExistedBreakPoint(debug_ptr, func->fn_oid, estate->err_stmt->lineno, false) >= 0;
+        IsBreakPointExisted(debug_ptr, func->fn_oid, estate->err_stmt->lineno, true);
     if (debug_ptr->stop_next_stmt) {
         MemoryContext old_cxt = MemoryContextSwitchTo(debug_ptr->debug_cxt);
         PG_TRY();
@@ -255,7 +262,7 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
             need_wait = true;
             break;
         case DEBUG_LOCALS_HEADER:
-            debug_server_local_variables(debug, estate, true);
+            debug_server_local_variables(debug);
             need_wait = true;
             break;
         case DEBUG_NEXT_HEADER:
@@ -281,8 +288,21 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
             u_sess->plsql_cxt.has_step_into = false;
             need_wait = !send_cur_info(debug, estate, true);
             break;
+        case DEBUG_FINISH_HEADER:
+            debug->stop_next_stmt = false;
+            need_wait = false;
+            *firstChar = DEBUG_FINISH_HEADER_AFTER;
+            break;
         case DEBUG_ABORT_HEADER:
+            /* set abort flag incase has outter function */
+            *firstChar = DEBUG_ABORT_HEADER_AFTER;
             debug_server_abort(debug);
+            need_wait = false;
+            break;
+        case DEBUG_ABORT_HEADER_AFTER:
+            *firstChar = DEBUG_ABORT_HEADER_AFTER;
+            /* already send close to client, no need to send again, just throw error is enough */
+            ereport(ERROR, (errmodule(MOD_PLDEBUGGER), (errmsg("receive abort message"))));
             need_wait = false;
             break;
         case DEBUG_CONTINUE_HEADER:
@@ -290,13 +310,10 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
             need_wait = false;
             *firstChar = DEBUG_CONTINUE_HEADER_AFTER;
             break;
+        case DEBUG_FINISH_HEADER_AFTER:
         case DEBUG_CONTINUE_HEADER_AFTER:
             *firstChar = DEBUG_NOTHING_HEADER;
             need_wait = !send_cur_info(debug, estate, false);
-            break;
-        case DEBUG_PRINT_HEADER:
-            debug_server_local_variables(debug, estate, false);
-            need_wait = true;
             break;
         case DEBUG_ADDBREAKPOINT_HEADER:
             debug_server_add_breakpoint(debug);
@@ -304,11 +321,20 @@ bool handle_debug_msg(DebugInfo* debug, char* firstChar, PLpgSQL_execstate* esta
         case DEBUG_DELETEBREAKPOINT_HEADER:
             debug_server_delete_breakpoint(debug);
             break;
+        case DEBUG_ENABLEBREAKPOINT_HEADER:
+            debug_server_enable_breakpoint(debug);
+            break;
+        case DEBUG_DISABLEBREAKPOINT_HEADER:
+            debug_server_disable_breakpoint(debug);
+            break;
         case DEBUG_BREAKPOINT_HEADER:
             debug_server_info_breakpoint(debug);
             break;
         case DEBUG_BACKTRACE_HEADER:
             debug_server_backtrace();
+            break;
+        case DEBUG_SET_VARIABLE_HEADER:
+            debug_server_set_variable(debug, estate);
             break;
         default:
             ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
@@ -336,6 +362,9 @@ void server_pass_upper_debug_opt(DebugInfo* debug)
                     erraction("Contact Huawei Engineer.")));
         }
         outer_debug->cur_opt = debug->cur_opt;
+        if (debug->cur_opt == DEBUG_FINISH_HEADER_AFTER) {
+            outer_debug->stop_next_stmt = true;
+        }
     }
 }
 
@@ -346,15 +375,23 @@ void server_send_end_msg(DebugInfo* debug)
         StringInfoData str;
         initStringInfo(&str);
         Oid funcoid = debug->func->fn_oid;
+        Oid pkgoid = debug->func->pkg_oid;
         char* funcname = get_func_name(debug->func->fn_oid);
+        char* pkgname = NULL;
         Assert(funcname != NULL);
-        appendStringInfo(&str, "%u:%s:%d:%s", funcoid, funcname, 0, "[EXECUTION FINISHED]");
+        if (pkgoid != InvalidOid) {
+            NameData* pkgName = GetPackageName(pkgoid);
+            pkgname = NameStr(*pkgName);
+        }
+        char* pkgfuncname = quote_qualified_identifier(pkgname, funcname);
+        appendStringInfo(&str, "%u:%s:%d:%s", funcoid, pkgfuncname, 0, "[EXECUTION FINISHED]");
         /* set procedure end */
         set_debugger_procedure_state(debug->comm->comm_idx, false);
         debug_server_send_msg(debug, str.data, str.len);
         MemoryContextSwitchTo(old_cxt);
         debug->cur_opt = DEBUG_NOTHING_HEADER;
         pfree_ext(funcname);
+        pfree_ext(pkgfuncname);
     }
 }
 
@@ -409,7 +446,8 @@ static bool is_target_variable(const char* target, const char* this_var)
 
 PLDebug_variable* get_debug_variable_var(PLpgSQL_var* node, const char* target)
 {
-    if (!is_target_variable(target, node->refname)) {
+    char* varname = node->varname == NULL || node->varname[0] == '\0' ? node->refname : node->varname;
+    if (!is_target_variable(target, varname)) {
         return NULL;
     }
 
@@ -432,31 +470,41 @@ PLDebug_variable* get_debug_variable_var(PLpgSQL_var* node, const char* target)
     }
     form = (Form_pg_type)GETSTRUCT(tuple);
     var = (PLDebug_variable*)makeNode(PLDebug_variable);
-    var->name = AssignStr(node->refname);
+    var->name = AssignStr(varname);
     var->var_type = AssignStr(NameStr(form->typname));
-    if (node->value == (uintptr_t)NULL && form->typlen == -1) { /* type treated as pointers */
+    if (node->value == (uintptr_t)NULL && form->typbyval == false) { /* type treated as pointers */
         var->value = pstrdup("");
     } else {
         var->value = OidOutputFunctionCall(form->typoutput, node->value);
     }
+    if (node->pkg != NULL) {
+        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(NameStr(*pkgName));
+    } else {
+        var->pkgname = pstrdup("");
+    }
+    
+    var->isconst = node->isconst;
     ReleaseSysCache(tuple);
     return var;
 }
 
 PLDebug_variable* get_debug_variable_row(PLpgSQL_row* node, PLpgSQL_execstate* estate, const char* target)
 {
-    if (!is_target_variable(target, node->refname)) {
+    char* varname = node->varname == NULL ? node->refname : node->varname;
+    if (!is_target_variable(target, varname)) {
         return NULL;
     }
 
     /* no need to show internal variable */
     const char* internal = "*internal*";
-    if (node->refname != NULL && strcmp(node->refname, internal) == 0) {
+    if (node->refname != NULL && strcmp(varname, internal) == 0) {
         return NULL;
     }
 
     PLDebug_variable* var = (PLDebug_variable*)makeNode(PLDebug_variable);
-    var->name = AssignStr(node->refname);
+    var->isconst = false;
+    var->name = AssignStr(varname);
     switch (node->dtype) {
         case PLPGSQL_DTYPE_ROW:
             var->var_type = pstrdup("Row");
@@ -491,17 +539,25 @@ PLDebug_variable* get_debug_variable_row(PLpgSQL_row* node, PLpgSQL_execstate* e
         heap_freetuple_ext(tuple);
         pfree(buf);
     }
+    if (node->pkg != NULL) {
+        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(NameStr(*pkgName));
+    } else {
+        var->pkgname = pstrdup("");
+    }
     return var;
 }
 
 PLDebug_variable* get_debug_variable_rec(PLpgSQL_rec* node, const char* target)
 {
-    if (!is_target_variable(target, node->refname)) {
+    char* varname = node->varname == NULL ? node->refname : node->varname;
+    if (!is_target_variable(target, varname)) {
         return NULL;
     }
 
     PLDebug_variable* var = (PLDebug_variable*)makeNode(PLDebug_variable);
-    var->name = AssignStr(node->refname);
+    var->isconst = false;
+    var->name = AssignStr(varname);
     var->var_type = pstrdup("Rec");
     if (node->tupdesc == NULL || node->tup == NULL) {
         var->value = pstrdup(DEFAULT_UNKNOWN_VALUE);
@@ -517,26 +573,37 @@ PLDebug_variable* get_debug_variable_rec(PLpgSQL_rec* node, const char* target)
         var->value = pstrdup(buf->data);
         pfree(buf);
     }
+    if (node->pkg != NULL) {
+        NameData* pkgName = GetPackageName(node->pkg->pkg_oid);
+        var->pkgname = AssignStr(NameStr(*pkgName));
+    } else {
+        var->pkgname = pstrdup("");
+    }
     return var;
 }
 
 PLDebug_variable* get_debug_variable_refcursor(PLpgSQL_datum** node, int index, const char* target)
 {
-    if (!is_target_variable(target, ((PLpgSQL_var*)node[index])->refname)) {
+    char* varname = ((PLpgSQL_var*)node[index])->varname == NULL ?
+        ((PLpgSQL_var*)node[index])->refname : ((PLpgSQL_var*)node[index])->varname;
+    if (!is_target_variable(target, varname)) {
         return NULL;
     }
     PLDebug_variable* var = (PLDebug_variable*)makeNode(PLDebug_variable);
+    var->isconst = false;
     PLDebug_variable* refcursor = get_debug_variable_var((PLpgSQL_var*)node[index++], NULL);
     PLDebug_variable* is_open = get_debug_variable_var((PLpgSQL_var*)node[index++], NULL);
     PLDebug_variable* found = get_debug_variable_var((PLpgSQL_var*)node[index++], NULL);
     PLDebug_variable* not_found = get_debug_variable_var((PLpgSQL_var*)node[index++], NULL);
     PLDebug_variable* row_count = get_debug_variable_var((PLpgSQL_var*)node[index], NULL);
-    var->name = pstrdup(refcursor->name);
+    var->name = pstrdup(varname);
     var->var_type = pstrdup(refcursor->var_type);
     StringInfo buf = makeStringInfo();
     appendStringInfo(buf, "{name:\t%s\nis_open:\t%s\nfound:\t%s\nnot_found:\t%s\nrow_count:\t%s}",
         refcursor->value, is_open->value, found->value, not_found->value, row_count->value);
     var->value = buf->data;
+    var->pkgname = pstrdup(refcursor->pkgname);
+
     pfree(refcursor);
     pfree(is_open);
     pfree(found);
@@ -545,15 +612,76 @@ PLDebug_variable* get_debug_variable_refcursor(PLpgSQL_datum** node, int index, 
     return var;
 }
 
-void debug_server_local_variables(DebugInfo* debug, PLpgSQL_execstate* estate, bool show_all)
+static PLpgSQL_execstate* GetEstateAtDepth(int n)
 {
-    if (estate == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-                errmodule(MOD_PLDEBUGGER),
-                errmsg("Unexpeted null execution state for debug server info local.")));
+    DebugInfo* target = u_sess->plsql_cxt.cur_debug_server;
+    DebugInfo* top = target;
+    /* get n'th stack from lowest stack */
+    for (int i = 0; i < n; i++) {
+        top = top->inner_called_debugger;
+        if (top == NULL) {
+            return NULL;
+        }
     }
-    char* var_name = show_all ? NULL : debug->comm->rec_buffer;
+
+    /* proceed both frame till top reaches outer most */
+    while (top->inner_called_debugger != NULL) {
+        top = top->inner_called_debugger;
+        target = target->inner_called_debugger;
+    }
+    return target->estate;
+}
+
+static void report_msg_error(const char* msg)
+{
+    ereport(ERROR,
+        (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+            errmsg("Unexpeted message for debug server info print_var/info_locals"),
+            errdetail("error message: %s", msg),
+            errcause("The message is not complete"),
+            erraction("Contact Huawei Engineer.")));
+}
+
+void debug_server_local_variables(DebugInfo* debug)
+{
+    /* Received buffer will be in the form of <varname:framno> */
+    PLpgSQL_execstate* estate = NULL;
+    char* var_name = NULL;
+    int frameno = -1;
+    char* psave = NULL;
+    char* fir = strtok_r(debug->comm->rec_buffer, ":", &psave);
+    bool show_all = false;
+    var_name = pstrdup(TrimStr(fir));
+    if (psave == NULL) {
+        report_msg_error(debug->comm->rec_buffer);
+    }
+    fir = strtok_r(NULL, ":", &psave);
+    if (fir == NULL) {
+        report_msg_error(debug->comm->rec_buffer);
+    }
+    frameno = pg_strtoint32(fir);
+    if (frameno == 0) {
+        estate = debug->estate;
+    } else {
+        estate = GetEstateAtDepth(frameno);
+    }
+    if (psave == NULL) {
+        report_msg_error(debug->comm->rec_buffer);
+    }
+    show_all = (pg_strtoint32(psave) == 1);
+    if (show_all) {
+        /* empty var_name will show all variables */
+        pfree_ext(var_name);
+    }
+
+    if (estate == NULL) {
+        char* errmsg = (char*)palloc(MAX_INT_SIZE);
+        pg_ltoa(DEBUG_SERVER_PRINT_VAR_FRAMENO_EXCEED, errmsg);
+        debug_server_send_msg(debug, errmsg, strlen(errmsg));
+        pfree(errmsg);
+        return;
+    }
+
     List* local_variables = NIL;
     for (int i = 0; i < estate->ndatums; i++) {
         PLpgSQL_variable* node = (PLpgSQL_variable*)estate->datums[i];
@@ -607,12 +735,12 @@ void clean_up_debug_client(bool hasError)
             PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[client->comm_idx];
             AutoMutexLock debuglock(&debug_comm->mutex);
             debuglock.lock();
-            if (debug_comm->hasClient() && debug_comm->clientId == u_sess->session_id) {
+            if (debug_comm->hasClient() &&
+                (debug_comm->clientId == u_sess->session_id || debug_comm->clientId == t_thrd.proc_cxt.MyProcPid)) {
                 /* only wake up server for error when it's not recevied server error */
                 if (hasError && debug_comm->IsServerWaited && !debug_comm->hasServerErrorOccured) {
                     debug_comm->hasClientErrorOccured = true;
                     debug_comm->hasClientFlushed = false;
-                    debug_comm->startPos = 0;
                     debug_comm->bufLen = 0;
                     debug_comm->clientId = 0;
                     debuglock.unLock();
@@ -623,7 +751,6 @@ void clean_up_debug_client(bool hasError)
                     debug_comm->hasServerErrorOccured = false;
                     debug_comm->hasClientFlushed = false;
                     debug_comm->clientId = 0;
-                    debug_comm->startPos = 0;
                     debug_comm->bufLen = 0;
                     debuglock.unLock();
                 }
@@ -636,6 +763,7 @@ void clean_up_debug_client(bool hasError)
         u_sess->plsql_cxt.debug_client = NULL;
     }
 }
+
 static void wait_for_client_handle_msg(int comm_idx)
 {
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[comm_idx];
@@ -691,7 +819,6 @@ void clean_up_debug_server(DebugInfo* debug, bool sessClose, bool hasError)
                 /* still has client wait server msg, error occurs */
                 debug_comm->hasServerErrorOccured = true;
                 debug_comm->bufLen = 0;
-                debug_comm->startPos = 0;
                 debug_comm->hasServerFlushed = false;
                 debuglock.unLock();
                 WakeUpReceiver(debug->comm->comm_idx, false);
@@ -701,7 +828,6 @@ void clean_up_debug_server(DebugInfo* debug, bool sessClose, bool hasError)
                 debug_comm->hasClientErrorOccured = false;
                 debug_comm->clientId = 0;
                 debug_comm->bufLen = 0;
-                debug_comm->startPos = 0;
                 debug_comm->hasServerFlushed = false;
                 debuglock.unLock();
             }
@@ -749,21 +875,34 @@ static bool get_cur_info(StringInfo str, PLpgSQL_execstate* estate, DebugInfo* d
 {
     Oid funcoid = debug->func->fn_oid;
     char* funcname = get_func_name(funcoid);
+    Oid pkgoid = debug->func->pkg_oid;
     Assert(funcname != NULL);
     int lineno = estate->err_stmt->lineno;
     char* query = get_stmt_query(estate->err_stmt);
     bool isend = false;
+    char* pkgname = NULL;
+
+    if (pkgoid != InvalidOid) {
+        NameData* pkgName = GetPackageName(pkgoid);
+        pkgname = NameStr(*pkgName);
+    }
+
+    char* pkgfuncname = quote_qualified_identifier(pkgname, funcname);
+
     /* turn to show code's lineno */
     if (query) {
-        appendStringInfo(str, "%u:%s:%d:%s", funcoid, funcname, lineno, query);
+        appendStringInfo(str, "%u:%s:%d:%s", funcoid, pkgfuncname, lineno, query);
     } else {
         if (debug->debugStackIdx == 0) {
             set_debugger_procedure_state(debug->comm->comm_idx, false);
             debug->stop_next_stmt = false;
             isend = true;
         }
-        appendStringInfo(str, "%u:%s:%d:%s", funcoid, funcname, lineno, "[EXECUTION FINISHED]");
+        appendStringInfo(str, "%u:%s:%d:%s", funcoid, pkgfuncname, lineno, "[EXECUTION FINISHED]");
     }
+    pfree(pkgfuncname);
+    pfree(funcname);
+
     return isend;
 }
 
@@ -773,7 +912,7 @@ char* GetSqlString(PLpgSQL_stmt* stmt)
     return ((T*)stmt)->sqlString;
 }
 
-const int STMT_NUM = 27;
+const int STMT_NUM = 28;
 typedef char* (*GetSQLStringFunc)(PLpgSQL_stmt*);
 
 /* KEEP IN THE SAME ORDER AS PLpgSQL_stmt_types */
@@ -804,7 +943,8 @@ const GetSQLStringFunc G_GET_SQL_STRING[STMT_NUM] = {
     GetSqlString<PLpgSQL_stmt_perform>,
     GetSqlString<PLpgSQL_stmt_commit>,
     GetSqlString<PLpgSQL_stmt_rollback>,
-    GetSqlString<PLpgSQL_stmt_null>
+    GetSqlString<PLpgSQL_stmt_null>,
+    GetSqlString<PLpgSQL_stmt_savepoint>
 };
 
 static char* get_stmt_query(PLpgSQL_stmt* stmt)
@@ -821,20 +961,28 @@ static char* get_stmt_query(PLpgSQL_stmt* stmt)
     return query;
 }
 
-static int CheckExistedBreakPoint(DebugInfo* debug, Oid funcOid, int lineno, bool activate)
+static bool ActiveBPInFunction(DebugInfo* debug, Oid funcOid)
 {
     ListCell* lc = NULL;
     foreach(lc, debug->bp_list) {
         PLDebug_breakPoint* bp = (PLDebug_breakPoint*)lfirst(lc);
-        if (bp->funcoid == funcOid && (lineno == -1 || bp->lineno == lineno)) {
-            if (!activate && !bp->active) {
-                return -1;
-            } 
-            bp->active = true;
-            return bp->bpIndex;
+        if (bp->funcoid == funcOid && !bp->deleted && bp->active) {
+            return true;
         }
     }
-    return -1;
+    return false;
+}
+
+static bool IsBreakPointExisted(DebugInfo* debug, Oid funcOid, int lineno, bool ignoreDisabled)
+{
+    ListCell* lc = NULL;
+    foreach(lc, debug->bp_list) {
+        PLDebug_breakPoint* bp = (PLDebug_breakPoint*)lfirst(lc);
+        if (bp->funcoid == funcOid && bp->lineno == lineno && !bp->deleted && (bp->active || !ignoreDisabled)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void debug_server_add_breakpoint(DebugInfo* debug)
@@ -861,23 +1009,25 @@ static void debug_server_add_breakpoint(DebugInfo* debug)
     int lineno = (int)pg_strtouint64(new_fir, NULL, int64Size);
     char* query = pstrdup(psave);
 
-    int foundIndex = CheckExistedBreakPoint(debug, funcOid, lineno, true);
-    if (foundIndex == -1) {
+    int newIndex = -1;
+
+    if (!IsBreakPointExisted(debug, funcOid, lineno, false)) {
         PLDebug_breakPoint* bp = (PLDebug_breakPoint*)makeNode(PLDebug_breakPoint);
         bp->bpIndex = list_length(debug->bp_list);
         bp->funcoid = funcOid;
         bp->lineno = lineno;
         bp->active = true;
+        bp->deleted = false;
         bp->query = query;
         debug->bp_list = lappend(debug->bp_list, bp);
-        foundIndex = bp->bpIndex;
+        newIndex = bp->bpIndex;
     }
 
     (void)MemoryContextSwitchTo(old_context);
 
     StringInfoData str;
     initStringInfo(&str);
-    appendStringInfo(&str, "%d", foundIndex);
+    appendStringInfo(&str, "%d", newIndex);
     debug_server_send_msg(debug, str.data, str.len);
 }
 
@@ -888,12 +1038,64 @@ static void debug_server_delete_breakpoint(DebugInfo* debug)
 
     /* Received buffer will be in the form of <bpIndex> */
     int bpIndex = pg_strtoint32(debug->comm->rec_buffer);
-    char* buf;
+    char* buf = NULL;
 
     if (bpIndex >= list_length(debug->bp_list)) {
         buf = pstrdup("1");
     } else {
         PLDebug_breakPoint* bp = (PLDebug_breakPoint*)list_nth(debug->bp_list, bpIndex);
+        bp->deleted = true;
+        buf = pstrdup("0");
+    }
+    debug_server_send_msg(debug, buf, strlen(buf));
+    pfree(buf);
+    (void)MemoryContextSwitchTo(old_context);
+}
+
+static void debug_server_enable_breakpoint(DebugInfo* debug)
+{
+    /* Client guarantees the index to be positive */
+    MemoryContext old_context = MemoryContextSwitchTo(debug->debug_cxt);
+
+    /* Received buffer will be in the form of <bpIndex> */
+    int bpIndex = pg_strtoint32(debug->comm->rec_buffer);
+    char* buf = NULL;
+
+    if (bpIndex >= list_length(debug->bp_list)) {
+        buf = pstrdup("1");
+    } else {
+        PLDebug_breakPoint* bp = (PLDebug_breakPoint*)list_nth(debug->bp_list, bpIndex);
+        if (bp->deleted) {
+            buf = pstrdup("1");
+        }
+        if (!bp->active) {
+            bp->active = true;
+            buf = pstrdup("0");
+        } else {
+            buf = pstrdup("1");
+        }
+    }
+    debug_server_send_msg(debug, buf, strlen(buf));
+    pfree(buf);
+    (void)MemoryContextSwitchTo(old_context);
+}
+
+static void debug_server_disable_breakpoint(DebugInfo* debug)
+{
+    /* Client guarantees the index to be positive */
+    MemoryContext old_context = MemoryContextSwitchTo(debug->debug_cxt);
+
+    /* Received buffer will be in the form of <bpIndex> */
+    int bpIndex = pg_strtoint32(debug->comm->rec_buffer);
+    char* buf = NULL;
+
+    if (bpIndex >= list_length(debug->bp_list)) {
+        buf = pstrdup("1");
+    } else {
+        PLDebug_breakPoint* bp = (PLDebug_breakPoint*)list_nth(debug->bp_list, bpIndex);
+        if (bp->deleted) {
+            buf = pstrdup("1");
+        }
         if (bp->active) {
             bp->active = false;
             buf = pstrdup("0");
@@ -902,6 +1104,7 @@ static void debug_server_delete_breakpoint(DebugInfo* debug)
         }
     }
     debug_server_send_msg(debug, buf, strlen(buf));
+    pfree(buf);
     (void)MemoryContextSwitchTo(old_context);
 }
 
@@ -911,7 +1114,7 @@ static void debug_server_info_breakpoint(DebugInfo* debug)
     ListCell* lc = NULL;
     foreach(lc, debug->bp_list) {
         PLDebug_breakPoint* bp = (PLDebug_breakPoint*)lfirst(lc);
-        if (bp->active) {
+        if (!bp->deleted) {
             activeBreakPoints = lappend(activeBreakPoints, bp);
         }
     }
@@ -924,10 +1127,7 @@ static void debug_server_info_breakpoint(DebugInfo* debug)
 
 PLDebug_frame* get_frame(DebugInfo* debug)
 {
-    PLDebug_frame* frame = (PLDebug_frame*)makeNode(PLDebug_frame);
-    Assert(debug->func != NULL);
-    Assert(debug->cur_stmt != NULL);
-    if (debug->func == NULL || debug->cur_stmt == NULL) {
+    if (debug == NULL || debug->func == NULL || debug->cur_stmt == NULL) {
         ereport(ERROR,
             (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
                 errmsg("Server debug info contains unexpected NULL value"),
@@ -935,10 +1135,20 @@ PLDebug_frame* get_frame(DebugInfo* debug)
                 errcause("Debugger info on current stack is not properly initialized."),
                 erraction("Contact Huawei Engineer.")));
     }
+    PLDebug_frame* frame = (PLDebug_frame*)makeNode(PLDebug_frame);
+    char* funcname = get_func_name(debug->func->fn_oid);
+    char* pkgname = NULL;
+    Oid pkgoid = debug->func->pkg_oid;
+    if (pkgoid != InvalidOid) {
+        NameData* pkgName = GetPackageName(pkgoid);
+        pkgname = NameStr(*pkgName);
+    }
     frame->frameno = debug->debugStackIdx;
-    frame->funcname = get_func_name(debug->func->fn_oid);
+    frame->funcname = quote_qualified_identifier(pkgname, funcname);
     frame->lineno = debug->cur_stmt->lineno;
     frame->query = get_stmt_query(debug->cur_stmt);
+    frame->funcoid = debug->func->fn_oid;
+    pfree(funcname);
     return frame;
 }
 
@@ -958,6 +1168,156 @@ static void debug_server_backtrace()
     debug_server_send_msg(u_sess->plsql_cxt.cur_debug_server, buf, len);
     list_free_deep(stackInfo);
     pfree(buf);
+}
+
+static PLpgSQL_expr* ConstructAssignExpr(char* value, PLpgSQL_nsitem* ns_top)
+{
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfo(&str, "SELECT %s", value);
+    PLpgSQL_expr* expr = (PLpgSQL_expr*)palloc0(sizeof(PLpgSQL_expr));
+    expr->dtype = PLPGSQL_DTYPE_EXPR;
+    expr->query = pstrdup(str.data);
+    expr->ns = ns_top;
+    expr->dno = -1;
+    expr->idx = -1;
+    pfree(str.data);
+    return expr;
+}
+
+PLpgSQL_datum* GetDatumByVarname(PLpgSQL_execstate* estate, const char* varName, bool* foundCursor, bool* foundConst)
+{
+    for (int i = 0; i < estate->ndatums; ++i) {
+        bool isCursor = false;
+        bool isConst = false;
+        char* datumName = NULL;
+        PLpgSQL_variable* node = (PLpgSQL_variable*)estate->datums[i];
+        switch(node->dtype) {
+            case PLPGSQL_DTYPE_VAR: {
+                PLpgSQL_var* var = (PLpgSQL_var*)node;
+                datumName = var->varname == NULL ? var->refname : var->varname;
+                if (var->datatype != NULL && var->datatype->typoid == REFCURSOROID) {
+                    isCursor = true;
+                } else if (var->isconst) {
+                    isConst = true;
+                }
+                break;
+            }
+            case PLPGSQL_DTYPE_ROW:
+            case PLPGSQL_DTYPE_RECORD: {
+                PLpgSQL_row* row = (PLpgSQL_row*)node;
+                datumName = row->varname == NULL ? row->refname : row->varname;
+                break;
+            }
+            case PLPGSQL_DTYPE_REC: {
+                PLpgSQL_rec* rec = (PLpgSQL_rec*)node;
+                datumName = rec->varname == NULL ? rec->refname : rec->varname;
+                break;
+            }
+            default:
+                break;
+        }
+        if (datumName == NULL) {
+            continue;
+        }
+        if (strcmp(varName, datumName) == 0) {
+            if (isCursor) {
+                *foundCursor = true;
+                return NULL;
+            } else if (isConst) {
+                *foundConst = true;
+                return NULL;
+            }
+            return (PLpgSQL_datum*)node;
+        }
+    }
+    return NULL;
+}
+
+static void debug_server_set_variable(DebugInfo* debug, PLpgSQL_execstate* estate)
+{
+    MemoryContext func_context = MemoryContextSwitchTo(debug->debug_cxt);
+
+    /* Received buffer will be in the form of <variable_name:value> */
+    char* psave = NULL;
+    char* fir = strtok_r(debug->comm->rec_buffer, ":", &psave);
+    char* varname = TrimStr(fir);
+    if (varname == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("Get null pointer for variable name"),
+                errdetail("message received: %s", debug->comm->rec_buffer),
+                errcause("internal error, invalid debugger message."),
+                erraction("Contact Huawei Engineer.")));
+    }
+    fir = psave;
+    char* value = TrimStr(fir);
+    StringInfoData str;
+    initStringInfo(&str);
+
+    bool foundCursor = false;
+    bool foundConst = false;
+    PLpgSQL_datum* targetDatum = GetDatumByVarname(estate, varname, &foundCursor, &foundConst);
+
+    if (targetDatum == NULL) {
+        if (foundCursor) {
+            appendStringInfo(&str, "%d:", DEBUG_SERVER_SET_CURSOR);
+        } else if (foundConst) {
+            appendStringInfo(&str, "%d:", DEBUG_SERVER_SET_CONST);
+        } else {
+            appendStringInfo(&str, "%d:", DEBUG_SERVER_SET_NO_VAR);
+        }
+
+        debug_server_send_msg(u_sess->plsql_cxt.cur_debug_server, str.data, strlen(str.data));
+        (void)MemoryContextSwitchTo(func_context);
+        pfree(str.data);
+        return;
+    }
+
+    PLpgSQL_expr* expr = ConstructAssignExpr(value, debug->func->ns_top);
+
+    ResourceOwner oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
+    /* Try to execute the assignment */
+    BeginInternalSubTransaction(NULL);
+    (void)MemoryContextSwitchTo(func_context);
+    PG_TRY();
+    {
+        /* Expr for set_var should only contain one query statement */
+        List* parsetrees = pg_parse_query(expr->query);
+        if (list_length(parsetrees) != 1) {
+            appendStringInfo(&str, "%d:%s", DEBUG_SERVER_SET_EXEC_FAILURE, "invalid value for set_var");
+            debug_server_send_msg(u_sess->plsql_cxt.cur_debug_server, str.data, strlen(str.data));
+            pfree(str.data);
+            list_free_deep(parsetrees);
+            ReleaseCurrentSubTransaction();
+            func_context = MemoryContextSwitchTo(debug->debug_cxt);
+            t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+            return;
+        }
+        exec_assign_expr(estate, targetDatum, expr);
+        /* Commit the inner transaction and return to the outer context */
+        ReleaseCurrentSubTransaction();
+        func_context = MemoryContextSwitchTo(debug->debug_cxt);
+        t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+        SPI_restore_connection();
+        appendStringInfo(&str, "%d:", DEBUG_SERVER_SUCCESS);
+    }
+    PG_CATCH();
+    {
+        /* Abort the inner transaction, flush error and return to the outer context. */
+        func_context = MemoryContextSwitchTo(debug->debug_cxt);
+        ErrorData* edata = &t_thrd.log_cxt.errordata[t_thrd.log_cxt.errordata_stack_depth];
+        appendStringInfo(&str, "%d:%s", DEBUG_SERVER_SET_EXEC_FAILURE, edata->message);
+        FlushErrorState();
+        RollbackAndReleaseCurrentSubTransaction();
+        (void)MemoryContextSwitchTo(debug->debug_cxt);
+        t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
+        SPI_restore_connection();
+    }
+    PG_END_TRY();
+
+    debug_server_send_msg(u_sess->plsql_cxt.cur_debug_server, str.data, strlen(str.data));
+    pfree(str.data);
 }
 
 PlDebugEntry* has_debug_func(Oid key, bool* found)
@@ -1008,7 +1368,6 @@ void ReleaseDebugCommIdx(int idx)
     comm->clientId = 0;
     comm->bufLen = 0;
     comm->bufSize = 0;
-    comm->startPos = 0;
     debuglock.unLock();
     /* release debug comm */
     (void)LWLockAcquire(PldebugLock, LW_EXCLUSIVE);
@@ -1033,11 +1392,10 @@ int GetValidDebugCommIdx()
             comm->hasServerErrorOccured = false;
             comm->hasClientErrorOccured = false;
             comm->isProcdeureRunning = false;
-            comm->serverId = u_sess->session_id;
+            comm->serverId = ENABLE_THREAD_POOL ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
             comm->clientId = 0;
             comm->bufLen = 0;
             comm->bufSize = 0;
-            comm->startPos = 0;
             comm->buffer = NULL; /* init buffer when need use it */
             idx = i;
             break;
@@ -1072,33 +1430,45 @@ bool WakeUpReceiver(int commIdx, bool isClient)
     pthread_mutex_unlock(&debug_comm->mutex);
     return succ;
 }
-
-void WaitSendMsg(int commIdx, bool isClient)
+/* get msg from global comm buffer, copy into local buffer */
+void WaitSendMsg(int commIdx, bool isClient, char** destBuffer, int* destLen)
 {
+    int rc = 0;
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[commIdx];
     pthread_mutex_lock(&debug_comm->mutex);
     PG_TRY();
     {
         struct timespec time_to_wait;
         long cur_time = 1;
-        clock_gettime(CLOCK_REALTIME, &time_to_wait);
         if (isClient) {
+            /* server wait for client msg */
             debug_comm->IsServerWaited = true;
             while (debug_comm->hasClientFlushed == false) {
-                time_to_wait.tv_sec += cur_time;
                 CHECK_FOR_INTERRUPTS();
-                if (cur_time >= DEBUG_SOCKET_TIMEOUT) {
+                if (cur_time >= u_sess->attr.attr_sql.pldebugger_timeout) {
                     ereport(ERROR,
                         (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_PLDEBUGGER_TIMEOUT),
-                            errmsg("Client accept message wait timeout, max wait time 15 min."),
+                            errmsg("Client accept message wait timeout, max wait time %d seconds.",
+                                   u_sess->attr.attr_sql.pldebugger_timeout),
                             errdetail("N/A"),
                             errcause("Debug client wait for server msg timeout."),
                             erraction("Debug server should send to client msg in time.")));
                 }
+                clock_gettime(CLOCK_REALTIME, &time_to_wait);
+                time_to_wait.tv_sec += 1;
                 pthread_cond_timedwait(&debug_comm->cond, &debug_comm->mutex, &time_to_wait);
                 cur_time += 1;
             }
             debug_comm->IsServerWaited = false;
+            /* save msg */
+            *destBuffer  = ResizeDebugBufferIfNecessary(*destBuffer, destLen, debug_comm->bufSize);
+            rc = memcpy_s(*destBuffer, *destLen, debug_comm->buffer, debug_comm->bufLen);
+            securec_check(rc, "\0", "\0");
+            /* reset buf msg */
+            rc = memset_s(debug_comm->buffer, debug_comm->bufLen, 0, debug_comm->bufLen);
+            securec_check(rc, "\0", "\0");
+            debug_comm->bufLen = 0;
+            debug_comm->hasClientFlushed = false;
             if (debug_comm->hasClientErrorOccured) {
                 ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
                         errmsg("Debug client has some error occured.")));
@@ -1107,20 +1477,31 @@ void WaitSendMsg(int commIdx, bool isClient)
             /* client wait for server msg */
             debug_comm->IsClientWaited = true;
             while (debug_comm->hasServerFlushed == false) {
-                time_to_wait.tv_sec += cur_time;
                 CHECK_FOR_INTERRUPTS();
-                if (cur_time >= DEBUG_SOCKET_TIMEOUT) {
+                if (cur_time >= u_sess->attr.attr_sql.pldebugger_timeout) {
                     ereport(ERROR,
                         (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_PLDEBUGGER_TIMEOUT),
-                            errmsg("Server accept message wait timeout, max wait time 15 min."),
+                            errmsg("Server accept message wait timeout, max wait time %d seconds.",
+                                   u_sess->attr.attr_sql.pldebugger_timeout),
                             errdetail("N/A"),
                             errcause("Debug server wait for client msg timeout."),
                             erraction("Debug client should send to server msg in time.")));
                 }
+                clock_gettime(CLOCK_REALTIME, &time_to_wait);
+                time_to_wait.tv_sec += 1;
                 pthread_cond_timedwait(&debug_comm->cond, &debug_comm->mutex, &time_to_wait);
                 cur_time += 1;
             }
             debug_comm->IsClientWaited = false;
+            /* save msg */
+            *destBuffer  = ResizeDebugBufferIfNecessary(*destBuffer, destLen, debug_comm->bufSize);
+            rc = memcpy_s(*destBuffer, *destLen, debug_comm->buffer, debug_comm->bufLen);
+            securec_check(rc, "\0", "\0");
+            /* reset buf msg */
+            rc = memset_s(debug_comm->buffer, debug_comm->bufLen, 0, debug_comm->bufLen);
+            securec_check(rc, "\0", "\0");
+            debug_comm->bufLen = 0;
+            debug_comm->hasServerFlushed = false;
             if (debug_comm->hasServerErrorOccured) {
                 ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
                         errmsg("Debug server has some error occured.")));
@@ -1142,22 +1523,6 @@ void WaitSendMsg(int commIdx, bool isClient)
         PG_RE_THROW();
     }
     PG_END_TRY();
-}
-
-/* temp file for unix socket in same process, no need to use absolute path */
-char* GetDebugTempFilePath(int idx, bool is_server)
-{
-    const int pathLen = 128 * sizeof(char);
-    char* debugfilepath = (char*)palloc0(pathLen);
-    int rc = 0;
-
-    if (is_server) {
-        rc = snprintf_s(debugfilepath, pathLen, pathLen - 1, "%s/debugserver_%d", PG_DEBUG_FILES_DIR, idx);
-    } else {
-        rc = snprintf_s(debugfilepath, pathLen, pathLen - 1, "%s/debugclient_%d", PG_DEBUG_FILES_DIR, idx);
-    }
-    securec_check_ss(rc, "", "");
-    return debugfilepath;
 }
 
 /* msg send & receive for server thread */
@@ -1202,17 +1567,25 @@ static void PrintDebugBuffer(const char *buffer, int len)
     return;
 }
 
-/* Only execute SendUnixMsg & RecvUnixMsg when get PlDebuggerComm lock */
-void SendUnixMsg(int comm_idx, const char* val, int len)
+/* Send msg into global comm buffer */
+void SendUnixMsg(int comm_idx, const char* val, int len, bool is_client)
 {
     ereport(DEBUG3, (errmodule(MOD_PLDEBUGGER), errmsg("send len %d", len)));
     if (len <= 0)
         return;
-    /* set time out & memory context */
     PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[comm_idx];
+    /* lock */
+    (void)MemoryContextSwitchTo(g_instance.pldebug_cxt.PldebuggerCxt);
+    AutoMutexLock debuglock(&debug_comm->mutex);
+    debuglock.lock();
     Assert(debug_comm->Used());
-    /* lock entry*/
-    Assert(debug_comm->startPos == 0);
+    if (is_client) {
+        Assert(debug_comm->hasClientFlushed == false);
+        debug_comm->hasClientFlushed = false;
+    } else {
+        Assert(debug_comm->hasServerFlushed == false);
+        debug_comm->hasServerFlushed = false;
+    }
     Assert(debug_comm->bufLen == 0);
     /* resize */
     debug_comm->buffer = ResizeDebugCommBufferIfNecessary(debug_comm->buffer, &debug_comm->bufSize, len);
@@ -1221,29 +1594,26 @@ void SendUnixMsg(int comm_idx, const char* val, int len)
     rc = memcpy_s(debug_comm->buffer, debug_comm->bufSize, val, len);
     securec_check(rc, "\0", "\0");
     debug_comm->bufLen += len;
+    /* unlock */
+    debuglock.unLock();
     PrintDebugBuffer(val, len);
 }
 
-void RecvUnixMsg(int comm_idx, char* copyBuffer, int len)
+/* Get msg from copyed buffer. No need to get lock */
+void RecvUnixMsg(const char* buf, int bufLen, char* destBuf, int destLen)
 {
-    ereport(DEBUG3, (errmodule(MOD_PLDEBUGGER), errmsg("recv len: %d", len)));
-    if (len <= 0)
+    ereport(DEBUG3, (errmodule(MOD_PLDEBUGGER), errmsg("recv len: %d", destLen)));
+    if (destLen <= 0)
         return;
-    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[comm_idx];
-    Assert(debug_comm->Used());
+    if (bufLen < destLen) {
+        ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
+                        errmsg("need len: %d, but only get buffer len:%d", destLen, bufLen)));
+    }
     /* copy buffer */
     int rc = 0;
-    rc = memcpy_s(copyBuffer, len, debug_comm->buffer + debug_comm->startPos, len);
+    rc = memcpy_s(destBuf, destLen, buf, destLen);
     securec_check(rc, "\0", "\0");
-    debug_comm->startPos += len;
-    /* received, reset buffer to receive new buffer */
-    if (debug_comm->startPos >= debug_comm->bufLen) {
-        rc = memset_s(debug_comm->buffer, debug_comm->bufLen, 0, debug_comm->bufLen);
-        securec_check(rc, "\0", "\0");
-        debug_comm->startPos = 0;
-        debug_comm->bufLen = 0;
-    }
-    PrintDebugBuffer(copyBuffer, len);
+    PrintDebugBuffer(destBuf, destLen);
 }
 
 /* buffer contains : buffer size + buffer msg */
@@ -1269,16 +1639,7 @@ static void debug_server_send_msg(DebugInfo* debug, const char* msg, int msg_len
     (void)MemoryContextSwitchTo(old_context);
 
     CHECK_DEBUG_COMM_VALID(sock->comm_idx);
-    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[debug->comm->comm_idx];
-    (void)MemoryContextSwitchTo(g_instance.pldebug_cxt.PldebuggerCxt);
-    /* lock */
-    AutoMutexLock debuglock(&debug_comm->mutex);
-    debuglock.lock();
-    Assert(debug_comm->hasServerFlushed == false);
-    debug_comm->hasServerFlushed = false;
-    SendUnixMsg(sock->comm_idx, sock->send_buffer, sock->send_ptr);
-    /* unlock */
-    debuglock.unLock();
+    SendUnixMsg(sock->comm_idx, sock->send_buffer, sock->send_ptr, false);
     /* wake up client */
     if (!WakeUpReceiver(debug->comm->comm_idx, false)) {
         ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
@@ -1290,30 +1651,27 @@ static void debug_server_send_msg(DebugInfo* debug, const char* msg, int msg_len
 static void debug_server_rec_msg(DebugInfo* debug, char* firstChar)
 {
     MemoryContext old_context = MemoryContextSwitchTo(debug->debug_cxt);
-    int len = 0;
+    char* copyBuf = NULL;
+    int copyLen = 0;
+    int copyPtr = 0;
+    int msgLen = 0;
     DebugInfoComm* comm = debug->comm;
     comm->rec_ptr = 0;
     CHECK_DEBUG_COMM_VALID(comm->comm_idx);
-    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[comm->comm_idx];
-    /* wait for client's msg */
-    WaitSendMsg(comm->comm_idx, true);
-    /* lock */
-    AutoMutexLock debuglock(&debug_comm->mutex);
-    debuglock.lock();
+    /* wait for client's msg and copy into local buf */
+    WaitSendMsg(comm->comm_idx, true, &copyBuf, &copyLen);
     /* first char */
-    RecvUnixMsg(comm->comm_idx, firstChar, 1);
+    RecvUnixMsg(copyBuf + copyPtr, copyLen - copyPtr, firstChar, sizeof(char));
+    copyPtr += sizeof(char);
     /* msg length */
-    RecvUnixMsg(comm->comm_idx, (char*)&len, sizeof(int));
-    comm->rec_buffer = ResizeDebugBufferIfNecessary(comm->rec_buffer, &(comm->rec_buf_len), len + 1);
-    RecvUnixMsg(comm->comm_idx, comm->rec_buffer, len);
-    comm->rec_ptr = len;
-    comm->rec_buffer[len] = '\0';
-    /* flushed invalid */
-    debug_comm->hasClientFlushed = false;
-    debug_comm->bufLen = 0;
-    debug_comm->startPos = 0;
-    /* unlock */
-    debuglock.unLock();
+    RecvUnixMsg(copyBuf + copyPtr, copyLen - copyPtr, (char*)&msgLen, sizeof(int));
+    copyPtr += sizeof(int);
+    /* msg */
+    comm->rec_buffer = ResizeDebugBufferIfNecessary(comm->rec_buffer, &(comm->rec_buf_len), msgLen + 1);
+    RecvUnixMsg(copyBuf + copyPtr, copyLen - copyPtr, comm->rec_buffer, msgLen);
+    comm->rec_ptr = msgLen;
+    comm->rec_buffer[msgLen] = '\0';
+    pfree_ext(copyBuf);
     (void)MemoryContextSwitchTo(old_context);
 }
 
@@ -1351,9 +1709,10 @@ static char* ResizeDebugCommBufferIfNecessary(char* buffer, int* oldSize, int ne
 /* resize buffer and clear buffer's msg */
 char* ResizeDebugBufferIfNecessary(char* buffer, int* oldSize, int needSize)
 {
-    int rc = memset_s(buffer, *oldSize, 0, *oldSize);
-    securec_check(rc, "\0", "\0");
-
+    if (*oldSize > 0) {
+        int rc = memset_s(buffer, *oldSize, 0, *oldSize);
+        securec_check(rc, "\0", "\0");
+    }
     if (needSize <= *oldSize) {
         return buffer;
     }

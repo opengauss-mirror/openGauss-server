@@ -1,4 +1,6 @@
 /*
+ * Portions Copyright (c) 2021, openGauss Contributors
+ *
  * the plpy module
  *
  * src/common/pl/plpython/plpy_plpymodule.cpp
@@ -246,7 +248,7 @@ static void PLy_generate_spi_exceptions(PyObject* mod, PyObject* base)
             PLy_elog(ERROR, "could not generate SPI exceptions");
         }
 
-        sqlstate = PyString_FromString(unpack_sql_state(exception_map[i].sqlstate));
+        sqlstate = PyString_FromString(plpgsql_get_sqlstate(exception_map[i].sqlstate));
         if (sqlstate == NULL) {
             PLy_elog(ERROR, "could not generate SPI exceptions");
         }

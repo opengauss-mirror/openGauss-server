@@ -553,7 +553,7 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
      * because like other backends operating on uheap, lazy vacuum also
      * reserves a transaction slot in the page for pruning purpose.
      */
-    TransactionId oldestXmin = GetOldestXmin(onerel, false, true);
+    TransactionId oldestXmin = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
     Assert(TransactionIdIsNormal(oldestXmin));
 
     vacrelstats = (LVRelStats *)palloc0(sizeof(LVRelStats));
@@ -637,10 +637,12 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
         newRelAllvisible = newRelPages;
     }
 
+    TransactionId newFrozenXid = oldestXmin;
+
     if (RelationIsPartition(onerel)) {
         Assert(vacstmt->onepart != NULL);
 
-        vac_update_partstats(vacstmt->onepart, newRelPages, newRelTuples, newRelAllvisible, InvalidTransactionId,
+        vac_update_partstats(vacstmt->onepart, newRelPages, newRelTuples, newRelAllvisible, newFrozenXid,
             InvalidMultiXactId);
         /*
          * when vacuum partition, do not change the relhasindex field in pg_class
@@ -650,11 +652,11 @@ void LazyVacuumUHeapRel(Relation onerel, VacuumStmt *vacstmt, BufferAccessStrate
          * misdguge as hot update even if update indexes columns.
          */
         vac_update_pgclass_partitioned_table(vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex,
-            InvalidTransactionId, InvalidMultiXactId);
+            newFrozenXid, InvalidMultiXactId);
     } else {
         Relation classRel = heap_open(RelationRelationId, RowExclusiveLock);
-        vac_update_relstats(onerel, classRel, newRelPages, newRelTuples, newRelAllvisible, nindexes > 0,
-            InvalidTransactionId, InvalidMultiXactId);
+        vac_update_relstats(onerel, classRel, newRelPages, newRelTuples, newRelAllvisible, nindexes > 0, newFrozenXid,
+            InvalidMultiXactId);
         heap_close(classRel, RowExclusiveLock);
     }
 

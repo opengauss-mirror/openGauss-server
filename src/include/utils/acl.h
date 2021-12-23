@@ -182,6 +182,7 @@ typedef ArrayType Acl;
 /* Bitmasks defining "all ddl rights" for each supported object type */
 #define ACL_ALL_DDL_RIGHTS_COLUMN (ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_RELATION (ACL_ALTER | ACL_DROP | ACL_COMMENT | ACL_INDEX | ACL_VACUUM)
+#define ACL_ALL_DDL_RIGHTS_VIEW (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_SEQUENCE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_NODEGROUP (ACL_ALTER | ACL_DROP)
 #define ACL_ALL_DDL_RIGHTS_DATABASE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
@@ -193,41 +194,11 @@ typedef ArrayType Acl;
 #define ACL_ALL_DDL_RIGHTS_FOREIGN_SERVER (ACL_ALTER | ACL_DROP | ACL_COMMENT)
 #define ACL_ALL_DDL_RIGHTS_FDW (ACL_NO_DDL_RIGHTS)
 #define ACL_ALL_DDL_RIGHTS_DATA_SOURCE (ACL_NO_DDL_RIGHTS)
-#define ACL_ALL_DDL_RIGHTS_DIRECTORY (ACL_NO_DDL_RIGHTS)
+#define ACL_ALL_DDL_RIGHTS_DIRECTORY (ACL_ALTER | ACL_DROP)
 #define ACL_ALL_DDL_RIGHTS_LARGEOBJECT (ACL_NO_DDL_RIGHTS)
 #define ACL_ALL_DDL_RIGHTS_LANGUAGE (ACL_NO_DDL_RIGHTS)
 #define ACL_ALL_DDL_RIGHTS_DOMAIN (ACL_NO_DDL_RIGHTS)
 #define ACL_ALL_DDL_RIGHTS_KEY (ACL_DROP)
-
-/* External representations of the ddl privilege bits --- aclitemin/aclitemout */
-#define ACL_ALTER_CHR 'A' /* known as "modify" */
-#define ACL_DROP_CHR 'P' /* known as "remove" */
-#define ACL_COMMENT_CHR 'm' /* known as "statement" */
-#define ACL_INDEX_CHR 'i'
-#define ACL_VACUUM_CHR 'v'
-
-/* string holding all ddl privilege code chars, in order by bitmask position */
-#define ACL_ALL_DDL_RIGHTS_STR "APmiv"
-
-/* Bitmasks defining "all ddl rights" for each supported object type */
-#define ACL_ALL_DDL_RIGHTS_COLUMN (ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_RELATION (ACL_ALTER | ACL_DROP | ACL_COMMENT | ACL_INDEX | ACL_VACUUM)
-#define ACL_ALL_DDL_RIGHTS_VIEW (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_SEQUENCE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_NODEGROUP (ACL_ALTER | ACL_DROP)
-#define ACL_ALL_DDL_RIGHTS_DATABASE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_TABLESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_NAMESPACE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_FUNCTION (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_PACKAGE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_TYPE (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_FOREIGN_SERVER (ACL_ALTER | ACL_DROP | ACL_COMMENT)
-#define ACL_ALL_DDL_RIGHTS_FDW (ACL_NO_DDL_RIGHTS)
-#define ACL_ALL_DDL_RIGHTS_DATA_SOURCE (ACL_NO_DDL_RIGHTS)
-#define ACL_ALL_DDL_RIGHTS_DIRECTORY (ACL_NO_DDL_RIGHTS)
-#define ACL_ALL_DDL_RIGHTS_LARGEOBJECT (ACL_NO_DDL_RIGHTS)
-#define ACL_ALL_DDL_RIGHTS_LANGUAGE (ACL_NO_DDL_RIGHTS)
-#define ACL_ALL_DDL_RIGHTS_DOMAIN (ACL_NO_DDL_RIGHTS)
 
 /* operation codes for pg_*_aclmask */
 typedef enum {
@@ -338,6 +309,7 @@ extern AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMask
 extern AclMode pg_database_aclmask(Oid db_oid, Oid roleid, AclMode mask, AclMaskHow how);
 extern AclMode pg_directory_aclmask(Oid dir_oid, Oid roleid, AclMode mask, AclMaskHow how);
 extern AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, bool check_nodegroup = true);
+extern AclMode pg_package_aclmask(Oid packageOid, Oid roleid, AclMode mask, AclMaskHow how);
 extern AclMode pg_language_aclmask(Oid lang_oid, Oid roleid, AclMode mask, AclMaskHow how);
 extern AclMode pg_largeobject_aclmask_snapshot(
     Oid lobj_oid, Oid roleid, AclMode mask, AclMaskHow how, Snapshot snapshot);
@@ -357,6 +329,7 @@ extern AclResult pg_class_aclcheck(Oid table_oid, Oid roleid, AclMode mode, bool
 extern AclResult pg_database_aclcheck(Oid db_oid, Oid roleid, AclMode mode);
 extern AclResult pg_directory_aclcheck(Oid dir_oid, Oid roleid, AclMode mode);
 extern AclResult pg_proc_aclcheck(Oid proc_oid, Oid roleid, AclMode mode, bool check_nodegroup = true);
+extern AclResult pg_package_aclcheck(Oid pkgOid, Oid roleid, AclMode mode, bool checkNodegroup = true);
 extern AclResult pg_language_aclcheck(Oid lang_oid, Oid roleid, AclMode mode);
 extern AclResult pg_largeobject_aclcheck_snapshot(Oid lang_oid, Oid roleid, AclMode mode, Snapshot snapshot);
 extern AclResult pg_namespace_aclcheck(Oid nsp_oid, Oid roleid, AclMode mode, bool check_nodegroup = true);
@@ -411,6 +384,8 @@ extern bool is_role_independent(Oid roleid);
 extern bool is_role_iamauth(Oid roleid);
 extern bool independent_priv_aclcheck(AclMode mask, char relkind);
 extern bool is_trust_language(Oid lang_oid);
+extern Acl* allocacl(int n);
 extern bool pg_publication_ownercheck(Oid pub_oid, Oid roleid);
 extern bool pg_subscription_ownercheck(Oid sub_oid, Oid roleid);
+
 #endif /* ACL_H */

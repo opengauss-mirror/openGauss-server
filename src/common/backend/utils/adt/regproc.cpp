@@ -57,8 +57,11 @@ static Datum regprocin_booststrap(char* procname)
     ScanKeyInit(&skey[0], Anum_pg_proc_proname, BTEqualStrategyNumber, F_NAMEEQ, CStringGetDatum(procname));
 
     hdesc = heap_open(ProcedureRelationId, AccessShareLock);
+#ifndef ENABLE_MULTIPLE_NODES
+    sysscan = systable_beginscan(hdesc, ProcedureNameArgsNspNewIndexId, true, NULL, 1, skey);
+#else
     sysscan = systable_beginscan(hdesc, ProcedureNameArgsNspIndexId, true, NULL, 1, skey);
-
+#endif
     while (HeapTupleIsValid(tuple = systable_getnext(sysscan))) {
         result = (RegProcedure)HeapTupleGetOid(tuple);
         if (++matches > 1)

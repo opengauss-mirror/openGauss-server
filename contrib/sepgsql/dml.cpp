@@ -5,6 +5,7 @@
  * Routines to handle DML permission checks
  *
  * Copyright (c) 2010-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * -------------------------------------------------------------------------
  */
@@ -181,6 +182,7 @@ static bool check_relation_privileges(Oid relOid, Bitmapset* selected, Bitmapset
             break;
 
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
             Assert((required & ~SEPG_DB_TABLE__SELECT) == 0);
 
             if (required & SEPG_DB_TABLE__SELECT)

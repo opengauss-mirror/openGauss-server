@@ -271,6 +271,14 @@ create table location_type
 )with (orientation=column);
 
 
+explain (costs off, verbose on) WITH WITH_345 AS MATERIALIZED (SELECT Table_037.location_type_desc Column_024 
+FROM (SELECT 1 Column_017
+FROM region Table_010 RIGHT OUTER JOIN job_classification Table_030 ON FALSE) Table_036,
+location_type Table_037 ) 
+SELECT WITH_345.Column_024 Column_026
+FROM WITH_345
+GROUP BY ROLLUP(Column_026);
+
 explain (costs off, verbose on) WITH WITH_345 AS (SELECT Table_037.location_type_desc Column_024 
 FROM (SELECT 1 Column_017
 FROM region Table_010 RIGHT OUTER JOIN job_classification Table_030 ON FALSE) Table_036,

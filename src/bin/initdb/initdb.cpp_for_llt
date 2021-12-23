@@ -2607,7 +2607,7 @@ make_template0(void)
 		"REVOKE CREATE,TEMPORARY ON DATABASE template1 FROM public;\n",
 		"REVOKE CREATE,TEMPORARY ON DATABASE template0 FROM public;\n",
 
-		"COMMENT ON DATABASE template0 IS 'default template for new databases';\n",
+		"COMMENT ON DATABASE template0 IS 'unmodifiable empty database';\n",
 
 		/*
 		 * Finally vacuum to clean up dead rows in pg_database

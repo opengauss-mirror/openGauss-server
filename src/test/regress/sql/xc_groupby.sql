@@ -381,7 +381,7 @@ begin
 end;
 $$ language plpgsql;
 
-call redis_func_0000(168);
+select redis_func_0000(168);
 
 explain (verbose true, costs false)
 select (sum(length(c_varchar)),sum(length(c_char))) from groupby_b group by c_int8,c_numeric,c_varchar order by c_int8;

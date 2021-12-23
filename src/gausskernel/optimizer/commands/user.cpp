@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/gausskernel/optimizer/commands/user.cpp
  *
@@ -1591,7 +1592,9 @@ static bool IsPredefinedRole(const char* name)
         "gs_role_tablespace",
         "gs_role_replication",
         "gs_role_account_lock",
-        "gs_role_pldebugger"
+        "gs_role_pldebugger",
+        "gs_role_directory_create",
+        "gs_role_directory_drop"
     };
 
     for (unsigned i = 0; i < lengthof(predefinedRoles); i++) {
@@ -2734,7 +2737,7 @@ void AlterRole(AlterRoleStmt* stmt)
         }
 
         /* if not superuser or have createrole privilege, we must check the oldPasswd and replPasswd */
-        if (!(isRelSuperuser() || have_createrole_privilege()) || GetUserId() == roleid) {
+        if (!(isRelSuperuser() || have_createrole_privilege()) || (GetUserId() == roleid && !initialuser())) {
             /* if rolepassword is seted in pg_authid, replPasswd must be checked. */
             if (oldPasswd != NULL) {
                 if (replPasswd ==  NULL) {
@@ -3280,7 +3283,7 @@ void DropRole(DropRoleStmt* stmt)
                     errdetail_log("%s", detail_log)));
 
         /* Relate to remove all job belong the user. */
-        remove_job_by_oid(NameStr(((Form_pg_authid)GETSTRUCT(tuple))->rolname), UserOid, true);
+        remove_job_by_oid(roleid, UserOid, true);
 
         if (IsUnderPostmaster) {
             DropRoleStmt stmt_temp;
@@ -4247,19 +4250,19 @@ static void IsPasswdSatisfyPolicy(char* Password)
     /* Password must contain at least u_sess->attr.attr_security.Password_min_length characters */
     if ((int)strlen(Password) < u_sess->attr.attr_security.Password_min_length) {
         str_reset(Password);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PASSWORD),
-                errmsg(
-                    "Password must contain at least %d characters.", u_sess->attr.attr_security.Password_min_length)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password must contain at least %d characters.", u_sess->attr.attr_security.Password_min_length),
+            errcause("The minimum number of characters is specified by password_min_length."),
+            erraction("Add more characters to the password.")));
     }
 
     /* Password can't contain more than u_sess->attr.attr_security.Password_max_length characters */
     if ((int)strlen(Password) > u_sess->attr.attr_security.Password_max_length) {
         str_reset(Password);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PASSWORD),
-                errmsg("Password can't contain more than %d characters.",
-                    u_sess->attr.attr_security.Password_max_length)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password can't contain more than %d characters.", u_sess->attr.attr_security.Password_max_length),
+            errcause("The maximum number of characters is specified by password_max_length."),
+            erraction("Remove some characters from the password.")));
     }
 
     /* Calculate the number of all types of characters */
@@ -4268,9 +4271,11 @@ static void IsPasswdSatisfyPolicy(char* Password)
     /* If contain unusual character in password, show the warning. */
     if (include_unusual_character) {
         str_reset(Password);
-        ereport(ERROR,
-            (errmsg("Password cannot contain characters except numbers, alphabetic characters and "
-                    "specified special characters.")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password cannot contain characters except numbers, alphabetic characters and "
+                   "specified special characters."),
+            errcause("Password contain invalid characters."),
+            erraction("Use valid characters in password.")));
     }
 
     /* Calculate the number of character types */
@@ -4283,44 +4288,50 @@ static void IsPasswdSatisfyPolicy(char* Password)
     /* Password must contain at least u_sess->attr.attr_security.Password_min_upper upper characters */
     if (kinds[0] < u_sess->attr.attr_security.Password_min_upper) {
         str_reset(Password);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PASSWORD),
-                errmsg("Password must contain at least %d upper characters.",
-                    u_sess->attr.attr_security.Password_min_upper)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password must contain at least %d upper characters.",
+                   u_sess->attr.attr_security.Password_min_upper),
+            errcause("The minimum number of upper characters is specified by password_min_upper."),
+            erraction("Add more upper characters to the password.")));
     }
 
     /* Password must contain at least u_sess->attr.attr_security.Password_min_lower lower characters */
     if (kinds[1] < u_sess->attr.attr_security.Password_min_lower) {
         str_reset(Password);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PASSWORD),
-                errmsg("Password must contain at least %d lower characters.",
-                    u_sess->attr.attr_security.Password_min_lower)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password must contain at least %d lower characters.",
+                   u_sess->attr.attr_security.Password_min_lower),
+            errcause("The minimum number of lower characters is specified by password_min_lower."),
+            erraction("Add more lower characters to the password.")));
     }
 
     /* Password must contain at least u_sess->attr.attr_security.Password_min_digital digital characters */
     if (kinds[2] < u_sess->attr.attr_security.Password_min_digital) {
         str_reset(Password);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PASSWORD),
-                errmsg("Password must contain at least %d digital characters.",
-                    u_sess->attr.attr_security.Password_min_digital)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password must contain at least %d digital characters.",
+                   u_sess->attr.attr_security.Password_min_digital),
+            errcause("The minimum number of digital characters is specified by password_min_digital."),
+            erraction("Add more digital characters to the password.")));
     }
 
     /* Password must contain at least u_sess->attr.attr_security.Password_min_special special characters */
     if (kinds[3] < u_sess->attr.attr_security.Password_min_special) {
         str_reset(Password);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PASSWORD),
-                errmsg("Password must contain at least %d special characters.",
-                    u_sess->attr.attr_security.Password_min_special)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password must contain at least %d special characters.",
+                   u_sess->attr.attr_security.Password_min_special),
+            errcause("The minimum number of special characters is specified by password_min_special."),
+            erraction("Add more special characters to the password.")));
     }
 
     /* Password must contain at least three kinds of characters */
     if (kinds_num < 3) {
         str_reset(Password);
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PASSWORD), errmsg("Password must contain at least three kinds of characters.")));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD),
+            errmsg("Password must contain at least three kinds of characters."),
+            errcause("Password must contain numbers, alphabetic characters and specified special characters."),
+            erraction("Add at least three kinds of characters to the password.")));
     }
 
     check_weak_password(Password);
@@ -4358,6 +4369,7 @@ static bool CheckPasswordComplexity(const char* roleID, char* newPasswd, char* o
     if (isCreaterole && isPWDENCRYPTED(newPasswd)) {
         if (VerifyPasswdDigest(roleID, "\0", newPasswd)) {
             str_reset(newPasswd);
+            str_reset(oldPasswd);
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PASSWORD),
                     errmsg("New password should not be empty.")));
@@ -5931,11 +5943,11 @@ Datum calculate_encrypted_sha256_password(const char* password, const char* roln
     errno_t rc = EOK;
 
     if (!pg_sha256_encrypt(password,
-            salt_string,
-            strlen(salt_string),
-            encrypted_sha256_password,
-            NULL,
-            u_sess->attr.attr_security.auth_iteration_count)) {
+        salt_string,
+        strlen(salt_string),
+        encrypted_sha256_password,
+        NULL,
+        u_sess->attr.attr_security.auth_iteration_count)) {
         rc = memset_s(encrypted_sha256_password, SHA256_PASSWD_LEN + 1, 0, SHA256_PASSWD_LEN + 1);
         securec_check(rc, "\0", "\0");
         ereport(ERROR, (errcode(ERRCODE_INVALID_PASSWORD), errmsg("password encryption failed")));

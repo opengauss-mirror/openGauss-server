@@ -1,0 +1,59 @@
+-- setup
+create table SQLLDR_COL_TBL
+(
+    COL_1   NUMBER,
+    COL_2   VARCHAR,
+    COL_3   VARCHAR,
+    COL_4   INTEGER,
+    COL_5   INTEGER,
+    COL_6   VARCHAR,
+    COL_7   VARCHAR,
+    COL_8   VARCHAR,
+    COL_9   INTEGER,
+    COL_10  INTEGER
+);
+
+-- position
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position.ctl data=@abs_srcdir@/data/gs_loader_position.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence.ctl data=@abs_srcdir@/data/gs_loader_sequence.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence2.ctl data=@abs_srcdir@/data/gs_loader_sequence.csv port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence3.ctl data=@abs_srcdir@/data/gs_loader_sequence3.csv port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence4.ctl data=@abs_srcdir@/data/gs_loader_sequence3.csv port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+
+-- position
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position2.ctl data=@abs_srcdir@/data/gs_loader_position.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+
+-- position
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position3.ctl data=@abs_srcdir@/data/gs_loader_position.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+
+-- nullif
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position4.ctl data=@abs_srcdir@/data/gs_loader_position4.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+select * from SQLLDR_COL_TBL where col_6 is null;
+
+-- issue: DTS2021092327784 TIMESTAMP
+CREATE TABLE SQLLDR_COL_001(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    TIMESTAMP VARCHAR2(20)
+);
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_timestamp.ctl data=@abs_srcdir@/data/gs_loader_issue_001.csv port=@portstring@ db=regression passwd=gauss@123 rows=1000000 bindsize=1000000
+select * from SQLLDR_COL_001 order by 1,2,3;
+drop table SQLLDR_COL_001;
+
+-- teardown
+drop table SQLLDR_COL_TBL;

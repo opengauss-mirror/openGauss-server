@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -304,6 +305,7 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
     List* lowerIndexpr = NIL;
     ListCell* idx = NULL;
     ArrayRef* aref = NULL;
+    bool isIndexByVarchar = false;
 
     /*
      * Caller may or may not have bothered to determine elementType.  Note
@@ -358,9 +360,20 @@ ArrayRef* transformArraySubscripts(ParseState* pstate, Node* arrayBase, Oid arra
             lowerIndexpr = lappend(lowerIndexpr, subexpr);
         }
         subexpr = transformExpr(pstate, ai->uidx);
-        /* If it's not int4 already, try to coerce */
-        subexpr = coerce_to_target_type(
-            pstate, subexpr, exprType(subexpr), INT4OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        if (get_typecategory(arrayType) == TYPCATEGORY_TABLEOF_VARCHAR) {
+            isIndexByVarchar = true;
+        }
+        if ((nodeTag(arrayBase) == T_Param && ((Param*)arrayBase)->tableOfIndexType == VARCHAROID)
+            || isIndexByVarchar) {
+            /* subcript type is varchar */
+            subexpr = coerce_to_target_type(pstate, subexpr, exprType(subexpr),
+                ((Param*)arrayBase)->tableOfIndexType, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        } else {
+             /* If it's not int4 already, try to coerce */
+            subexpr = coerce_to_target_type(
+                pstate, subexpr, exprType(subexpr), INT4OID, -1, COERCION_ASSIGNMENT, COERCE_IMPLICIT_CAST, -1);
+        }
+       
         if (subexpr == NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),

@@ -100,6 +100,7 @@ ThreadPoolScheduler::ThreadPoolScheduler(int groupNum, ThreadPoolGroup** groups)
     m_freeStreamCount = (uint *)palloc0(sizeof(uint) * groupNum);
     m_gpcContext = NULL;
     m_getSIGHUP = false;
+    m_canAdjustPool = true;
 }
 
 ThreadPoolScheduler::~ThreadPoolScheduler()
@@ -119,7 +120,7 @@ int ThreadPoolScheduler::StartUp()
 void ThreadPoolScheduler::DynamicAdjustThreadPool()
 {
     for (int i = 0; i < m_groupNum; i++) {
-        if (pmState == PM_RUN) {
+        if (pmState == PM_RUN && m_canAdjustPool) {
             AdjustWorkerPool(i);
             AdjustStreamPool(i);
         }

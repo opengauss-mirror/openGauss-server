@@ -188,7 +188,6 @@ private:
     void copy_without_spaces(char buf[], size_t buf_len, const char *original, size_t original_len) const;
     void net_ipv6_to_host_order(IPV6 *ip, const struct sockaddr_in6 *sa) const;
     void net_ipv4_to_host_order(IPV6 *ip, const struct in_addr *addr) const;
-
 };
 
 #endif // IPRANGE_AUDIT_H_

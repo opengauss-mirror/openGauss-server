@@ -748,12 +748,15 @@ void StreamNodeGroup::initStreamThread(StreamProducer* producer, uint8 smpIdenti
 #ifdef __aarch64__
         pg_memory_barrier();
 #endif
+        AutoMutexLock streamLock(&m_mutex);
+        streamLock.lock();
         producer->setThreadId(producerThreadId);
         /* Set create thread num for sync quit. */
         m_createThreadNum++;
         /* Assume all stream threads build successfully for sync quit process. */
         StreamPair* tmpPair = producer->getPair();
         tmpPair->createThreadNum = tmpPair->expectThreadNum;
+        streamLock.unLock();
 
         Assert(m_createThreadNum <= m_size);
         STREAM_LOG(DEBUG2,

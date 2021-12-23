@@ -202,7 +202,7 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
     bool valid;
     Page dp;
     int lines;
-    OffsetNumber lineoff;
+    OffsetNumber lineoff = InvalidOffsetNumber;
     int linesleft;
     RowPtr *lpp;
 
@@ -231,8 +231,9 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
         } else {
             /* continue from previously returned page/tuple */
             page = scan->rs_base.rs_cblock; /* current page */
-            lineoff =                       /* next offnum */
-                OffsetNumberNext(ItemPointerGetOffsetNumber(&(tuple->ctid)));
+            if (tuple != NULL) {
+                lineoff = OffsetNumberNext(ItemPointerGetOffsetNumber(&(tuple->ctid))); /* next offnum */
+            }
         }
 
         LockBuffer(scan->rs_base.rs_cbuf, BUFFER_LOCK_SHARE);
@@ -285,8 +286,9 @@ static UHeapTuple UHeapScanGetTuple(UHeapScanDesc scan, ScanDirection dir)
             lineoff = lines; /* final offnum */
             scan->rs_base.rs_inited = true;
         } else {
-            lineoff = /* previous offnum */
-                OffsetNumberPrev(ItemPointerGetOffsetNumber(&(tuple->ctid)));
+            if (tuple != NULL) {
+                lineoff = OffsetNumberPrev(ItemPointerGetOffsetNumber(&(tuple->ctid))); /* previous offnum */
+            }
         }
         /* page and lineoff now reference the physically previous tid */
 
@@ -382,7 +384,6 @@ get_next_page:
              * a little bit backwards on every invocation, which is confusing.
              * We don't guarantee any specific ordering in general, though.
              */
-            // if (scan->rs_base.rs_flags & SO_ALLOW_SYNC)
             if (scan->rs_allow_sync)
                 ss_report_location(scan->rs_base.rs_rd, page);
         }
@@ -1270,7 +1271,7 @@ static bool VerifyUHeapGetTup(UHeapScanDesc scan, ScanDirection dir)
          * advance the scan until we find a qualifying tuple or run out of stuff
          * to scan
          */
-        while (linesLeft > 0) {
+        if (linesLeft > 0) {
             tuple = scan->rs_visutuples[lineOff];
             scan->rs_base.rs_cindex = lineOff;
             return tuple;

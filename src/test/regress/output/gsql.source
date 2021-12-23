@@ -1,0 +1,80 @@
+--
+-- gsql
+--
+create user gsqlbot password 'Gaussdba@Mpp';
+create database gsqldb with encoding='UTF8' template=template0 owner gsqlbot;
+\c gsqldb
+grant all on schema public to gsqlbot;
+GRANT CREATE ON SCHEMA public TO PUBLIC;
+select pg_sleep(5);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+\! gsql --help
+gsql is the GaussDB Kernel interactive terminal.
+
+Usage:
+  gsql [OPTION]... [DBNAME [USERNAME]]
+
+General options:
+  -c, --command=COMMAND    run only single command (SQL or internal) and exit
+--?.*
+  -f, --file=FILENAME      execute commands from file, then exit
+  -l, --list               list available databases, then exit
+  -v, --set=, --variable=NAME=VALUE
+                           set gsql variable NAME to VALUE
+  -V, --version            output version information, then exit
+  -X, --no-gsqlrc          do not read startup file (~/.gsqlrc)
+  -1 ("one"), --single-transaction
+                           execute command file as a single transaction
+  -?, --help               show this help, then exit
+
+Input and output options:
+  -a, --echo-all           echo all input from script
+  -e, --echo-queries       echo commands sent to server
+  -E, --echo-hidden        display queries that internal commands generate
+  -k, --with-key=KEY       the key for decrypting the encrypted file
+  -L, --log-file=FILENAME  send session log to file
+  -m, --maintenance        can connect to cluster during 2-pc transaction recovery
+  -n, --no-libedit        disable enhanced command line editing (libedit)
+  -o, --output=FILENAME    send query results to file (or |pipe)
+  -q, --quiet              run quietly (no messages, only query output)
+  -C, --enable-client-encryption              enable client encryption feature
+  -s, --single-step        single-step mode (confirm each query)
+  -S, --single-line        single-line mode (end of line terminates SQL command)
+
+Output format options:
+  -A, --no-align           unaligned table output mode
+  -F, --field-separator=STRING
+                           set field separator (default: "|")
+  -H, --html               HTML table output mode
+  -P, --pset=VAR[=ARG]     set printing option VAR to ARG (see \pset command)
+  -R, --record-separator=STRING
+                           set record separator (default: newline)
+  -r        		   if this parameter is set,use libedit 
+  -t, --tuples-only        print rows only
+  -T, --table-attr=TEXT    set HTML table tag attributes (e.g., width, border)
+  -x, --expanded           turn on expanded table output
+  -z, --field-separator-zero
+                           set field separator to zero byte
+  -0, --record-separator-zero
+                           set record separator to zero byte
+  -2, --pipeline           use pipeline to pass the password, forbidden to use in terminal
+                           must use with -c or -f
+  -g,                      echo all sql with separator from specified file 
+
+Connection options:
+  -h, --host=HOSTNAME      database server host or socket directory (default: "local socket")
+                           allow multi host IP address with comma separator in centralized cluster
+--?.*
+--?.*
+  -W, --password=PASSWORD  the password of specified database user
+
+For more information, type "\?" (for internal commands) or "\help" (for SQL
+commands) from within gsql, or consult the gsql section in the GaussDB Kernel
+documentation.
+
+\! gsql -d gsqldb -h 127.0.0.1,127.0.0.1 -p @portstring@ -U gsqlbot -W Gaussdba@Mpp -c "select 1;"
+--?.*

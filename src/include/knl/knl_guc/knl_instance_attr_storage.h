@@ -120,16 +120,15 @@ typedef struct knl_instance_attr_storage {
     int recovery_undo_workers;
     int recovery_redo_workers_per_paser_worker;
     int pagewriter_thread_num;
-    int bgwriter_thread_num;
     int real_recovery_parallelism;
     int batch_redo_num;
     int remote_read_mode;
     int advance_xlog_file_num;
     int gtm_option;
     int max_undo_workers;
+    int auto_csn_barrier;
     int enable_update_max_page_flush_lsn;
     int max_keep_log_seg;
-    int catchup2normal_wait_time;
     int undo_space_limit_size;
     int undo_limit_size_transaction;
     int max_size_for_xlog_receiver;
@@ -146,6 +145,9 @@ typedef struct knl_instance_attr_storage {
     char* num_internal_lock_partitions_str;
     int wal_insert_status_entries_power;
     int undo_zone_count;
+    int64 xlog_file_size;
+    char* xlog_file_path;
+    char* xlog_lock_file_path;
     int max_logical_replication_workers;
 } knl_instance_attr_storage;
 

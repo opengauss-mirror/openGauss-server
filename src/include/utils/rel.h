@@ -7,6 +7,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/utils/rel.h
  *
@@ -169,8 +170,8 @@ typedef struct RelationData {
 
     /* data managed by RelationGetIndexAttrBitmap: */
     Bitmapset* rd_indexattr; /* identifies columns used in indexes */
-    Bitmapset* rd_keyattr;   /* cols that can be ref'd by foreign keys */
     Bitmapset* rd_pkattr;    /* cols included in primary key */
+    Bitmapset* rd_keyattr;   /* cols that can be ref'd by foreign keys */
     Bitmapset* rd_idattr;    /* included in replica identity index */
 
     PublicationActions* rd_pubactions;  /* publication actions */
@@ -269,7 +270,13 @@ typedef struct RelationData {
      * instances. */
 
     PartitionMap* partMap;
-    Oid parentId; /*if this is construct by partitionGetRelation,this is Partition Oid,else this is InvalidOid*/
+    Oid parentId; /* if this is construct by partitionGetRelation,this is Partition Oid,else this is InvalidOid */
+    Oid grandparentId; /* if this is construct by partitionGetRelation,this is subpartition table Oid */
+    /* 
+     * Different from rd_rel->parttype, It's for subpartition table,
+     * 'p' for level-1 partition, 's' for level-2 partition 
+     */
+    char subpartitiontype; 
     /* use "struct" here to avoid needing to include pgstat.h: */
     struct PgStat_TableStatus* pgstat_info; /* statistics collection area */
 
@@ -685,7 +692,9 @@ extern TransactionId RelationGetRelFrozenxid64(Relation r);
 
 #define RelationIsRelation(relation) (RELKIND_RELATION == (relation)->rd_rel->relkind)
 
-#define isPartitionedRelation(classForm) (PARTTYPE_PARTITIONED_RELATION == (classForm)->parttype)
+#define isPartitionedRelation(classForm)                  \
+    (PARTTYPE_PARTITIONED_RELATION == (classForm)->parttype|| \
+        PARTTYPE_SUBPARTITIONED_RELATION == (classForm)->parttype)
 
 #ifdef PGXC
 /*

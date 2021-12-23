@@ -10,10 +10,11 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
+ALTER MASKING POLICY policy_name COMMENTS policy_comments;
 ALTER MASKING POLICY policy_name { ADD | REMOVE | MODIFY } masking_actions [, ... ];
-ALTER MASKING POLICY policy_name MODIFY ( filter_group_clause ); 
-ALTER MASKING POLICY policy_name DROP FILTER; 
-ALTER MASKING POLICY policy_name { ENABLE | DISABLE }; 
+ALTER MASKING POLICY policy_name MODIFY ( filter_group_clause );
+ALTER MASKING POLICY policy_name DROP FILTER;
+ALTER MASKING POLICY policy_name { ENABLE | DISABLE };
 
 where masking_actions can be:
 masking_function ON LABEL(label_name [, ... ])

@@ -55,6 +55,7 @@
 #include "replication/syncrep_gramparse.h"
 #include "replication/walsender.h"
 #include "replication/walsender_private.h"
+#include "replication/shared_storage_walreceiver.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
 #include "tcop/tcopprot.h"
@@ -75,7 +76,6 @@ const int SYNC_REP_SLEEP_DELAY = 1000;
 
 static void SyncRepQueueInsert(int mode);
 static bool SyncRepCancelWait(void);
-static int SyncRepWakeQueue(bool all, int mode);
 static void SyncRepWaitCompletionQueue();
 static void SyncRepNotifyComplete();
 
@@ -119,16 +119,16 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN)
      * return true.
      */
     if (!t_thrd.walsender_cxt.WalSndCtl->most_available_sync ||
-        g_instance.attr.attr_storage.catchup2normal_wait_time < 0) {
+        u_sess->attr.attr_storage.catchup2normal_wait_time < 0) {
         return true;
     }
 
-    static const TimestampTz catchup2normalWaitTime = g_instance.attr.attr_storage.catchup2normal_wait_time * 1000;
+    static const TimestampTz catchup2normalWaitTime = u_sess->attr.attr_storage.catchup2normal_wait_time * 1000;
     TimestampTz syncLeftTime = 0;
 
     /* 
      * SyncRepGetSyncLeftTime() return false means that there is at lease one
-     * sync standby, or no standby in catchup, so it is need to wait for 
+     * sync standby, or no standby in catchup, so it is need to wait for
      * synchronous replication.
      */
     if (!SyncRepGetSyncLeftTime(XactCommitLSN, &syncLeftTime)) {
@@ -190,16 +190,16 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
     int diff_microsec;
 
     if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone) {
-        TimestampDifference(t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time, now_time, &diff_sec, 
+        TimestampDifference(t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time, now_time, &diff_sec,
                             &diff_microsec);
-        if(diff_sec >= (long)u_sess->attr.attr_storage.keep_sync_window) {
+        if (diff_sec >= (long)u_sess->attr.attr_storage.keep_sync_window) {
             sync_master_standalone_window = true;
         }
     }
 
     if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined ||
         XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode]) ||
-        sync_master_standalone_window ||
+        (sync_master_standalone_window && !IS_SHARED_STORAGE_MODE) ||
         !SynRepWaitCatchup(XactCommitLSN)) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
@@ -331,13 +331,14 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         long diff_sec_dynamical;
         int diff_microsec_dynamical;
         if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone) {
-            TimestampDifference(t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time, now_time_dynamical, 
+            TimestampDifference(t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time, now_time_dynamical,
                                 &diff_sec_dynamical, &diff_microsec_dynamical);
         }
-        if (sync_master_standalone_window ||
-            synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH  ||
-            (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && 
-            diff_sec_dynamical >= (long)u_sess->attr.attr_storage.keep_sync_window)) {
+
+        if ((sync_master_standalone_window && !IS_SHARED_STORAGE_MODE) ||
+            u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH ||
+            (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone &&
+             diff_sec_dynamical >= (long)u_sess->attr.attr_storage.keep_sync_window)) {
             ereport(WARNING,
                     (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
@@ -674,9 +675,15 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
      * we can use SyncRepGetOldestSyncRecPtr() to calculate the synced
      * positions even in a quorum-based sync replication.
      */
-    if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) {
+    if (list_length(sync_standbys) == 0) {
+        /* deal with sync standbys list is empty when most available sync mode is on */
+        *writePtr = GetXLogWriteRecPtr();
+        *flushPtr = GetFlushRecPtr();
+        *receivePtr = *writePtr;
+        *replayPtr = *flushPtr;
+    } else if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_PRIORITY) {
         SyncRepGetOldestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr, sync_standbys);
-    } else {
+    } else if (t_thrd.syncrep_cxt.SyncRepConfig->syncrep_method == SYNC_REP_QUORUM) {
         SyncRepGetNthLatestSyncRecPtr(receivePtr, writePtr, flushPtr, replayPtr, sync_standbys,
                                       t_thrd.syncrep_cxt.SyncRepConfig->num_sync);
     }
@@ -687,7 +694,7 @@ bool SyncRepGetSyncRecPtr(XLogRecPtr *receivePtr, XLogRecPtr *writePtr, XLogRecP
 
 #ifndef ENABLE_MULTIPLE_NODES
 /*
- * Obtains the remaining time for synchronizing to the sync standby. 
+ * Obtains the remaining time for synchronizing to the sync standby.
  *
  * If there is at lease one sync standby, or no standby in catchup, no need
  * to consider standby in catchup, return false. Otherwise return true.
@@ -702,7 +709,6 @@ static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTi
 
     /* Get standbys that are considered as synchronous at this moment. */
     sync_standbys = SyncRepGetSyncStandbys(&am_sync, &catchup_standbys);
-
     /* Skip here if there is at lease one sync standby, or no standby in catchup. */
     if (list_length(sync_standbys) > 0 || list_length(catchup_standbys) == 0) {
         list_free(sync_standbys);
@@ -716,8 +722,8 @@ static bool SyncRepGetSyncLeftTime(XLogRecPtr XactCommitLSN, TimestampTz* leftTi
      */
     foreach (cell, catchup_standbys) {
         WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[lfirst_int(cell)];
-        SpinLockAcquire(&walsnd->mutex);
         TimestampTz syncNeededTime;
+        SpinLockAcquire(&walsnd->mutex);
         XLogRecPtr xrp = walsnd->receive;
         double rate = walsnd->catchupRate;
         SpinLockRelease(&walsnd->mutex);
@@ -795,6 +801,9 @@ static void SyncRepGetNthLatestSyncRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* wr
     foreach (cell, sync_standbys) {
         WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[lfirst_int(cell)];
 
+        if (walsnd->is_cross_cluster) {
+            continue;
+        }
         SpinLockAcquire(&walsnd->mutex);
         receive_array[i] = walsnd->receive;
         write_array[i] = walsnd->write;
@@ -868,7 +877,7 @@ static int SyncRepGetStandbyPriority(void)
      * Since synchronous cascade replication is not allowed, we always set the
      * priority of cascading walsender to zero.
      */
-    if (AM_WAL_STANDBY_SENDER)
+    if (AM_WAL_STANDBY_SENDER || AM_WAL_SHARE_STORE_SENDER || AM_WAL_HADR_SENDER)
         return 0;
 
     if (!SyncStandbysDefined() || t_thrd.syncrep_cxt.SyncRepConfig == NULL || !SyncRepRequested())
@@ -903,7 +912,7 @@ static int SyncRepGetStandbyPriority(void)
  *
  * Must hold SyncRepLock.
  */
-static int SyncRepWakeQueue(bool all, int mode)
+int SyncRepWakeQueue(bool all, int mode)
 {
     volatile WalSndCtlData *walsndctl = t_thrd.walsender_cxt.WalSndCtl;
     PGPROC *proc = NULL;
@@ -1160,6 +1169,10 @@ static List *SyncRepGetSyncStandbysQuorum(bool *am_sync, List** catchup_standbys
         if (walsnd->state != WALSNDSTATE_STREAMING)
             continue;
 
+        if (walsnd->peer_role == STANDBY_CLUSTER_MODE) {
+            continue;
+        }
+
         /*
          * Consider this standby as a candidate for quorum sync standbys
          * and append it to the result.
@@ -1388,11 +1401,11 @@ void SyncRepCheckSyncStandbyAlive(void)
 
     if (!sync_standby_alive && !t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone &&
         t_thrd.walsender_cxt.WalSndCtl->most_available_sync) {
-        
         ereport(LOG, (errmsg("synchronous master is now standalone")));
 
         t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone = true;
         t_thrd.walsender_cxt.WalSndCtl->last_sync_master_standalone_time = GetCurrentTimestamp();
+
         /*
          * If there is any waiting sender, then wake-up them as
          * master has switched to standalone mode

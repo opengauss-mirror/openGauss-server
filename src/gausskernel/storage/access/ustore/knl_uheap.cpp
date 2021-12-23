@@ -275,7 +275,7 @@ bool UHeapPagePrepareForXid(Relation relation, Buffer buffer, TransactionId xid,
 
         /* No items on the page */
         if (!UHeapPageXidMinMax(page, multi, &min, &max)) {
-            int64 delta = (xid - FirstNormalTransactionId) - multi ? uheappage->pd_multi_base : uheappage->pd_xid_base;
+            int64 delta = (xid - FirstNormalTransactionId) - base;
             UHeapPageShiftBaseAndDirty(needWal, buffer, page, multi, delta);
             return false;
         }
@@ -302,8 +302,6 @@ bool UHeapPagePrepareForXid(Relation relation, Buffer buffer, TransactionId xid,
         if (i == 0) {
             /* Have to try freezing the page... */
             (void)FreezeSingleUHeapPage(relation, buffer);
-
-            Assert(0);
         }
     }
 
@@ -970,7 +968,7 @@ static void ComputeNewXidInfomask(UHeapTuple uhtup, Buffer buf, TransactionId tu
 
             /* Keep the old tuple slot as it is */
             newTdSlot = tupTdSlot;
-        } else if (isUpdate && TransactionIdIsValid(singleLockerXid) && !TransactionIdDidCommit(singleLockerXid)) {
+        } else if (isUpdate && TransactionIdIsValid(singleLockerXid) && !UHeapTransactionIdDidCommit(singleLockerXid)) {
             LockTupleMode oldMode;
 
             /*
@@ -1606,7 +1604,8 @@ static bool UHeapWait(Relation relation, Buffer buffer, UHeapTuple utuple, LockT
             LockBuffer(buffer, BUFFER_LOCK_EXCLUSIVE);
 
             // a single locker only transaction shouldn't exec pending undo
-            if (!isSubXact && !isLockSingleLocker && TransactionIdIsValid(topXid) && !TransactionIdDidCommit(topXid)) {
+            if (!isSubXact && !isLockSingleLocker && TransactionIdIsValid(topXid) &&
+                !UHeapTransactionIdDidCommit(topXid)) {
                 UHeapExecPendingUndoActions(relation, buffer, topXid);
             }
 
@@ -3001,18 +3000,6 @@ check_tup_satisfies_update:
     oldtup.disk_tuple->flag &= ~UHEAP_MULTI_LOCKERS;
     tempInfomask = oldtup.disk_tuple->flag;
 
-    /*
-     * We can't rely on anyMultiLockerMemberAlive to clear the multi
-     * locker bit, if the lock on the buffer is released in between.
-     */
-    if (buffer == newbuf) {
-        /*
-         * If all the members were lockers and are all gone, we can do away
-         * with the MULTI_LOCKERS bit.
-         */
-        if (UHeapTupleHasMultiLockers(tempInfomask) && !anyMultiLockerMemberAlive)
-            tempInfomask &= ~UHEAP_MULTI_LOCKERS;
-    }
 
     /* Compute the new xid and infomask to store into the tuple. */
     ComputeNewXidInfomask(&oldtup, buffer, saveTupXid, txactinfo.td_slot, tempInfomask, xid, oldtupNewTransSlot,
@@ -4028,7 +4015,7 @@ bool UHeapPageFreezeTransSlots(Relation relation, Buffer buf, bool *lockReacquir
         TransactionId slotXid = transinfo[slotNo].xactid;
 
         if (!TransactionIdIsInProgress(slotXid, NULL, false, false, true)) {
-            if (TransactionIdDidCommit(slotXid))
+            if (UHeapTransactionIdDidCommit(slotXid))
                 completedXactSlots[nCompletedXactSlots++] = slotNo;
             else
                 abortedXactSlots[nAbortedXactSlots++] = slotNo;
@@ -4900,8 +4887,8 @@ static void LogUHeapUpdate(UHeapWALInfo *oldTupWalinfo, UHeapWALInfo *newTupWali
 {
     char *oldp = NULL;
     char *newp = NULL;
-    int oldlen;
-    int newlen;
+    int oldlen = 0;
+    int newlen = 0;
     int bufflags = REGBUF_STANDARD;
     uint32 oldTupLen = 0;
     Page page = NULL;
@@ -5274,8 +5261,7 @@ bool UHeapExecPendingUndoActions(Relation relation, Buffer buffer, TransactionId
      * crash, and after restart, status of this transaction will not be
      * aborted but we should still consider it as aborted because it dit not commit.
      */
-    if (TransactionIdIsValid(xid) && !TransactionIdDidCommit(xid) &&
-        !TransactionIdIsInProgress(xid, NULL, false, false)) {
+    if (TransactionIdIsValid(xid) && UHeapTransactionIdDidAbort(xid)) {
         /*
          * Release the buffer lock here to prevent deadlock.
          * This is because the actual rollback will reacquire the lock.

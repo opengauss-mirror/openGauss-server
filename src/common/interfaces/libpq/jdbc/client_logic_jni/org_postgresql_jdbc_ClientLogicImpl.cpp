@@ -38,6 +38,20 @@
         ptr = NULL;       \
     }
 
+static bool adjust_param_valid(const char *adjusted_param_value, const char* param_value)
+{
+    return adjusted_param_value && param_value &&
+            strcmp(adjusted_param_value, param_value) != 0;
+}
+
+static bool check_pre_param_valid(JNIEnv *env, jstring statement_name_java, jobjectArray parameters_java)
+{
+    if (env == NULL || statement_name_java == NULL || parameters_java == NULL) {
+        return false;
+    }
+    return true;
+}
+
 /*
  * Placeholder for few usefull methods in JNI pluming
  */
@@ -345,29 +359,76 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runClien
     return result.array;
 }
 
-/* *
+/**
+ * check if a type is holding a record type and then need to pass its values to process_record_data
+ * In Java this is done once for every field in the resultset and
+ * then we call process_record_data only for the fields that we need to
+ * @param env pointer to jvm
+ * @param
+ * @param handle pointer to ClientLogicJNI instance
+ * @param column_name_java the name of the column in the resultset
+ * @param oid the oid of the field type
+ * @return java array with the format below:
+ * [0][0] - int status code - zero for success
+ * [0][1] - string status description
+ * [0...n] - array of ints with actual oids that the field contain
+*/
+JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_getRecordIDsImpl(JNIEnv *env, jobject,
+    jlong handle, jstring column_name_java, jint oid)
+{
+    DriverError status(0, "");
+    JniResult result(env, 2);
+    if (!result.init()) {
+        return result.array; /* Should never happen */
+    }
+
+    if (env == NULL || column_name_java == NULL) {
+        return result.array;
+    }
+    JNIStringConvertor column_type_name;
+    if (!result.convert_string(&column_type_name, column_name_java, &status, "getRecordIDsImpl")) {
+        return result.array;
+    }
+
+    ClientLogicJNI *client_logic = NULL;
+    if (!result.from_handle((long)handle, &client_logic, &status, "getRecordIDsImpl")) {
+        return result.array;
+    }
+    result.set_no_error_retrun();
+    size_t number_of_oids = client_logic->get_record_data_oid_length(oid, column_type_name.c_str);
+    if (number_of_oids > 0) {
+        const int *oids = client_logic->get_record_data_oids(oid, column_type_name.c_str);
+        place_ints_in_target_array(env, oids, number_of_oids, 1, result.array);
+    }
+    return result.array;
+}
+
+/**
+ * gets a record in client logic format and returns it in user format
+ * @param env pointer to jvm
+ * @param
+ * @param handle pointer to ClientLogicJNI instance
+ * @param data_to_process_java the data in client logic format
+ * @param original_oids_java the result returned from getRecordIDsImpl method for this field
+ * @return java array with the format below:
  * [0][0] - int status code - zero for success
  * [0][1] - string status description
  * [1] - int 0 not client logic 1 - is client logic
  * [2] - String - The data in user format
- */
+*/
 JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runClientLogic4RecordImpl(JNIEnv *env, jobject,
-    jlong handle, jstring data_to_process_java, jint mod_data_type, jint data_type, jstring column_label_java)
+    jlong handle, jstring data_to_process_java, jintArray original_oids_java)
 {
     JniResult result(env, ARRAY_SIZE + 1);
     if (!result.init()) {
         return result.array; /* Should never happen */
     }
-    if (env == NULL || data_to_process_java == NULL) {
+    if (env == NULL || data_to_process_java == NULL || original_oids_java == NULL) {
         return result.array;
     }
     DriverError status(0, "");
     JNIStringConvertor data_to_process;
     if (!result.convert_string(&data_to_process, data_to_process_java, &status, "runClientLogic4RecordImpl")) {
-        return result.array;
-    }
-    JNIStringConvertor column_label;
-    if (!result.convert_string(&column_label, column_label_java, &status, "runClientLogic4RecordImpl")) {
         return result.array;
     }
     ClientLogicJNI *client_logic = NULL;
@@ -377,15 +438,27 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runClien
     bool is_client_logic = false;
     unsigned char *proccessed_data = NULL;
     size_t length_output;
-    if (!client_logic->process_record_data(data_to_process.c_str, NULL, data_type, column_label.c_str, &proccessed_data,
-        &is_client_logic, length_output, &status)) {
-        libpq_free(proccessed_data);
-        JNI_LOG_ERROR("Java_org_postgresql_jdbc_ClientLogicImpl_runClientLogicImpl failed:error code: %d error: '%s'",
-            status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
-        result.set_error_return(&status);
-        return result.array;
+    size_t number_of_oids = env->GetArrayLength(original_oids_java);
+    if (number_of_oids > 0) {
+        /* Gauss wil not allow more than 250 fields with client logic */
+        static const size_t MAXMIMUM_NUMBER_OF_CL_FIELDS_IN_TABLE = 250;
+        Assert(number_of_oids < MAXMIMUM_NUMBER_OF_CL_FIELDS_IN_TABLE);
+        int original_oids[MAXMIMUM_NUMBER_OF_CL_FIELDS_IN_TABLE] = {0};
+        jint *oids_java = env->GetIntArrayElements(original_oids_java, 0);
+        for (size_t index = 0; index < number_of_oids; ++index) {
+            original_oids[index] = oids_java[index];
+        }
+        if (!client_logic->process_record_data(data_to_process.c_str, original_oids, &proccessed_data,
+            &is_client_logic, length_output, &status)) {
+            libpq_free(proccessed_data);
+            JNI_LOG_ERROR(
+                "Java_org_postgresql_jdbc_ClientLogicImpl_runClientLogic4RecordImpl failed:error code: %d error: '%s'",
+                status.get_error_code(), status.get_error_message() ? status.get_error_message() : "");
+            result.set_error_return(&status);
+            return result.array;
+        }
+        result.set_no_error_retrun();
     }
-    result.set_no_error_retrun();
     if (is_client_logic) {
         place_int_in_target_array(env, 1, 1, result.array);
     } else {
@@ -472,17 +545,20 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_prepareQ
  * [0][1][0] - error text - if none, empty string
  * [1][0 ... parameter_count - 1] - array with the parameters value, if the parameter is not being replace a NULL apears
  * otherwise the replaced value
+ * [2][0 ... parameter_count - 1] - array with the parameters' type-oids,
+ * if the parameter is being replaced, otherwise 0
  */
 JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceStatementParamsImpl(JNIEnv *env,
     jobject jdbc_cl_impl, jlong handle, jstring statement_name_java, jobjectArray parameters_java)
 {
-    JniResult result(env, 2);
+    JniResult result(env, 3);
     if (!result.init()) {
         return result.array;
     }
-    if (env == NULL || statement_name_java == NULL || parameters_java == NULL) {
+    if (!check_pre_param_valid(env, statement_name_java, parameters_java)) {
         return result.array;
     }
+
     DriverError status(0, "");
     JNIStringConvertor statement_name;
     if (!result.convert_string(&statement_name, statement_name_java, &status,
@@ -539,18 +615,48 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceS
         delete[] string_convertors;
         return result.array;
     }
-    /* After parameters values replaces, place the new values on the target array */
+
+    // After parameters values replaces, place the new values on the target array
     jobjectArray parameters_array = env->NewObjectArray(parameter_count, result.object_class, NULL);
     const StatementData *stmnt_data = client_logic->get_statement_data();
-    for (int i = 0; i < parameter_count && !convert_failure; ++i) {
-        if (strcmp(stmnt_data->params.adjusted_param_values[i], param_values[i]) != 0) {
-            place_string_in_array(env, stmnt_data->params.adjusted_param_values[i], i, parameters_array);
+
+    int *parameters_types_array = NULL;
+    if (stmnt_data->params.adjusted_paramTypes != NULL) {
+        // set adjusted types array to return to JNI
+        parameters_types_array = new (std::nothrow) int[(size_t)parameter_count];
+        if (parameters_types_array == NULL) {
+            delete[] param_values;
+            delete[] string_convertors;
+            status.set_error(JNI_SYSTEM_ERROR_CODES::UNEXPECTED_ERROR);
+            result.set_error_return(&status);
+            JNI_LOG_ERROR("new failed");
+            return result.array;
         }
     }
+
+    for (int i = 0; i < parameter_count; ++i) {
+        /*
+         * rawValue in INSERT could be NULL or empty string,
+         * we have recgonize it in preare_statement routine and make adjusted_param_values[idx]
+         * to the NULL value directly, therefore ignore it here just like the normal empty value.
+         */
+        if (adjust_param_valid(stmnt_data->params.adjusted_param_values[i], param_values[i])) {
+            place_string_in_array(env, stmnt_data->params.adjusted_param_values[i], i, parameters_array);
+        }
+        /* return type oid for jdbc side distinguish the enc param */
+        if (parameters_types_array != NULL) {
+            parameters_types_array[i] = (int)stmnt_data->params.adjusted_paramTypes[i];
+        }
+    }
+
+    /* [1][...] arryay object */
     env->SetObjectArrayElement(result.array, 1, parameters_array);
+    /* [2][...] arryay object */
+    place_ints_in_target_array(env, parameters_types_array, parameter_count, 2, result.array);
     delete[] param_values;
     delete[] string_convertors;
     client_logic->clean_stmnt();
+    DELETE_ARRAY(parameters_types_array);
     result.set_no_error_retrun();
     return result.array;
 }
@@ -619,6 +725,26 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceE
         converted_message = NULL;
     }
     return result.array;
+}
+
+/**
+ * reloads the client logic cache ONLY if the server timestamp is later than the client timestamp
+ * @param env java environment
+ * @param jdbc_cl_impl pointer back to the Java client logic impl instance
+ * @param handle client logic instance handle
+ */
+JNIEXPORT void JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_reloadCacheIfNeededImpl (JNIEnv *env,
+		jobject jdbc_cl_impl, jlong handle){
+    ClientLogicJNI *client_logic = NULL;
+    DriverError status(0, "");
+    if (!ClientLogicJNI::from_handle(handle, &client_logic, &status) || client_logic == NULL){
+        JNI_LOG_DEBUG("reloadCacheIfNeededImpl failed: %ld, error code: %d error: '%s'",
+        (long)handle, status.get_error_code(),
+		status.get_error_message() ? status.get_error_message() : "");
+        return;
+    }
+    client_logic->set_jni_env_and_cl_impl(env, jdbc_cl_impl);
+    client_logic->reload_cache_if_needed();
 }
 
 /*

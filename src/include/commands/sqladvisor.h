@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -264,5 +265,7 @@ extern Datum run(PG_FUNCTION_ARGS);
 extern Datum start_collect_workload(PG_FUNCTION_ARGS);
 extern Datum end_collect_workload(PG_FUNCTION_ARGS);
 extern Datum analyze_workload(PG_FUNCTION_ARGS);
+extern bool checkSelectIntoParse(SelectStmt* stmt);
+extern PLpgSQL_datum* copypPlpgsqlDatum(PLpgSQL_datum* datum);
 
 #endif /* SQLADVISOR_H */

@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -124,13 +125,6 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading user-defined functions\n");
     funinfo = getFuncs(fout, &numFuncs);
     funinfoindex = buildIndexArray(funinfo, numFuncs, sizeof(FuncInfo));
-
-    if (g_verbose)
-        write_msg(NULL, "reading user-defined packages\n");
-    packageinfo = getPackages(fout, &numPackages);
-    if (packageinfo!=NULL) {
-        packageinfoindex = buildIndexArray(packageinfo, numPackages, sizeof(PkgInfo));
-    }
 
     /* this must be after getTables and getFuncs */
     if (g_verbose)
@@ -256,6 +250,13 @@ TableInfo* getSchemaData(Archive* fout, int* numTablesPtr)
         write_msg(NULL, "reading row level security policies\n");
     getRlsPolicies(fout, tblinfo, numTables);
 
+    if (g_verbose)
+        write_msg(NULL, "reading user-defined packages\n");
+    packageinfo = getPackages(fout, &numPackages);
+    if (packageinfo!=NULL) {
+        packageinfoindex = buildIndexArray(packageinfo, numPackages, sizeof(PkgInfo));
+    }
+
     if (g_verbose) {
         write_msg(NULL, "reading publications\n");
     }
@@ -294,7 +295,7 @@ static void flagInhTables(TableInfo* ptblinfo, int inumTables, InhInfo* inhinfo,
 
     for (i = 0; i < inumTables; i++) {
         /* Sequences, contqueries and views never have parents */
-        if (ptblinfo[i].relkind == RELKIND_SEQUENCE || ptblinfo[i].relkind == RELKIND_VIEW || 
+        if (RELKIND_IS_SEQUENCE(ptblinfo[i].relkind) || ptblinfo[i].relkind == RELKIND_VIEW || 
             ptblinfo[i].relkind == RELKIND_CONTQUERY)
             continue;
 
@@ -335,7 +336,7 @@ static void flagInhAttrs(TableInfo* ptblinfo, int inumTables)
         TableInfo** parents;
 
         /* Sequences, contqueries and views never have parents */
-        if (tbinfo->relkind == RELKIND_SEQUENCE || tbinfo->relkind == RELKIND_VIEW || 
+        if (RELKIND_IS_SEQUENCE(tbinfo->relkind) || tbinfo->relkind == RELKIND_VIEW || 
             tbinfo->relkind == RELKIND_MATVIEW || tbinfo->relkind == RELKIND_CONTQUERY)
             continue;
 

@@ -84,23 +84,22 @@
 #include "cipher.h"
 
 static bool verify_peer_name_matches_certificate(PGconn*);
-static int verify_cb(int ok, X509_STORE_CTX* ctx);
 static int init_ssl_system(PGconn* conn);
 static void destroy_ssl_system(PGconn* conn);
-
 static void destroySSL(PGconn* conn);
-
 static void close_SSL(PGconn*);
 #ifndef ENABLE_UT
 static char* SSLerrmessage(void);
 static int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username);
 static PostgresPollingStatusType open_client_SSL(PGconn*);
+static int verify_cb(int ok, X509_STORE_CTX* ctx);
 static int initialize_SSL(PGconn* conn);
 static int init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn);
 #else
 char* SSLerrmessage(void);
 int check_permission_cipher_file(const char* parent_dir, PGconn* conn, const char* username);
 PostgresPollingStatusType open_client_SSL(PGconn*);
+int verify_cb(int ok, X509_STORE_CTX* ctx);
 int initialize_SSL(PGconn* conn);
 int init_client_ssl_passwd(SSL* pstContext, const char* path, const char* username, PGconn* conn);
 #endif
@@ -891,58 +890,60 @@ ssize_t pgfdw_pqsecure_write(PGconn* conn, const void* ptr, size_t len)
  *  criteria (e.g., accepting self-signed or expired certs), but
  *  for now we accept the default checks.
  */
+#ifndef ENABLE_UT
+static
+#endif
+ int verify_cb(int ok, X509_STORE_CTX* ctx)
+{
+    int cert_error = X509_STORE_CTX_get_error(ctx);
 
- static int verify_cb(int ok, X509_STORE_CTX* ctx)
- {
-	int cert_error = X509_STORE_CTX_get_error(ctx);
+    if (!ok)
+    {
+        switch (cert_error)
+        {
+            case X509_V_ERR_CRL_HAS_EXPIRED:
+                ok = 1;
+                break;
+            case X509_V_ERR_UNABLE_TO_GET_CRL:
+                ok = 1;
+                break;  
+            case X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE:
+                ok = 1;
+                break;  
+            case X509_V_ERR_CRL_SIGNATURE_FAILURE:
+                ok = 1;
+                break;
+            case X509_V_ERR_CRL_NOT_YET_VALID:
+                ok = 1;
+                break;  
+            case X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD:
+                ok = 1;
+                break;
+            case X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD:
+                ok = 1;
+                break;
+            case X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER:
+                ok = 1;
+                break;
+            case X509_V_ERR_KEYUSAGE_NO_CRL_SIGN:
+                ok = 1;
+                break;
+            case X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION:
+                ok = 1;
+                break;
+            case X509_V_ERR_DIFFERENT_CRL_SCOPE:
+                ok = 1;
+                break;
+            case X509_V_ERR_CRL_PATH_VALIDATION_ERROR:
+                ok = 1;
+                break;
+            default:
+                break;
+        }
+    }
 
-	if (!ok)
-	{
-		switch (cert_error)
-		{
-			case X509_V_ERR_CRL_HAS_EXPIRED:
-				ok = 1;
-				break;
-			case X509_V_ERR_UNABLE_TO_GET_CRL:
-				ok = 1;
-				break;	
-			case X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE:
-				ok = 1;
-				break;	
-			case X509_V_ERR_CRL_SIGNATURE_FAILURE:
-				ok = 1;
-				break;
-			case X509_V_ERR_CRL_NOT_YET_VALID:
-				ok = 1;
-				break;	
-			case X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD:
-				ok = 1;
-				break;
-			case X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD:
-				ok = 1;
-				break;
-			case X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER:
-				ok = 1;
-				break;
-			case X509_V_ERR_KEYUSAGE_NO_CRL_SIGN:
-				ok = 1;
-				break;
-			case X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION:
-				ok = 1;
-				break;
-			case X509_V_ERR_DIFFERENT_CRL_SCOPE:
-				ok = 1;
-				break;
-			case X509_V_ERR_CRL_PATH_VALIDATION_ERROR:
-				ok = 1;
-				break;
-			default:
-				break;
-		}
-	}
-
-	return ok;
- }
+    return ok;
+}
 
 /*
  * Check if a wildcard certificate matches the server hostname.
@@ -959,7 +960,10 @@ ssize_t pgfdw_pqsecure_write(PGconn* conn, const void* ptr, size_t len)
  *
  * Matching is always case-insensitive, since DNS is case insensitive.
  */
-static int wildcard_certificate_match(const char* pattern, const char* string)
+#ifndef ENABLE_UT
+static
+#endif
+int wildcard_certificate_match(const char* pattern, const char* string)
 {
     int lenpat = strlen(pattern);
     int lenstr = strlen(string);
@@ -1229,9 +1233,7 @@ static int init_ssl_system(PGconn* conn)
 #ifndef ENABLE_UT
 static
 #endif  // ENABLE_UT
-
-    bool
-    set_client_ssl_ciphers()
+bool set_client_ssl_ciphers()
 {
     int default_ciphers_count = 0;
 

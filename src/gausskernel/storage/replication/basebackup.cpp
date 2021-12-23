@@ -59,6 +59,8 @@ typedef struct {
     bool includewal;
     bool sendtblspcmapfile;
     bool isBuildFromStandby;
+    bool isCopySecureFiles;
+    bool isCopyUpgradeFile;
     bool isObsmode;
 } basebackup_options;
 
@@ -103,6 +105,7 @@ static void SendBackupHeader(List *tablespaces);
 static void SendMotCheckpointHeader(const char* path);
 #endif
 static void base_backup_cleanup(int code, Datum arg);
+static void SendSecureFileToDisasterCluster(basebackup_options *opt);
 static void perform_base_backup(basebackup_options *opt, DIR *tblspcdir);
 static void parse_basebackup_options(List *options, basebackup_options *opt);
 static int CompareWalFileNames(const void* a, const void* b);
@@ -259,6 +262,104 @@ static void SetPaxosIndex(unsigned long long *consensusPaxosIdx)
     }
 }
 #endif
+
+static void ProcessSecureFilesForDisasterCluster(const char *path)
+{
+#define BASE_PATH_LEN 2
+    struct dirent *de = NULL;
+    char pathbuf[MAXPGPATH];
+    struct stat statbuf;
+    int64 size = 0;
+    int rc = 0;
+
+
+    DIR *dir = AllocateDir(path);
+
+    while ((de = ReadDir(dir, path)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) {
+            continue;
+        }
+        if (!PostmasterIsAlive()) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("Postmaster exited, aborting active base backup")));
+        }
+
+        if (t_thrd.walsender_cxt.walsender_shutdown_requested || t_thrd.walsender_cxt.walsender_ready_to_stop) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("shutdown requested, aborting active base backup")));
+        }
+        if (t_thrd.postmaster_cxt.HaShmData &&
+            (t_thrd.walsender_cxt.server_run_mode != t_thrd.postmaster_cxt.HaShmData->current_mode)) {
+            ereport(ERROR, (errcode_for_file_access(), errmsg("server run mode changed, aborting active base backup")));
+        }
+        rc = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH - 1, "%s/%s", path, de->d_name);
+        securec_check_ss(rc, "", "");
+
+        if (lstat(pathbuf, &statbuf) != 0) {
+            if (errno != ENOENT) {
+                ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m", pathbuf)));
+            }
+            /* If the file went away while scanning, it's no error. */
+            continue;
+        }
+        if (S_ISDIR(statbuf.st_mode)) {
+            _tarWriteHeader(pathbuf + BASE_PATH_LEN, NULL, &statbuf);
+            size += BUILD_PATH_LEN;
+            ProcessSecureFilesForDisasterCluster(pathbuf);
+        } else if (S_ISREG(statbuf.st_mode)) {
+            bool sent = sendFile(pathbuf, pathbuf + BASE_PATH_LEN, &statbuf, true);
+            size = size + ((statbuf.st_size + 511) & ~511) + BUILD_PATH_LEN;
+            if (!sent) {
+                ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("could not send file \"%s\"", pathbuf)));
+            }
+        }
+    }
+    FreeDir(dir);
+}
+
+static void SendSecureFileToDisasterCluster(basebackup_options *opt)
+{
+    char pathbuf[MAXPGPATH];
+    struct stat statbuf;
+    StringInfoData buf;
+    tablespaceinfo *ti = (tablespaceinfo *)palloc0(sizeof(tablespaceinfo));
+    List *tablespaces = NIL;
+    int64 size = 0;
+    int rc = 0;
+
+    ti->size = size;
+    tablespaces = (List *)lappend(tablespaces, ti);
+    SendBackupHeader(tablespaces);
+    pq_beginmessage(&buf, 'H');
+    pq_sendbyte(&buf, 0);  /* overall format */
+    pq_sendint16(&buf, 0); /* natts */
+    pq_endmessage_noblock(&buf);
+    if (opt->isCopyUpgradeFile) {
+        rc = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH - 1, "./upgrade_phase_info");
+        securec_check_ss(rc, "", "");
+        if (lstat(pathbuf, &statbuf) != 0) {
+            if (errno != ENOENT) {
+                ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("could not stat file or directory \"%s\": %m", pathbuf)));
+            } else {
+                ereport(ERROR,
+                    (errcode_for_file_access(), errmsg("upgrade file \"%s\" does not exist.", pathbuf)));
+            }
+        }
+        bool sent = sendFile(pathbuf, pathbuf + BASE_PATH_LEN, &statbuf, true);
+        size = size + ((statbuf.st_size + 511) & ~511) + BUILD_PATH_LEN;
+        if (!sent) {
+            ereport(ERROR,
+                (errcode_for_file_access(), errmsg("could not send file \"%s\"", pathbuf)));
+        }
+        pq_putemptymessage_noblock('c');
+        pfree(ti);
+        return;
+    }
+    ProcessSecureFilesForDisasterCluster("./gs_secure_files");
+    pq_putemptymessage_noblock('c');
+    pfree(ti);
+}
 
 /*
  * Actually do a base backup for the specified tablespaces.
@@ -607,6 +708,8 @@ static void parse_basebackup_options(List *options, basebackup_options *opt)
     bool o_nowait = false;
     bool o_wal = false;
     bool o_buildstandby = false;
+    bool o_copysecurefiles = false;
+    bool o_iscopyupgradefile = false;
     bool o_tablespace_map = false;
     bool o_isobsmode = false;
     errno_t rc = memset_s(opt, sizeof(*opt), 0, sizeof(*opt));
@@ -656,6 +759,18 @@ static void parse_basebackup_options(List *options, basebackup_options *opt)
             }
             opt->isObsmode = true;
             o_isobsmode = true;
+        } else if (strcmp(defel->defname, "copysecurefile") == 0) {
+            if (o_copysecurefiles) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
+            }
+            opt->isCopySecureFiles = true;
+            o_copysecurefiles = true;
+        } else if (strcmp(defel->defname, "needupgradefile") == 0) {
+            if (o_iscopyupgradefile) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("duplicate option \"%s\"", defel->defname)));
+            }
+            opt->isCopyUpgradeFile = true;
+            o_iscopyupgradefile = true;
         } else {
             ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
         }
@@ -686,6 +801,13 @@ void SendBaseBackup(BaseBackupCmd *cmd)
     old_context = MemoryContextSwitchTo(backup_context);
 
     WalSndSetState(WALSNDSTATE_BACKUP);
+
+    if (opt.isCopySecureFiles) {
+        SendSecureFileToDisasterCluster(&opt);
+        MemoryContextSwitchTo(old_context);
+        MemoryContextDelete(backup_context);
+        return;
+    }
 
     if (u_sess->attr.attr_common.update_process_title) {
         char activitymsg[50];
@@ -1036,6 +1158,8 @@ bool IsSkipPath(const char * pathName)
     if (strcmp(pathName, "./global/pg_control") == 0)
         return true;
     if (strcmp(pathName, "./global/pg_dw") == 0)
+        return true;
+    if (strcmp(pathName, "./global/pg_dw_single") == 0)
         return true;
     if (strcmp(pathName, "./global/pg_dw.build") == 0)
         return true;
@@ -1870,6 +1994,7 @@ static void SendCompressedFile(char* readFileName, int basePathLen, struct stat&
         for (size_t i = 0; i < nchunks; i++) {
             addr->chunknos[i] = chunkIndex++;
         }
+
         addr->checksum = AddrChecksum32(blockNum, addr);
         totalLen += len;
     }
@@ -2132,7 +2257,7 @@ static XLogRecPtr GetMinArchiveSlotLSN(void)
         XLogRecPtr restart_lsn;
         ReplicationSlot *slot = &t_thrd.slot_cxt.ReplicationSlotCtl->replication_slots[slotno];
         SpinLockAcquire(&slot->mutex);
-        if (slot->in_use == true && slot->archive_obs != NULL && slot->archive_obs->is_recovery == false) {
+        if (slot->in_use == true && slot->archive_config != NULL && slot->archive_config->is_recovery == false) {
             restart_lsn = slot->data.restart_lsn;
             if ((!XLByteEQ(restart_lsn, InvalidXLogRecPtr)) &&
                 (XLByteEQ(minArchSlotPtr, InvalidXLogRecPtr) || XLByteLT(restart_lsn, minArchSlotPtr))) {

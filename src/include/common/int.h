@@ -12,6 +12,7 @@
  * intrinsics are available 128 bit math is used where available.
  *
  * Copyright (c) 2017-2019, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  * 
  * 
  * IDENTIFICATION
@@ -176,6 +177,20 @@ static inline bool pg_add_s64_overflow(int64 a, int64 b, int64* result)
 #endif
 }
 
+static inline bool pg_add_s128_overflow(int128 a, int128 b, int128* result)
+{
+#if defined(HAVE__BUILTIN_OP_OVERFLOW)
+    return __builtin_add_overflow(a, b, result);
+#else
+    if ((a > 0 && b > 0 && a > PG_INT128_MAX - b) || (a < 0 && b < 0 && a < PG_INT128_MIN - b)) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+    *result = a + b;
+    return false;
+#endif
+}
+
 /*
  * If a - b overflows, return true, otherwise store the result of a - b into
  * *result. The content of *result is implementation defined in case of
@@ -196,6 +211,20 @@ static inline bool pg_sub_s64_overflow(int64 a, int64 b, int64* result)
     return false;
 #else
     if ((a < 0 && b > 0 && a < PG_INT64_MIN + b) || (a > 0 && b < 0 && a > PG_INT64_MAX + b)) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+    *result = a - b;
+    return false;
+#endif
+}
+
+static inline bool pg_sub_s128_overflow(int128 a, int128 b, int128* result)
+{
+#if defined(HAVE__BUILTIN_OP_OVERFLOW)
+    return __builtin_sub_overflow(a, b, result);
+#else
+    if ((a < 0 && b > 0 && a < PG_INT128_MIN + b) || (a > 0 && b < 0 && a > PG_INT128_MAX + b)) {
         *result = 0x5EED; /* to avoid spurious warnings */
         return true;
     }
@@ -245,6 +274,40 @@ static inline bool pg_mul_s64_overflow(int64 a, int64 b, int64* result)
     return false;
 #endif
 }
+
+static inline bool check_sqrroot_overflow(int128 a, int128 b)
+{
+    return a > PG_INT64_MAX || a < PG_INT64_MIN || b > PG_INT64_MAX || b < PG_INT64_MIN;
+}
+
+static inline bool pg_mul_s128_overflow(int128 a, int128 b, int128* result)
+{
+#if defined(HAVE__BUILTIN_OP_OVERFLOW)
+    return __builtin_mul_overflow(a, b, result);
+#else
+    /*
+     * Overflow can only happen if at least one value is outside the range
+     * sqrt(min)..sqrt(max) so check that first as the division can be quite a
+     * bit more expensive than the multiplication.
+     *
+     * Multiplying by 0 or 1 can't overflow of course and checking for 0
+     * separately avoids any risk of dividing by 0.  Be careful about dividing
+     * INT_MIN by -1 also, note reversing the a and b to ensure we're always
+     * dividing it by a positive value.
+     *
+     */
+    if (check_sqrroot_overflow(a, b) && a != 0 && a != 1 && b != 0 && b != 1 &&
+        ((a > 0 && b > 0 && a > PG_INT128_MAX / b) || (a > 0 && b < 0 && b < PG_INT128_MIN / a) ||
+            (a < 0 && b > 0 && a < PG_INT128_MIN / b) || (a < 0 && b < 0 && a < PG_INT128_MAX / b))) {
+        *result = 0x5EED; /* to avoid spurious warnings */
+        return true;
+    }
+    *result = a * b;
+    return false;
+#endif
+}
+
+
 
 #endif /* COMMON_INT_H */
 

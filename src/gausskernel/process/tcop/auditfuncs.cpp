@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -943,7 +944,8 @@ static void pgaudit_process_drop_objects(Node* node, const char* querystring)
                 objectname = NameListToString(names);
                 pgaudit_ddl_textsearch(objectname, querystring);
             } break;
-            case OBJECT_SEQUENCE: {
+            case OBJECT_SEQUENCE:
+            case OBJECT_LARGE_SEQUENCE: {
                 objectname = strVal(lfirst(list_tail(names)));
                 pgaudit_ddl_sequence(objectname, querystring);
             } break;
@@ -1229,7 +1231,7 @@ static void pgaudit_ProcessUtility(Node* parsetree, const char* queryString, Par
         } break;
         case T_AlterTableStmt: {
             AlterTableStmt* altertablestmt = (AlterTableStmt*)(parsetree); /* Audit alter table */
-            if (altertablestmt->relkind == OBJECT_SEQUENCE) {
+            if (RELKIND_IS_SEQUENCE(altertablestmt->relkind)) {
                 pgaudit_ddl_sequence(altertablestmt->relation->relname, queryString);
             } else {
                 pgaudit_ddl_table(altertablestmt->relation->relname, queryString);

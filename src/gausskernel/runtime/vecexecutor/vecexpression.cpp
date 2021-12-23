@@ -229,22 +229,6 @@ static ScalarVector* ExecEvalVecNot(
     return pVector;
 }
 
-static ScalarVector* ExecEvalVecRownum(
-    RownumState* exprstate, ExprContext* econtext, bool* pSelection, ScalarVector* pVector, ExprDoneCond* isDone)
-{
-    Assert(pSelection != NULL);
-    ScalarValue* pDest = pVector->m_vals;
-    int64 ps_rownum = exprstate->ps->ps_rownum;
-    
-    for (int i = 0; i < econtext->align_rows; i++) {
-        SET_NOTNULL(pVector->m_flag[i]);
-        pDest[i] = ++ps_rownum ;
-    }
-
-    pVector->m_rows = econtext->align_rows;
-
-    return pVector;
-}
 // TRUE means we deal with or
 // false means we deal with and
 template <bool AndOrFLag>
@@ -3181,12 +3165,6 @@ ExprState* ExecInitVecExpr(Expr* node, PlanState* parent)
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmodule(MOD_VEC_EXECUTOR),
                     errmsg("Unsupported array coerce expression in vector engine")));
-        case T_Rownum: {
-            RownumState* rnstate = (RownumState*)makeNode(RownumState);
-            rnstate->ps = parent;
-            state = (ExprState*)rnstate;
-            state->vecExprFun = (VectorExprFun)ExecEvalVecRownum;
-        } break;
         default:
             ereport(ERROR,
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

@@ -83,7 +83,6 @@ bool SortFusion::execute(long max_rows, char *completionTag)
 {
     max_rows = FETCH_ALL;
     bool success = false;
-
     TimestampTz startTime = 0;
     TupleTableSlot *reslot = m_local.m_reslot;
     Datum *values = m_local.m_values;

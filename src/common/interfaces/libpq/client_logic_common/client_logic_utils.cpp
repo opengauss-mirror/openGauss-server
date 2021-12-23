@@ -127,111 +127,6 @@ bool concat_table_fqdn(const char *catalogname, const char *schemaname, const ch
     return true;
 }
 
-static bool is_type_simple(Oid elem_type)
-{
-    switch (elem_type) {
-        case OIDOID:
-        case INT4OID:
-        case INT8OID:
-        case INT2OID:
-        case INT1OID:
-            return true;
-        default:
-            return false;
-    }
-    return false; /* passinate compiler */
-}
-
-/*
- * Converts bynary array from qiuery into internal array
- * @IN - input_array
- * @OUT - output_array in type of int[] for fixed len types or char*[] for varailbe length
- * For our needs the onlt Oid[] and char*[] are handled
- */
-int parseBinaryArray(char* input_array, void** output_array)
-{
-    /* claculate binary size - one dimensinal array */
-    char* pos = input_array;
-    int ndim = 0;
-    int n_elements = 0;
-    ArrayHead* ah = (ArrayHead*)pos;
-    bool is_simple_type = false;
-    /* fill outpu */
-    ndim = ntohl(ah->ndim);
-    if (!ndim) { /* array is empty */
-        return 0;
-    }
-    int dataoffset = ntohl(ah->dataoffset);
-    Oid elem_type = ntohl(ah->elemtype); //
-    uint32 elem_size = 0;
-    char* new_array = NULL;
-
-    pos += sizeof(ArrayHead);
-    for (int i = 0; i < ndim; i++) {
-        n_elements += ntohl(((DimHeader*)pos)->numElements);
-        pos += sizeof(DimHeader);
-    }
-    if (!n_elements) {
-        return 0;
-    }
-    pos += dataoffset;
-    is_simple_type = is_type_simple(elem_type);
-    if (is_simple_type) {
-        elem_size = ntohl(*(uint32*)pos);
-        new_array = (char*)malloc(elem_size * n_elements);
-    } else {
-        new_array = (char*)calloc(n_elements, sizeof(char*));
-    }
-    if (new_array == NULL) {
-        return 0;
-    }
-    /*
-     * earch array element consists of 2 parts element_size : element_val
-     * element_size is 4 bytes long
-     */
-    for (int i = 0; i < n_elements; i++) {
-        if (is_simple_type) {
-            pos += sizeof(elem_size);
-            switch (elem_size) {
-                case (sizeof(uint64)):
-                    *((uint64*)new_array + i) = NTOHLL(*(uint64*)pos);
-                    break;
-                case (sizeof(uint32)):
-                    *((uint32*)new_array + i) = ntohl(*(uint32*)pos);
-                    break;
-                case (sizeof(uint16)):
-                    *((uint16*)new_array + i) = ntohs(*(uint16*)pos);
-                    break;
-                case 1:
-                    *((char*)new_array + i) = *(char*)pos;
-                default:
-                    fprintf(stderr, "array of simple type %u is not handled\n", elem_type);
-                    Assert(false);
-                    break;
-            }
-        } else {
-            elem_size = ntohl(*(uint32*)pos);
-            *((char**)new_array + i) = (char*)calloc(elem_size + 1, sizeof(char));
-            if (!*((char**)new_array + i)) {
-                if (new_array != NULL) {
-                    for (int j = 0; j < i; j++) {
-                        libpq_free(*((char**)new_array + j));
-                    }
-                    libpq_free(new_array);
-                }
-                fprintf(stderr, "error allocating memory for array\n");
-                Assert(false);
-                return 0;
-            }
-            pos += sizeof(elem_size);
-            check_memcpy_s(memcpy_s(*((char**)new_array + i), elem_size + 1, pos, elem_size));
-        }
-        pos += elem_size;
-    }
-    *output_array = new_array;
-    return n_elements;
-}
-
 void free_obj_list(ObjName *obj_list)
 {
     ObjName *cur_obj = obj_list;
@@ -278,4 +173,140 @@ ObjName *obj_list_append(ObjName *obj_list, const char *new_obj_name)
 
     last_obj->next = new_obj;
     return obj_list;
+}
+/**
+ * helper function to parse a string array of Oids and types.
+ * It searches for possible separator with are ',' or ' ' space and count its occurrences
+ * @param input input array
+ * @return the numbers of seperators in the input string
+ */
+size_t count_sep_in_str(const char *input)
+{
+    size_t result = 0;
+    if (input == NULL || strlen(input) == 0) {
+        return result;
+    }
+    for (size_t index = 0; index < strlen(input); ++index) {
+        if (input[index] == ',' || input[index] == ' ') {
+            ++result;
+        }
+    }
+    return result;
+}
+/**
+ * Parses a char array coming from the database server when loading the cache
+ * It is in the form of {elem,elem,elem ...} or "elem elem elem elem"
+ * Note that this method allocates the memory for the items_out parameters and it is up to the caller to free it
+ * @param[in] input the input array string
+ * @param[out] items_out vector of items allocated by this method
+ * @return the numbers of items in items_out
+ */
+size_t parse_char_array(const char *input, char ***items_out)
+{
+    *items_out = NULL;
+    char **items = NULL;
+    size_t output_length = 0;
+
+    if (input == NULL ||
+        strlen(input) == 0) { /* there are 2 characters for opening and closing brakets {item1,item2....itemn} */
+        return output_length;
+    }
+    int start_offset = 0;
+    if (input[0] == '{') {
+        start_offset = 1;
+        /* if input length < 3, it has no item */
+        if (strlen(input) < 3) {
+            return output_length;
+        }
+    }
+    size_t count_of_column = count_sep_in_str(input);
+    output_length = count_of_column + 1;
+    size_t elem_index = 0;
+    items = (char **)malloc(output_length * sizeof(char *));
+    if (items == NULL) {
+        fprintf(stderr, "Error: out of memory\n");
+        output_length = 0;
+        return output_length;
+    }
+    *items_out = items;
+    check_memset_s(memset_s(items, output_length * sizeof(char *), 0, output_length * sizeof(char *)));
+    size_t begin_index = start_offset;
+    size_t last_index = 0;
+    /* Ignoring the brackets if exists {item1,item2....itemn} */
+    for (size_t index = start_offset; index < strlen(input); ++index) {
+        last_index = index;
+        if (input[index] == ',' || input[index] == ' ' || input[index] == '}') {
+            if (elem_index < output_length) {
+                size_t item_len = index - begin_index;
+                items[elem_index] = (char *)malloc((item_len + 1) * sizeof(char));
+                if (items[elem_index] == NULL) {
+                    fprintf(stderr, "Error: out of memory\n");
+                    for (size_t i = 0; i < elem_index; i++) {
+                        libpq_free(items[i]);
+                    }
+                    libpq_free(items);
+                    output_length = 0;
+                    return output_length;
+                }
+                check_strncpy_s(strncpy_s(items[elem_index], item_len + 1, input + begin_index, item_len));
+                items[elem_index][index - begin_index] = 0;
+            } else {
+                fprintf(stderr, "Error: index out of bound on parse_char_array %s\n", input);
+            }
+            begin_index = index + 1;
+            ++elem_index;
+        }
+    }
+    if (start_offset == 0) { /* Handle the last item */
+        if (elem_index < output_length) {
+            size_t item_len = last_index - begin_index + 1;
+            items[elem_index] = (char *)malloc((item_len + 1) * sizeof(char));
+            if (items[elem_index] == NULL) {
+                fprintf(stderr, "Error: out of memory\n");
+                for (size_t i = 0; i < elem_index; i++) {
+                    libpq_free(items[i]);
+                }
+                libpq_free(items);
+                output_length = 0;
+                return output_length;
+            }
+            check_strncpy_s(strncpy_s(items[elem_index], item_len + 1, input + begin_index, item_len));
+            items[elem_index][last_index - begin_index + 1] = 0;
+        }
+    }
+    return output_length;
+}
+/**
+ * Parses a char array coming from the database server when loading the cache
+ * It is in the form of {oid1,oid2,...oidn) or "oid1 oid2 ... oidn"
+ * Note that this method allocates the memory for the items_out parameters and it is up to the caller to free it
+ * @param[in] input the input array string
+ * @param[out] items_out vector of items allocated by this method
+ * @return the numbers of items in items_out*
+ */
+size_t parse_oid_array(const char *input, Oid **items_out)
+{
+    *items_out = NULL;
+    char **items_char = NULL;
+    Oid *items = NULL;
+    size_t output_length = parse_char_array(input, &items_char);
+    if (output_length > 0) {
+        items = (Oid *)malloc(output_length * sizeof(Oid));
+        if (items == NULL) {
+            fprintf(stderr, "Error: out of memory\n");
+            for (size_t index = 0; index < output_length; ++index) {
+                free(items_char[index]);
+            }
+            free(items_char);
+            output_length = 0;
+            return output_length;
+        }
+        *items_out = items;
+        for (size_t index = 0; index < output_length; ++index) {
+            items[index] = (Oid)atoi(items_char[index]);
+            free(items_char[index]);
+        }
+    }
+    free(items_char);
+    return output_length;
 }

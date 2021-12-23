@@ -36,6 +36,8 @@ static const uint32 HALF_K = 512;
 static const char DW_FILE_NAME[] = "global/pg_dw";
 static const char SINGLE_DW_FILE_NAME[] = "global/pg_dw_single";
 static const char DW_BUILD_FILE_NAME[] = "global/pg_dw.build";
+static const char DW_UPGRADE_FILE_NAME[] = "global/dw_upgrade";
+
 
 static const uint32 DW_TRY_WRITE_TIMES = 8;
 #ifndef WIN32
@@ -50,9 +52,6 @@ static const uint16 DW_FILE_PAGE = 32768;
 
 static const int64 DW_FILE_SIZE = (DW_FILE_PAGE * BLCKSZ);
 
-/* make file head size to 512 bytes in total, 12 bytes including head and tail, 500 bytes alignment */
-static const uint32 DW_FILE_HEAD_ALIGN_BYTES = 500;
-
 /**
  * | file_head | batch head | data pages   | batch tail/next batch head | ... |
  * |    0   |     1    | 409 at most |          1           | ... |
@@ -63,7 +62,7 @@ static const uint16 DW_BATCH_FILE_START = 1;
 
 typedef struct st_dw_page_head {
     uint16 page_id; /* page_id in file */
-    uint16 dwn;     /* double write number, updated when file header changed */
+    volatile uint16 dwn;     /* double write number, updated when file header changed */
 } dw_page_head_t;
 
 typedef struct st_dw_page_tail {
@@ -71,10 +70,14 @@ typedef struct st_dw_page_tail {
     uint16 dwn; /* double write number, updated when file header changed */
 } dw_page_tail_t;
 
+/* make file head size to 512 bytes in total, 16 bytes including head and tail, 496 bytes alignment */
+static const uint32 DW_FILE_HEAD_ALIGN_BYTES = 496;
+
 typedef struct st_dw_file_head {
     dw_page_head_t head;
-    uint16 start;
+    volatile uint16 start;
     uint16 buftag_version;
+    uint32 dw_version;
     uint8 unused[DW_FILE_HEAD_ALIGN_BYTES]; /* 512 bytes total, one sector for most disks */
     dw_page_tail_t tail;
 } dw_file_head_t;
@@ -148,16 +151,10 @@ typedef struct dw_stat_info_single {
     volatile uint64 file_trunc_num;        /* truncate file */
     volatile uint64 file_reset_num;        /* file full and restart from beginning */
     volatile uint64 total_writes;          /* total double write */
+    volatile uint64 second_file_trunc_num;        /* truncate file */
+    volatile uint64 second_file_reset_num;        /* file full and restart from beginning */
+    volatile uint64 second_total_writes;          /* total double write */
 } dw_stat_info_single;
-
-typedef struct single_slot_pos {
-    LWLock* write_lock;    /* The dw write lock corresponding to the slot */
-    uint16 actual_pos;    /* correspond to the actual double write file slot */
-}single_slot_pos;
-
-typedef struct single_slot_state {
-    bool data_flush;     /* The buffer corresponding to the slot finish data file flush */
-}single_slot_state;
 
 extern const dw_view_col_t g_dw_view_col_arr[DW_VIEW_COL_NUM];
 extern const dw_view_col_t g_dw_single_view[DW_SINGLE_VIEW_COL_NUM];

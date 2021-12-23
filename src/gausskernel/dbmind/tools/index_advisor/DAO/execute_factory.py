@@ -38,6 +38,20 @@ class ExecuteFactory:
                 redundant_indexes.append(index)
 
     @staticmethod
+    def match_table_name(table_name, query_index_dict):
+        for elem in query_index_dict.keys():
+            item_tmp = '_'.join(elem.split('.'))
+            if table_name == item_tmp:
+                table_name = elem
+                break
+            elif 'public_' + table_name == item_tmp:
+                table_name = 'public.' + table_name
+                break
+        else:
+            return False, table_name
+        return True, table_name
+
+    @staticmethod
     def get_valid_indexes(record, hypoid_table_column, valid_indexes):
         tokens = record.split(' ')
         for token in tokens:
@@ -55,8 +69,8 @@ class ExecuteFactory:
     @staticmethod
     def record_ineffective_negative_sql(candidate_index, obj, ind):
         cur_table = candidate_index.table
-        if cur_table not in obj.statement and \
-                re.search(r'(\.%s\s)' % cur_table.split('.')[-1], obj.statement.lower()):
+        if cur_table not in obj.statement.lower() and \
+                not re.search(r'(\.%s\s)' % cur_table.split('.')[-1], obj.statement.lower()):
             return
         if any(re.match(r'(insert\sinto\s%s\s)' % table, obj.statement.lower())
                for table in [cur_table, cur_table.split('.')[-1]]):
@@ -78,7 +92,7 @@ class ExecuteFactory:
             else:
                 candidate_index.ineffective_pos.append(ind)
             candidate_index.total_sql_num += obj.frequency
-        elif cur_table in obj.statement or \
+        elif cur_table in obj.statement.lower() or \
                 re.search(r'(\s%s\s)' % cur_table.split('.')[-1], obj.statement.lower()):
             candidate_index.select_sql_num += obj.frequency
             # SELECT scenes to filter out positive

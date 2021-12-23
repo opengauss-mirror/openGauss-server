@@ -31,6 +31,7 @@ set(TGT_plpgsql_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_scanner.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_sql_validator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_package.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/pl_global_package_runtime_cache.cpp
 )
 
 set(plpgsql_INC 

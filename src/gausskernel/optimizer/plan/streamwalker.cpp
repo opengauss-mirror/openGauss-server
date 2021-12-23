@@ -102,6 +102,49 @@ bool stream_walker(Node* node, void* context)
     return expression_tree_walker(node, (bool (*)())stream_walker, context);
 }
 
+static bool containReplicatedTable(List *rtable)
+{
+    ListCell *lc = NULL;
+    foreach(lc, rtable) {
+        RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+        if (IsLocatorReplicated(rte->locator_type)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void stream_walker_query_insertinto_rep(Query* query, shipping_context *cxt)
+{
+    if (!cxt->current_shippable) {
+        return;
+    }
+    if (query->commandType != CMD_INSERT || query->resultRelation == 0 ||
+        !IsLocatorReplicated(rt_fetch(query->resultRelation, query->rtable)->locator_type)) {
+        return;
+    }
+    ListCell *lc = NULL;
+    int index = 0;
+    foreach(lc, query->rtable) {
+        index++;
+        if (index == query->resultRelation) {
+            continue;
+        }
+        RangeTblEntry *rte = rt_fetch(index, query->rtable);
+        if (rte->rtekind != RTE_SUBQUERY || rte->subquery == NULL || !rte->subquery->hasWindowFuncs) {
+            continue;
+        }
+        if (!containReplicatedTable(rte->subquery->rtable)) {
+            continue;
+        }
+        errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+            NOTPLANSHIPPING_LENGTH,
+            "\"insert into replicated table with select rep table with winfunc\" can not be shipped");
+        securec_check_ss_c(sprintf_rc, "\0", "\0");
+        cxt->current_shippable = false;
+    }
+}
+
 static void stream_walker_query_update(Query* query, shipping_context *cxt)
 {
     /*
@@ -373,6 +416,7 @@ static void stream_walker_query(Query* query, shipping_context *cxt)
     stream_walker_query_having(query, cxt);
     stream_walker_query_window(query, cxt);
 
+    stream_walker_query_insertinto_rep(query, cxt);
     /* mark shippable flag based on rte shippbility */
     stream_walker_finalize_cxt(query, cxt);
 
@@ -703,7 +747,7 @@ static bool table_contain_unsupport_feature(Oid relid, Query* query)
             u_sess->opt_cxt.not_shipping_info->need_log = false;
         }
 
-        /* global temp table could not ship */
+        /* globel temp table could not ship */
         if (rel->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP) {
             sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
                 NOTPLANSHIPPING_LENGTH,

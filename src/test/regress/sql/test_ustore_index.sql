@@ -218,3 +218,30 @@ fetch next from c1;
 rollback;
 
 drop table t;
+
+-- test unique index first for ustore table --
+
+create table t1(c1 int not null, c2 int not null, c3 text, constraint ustore_index primary key (c1)) with (storage_type=USTORE);
+
+insert into t1 values(generate_series(1, 10), generate_series(1, 10));
+
+analyze t1;
+
+set enable_seqscan = on;
+set enable_indexscan = on;
+
+set sql_beta_feature = no_unique_index_first;
+show sql_beta_feature;
+
+explain SELECT c1 FROM t1 WHERE c1 = 50;
+explain SELECT /*+ tablescan(t1) */c1 FROM t1 WHERE c1 = 50;
+explain SELECT /*+ indexonlyscan(t1) */c1 FROM t1 WHERE c1 = 50;
+
+reset sql_beta_feature;
+show sql_beta_feature;
+
+explain SELECT c1 FROM t1 WHERE c1 = 50;
+explain SELECT /*+ tablescan(t1) */c1 FROM t1 WHERE c1 = 50;
+explain SELECT /*+ indexonlyscan(t1) */c1 FROM t1 WHERE c1 = 50;
+
+drop table t1;

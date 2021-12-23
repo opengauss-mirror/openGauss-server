@@ -16,6 +16,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *	src/common/backend/parser/analyze.cpp
  *
@@ -56,6 +57,7 @@
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
 #include "parser/parse_type.h"
+#include "parser/parse_expr.h"
 #include "parser/parsetree.h"
 #include "rewrite/rewriteManip.h"
 #include "rewrite/rewriteRlsPolicy.h"
@@ -1961,7 +1963,6 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
     List* exclRelTlist = NIL;
     UpsertAction action = UPSERT_NOTHING;
     Relation targetrel = pstate->p_target_relation;
-    bool partKeyUpsert = false;
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (targetrel->rd_rel->relhastriggers) {
@@ -1982,6 +1983,12 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
                           "UPDATE.")));
     }
 
+    if (RelationIsSubPartitioned(targetrel)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Subpartition is not supported for INSERT ON DUPLICATE KEY UPDATE.")));
+    }
+
     if (upsertClause->targetList != NIL) {
         pstate->p_is_insert = false;
         action = UPSERT_UPDATE;
@@ -2000,6 +2007,7 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
          * adds have to be reset. markVarForSelectPriv() will add the exact
          * required permissions back.
          */
+
         exclRelTlist = BuildExcludedTargetlist(targetrel, exclRelIndex);
         exclRte->requiredPerms = 0;
         exclRte->selectedCols = NULL;
@@ -2013,7 +2021,6 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
 
         updateTlist = transformTargetList(pstate, upsertClause->targetList);
         updateTlist = transformUpdateTargetList(pstate, updateTlist, upsertClause->targetList, relation);
-
         /* We can't update primary or unique key in upsert, check it here */
 #ifdef ENABLE_MULTIPLE_NODES
         if (IS_PGXC_COORDINATOR && !u_sess->attr.attr_sql.enable_upsert_to_merge) {
@@ -2022,7 +2029,6 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
 #else
         checkUpsertTargetlist(pstate->p_target_relation, updateTlist);
 #endif
-        partKeyUpsert = RELATION_IS_PARTITIONED(targetrel) && targetListHasPartitionKey(updateTlist, targetrel->rd_id);
     }
 
     /* Finally, build DUPLICATE KEY UPDATE [NOTHING | ... ] expression */
@@ -2031,7 +2037,6 @@ static UpsertExpr* transformUpsertClause(ParseState* pstate, UpsertClause* upser
     result->exclRelIndex = exclRelIndex;
     result->exclRelTlist = exclRelTlist;
     result->upsertAction = action;
-    result->partKeyUpsert = partKeyUpsert;
     return result;
 }
 
@@ -2153,6 +2158,30 @@ static int count_rowexpr_columns(ParseState* pstate, Node* expr)
     return -1;
 }
 
+static char* fetchSelectStmtFromCTAS(char* source_text)
+{
+    char* select_pos = strcasestr(source_text, "SELECT");
+    return select_pos;
+}
+
+static bool shouldTransformStartWithStmt(ParseState* pstate, SelectStmt* stmt, Query* selectQuery)
+{
+    /*
+     * Only applicable to START WITH CONNECT BY clauses.
+     */
+    if (stmt->startWithClause == NULL || pstate->p_sourcetext == NULL) {
+        return false;
+    }
+
+    /*
+     * Back up the current select statement to be restored after query re-writing
+     * for cases of START WITH CONNNECT BY under CREATE TABLE AS.
+     */
+    selectQuery->sql_statement = fetchSelectStmtFromCTAS((char*)pstate->p_sourcetext);
+
+    return true;
+}
+
 /*
  * transformSelectStmt -
  *	  transforms a Select Statement
@@ -2167,6 +2196,12 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     ListCell* l = NULL;
 
     qry->commandType = CMD_SELECT;
+
+    if (stmt->startWithClause != NULL) {
+        pstate->p_addStartInfo = true;
+        pstate->p_sw_selectstmt = stmt;
+        pstate->origin_with = (WithClause *)copyObject(stmt->withClause);
+    }
 
     /* process the WITH clause independently of all else */
     if (stmt->withClause) {
@@ -2191,6 +2226,11 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
 
     /* process the FROM clause */
     transformFromClause(pstate, stmt->fromClause, isFirstNode, isCreateView);
+
+    /* transform START WITH...CONNECT BY clause */
+    if (shouldTransformStartWithStmt(pstate, stmt, qry)) {
+        transformStartWith(pstate, stmt, qry);
+    }
 
     /* transform targetlist */
     qry->targetList = transformTargetList(pstate, stmt->targetList);
@@ -2307,6 +2347,14 @@ static Query* transformSelectStmt(ParseState* pstate, SelectStmt* stmt, bool isF
     /* this must be done after collations, for reliable comparison of exprs */
     if (pstate->p_hasAggs || qry->groupClause || qry->groupingSets || qry->havingQual) {
         parseCheckAggregates(pstate, qry);
+    }
+
+    /*
+     * If SelectStmt has been rewrite by startwith/connectby, it should
+     * return as With-Recursive for upper level. So we need to fix fromClause.
+     */
+    if (pstate->p_addStartInfo) {
+        AdaptSWSelectStmt(pstate, stmt);
     }
 
     return qry;

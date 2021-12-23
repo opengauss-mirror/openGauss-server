@@ -7,6 +7,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/index.h
  *
@@ -49,7 +50,6 @@ typedef struct IndexBucketShared {
     Oid heappartid;
     Oid indexpartid;
     slock_t mutex;
-    IndexInfo  indexInfo;
     pg_atomic_uint32 curiter;
     int nparticipants;
     IndexBuildResult indresult;
@@ -165,6 +165,8 @@ extern double IndexBuildUHeapScan(Relation heapRelation,
                          TableScanDesc scan /* set as NULL */);
 extern double* GlobalIndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
                                  IndexBuildCallback callback, void* callbackState);
+extern List* LockAllGlobalIndexes(Relation relation, LOCKMODE lockmode);
+extern void ReleaseLockAllGlobalIndexes(List** indexRelList, LOCKMODE lockmode);
 extern double IndexBuildHeapScanCrossBucket(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
                                             IndexBuildCallback callback, void *callbackState);
 extern double IndexBuildVectorBatchScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
@@ -233,9 +235,11 @@ extern void PartitionNameCallbackForIndexPartition(Oid partitionedRelationOid,
 extern void reindex_partIndex(Relation heapRel,  Partition heapPart, Relation indexRel , Partition indexPart);
 extern bool reindexPartition(Oid relid, Oid partOid, int flags, int reindexType);
 extern void AddGPIForPartition(Oid partTableOid, Oid partOid);
+extern void AddGPIForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
 void AddCBIForPartition(Relation partTableRel, Relation tempTableRel, const List* indexRelList, 
     const List* indexDestOidList);
 extern void DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid);
+extern void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid);
 extern void mergeBTreeIndexes(List* mergingBtreeIndexes, List* srcPartMergeOffset, int2 bktId);
 extern bool RecheckIndexTuple(IndexScanDesc scan, TupleTableSlot *slot);
 extern void SetIndexCreateExtraArgs(IndexCreateExtraArgs* extra, Oid psortOid, bool isPartition, bool isGlobal,

@@ -3627,6 +3627,7 @@ static int parse_filenodemap_file(char* filename)
     rewind(fd);
     if (result != sizeof(int32)) {
         fprintf(stderr, "Reading magic error");
+        fclose(fd);
         return false;
     }
 
@@ -3641,6 +3642,7 @@ static int parse_filenodemap_file(char* filename)
     }
     if ((size_t)relmapSize != result) {
         fprintf(stderr, "Reading error");
+        fclose(fd);
         return false;
     }
 
@@ -3706,6 +3708,7 @@ static int parse_cu_file(char* filename, uint64 offset)
     result = fread(buffer, 1, BLCKSZ, fd);
     if (result != BLCKSZ) {
         fprintf(stderr, "Reading error");
+        fclose(fd);
         return false;
     }
 
@@ -3762,30 +3765,35 @@ static int parse_slot_file(char* filename)
     readBytes = fread(&cp, 1, ReplicationSlotOnDiskConstantSize, fd);
     if (readBytes != ReplicationSlotOnDiskConstantSize) {
         fprintf(stderr, "Reading error");
+        fclose(fd);
         return false;
     }
 
     /* verify magic */
     if (cp.magic != SLOT_MAGIC) {
         fprintf(stderr, "wrong magic");
+        fclose(fd);
         return false;
     }
 
     /* verify version */
     if (cp.version != SLOT_VERSION) {
         fprintf(stderr, "unsupported version");
+        fclose(fd);
         return false;
     }
 
     /* boundary check on length */
     if (cp.length != ReplicationSlotOnDiskDynamicSize) {
         fprintf(stderr, "corrupted length");
+        fclose(fd);
         return false;
     }
 
     readBytes = fread((char*)&cp + ReplicationSlotOnDiskConstantSize, 1, cp.length, fd);
     if (readBytes != cp.length) {
         fprintf(stderr, "Reading error");
+        fclose(fd);
         return false;
     }
 
@@ -3797,6 +3805,7 @@ static int parse_slot_file(char* filename)
 
     if (!EQ_CRC32C(checksum, cp.checksum)) {
         fprintf(stderr, "slot crc error");
+        fclose(fd);
         return false;
     }
 
@@ -3849,6 +3858,7 @@ static int parse_gaussdb_state_file(char* filename)
     readBytes = fread(&state, 1, sizeof(GaussState), fd);
     if (readBytes != sizeof(GaussState)) {
         fprintf(stderr, "Reading error");
+        fclose(fd);
         return false;
     }
 
@@ -3910,6 +3920,7 @@ static int parse_pg_control_file(char* filename)
     readBytes = fread(&ControlFile, 1, sizeof(ControlFileData), fd);
     if (readBytes != sizeof(ControlFileData)) {
         fprintf(stderr, "Reading error");
+        fclose(fd);
         return false;
     }
 
@@ -3920,6 +3931,7 @@ static int parse_pg_control_file(char* filename)
     FIN_CRC32C(crc);
     if (!EQ_CRC32C(crc, ControlFile.crc)) {
         fprintf(stderr, "pg_control crc error");
+        fclose(fd);
         return false;
     }
 
@@ -4041,6 +4053,7 @@ static int parse_clog_file(char* filename)
     while ((nread = fread(buffer, 1, BLCKSZ, fd)) != 0) {
         if (nread < 0) {
             fprintf(stderr, "read file error!\n");
+            fclose(fd);
             return false;
         }
 
@@ -4095,6 +4108,7 @@ static int parse_csnlog_file(char* filename)
     while ((nread = fread(buffer, 1, BLCKSZ, fd)) != 0) {
         if (nread != BLCKSZ) {
             fprintf(stderr, "read file error!\n");
+            fclose(fd);
             return false;
         }
 
@@ -4211,6 +4225,9 @@ static uint16 parse_batch_data_pages(dw_batch_t* curr_head, uint16 page_num)
         GET_REL_PGAENUM(curr_head->page_num));
     page_start = (char*)curr_head + BLCKSZ;
     page_num--;
+    if (curr_head->buftag_ver == HASHBUCKET_TAG) {
+        isHashbucket = true;
+    }
     for (i = 0; i < GET_REL_PGAENUM(curr_head->page_num) && page_num > 0; i++, page_num--) {
         if (isHashbucket) {
             buf_tag = &curr_head->buf_tag[i];
@@ -4222,7 +4239,7 @@ static uint16 parse_batch_data_pages(dw_batch_t* curr_head, uint16 page_num)
                 buf_tag->rnode.bucketNode,
                 buf_tag->blockNum,
                 buf_tag->forkNum);
-            (void)parse_a_page(page_start, buf_tag->blockNum, i, SEG_UNKNOWN);
+            (void)parse_a_page(page_start, buf_tag->blockNum, buf_tag->blockNum % RELSEG_SIZE, SEG_UNKNOWN);
         } else {
             bufTagOrig = &((dw_batch_first_ver *)curr_head)->buf_tag[i];
             fprintf(stdout,
@@ -4232,7 +4249,7 @@ static uint16 parse_batch_data_pages(dw_batch_t* curr_head, uint16 page_num)
                 bufTagOrig->rnode.relNode,
                 bufTagOrig->blockNum,
                 bufTagOrig->forkNum);
-            (void)parse_a_page(page_start, bufTagOrig->blockNum, i, SEG_UNKNOWN);
+            (void)parse_a_page(page_start, bufTagOrig->blockNum, bufTagOrig->blockNum % RELSEG_SIZE, SEG_UNKNOWN);
         }
         page_start += BLCKSZ;
     }
@@ -4425,6 +4442,7 @@ static bool parse_bucket_table(char *head_buf, BlockNumber head, int fd, char *f
         ssize_t nread = pread(fd, buf, BLCKSZ, offset);
         if (nread != BLCKSZ) {
             fprintf(stderr, "Failed to read %s: %s\n", filename, strerror(errno));
+            free(buf);
             return false;
         }
 
@@ -4441,6 +4459,7 @@ static bool parse_bucket_table(char *head_buf, BlockNumber head, int fd, char *f
 
         total_segments += BktMapEntryNumberPerBlock;
     }
+    free(buf);
     return true;
 }
 
@@ -4512,19 +4531,24 @@ static bool parse_dw_single_flush_file(const char* file_name)
     FILE* fd;
     size_t result;
     dw_single_flush_item *item = (dw_single_flush_item*)malloc(sizeof(dw_single_flush_item) *
-        DW_SINGLE_DIRTY_PAGE_NUM);
-    uint16 batch_size = SINGLE_BLOCK_TAG_NUM;
-    uint16 blk_num = (DW_SINGLE_DIRTY_PAGE_NUM / batch_size) + (DW_SINGLE_DIRTY_PAGE_NUM % batch_size == 0 ? 0 : 1);
-    char *unaligned_buf = (char *)malloc((blk_num + 1 + 1) * BLCKSZ);
+        DW_SECOND_DATA_PAGE_NUM);
+    uint16 blk_num = DW_SECOND_BUFTAG_PAGE_NUM;
+    char *unaligned_buf = (char *)malloc((blk_num + 1 + 1 + 1) * BLCKSZ);
     char *buf = (char *)TYPEALIGN(BLCKSZ, unaligned_buf);
     char *file_head = buf;
+    buf = buf + BLCKSZ;
+    char *second_file_head = buf;
     buf = buf + BLCKSZ;
     char *item_buf = buf;
     char *unaligned_buf2 = (char *)malloc(BLCKSZ + BLCKSZ); /* one more BLCKSZ for alignment */
     char *dw_block = (char *)TYPEALIGN(BLCKSZ, unaligned_buf2);
+    PageHeader pghr = NULL;
 
     if (NULL == (fd = fopen(file_name, "rb"))) {
         fprintf(stderr, "%s: %s\n", file_name, gs_strerror(errno));
+        free(item);
+        free(unaligned_buf);
+        free(unaligned_buf2);
         return false;
     }
 
@@ -4539,7 +4563,11 @@ static bool parse_dw_single_flush_file(const char* file_name)
         fclose(fd);
         return false;
     }
-    fseek(fd, BLCKSZ, SEEK_SET);
+
+    fseek(fd, (1 + DW_FIRST_DATA_PAGE_NUM) * BLCKSZ, SEEK_SET);
+    result = fread(second_file_head, 1, BLCKSZ, fd);
+    
+    fseek(fd, (1 + DW_FIRST_DATA_PAGE_NUM + 1) * BLCKSZ, SEEK_SET);
     result = fread(item_buf, 1, blk_num * BLCKSZ, fd);
     if (blk_num * BLCKSZ != result) {
         fprintf(stderr, "Reading error");
@@ -4553,50 +4581,17 @@ static bool parse_dw_single_flush_file(const char* file_name)
     int offset = 0;
     int num = 0;
     dw_single_flush_item *temp = NULL;
-    uint16 head_dwn = ((dw_file_head_t*)file_head)->head.dwn;
+    dw_file_head_t* head = (dw_file_head_t*)file_head;
+    uint16 head_dwn = head->head.dwn;
+    dw_first_flush_item flush_item;
+    errno_t rc = EOK;
 
-    for (int i = 0; i < blk_num; i++) {
-        for (int j = i * batch_size; j < (i + 1) * batch_size; j++) {
-            offset = BLCKSZ * i + j % SINGLE_BLOCK_TAG_NUM * sizeof(dw_single_flush_item);
-            temp = (dw_single_flush_item*)((char*)buf + offset);
-            fprintf(stdout,
-                "flush_item[data_page_idx %u, dwn %u, crc %u]\n",
-                temp->data_page_idx,
-                temp->dwn,
-                temp->crc);
-            if (!dw_verify_item(temp, head_dwn)) {
-                fprintf(stdout, "flush item check failed, not need recovery \n");
-            } else {
-                item[num].data_page_idx = temp->data_page_idx;
-                item[num].dwn = temp->dwn;
-                item[num].buf_tag = temp->buf_tag;
-                item[num].crc = temp->crc;
-                num++;
-            }
-            if (temp->buf_tag.rnode.bucketNode == -1) {
-                fprintf(stdout,
-                    "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
-                    temp->buf_tag.rnode.spcNode,
-                    temp->buf_tag.rnode.dbNode,
-                    temp->buf_tag.rnode.relNode,
-                    temp->buf_tag.blockNum,
-                    temp->buf_tag.forkNum);
-            } else {
-                fprintf(stdout,
-                    "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
-                    temp->buf_tag.rnode.spcNode,
-                    temp->buf_tag.rnode.dbNode,
-                    temp->buf_tag.rnode.relNode,
-                    temp->buf_tag.rnode.bucketNode,
-                    temp->buf_tag.blockNum,
-                    temp->buf_tag.forkNum);
-            }
-        }
-    }
+    fprintf(stdout, "first version page: \n");
+    fprintf(stdout, "file_head info: dwn is %u, start is %u \n", head->head.dwn, head->start);
 
-    for (int i = 0; i < num; i++) {
-        int idx = item[i].data_page_idx;
-        fseek(fd, (162 + idx) * BLCKSZ, SEEK_SET);
+    for (uint16 i = head->start; i < DW_FIRST_DATA_PAGE_NUM; i++) {
+        offset = (i + 1) * BLCKSZ;  /* need skip the file head */
+        fseek(fd, offset, SEEK_SET);
         result = fread(dw_block, 1, BLCKSZ, fd);
         if (BLCKSZ != result) {
             fprintf(stderr, "Reading error");
@@ -4606,25 +4601,73 @@ static bool parse_dw_single_flush_file(const char* file_name)
             fclose(fd);
             return false;
         }
-        if (temp->buf_tag.rnode.bucketNode == -1) {
-                fprintf(stdout,
-                    "buf_tag[rel %u/%u/%u blk %u fork %d]\n",
-                    item[i].buf_tag.rnode.spcNode,
-                    item[i].buf_tag.rnode.dbNode,
-                    item[i].buf_tag.rnode.relNode,
-                    item[i].buf_tag.blockNum,
-                    item[i].buf_tag.forkNum);
-            } else {
-                fprintf(stdout,
-                    "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
-                    item[i].buf_tag.rnode.spcNode,
-                    item[i].buf_tag.rnode.dbNode,
-                    item[i].buf_tag.rnode.relNode,
-                    item[i].buf_tag.rnode.bucketNode,
-                    item[i].buf_tag.blockNum,
-                    item[i].buf_tag.forkNum);
+        pghr = (PageHeader)dw_block;
+        rc = memcpy_s(&flush_item, sizeof(dw_first_flush_item), dw_block + pghr->pd_lower, sizeof(dw_first_flush_item));
+        securec_check(rc, "\0", "\0");
+        fprintf(stdout,
+                "dwn is %u, buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
+                flush_item.dwn,
+                flush_item.buf_tag.rnode.spcNode,
+                flush_item.buf_tag.rnode.dbNode,
+                flush_item.buf_tag.rnode.relNode,
+                flush_item.buf_tag.rnode.bucketNode,
+                flush_item.buf_tag.blockNum,
+                flush_item.buf_tag.forkNum);
+
+        if (CheckPageZeroCases(pghr)) {
+            uint16 blkno = flush_item.buf_tag.blockNum;
+            uint16 checksum = pg_checksum_page((char*)dw_block, blkno);
+            if (checksum != pghr->pd_checksum) {
+                fprintf(stdout, "page checksum failed \n");
             }
-        (void)parse_a_page(dw_block, item[i].buf_tag.blockNum, item[i].buf_tag.blockNum % 131072, SEG_UNKNOWN);
+        }
+        (void)parse_a_page(dw_block, flush_item.buf_tag.blockNum, flush_item.buf_tag.blockNum % RELSEG_SIZE, SEG_UNKNOWN);
+
+    }
+
+    head = (dw_file_head_t*)second_file_head;
+    head_dwn = head->head.dwn;
+    fprintf(stdout, "second version page: \n");
+    fprintf(stdout, "file_head info: dwn is %u, start is %u \n", head->head.dwn, head->start);
+
+    for (uint16 i = head->start; i < DW_SECOND_DATA_PAGE_NUM; i++) {
+        offset = i * sizeof(dw_single_flush_item);
+        temp = (dw_single_flush_item*)((char*)buf + offset);
+        fprintf(stdout, "flush_item[data_page_idx %u, dwn %u, crc %u]\n",
+            temp->data_page_idx, temp->dwn, temp->crc);
+        if (dw_verify_item(temp, head_dwn)) {
+            item[num].data_page_idx = temp->data_page_idx;
+            item[num].dwn = temp->dwn;
+            item[num].buf_tag = temp->buf_tag;
+            item[num].crc = temp->crc;
+            num++;
+        } else {
+            fprintf(stdout, "flush item check failed, not need recovery \n");
+        }
+    }
+
+    for (int i = 0; i < num; i++) {
+        int idx = item[i].data_page_idx;
+        fseek(fd, (DW_SECOND_DATA_START_IDX + idx) * BLCKSZ, SEEK_SET);
+        result = fread(dw_block, 1, BLCKSZ, fd);
+        if (BLCKSZ != result) {
+            fprintf(stderr, "Reading error");
+            free(item);
+            free(unaligned_buf);
+            free(unaligned_buf2);
+            fclose(fd);
+            return false;
+        }
+
+        fprintf(stdout,
+            "buf_tag[rel %u/%u/%u/%d blk %u fork %d]\n",
+            item[i].buf_tag.rnode.spcNode,
+            item[i].buf_tag.rnode.dbNode,
+            item[i].buf_tag.rnode.relNode,
+            item[i].buf_tag.rnode.bucketNode,
+            item[i].buf_tag.blockNum,
+            item[i].buf_tag.forkNum);
+        (void)parse_a_page(dw_block, item[i].buf_tag.blockNum, item[i].buf_tag.blockNum % RELSEG_SIZE, SEG_UNKNOWN);
     }
 
     free(item);

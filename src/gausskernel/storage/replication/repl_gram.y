@@ -49,13 +49,13 @@
 
 %}
 
-%pure-parser
+%define api.pure
 %parse-param {replication_scanner_yyscan_t yyscanner}
 %lex-param   {replication_scanner_yyscan_t yyscanner}
 %locations
 
 %expect 0
-%name-prefix="replication_yy"
+%name-prefix "replication_yy"
 
 %union {
 		replication_scanner_YYSTYPE yy_core;
@@ -89,6 +89,8 @@
 %token K_NOWAIT
 %token K_BUILDSTANDBY
 %token K_OBSMODE
+%token K_COPYSECUREFILE
+%token K_NEEDUPGRADEFILE
 %token K_WAL
 %token K_TABLESPACE_MAP
 %token K_DATA
@@ -220,7 +222,8 @@ identify_az:
 			;
 
 /*
- * BASE_BACKUP [LABEL '<label>'] [PROGRESS] [FAST] [WAL] [NOWAIT] [BUILDSTANDBY] [OBSMODE] [TABLESPACE_MAP]
+ * BASE_BACKUP [LABEL '<label>'] [PROGRESS] [FAST] [WAL] [NOWAIT] [BUILDSTANDBY] [OBSMODE] [COPYSECUREFILE] 
+ * [COPYUPGRADEFILE] [TABLESPACE_MAP]
  */
 base_backup:
 			K_BASE_BACKUP base_backup_opt_list
@@ -265,6 +268,16 @@ base_backup_opt:
 				  $$ = makeDefElem("buildstandby",
 				  		   (Node *)makeInteger(TRUE));
 				}
+			| K_COPYSECUREFILE
+                                {
+                                  $$ = makeDefElem("copysecurefile",
+                                                   (Node *)makeInteger(TRUE));
+                                }
+                        | K_NEEDUPGRADEFILE
+                                {
+                                  $$ = makeDefElem("needupgradefile",
+                                                   (Node *)makeInteger(TRUE));
+                                }
                         | K_OBSMODE
                                 {
                                   $$ = makeDefElem("obsmode",
@@ -272,8 +285,8 @@ base_backup_opt:
                                 }
 			| K_TABLESPACE_MAP
 				{
-					$$ = makeDefElem("tablespace_map",
-							(Node *)makeInteger(TRUE));
+			          $$ = makeDefElem("tablespace_map",
+				                   (Node *)makeInteger(TRUE));
 				}
 			;
 

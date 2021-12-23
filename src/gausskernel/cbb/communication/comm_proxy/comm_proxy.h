@@ -455,9 +455,11 @@ typedef struct CommWaitPollParam {
 
     int caller(Sys_poll fn, unsigned long int reqid = 0) {
         int ret = fn(s_fdarray, s_nfds, s_timeout);
-        ereport(DEBUG5, (errmodule(MOD_COMM_PROXY),
-            errmsg("%s reqid[%016lu] sockreq_poll: poll (%lu) fds, ret:[%d], errno:%d, %m",
-            t_thrd.proxy_cxt.identifier, reqid, s_nfds, ret, errno)));
+
+    /*
+     * comm_poll is only called in the PM thread and involved frequent interrupt signal response, so,
+     * there is no need for printing log debugging information.
+     */
 
         return ret;
     }

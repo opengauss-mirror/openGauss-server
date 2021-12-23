@@ -15,7 +15,7 @@ ALTER GROUP group_name
 ALTER GROUP group_name
     DROP USER user_name [, ... ];
 ALTER GROUP group_name
-   RENAME TO new_name;
+    RENAME TO new_name;
 </synopsis>
 </refsynopsisdiv>
 </refentry>

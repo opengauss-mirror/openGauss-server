@@ -1,4 +1,6 @@
 ---RETURN---
+create database pl_test_func_out DBCOMPATIBILITY 'pg';
+\c pl_test_func_out;
 SET CHECK_FUNCTION_BODIES TO ON;
 --default return out arg. not supported in A db
 CREATE OR REPLACE FUNCTION test_return( i in integer, j out integer) 
@@ -561,7 +563,7 @@ return 0;
 END;
 $$LANGUAGE plpgsql;
 call test_assign_func1();
-INFO:  MYCHAR3 is <NULL>
+INFO:  MYCHAR3 is 
  test_assign_func1 
 -------------------
                  0
@@ -1159,7 +1161,7 @@ END;
 /**function body END**/
 $$LANGUAGE plpgsql;
 call test_assign_func1();
-INFO:  MYCHAR3 is <NULL>
+INFO:  MYCHAR3 is 
  test_assign_func1 
 -------------------
                  0
@@ -1365,3 +1367,5 @@ CONTEXT:  PL/pgSQL function pro_cursor_c011(integer)
 ERROR:  control reached end of function without RETURN
 CONTEXT:  PL/pgSQL function pro_cursor_c012(integer)
 SET CHECK_FUNCTION_BODIES TO OFF;
+\c regression;
+drop database IF EXISTS pl_test_func_out;

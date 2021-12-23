@@ -115,6 +115,12 @@ XLogRecParseState *xact_redo_rmbktlist_parse_to_block(XLogReaderState *record, X
         ColFileNode node;
         ColFileNodeCopy(&node, colFileNodeRel);
         Assert(!IsValidColForkNum(node.forknum));
+
+        if (IsSegmentFileNode(node.filenode)) {
+            SMgrRelation reln = smgropen(node.filenode, InvalidBackendId);
+            smgrclose(reln);
+        }
+
         if (!RelFileNodeRelEquals(node.filenode, preRnode)) {
             newLoop = true;
             if (firstLoop && preRnode.spcNode != InvalidOid) {
@@ -140,13 +146,12 @@ XLogRecParseState *xact_redo_rmbktlist_parse_to_block(XLogReaderState *record, X
             return NULL;
         }
 
-        
         RelFileNodeForkNum filenode = RelFileNodeForkNumFill(&(node.filenode), InvalidBackendId, MAIN_FORKNUM,
                                                              InvalidBlockNumber);
         XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
 
-        uint32 *bucketList = (uint32 *)palloc(BktBitMaxMapCnt);
-        errno_t err = memcpy_s(bucketList, BktBitMaxMapCnt, bitmap, BktBitMaxMapCnt);
+        uint32 *bucketList = (uint32 *)palloc(sizeof(bitmap));
+        errno_t err = memcpy_s(bucketList, sizeof(bitmap), bitmap, sizeof(bitmap));
         securec_check(err, "", "");
 
         XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_BKTLIST,
@@ -199,6 +204,11 @@ XLogRecParseState *xact_redo_rmddl_parse_to_block(XLogReaderState *record, XLogR
                 XLogRecSetBlockCommonState(record, BLOCK_DATA_DDL_TYPE, filenode, blockstate);
                 XLogRecSetBlockDdlState(&(blockstate->blockparse.extra_rec.blockddlrec), BLOCK_DDL_DROP_RELNODE, false,
                                         NULL, node.ownerid);
+
+                if (IsSegmentFileNode(node.filenode)) {
+                    SMgrRelation reln = smgropen(node.filenode, InvalidBackendId);
+                    smgrclose(reln);
+                }
             }
         } else {
             if (SUPPORT_COLUMN_BATCH) {

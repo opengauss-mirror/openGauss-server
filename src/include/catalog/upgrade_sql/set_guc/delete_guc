@@ -12,4 +12,8 @@ comm_tcp_mode datanode
 comm_usable_memory datanode
 minimum_pool_size datanode
 pooler_maximum_idle_time datanode
+enable_twophase_commit datanode
+twophase_clean_workers datanode
+bgwriter_thread_num datanode
+gds_debug_mod datanode
 unique_sql_clean_ratio datanode

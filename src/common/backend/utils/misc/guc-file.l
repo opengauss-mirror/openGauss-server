@@ -46,7 +46,6 @@ enum {
 };
 
 /* flex fails to supply a prototype for yylex, so provide one */
-/*int GUC_yylex(void);*/
 int GUC_yylex(void * parse_scan);
 
 
@@ -291,7 +290,7 @@ ProcessConfigFile(GucContext context)
 		int		scres;
 
 		/* In SIGHUP cases in the postmaster, we want to report changes */
-		if (context == PGC_SIGHUP && !IsUnderPostmaster)
+		if (context == PGC_SIGHUP && (!IsUnderPostmaster || (strcmp(item->name, "upgrade_mode") == 0 && t_thrd.proc != NULL)))
 		{
 			const char *preval = GetConfigOption(item->name, true, false);
 

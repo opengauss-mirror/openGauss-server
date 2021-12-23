@@ -893,8 +893,9 @@ static bool pqSaveMessageField(PGconn* conn, PGMessageField *pfield, const char 
                 return false;
             }
             size_t plaintextSize(0);
-            bool ret = RawValues::get_unprocessed_data(conn->client_logic->rawValuesForReplace, processedValueStart,
-                plaintext, plaintextSize);
+            bool ret = RawValues::get_unprocessed_data(&(conn->client_logic->raw_values_for_post_query),
+                                                       processedValueStart,
+                                                       plaintext, plaintextSize);
             /* place back the removed char (it was removed for the null terminated \0) */
             processedValueStart[processedValueSize] = valueEofChar;
 
@@ -931,6 +932,7 @@ static bool pqSaveMessageField(PGconn* conn, PGMessageField *pfield, const char 
             break;
         }
     }
+    conn->client_logic->raw_values_for_post_query.clear();
     return isProcessedMessage;
 }
 #endif
@@ -1107,8 +1109,9 @@ int pqRowProcessor(PGconn* conn, const char** errmsgp)
                 is_encrypted_dat = is_clientlogic_datatype(res->attDescs[i].typid);
                 size_t length = (size_t)clen;
                 if (is_encrypted_dat) {
+                    ProcessStatus process_status = ONLY_VALUE;
                     dec_dat_res = ValuesProcessor::deprocess_value(conn, (unsigned char *)columns[i].value, length,
-                        res->attDescs[i].atttypmod, res->attDescs[i].format, &deProcessed, length, false);
+                        res->attDescs[i].atttypmod, res->attDescs[i].format, &deProcessed, length, process_status);
                     if (dec_dat_res == DEC_DATA_SUCCEED) {
                         clen = (int)length;
                     } else if (dec_dat_res == DEC_DATA_ERR) {

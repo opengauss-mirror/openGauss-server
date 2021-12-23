@@ -192,9 +192,8 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
      * security hole.
      */
     if (catalog == ForeignTableRelationId && !superuser())
-            ereport(ERROR,
-                            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                             errmsg("only superuser can change options of a file_fdw foreign table")));
+        ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+            errmsg("only superuser can change options of a file_fdw foreign table")));
 
     /*
      * Check that only options supported by file_fdw, and allowed for the
@@ -242,7 +241,8 @@ Datum file_fdw_validator(PG_FUNCTION_ARGS)
         } else if (strcmp(def->defname, "format") == 0) {
             char* fmt = defGetString(def);
             if (strcasecmp(fmt, "fixed") == 0) {
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("file_fdw doesn't support fixed option in format")));
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                    errmsg("file_fdw doesn't support fixed option in format")));
             }
             other_options = lappend(other_options, def);
         } else {

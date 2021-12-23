@@ -10,6 +10,7 @@ list(APPEND TGT_transam_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/multixact.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/redo_statistic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmgr.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/seg_double_write.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/slru.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/transam.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/twophase.cpp

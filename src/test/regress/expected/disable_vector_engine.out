@@ -520,6 +520,38 @@ SELECT COUNT(8)
 -- unsupported feature in ctelist
 EXPLAIN (COSTS OFF)
 INSERT INTO store(s_store_sk)
+WITH v1 as materialized (
+	SELECT c_customer_sk,
+	SUM(c_customer_sk) over
+		(PARTITION BY c_customer_sk, c_customer_id)
+		avg_customer_sk,
+	STDDEV_SAMP(c_customer_sk) stdev
+	FROM customer
+	GROUP BY c_customer_sk, c_customer_id),
+	v2 as materialized (
+	SELECT v1.c_customer_sk FROM v1)
+	SELECT * FROM v2;
+                                                    QUERY PLAN                                                    
+------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Insert on store
+         ->  Vector Adapter
+               ->  Subquery Scan on "*SELECT*"
+                     ->  CTE Scan on v2
+                           CTE v1
+                             ->  Row Adapter
+                                   ->  Vector WindowAgg
+                                         ->  Vector Sort
+                                               Sort Key: customer.c_customer_sk, customer.c_customer_id
+                                               ->  Vector Hash Aggregate
+                                                     Group By Key: customer.c_customer_sk, customer.c_customer_id
+                                                     ->  CStore Scan on customer
+                           CTE v2
+                             ->  CTE Scan on v1
+(15 rows)
+
+EXPLAIN (COSTS OFF)
+INSERT INTO store(s_store_sk)
 WITH v1 as(
 	SELECT c_customer_sk,
 	SUM(c_customer_sk) over
@@ -537,7 +569,7 @@ WITH v1 as(
    ->  Vector Insert on store
          ->  Vector Adapter
                ->  Subquery Scan on "*SELECT*"
-                     ->  CTE Scan on v2
+                     ->  CTE Scan on v1
                            CTE v1
                              ->  Row Adapter
                                    ->  Vector WindowAgg
@@ -545,6 +577,36 @@ WITH v1 as(
                                                Sort Key: customer.c_customer_sk, customer.c_customer_id
                                                ->  Vector Hash Aggregate
                                                      Group By Key: customer.c_customer_sk, customer.c_customer_id
+                                                     ->  CStore Scan on customer
+(13 rows)
+
+explain (costs off)
+INSERT INTO store(s_store_sk)
+WITH v1 as materialized (
+        SELECT c_customer_sk,
+        SUM(c_customer_sk) over
+                (PARTITION BY c_customer_sk, c_customer_id)
+                avg_customer_sk,
+        STDDEV_pop(c_customer_sk) stdev
+        FROM customer
+        GROUP BY c_customer_sk, c_customer_id),
+        v2 as materialized (
+        SELECT v1.c_customer_sk FROM v1)
+        SELECT * FROM v2;
+                                                 QUERY PLAN                                                 
+------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   ->  Vector Insert on store
+         ->  Vector Adapter
+               ->  Subquery Scan on "*SELECT*"
+                     ->  CTE Scan on v2
+                           CTE v1
+                             ->  WindowAgg
+                                   ->  Sort
+                                         Sort Key: customer.c_customer_sk, customer.c_customer_id
+                                         ->  HashAggregate
+                                               Group By Key: customer.c_customer_sk, customer.c_customer_id
+                                               ->  Row Adapter
                                                      ->  CStore Scan on customer
                            CTE v2
                              ->  CTE Scan on v1
@@ -569,7 +631,7 @@ WITH v1 as(
    ->  Vector Insert on store
          ->  Vector Adapter
                ->  Subquery Scan on "*SELECT*"
-                     ->  CTE Scan on v2
+                     ->  CTE Scan on v1
                            CTE v1
                              ->  WindowAgg
                                    ->  Sort
@@ -578,9 +640,7 @@ WITH v1 as(
                                                Group By Key: customer.c_customer_sk, customer.c_customer_id
                                                ->  Row Adapter
                                                      ->  CStore Scan on customer
-                           CTE v2
-                             ->  CTE Scan on v1
-(15 rows)
+(13 rows)
 
 ----
 --- Drop Tables

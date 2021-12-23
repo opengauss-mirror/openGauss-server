@@ -74,7 +74,7 @@ public:
     bool CheckNumaDistribute(int numaNodeNum) const;
     CPUBindType GetCpuBindType() const;
     void ShutDownListeners(bool forceWait);
-    void ShutDownScheduler(bool forceWait);
+    void ShutDownScheduler(bool forceWait, bool noAdjust);
     inline ThreadPoolSessControl* GetSessionCtrl()
     {
         return m_sessCtrl;
@@ -94,6 +94,7 @@ public:
     }
 	
 	void BindThreadToAllAvailCpu(ThreadId thread) const;
+    void EnableAdjustPool();
 
 private:
     ThreadPoolGroup* FindThreadGroupWithLeastSession();

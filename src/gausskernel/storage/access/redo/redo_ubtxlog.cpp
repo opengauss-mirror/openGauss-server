@@ -137,10 +137,10 @@ void UBTreeXlogInsertOperatorPage(RedoBufferInfo *buffer, void *recorddata, void
     PageSetLSN(page, buffer->lsn);
 }
 
-void UBTreeXlogSplitOperatorRightpage(RedoBufferInfo *rbuf, void *recorddata, BlockNumber leftsib, BlockNumber rnext,
-                                     void *blkdata, Size datalen)
+void UBTreeXlogSplitOperatorRightPage(RedoBufferInfo *rbuf, void *recorddata, BlockNumber leftsib, BlockNumber rnext,
+                                     void *blkdata, Size datalen, bool hasOpaque)
 {
-    xl_btree_split *xlrec = (xl_btree_split *)recorddata;
+    xl_ubtree_split *xlrec = (xl_ubtree_split *)recorddata;
     bool isleaf = (xlrec->level == 0);
     Page rpage = rbuf->pageinfo.page;
     char *datapos = (char *)blkdata;
@@ -149,11 +149,18 @@ void UBTreeXlogSplitOperatorRightpage(RedoBufferInfo *rbuf, void *recorddata, Bl
     UBTreePageInit(rpage, rbuf->pageinfo.pagesize);
     ropaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(rpage);
 
-    ropaque->btpo_prev = leftsib;
-    ropaque->btpo_next = rnext;
-    ropaque->btpo.level = xlrec->level;
-    ropaque->btpo_flags = isleaf ? BTP_LEAF : 0;
-    ropaque->btpo_cycleid = 0;
+    if (hasOpaque) {
+        if (xlrec->opaqueVersion != UBTREE_OPAQUE_VERSION_RCR) {
+            ereport(ERROR, (errmsg("unknown btree opaque version")));
+        }
+        *ropaque = xlrec->ropaque;
+    } else {
+        ropaque->btpo_prev = leftsib;
+        ropaque->btpo_next = rnext;
+        ropaque->btpo.level = xlrec->level;
+        ropaque->btpo_flags = isleaf ? BTP_LEAF : 0;
+        ropaque->btpo_cycleid = 0;
+    }
 
     UBTreeRestorePage(rpage, datapos, (int)datalen);
 
@@ -171,9 +178,9 @@ void UBTreeXlogSplitOperatorNextpage(RedoBufferInfo *buffer, BlockNumber rightsi
 }
 
 void UBTreeXlogSplitOperatorLeftpage(RedoBufferInfo *lbuf, void *recorddata, BlockNumber rightsib, bool onleft,
-                                    void *blkdata, Size datalen)
+                                    void *blkdata, Size datalen, bool hasOpaque)
 {
-    xl_btree_split *xlrec = (xl_btree_split *)recorddata;
+    xl_ubtree_split *xlrec = (xl_ubtree_split *)recorddata;
     bool isleaf = (xlrec->level == 0);
     Page lpage = lbuf->pageinfo.page;
     char *datapos = (char *)blkdata;
@@ -258,13 +265,20 @@ void UBTreeXlogSplitOperatorLeftpage(RedoBufferInfo *lbuf, void *recorddata, Blo
     PageRestoreTempPage(newlpage, lpage);
 
     /* Fix opaque fields */
-    lopaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(lpage);
-    lopaque->btpo_flags = BTP_INCOMPLETE_SPLIT;
-    if (isleaf) {
-        lopaque->btpo_flags |= BTP_LEAF;
+    if (hasOpaque) {
+        if (xlrec->opaqueVersion != UBTREE_OPAQUE_VERSION_RCR) {
+            ereport(ERROR, (errmsg("unknown btree opaque version")));
+        }
+        *lopaque = xlrec->lopaque;
+    } else {
+        lopaque = (UBTPageOpaqueInternal)PageGetSpecialPointer(lpage);
+        lopaque->btpo_flags = BTP_INCOMPLETE_SPLIT;
+        if (isleaf) {
+            lopaque->btpo_flags |= BTP_LEAF;
+        }
+        lopaque->btpo_next = rightsib;
+        lopaque->btpo_cycleid = 0;
     }
-    lopaque->btpo_next = rightsib;
-    lopaque->btpo_cycleid = 0;
 
     PageSetLSN(lpage, lbuf->lsn);
 }
@@ -602,7 +616,7 @@ XLogRecParseState *UBTreeXlogInsertParseBlock(XLogReaderState *record, uint32 *b
 
 static XLogRecParseState *UBTreeXlogSplitParseBlock(XLogReaderState *record, uint32 *blocknum)
 {
-    xl_btree_split *xlrec = (xl_btree_split *)XLogRecGetData(record);
+    xl_ubtree_split *xlrec = (xl_ubtree_split *)XLogRecGetData(record);
     bool isleaf = (xlrec->level == 0);
     BlockNumber leftsib = InvalidBlockNumber;
     BlockNumber rightsib = InvalidBlockNumber;
@@ -1093,7 +1107,8 @@ static void UBTreeXlogSplitBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
         rnext = XLogBlockDataGetAuxiBlock1(datadecode);
         leftsib = XLogBlockDataGetAuxiBlock2(datadecode);
 
-        UBTreeXlogSplitOperatorRightpage(bufferinfo, (void *)maindata, leftsib, rnext, (void *)blkdata, blkdatalen);
+        UBTreeXlogSplitOperatorRightPage(bufferinfo, (void *)maindata, leftsib, rnext, (void *)blkdata,
+            blkdatalen, true);
         MakeRedoBufferDirty(bufferinfo);
     } else {
         XLogRedoAction action;
@@ -1111,7 +1126,7 @@ static void UBTreeXlogSplitBlock(XLogBlockHead *blockhead, XLogBlockDataParse *b
 
                 blkdata = XLogBlockDataGetBlockData(datadecode, &blkdatalen);
                 UBTreeXlogSplitOperatorLeftpage(bufferinfo, (void *)maindata, rightsib, onleft, (void *)blkdata,
-                    blkdatalen);
+                    blkdatalen, true);
             } else if (XLogBlockDataGetBlockId(datadecode) == BTREE_SPLIT_RIGHTNEXT_BLOCK_NUM) {
                 /* right next */
                 UBTreeXlogSplitOperatorNextpage(bufferinfo, rightsib);
@@ -1273,8 +1288,6 @@ void UBTreeXlogPrunePageOperatorPage(RedoBufferInfo* buffer, void* recorddata)
     /* Set up flags and try to repair page  fragmentation */
     UBTreePagePruneExecute(page, (OffsetNumber *)(((char *)xlrec) + SizeOfUBTreePrunePage), xlrec->count, NULL);
 
-    /* We won't execute freezing operation only, until the number of tuples that need to be frozen reaches 8 */
-
     UBTreePageRepairFragmentation(page);
 
     /*
@@ -1301,6 +1314,9 @@ void UBTree2XlogShiftBaseOperatorPage(RedoBufferInfo* buffer, void* recorddata)
         }
     }
 
+    /* reset pd_prune_xid for prune hint */
+    ((PageHeader)page)->pd_prune_xid = InvalidTransactionId;
+
     /* Iterate over page items */
     OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
     for (OffsetNumber offnum = P_FIRSTDATAKEY(opaque); offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
@@ -1309,7 +1325,7 @@ void UBTree2XlogShiftBaseOperatorPage(RedoBufferInfo* buffer, void* recorddata)
         UstoreIndexXid uxid;
 
         itemid = PageGetItemId(page, offnum);
-        if (!ItemIdIsNormal(itemid)) {
+        if (!ItemIdHasStorage(itemid)) {
             continue;
         }
 
@@ -1385,10 +1401,19 @@ void UBTree2XlogFreezeOperatorPage(RedoBufferInfo* buffer, void* recorddata)
         UstoreIndexXid uxid = (UstoreIndexXid) UstoreIndexTupleGetXid(itup);
         /* freeze xmin */
         uxid->xmin = FrozenTransactionId;
-        /* remove xmax if necessary */
+    }
+    /* Iterate over page items, remove xmax if necessary */
+    OffsetNumber maxoff = PageGetMaxOffsetNumber(page);
+    for (OffsetNumber offnum = P_FIRSTDATAKEY(opaque); offnum <= maxoff; offnum = OffsetNumberNext(offnum)) {
+        ItemId itemid = PageGetItemId(page, offnum);
+        if (!ItemIdHasStorage(itemid)) {
+            continue;
+        }
+        IndexTuple itup = (IndexTuple) PageGetItem(page, itemid);
+        UstoreIndexXid uxid = (UstoreIndexXid)UstoreIndexTupleGetXid(itup);
         if (TransactionIdIsNormal(uxid->xmax)) {
             TransactionId xmax = ShortTransactionIdToNormal(opaque->xid_base, uxid->xmax);
-            if (xmax <= xlrec->latestRemovedXid) {
+            if (TransactionIdPrecedes(xmax, xlrec->oldestXmin)) {
                 uxid->xmax = InvalidTransactionId; /* aborted */
             }
         }

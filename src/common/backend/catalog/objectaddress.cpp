@@ -209,6 +209,7 @@ ObjectAddress get_object_address(
         switch (objtype) {
             case OBJECT_INDEX:
             case OBJECT_SEQUENCE:
+            case OBJECT_LARGE_SEQUENCE:
             case OBJECT_TABLE:
             case OBJECT_VIEW:
             case OBJECT_CONTQUERY:
@@ -590,6 +591,12 @@ static ObjectAddress get_relation_by_qualified_name(
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("\"%s\" is not a sequence", RelationGetRelationName(relation))));
             break;
+        case OBJECT_LARGE_SEQUENCE:
+            if (relation->rd_rel->relkind != RELKIND_LARGE_SEQUENCE)
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("\"%s\" is not a large sequence", RelationGetRelationName(relation))));
+            break;
         case OBJECT_TABLE:
             if (relation->rd_rel->relkind != RELKIND_RELATION)
                 ereport(ERROR,
@@ -805,6 +812,18 @@ static ObjectAddress get_object_address_type(ObjectType objtype, List* objname, 
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a domain", TypeNameToString(typname))));
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (IsPackageDependType(typeTypeId(tup), InvalidOid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                errmodule(MOD_PLSQL),
+                errmsg("Not allowed to drop type \"%s\"", TypeNameToString(typname)),
+                errdetail("\"%s\" is a package or procedure type", TypeNameToString(typname)),
+                errcause("feature not supported"),
+                erraction("check type name")));
+    }
+#endif
+
     ReleaseSysCache(tup);
 
     return address;
@@ -893,6 +912,7 @@ void check_object_ownership(
     switch (objtype) {
         case OBJECT_INDEX:
         case OBJECT_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
         case OBJECT_CONTQUERY:
@@ -1047,7 +1067,7 @@ void check_object_ownership(
             break;
         case OBJECT_DIRECTORY:
             if (!pg_directory_ownercheck(address.objectId, roleid))
-                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, NameListToString(objname));
+                aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_DIRECTORY, NameListToString(objname));
             break;
         case OBJECT_PUBLICATION:
             if (!pg_publication_ownercheck(address.objectId, roleid)) {

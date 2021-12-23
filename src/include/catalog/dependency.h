@@ -8,6 +8,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/dependency.h
  *
@@ -232,7 +233,8 @@ extern void performDeletion(const ObjectAddress *object,
 
 extern void performMultipleDeletions(const ObjectAddresses *objects,
                                      DropBehavior behavior,
-                                     uint32 flags);
+                                     uint32 flags,
+                                     bool isPkgDropTypes = false);
 
 extern void deleteWhatDependsOn(const ObjectAddress *object,
                                 bool showNotices);
@@ -282,6 +284,10 @@ extern void recordDependencyOnCurrentExtension(const ObjectAddress *object,
 
 extern void recordPinnedDependency(const ObjectAddress *object);
 
+extern bool IsPackageDependType(Oid typOid, Oid pkgOid, bool isRefCur = false);
+
+extern long DeleteTypesDenpendOnPackage(Oid classId, Oid objectId, bool isSpec = true);
+
 extern long deleteDependencyRecordsFor(Oid classId,
                                        Oid objectId,
                                        bool skipExtensionDeps);
@@ -320,6 +326,7 @@ extern void deleteSharedDependencyRecordsFor(Oid classId,
                                              int32 objectSubId);
 
 extern void recordDependencyOnOwner(Oid classId, Oid objectId, Oid owner, const char *objfile = NULL);
+extern void recordDependencyOnPackage(Oid classId, Oid objectId, List* pkgOidList);
 #ifdef ENABLE_MOT
 extern void recordDependencyOnDatabase(Oid classId, Oid objectId, Oid serverId, Oid owner, const char *objfile = NULL);
 #endif

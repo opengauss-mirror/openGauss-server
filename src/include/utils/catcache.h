@@ -200,5 +200,6 @@ extern void PrepareToInvalidateCacheTuple(
 
 extern void PrintCatCacheLeakWarning(HeapTuple tuple);
 extern void PrintCatCacheListLeakWarning(CatCList* list);
+extern void InsertBuiltinFuncDescInBootstrap();
 extern void InsertBuiltinFuncInBootstrap();
 #endif /* CATCACHE_H */

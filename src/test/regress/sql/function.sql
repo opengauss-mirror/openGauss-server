@@ -1,3 +1,5 @@
+create database pl_test_funcion DBCOMPATIBILITY 'pg';
+\c pl_test_funcion;
 create schema distribute_function;
 set current_schema = distribute_function;
 
@@ -926,3 +928,19 @@ DROP FUNCTION func_increment_sql_1;
 DROP FUNCTION func_increment_sql_2;
 DROP FUNCTION fun_test_1;
 DROP FUNCTION fun_test_2;
+CREATE OR REPLACE PROCEDURE test_spi()
+AS DECLARE d_statement VARCHAR2(32767);
+BEGIN
+    d_statement := 'EXPLAIN PLAN FOR select 1';
+    BEGIN
+        EXECUTE IMMEDIATE d_statement;
+    END;
+
+    COMMIT;
+END;
+/
+select * from test_spi();
+\d+ plan_table
+DROP PROCEDURE test_spi;
+\c regression;
+drop database IF EXISTS pl_test_funcion;

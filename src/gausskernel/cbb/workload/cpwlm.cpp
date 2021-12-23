@@ -1927,6 +1927,8 @@ NON_EXEC_STATIC void CPmonitorMain(void)
         /* Since not using PG_TRY, we must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
 
+        t_thrd.log_cxt.call_stack = NULL;
+
         /* Prevents interrupts while cleaning up */
         HOLD_INTERRUPTS();
 

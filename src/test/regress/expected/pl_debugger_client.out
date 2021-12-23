@@ -21,32 +21,32 @@ select dbe_pldebugger.attach(nodename, port) from debug_info;
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |           value            | package_name 
------------+-----------+----------------------------+--------------
- $1        | int4      | 4                          | 
- sql_stmt  | varchar   | <UNKNOWN>                  | 
- test.a    | int4      | 0                          | 
- test.b    | varchar   | <UNKNOWN>                  | 
- test.c    | timestamp | Sat Jan 01 00:00:00 2000   | 
- r         | Row       | [ (null), (null), (null),] | 
- rec       | Rec       | <UNKNOWN>                  | 
- b_tmp     | text      | <UNKNOWN>                  | 
- cnt       | int4      | 0                          | 
- a_tmp     | int4      | 0                          | 
- cur       | refcursor | {name:                    +| 
-           |           | is_open:        f         +| 
-           |           | found:  f                 +| 
-           |           | not_found:      f         +| 
-           |           | row_count:      0}         | 
- n_tmp     | numeric   | <UNKNOWN>                  | 
- t_tmp     | tsquery   | <UNKNOWN>                  | 
- criterion | int4      | 0                          | 
- cur_arg   | refcursor | {name:                    +| 
-           |           | is_open:        f         +| 
-           |           | found:  f                 +| 
-           |           | not_found:      f         +| 
-           |           | row_count:      0}         | 
- index_1   | int4      | 0                          | 
+  varname  |  vartype  |           value            | package_name | isconst 
+-----------+-----------+----------------------------+--------------+---------
+ x         | int4      | 4                          |              | f
+ sql_stmt  | varchar   | <UNKNOWN>                  |              | f
+ test.a    | int4      | 0                          |              | f
+ test.b    | varchar   | <UNKNOWN>                  |              | f
+ test.c    | timestamp | Sat Jan 01 00:00:00 2000   |              | f
+ r         | Row       | [ (null), (null), (null),] |              | f
+ rec       | Rec       | <UNKNOWN>                  |              | f
+ b_tmp     | text      | <UNKNOWN>                  |              | f
+ cnt       | int4      | 0                          |              | f
+ a_tmp     | int4      | 0                          |              | f
+ cur       | refcursor | {name:                    +|              | f
+           |           | is_open:        f         +|              | 
+           |           | found:  f                 +|              | 
+           |           | not_found:      f         +|              | 
+           |           | row_count:      0}         |              | 
+ n_tmp     | numeric   | <UNKNOWN>                  |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                  |              | f
+ criterion | int4      | 0                          |              | f
+ cur_arg   | refcursor | {name:                    +|              | f
+           |           | is_open:        f         +|              | 
+           |           | found:  f                 +|              | 
+           |           | not_found:      f         +|              | 
+           |           | row_count:      0}         |              | 
+ index_1   | int4      | 0                          |              | f
 (16 rows)
 
 create table tmp_holder (res text);
@@ -62,9 +62,17 @@ begin
     insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 22); -- ok
     insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 15); -- duplicate
     insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 29); -- ok
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 32); -- ok
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 35); -- ok
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 39); -- ok
+    insert into tmp_holder select * from dbe_pldebugger.disable_breakpoint(4); -- ok
+    insert into tmp_holder select * from dbe_pldebugger.disable_breakpoint(5); -- ok
+    insert into tmp_holder select * from dbe_pldebugger.enable_breakpoint( 5); -- ok
     insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 50); -- exceeds
-    insert into tmp_holder select * from dbe_pldebugger.delete_breakpoint(1);
-    insert into tmp_holder select breakpointno || ':' || lineno || ':' || query from dbe_pldebugger.info_breakpoints();
+    insert into tmp_holder select * from dbe_pldebugger.delete_breakpoint(1);  -- ok
+    insert into tmp_holder select * from dbe_pldebugger.delete_breakpoint(0);  -- ok
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 15); -- add new bp at previously deleted one, bp id should proceed
+    insert into tmp_holder select breakpointno || ':' || lineno || ':' || query || ':' || enable from dbe_pldebugger.info_breakpoints();
 end;
 $$;
 WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
@@ -76,30 +84,49 @@ PL/pgSQL function inline_code_block line 7 at SQL statement
 WARNING:  the given line number does not name a valid breakpoint. Please use dbe_pldebugger.info_code for valid breakpoint candidates
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 17)"
 PL/pgSQL function inline_code_block line 9 at SQL statement
+WARNING:  the given line number already contains a valid breakpoint. Please se dbe_pldebugger.info_breakpoints for detail.
+CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 15)"
+PL/pgSQL function inline_code_block line 11 at SQL statement
 WARNING:  lineno must be within the range of [1, MaxLineNumber] Please use dbe_pldebugger.info_code for valid breakpoint candidates
 CONTEXT:  SQL statement "insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 50)"
-PL/pgSQL function inline_code_block line 13 at SQL statement
+PL/pgSQL function inline_code_block line 19 at SQL statement
 select * from tmp_holder;
-                                          res                                          
----------------------------------------------------------------------------------------
+                                            res                                             
+--------------------------------------------------------------------------------------------
  -1
  -1
  0
  -1
  1
- 0
+ -1
  2
+ 3
+ 4
+ 5
+ true
+ true
+ true
  -1
  true
- 0:15:    cnt := 0;
- 2:29:        INSERT INTO test VALUES (index_1, 'Happy Children''s Day!', '2021-6-1');
-(11 rows)
+ true
+ 6
+ 2:29:        INSERT INTO test VALUES (index_1, 'Happy Children''s Day!', '2021-6-1');:true
+ 3:32:    sql_stmt := 'select a from test where b = :1;';:true
+ 4:35:        FETCH cur INTO a_tmp;:false
+ 5:39:    CLOSE cur;:true
+ 6:15:    cnt := 0;:true
+(22 rows)
 
 select * from dbe_pldebugger.print_var('test.c');
- varname |  vartype  |          value           | package_name 
----------+-----------+--------------------------+--------------
- test.c  | timestamp | Sat Jan 01 00:00:00 2000 | 
+ varname |  vartype  |          value           | package_name | isconst 
+---------+-----------+--------------------------+--------------+---------
+ test.c  | timestamp | Sat Jan 01 00:00:00 2000 |              | f
 (1 row)
+
+select * from dbe_pldebugger.print_var('<UNKNOWN>');
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+(0 rows)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname  | lineno |              query              
@@ -126,42 +153,42 @@ select funcname, lineno, query from dbe_pldebugger.next();
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |                        value                         | package_name 
------------+-----------+------------------------------------------------------+--------------
- $1        | int4      | 4                                                    | 
- sql_stmt  | varchar   | <UNKNOWN>                                            | 
- test.a    | int4      | 7                                                    | 
- test.b    | varchar   | Treasures in Heaven                                  | 
- test.c    | timestamp | Mon Apr 02 00:00:00 2040                             | 
- r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] | 
- rec       | Rec       | <UNKNOWN>                                            | 
- b_tmp     | text      | <UNKNOWN>                                            | 
- cnt       | int4      | 0                                                    | 
- a_tmp     | int4      | 0                                                    | 
- cur       | refcursor | {name:                                              +| 
-           |           | is_open:        f                                   +| 
-           |           | found:  f                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      0}                                   | 
- n_tmp     | numeric   | <UNKNOWN>                                            | 
- t_tmp     | tsquery   | <UNKNOWN>                                            | 
- criterion | int4      | 0                                                    | 
- cur_arg   | refcursor | {name:                                              +| 
-           |           | is_open:        f                                   +| 
-           |           | found:  f                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      0}                                   | 
- index_1   | int4      | 0                                                    | 
+  varname  |  vartype  |                        value                         | package_name | isconst 
+-----------+-----------+------------------------------------------------------+--------------+---------
+ x         | int4      | 4                                                    |              | f
+ sql_stmt  | varchar   | <UNKNOWN>                                            |              | f
+ test.a    | int4      | 7                                                    |              | f
+ test.b    | varchar   | Treasures in Heaven                                  |              | f
+ test.c    | timestamp | Mon Apr 02 00:00:00 2040                             |              | f
+ r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] |              | f
+ rec       | Rec       | <UNKNOWN>                                            |              | f
+ b_tmp     | text      | <UNKNOWN>                                            |              | f
+ cnt       | int4      | 0                                                    |              | f
+ a_tmp     | int4      | 0                                                    |              | f
+ cur       | refcursor | {name:                                              +|              | f
+           |           | is_open:        f                                   +|              | 
+           |           | found:  f                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      0}                                   |              | 
+ n_tmp     | numeric   | <UNKNOWN>                                            |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                                            |              | f
+ criterion | int4      | 0                                                    |              | f
+ cur_arg   | refcursor | {name:                                              +|              | f
+           |           | is_open:        f                                   +|              | 
+           |           | found:  f                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      0}                                   |              | 
+ index_1   | int4      | 0                                                    |              | f
 (16 rows)
 
 select * from dbe_pldebugger.print_var('cur');
- varname |  vartype  |       value        | package_name 
----------+-----------+--------------------+--------------
- cur     | refcursor | {name:            +| 
-         |           | is_open:        f +| 
-         |           | found:  f         +| 
-         |           | not_found:      f +| 
-         |           | row_count:      0} | 
+ varname |  vartype  |       value        | package_name | isconst 
+---------+-----------+--------------------+--------------+---------
+ cur     | refcursor | {name:            +|              | f
+         |           | is_open:        f +|              | 
+         |           | found:  f         +|              | 
+         |           | not_found:      f +|              | 
+         |           | row_count:      0} |              | 
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
@@ -189,38 +216,38 @@ select funcname, lineno, query from dbe_pldebugger.next();
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |                        value                         | package_name 
------------+-----------+------------------------------------------------------+--------------
- $1        | int4      | 4                                                    | 
- sql_stmt  | varchar   | <UNKNOWN>                                            | 
- test.a    | int4      | 7                                                    | 
- test.b    | varchar   | Treasures in Heaven                                  | 
- test.c    | timestamp | Mon Apr 02 00:00:00 2040                             | 
- r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] | 
- rec       | Rec       | [ 3, Prayer, Thu Dec 02 00:00:00 2021,]              | 
- b_tmp     | text      | <UNKNOWN>                                            | 
- cnt       | int4      | 0                                                    | 
- a_tmp     | int4      | 0                                                    | 
- cur       | refcursor | {name:                                              +| 
-           |           | is_open:        f                                   +| 
-           |           | found:  f                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      0}                                   | 
- n_tmp     | numeric   | <UNKNOWN>                                            | 
- t_tmp     | tsquery   | <UNKNOWN>                                            | 
- criterion | int4      | 0                                                    | 
- cur_arg   | refcursor | {name:                                              +| 
-           |           | is_open:        f                                   +| 
-           |           | found:  f                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      0}                                   | 
- index_1   | int4      | 0                                                    | 
+  varname  |  vartype  |                        value                         | package_name | isconst 
+-----------+-----------+------------------------------------------------------+--------------+---------
+ x         | int4      | 4                                                    |              | f
+ sql_stmt  | varchar   | <UNKNOWN>                                            |              | f
+ test.a    | int4      | 7                                                    |              | f
+ test.b    | varchar   | Treasures in Heaven                                  |              | f
+ test.c    | timestamp | Mon Apr 02 00:00:00 2040                             |              | f
+ r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] |              | f
+ rec       | Rec       | [ 3, Prayer, Thu Dec 02 00:00:00 2021,]              |              | f
+ b_tmp     | text      | <UNKNOWN>                                            |              | f
+ cnt       | int4      | 0                                                    |              | f
+ a_tmp     | int4      | 0                                                    |              | f
+ cur       | refcursor | {name:                                              +|              | f
+           |           | is_open:        f                                   +|              | 
+           |           | found:  f                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      0}                                   |              | 
+ n_tmp     | numeric   | <UNKNOWN>                                            |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                                            |              | f
+ criterion | int4      | 0                                                    |              | f
+ cur_arg   | refcursor | {name:                                              +|              | f
+           |           | is_open:        f                                   +|              | 
+           |           | found:  f                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      0}                                   |              | 
+ index_1   | int4      | 0                                                    |              | f
 (16 rows)
 
 select * from dbe_pldebugger.print_var('rec');
- varname | vartype |                  value                  | package_name 
----------+---------+-----------------------------------------+--------------
- rec     | Rec     | [ 3, Prayer, Thu Dec 02 00:00:00 2021,] | 
+ varname | vartype |                  value                  | package_name | isconst 
+---------+---------+-----------------------------------------+--------------+---------
+ rec     | Rec     | [ 3, Prayer, Thu Dec 02 00:00:00 2021,] |              | f
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
@@ -248,37 +275,37 @@ select funcname, lineno, query from dbe_pldebugger.next();
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |                        value                         | package_name 
------------+-----------+------------------------------------------------------+--------------
- $1        | int4      | 4                                                    | 
- sql_stmt  | varchar   | select a from test where b = :1;                     | 
- test.a    | int4      | 7                                                    | 
- test.b    | varchar   | Treasures in Heaven                                  | 
- test.c    | timestamp | Mon Apr 02 00:00:00 2040                             | 
- r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] | 
- rec       | Rec       | [ 3, Prayer, Thu Dec 02 00:00:00 2021,]              | 
- b_tmp     | text      | Treasures in Heaven                                  | 
- cnt       | int4      | 0                                                    | 
- a_tmp     | int4      | 0                                                    | 
- cur       | refcursor | {name:                                              +| 
-           |           | is_open:        f                                   +| 
-           |           | found:  f                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      0}                                   | 
- n_tmp     | numeric   | <UNKNOWN>                                            | 
- t_tmp     | tsquery   | <UNKNOWN>                                            | 
- criterion | int4      | 0                                                    | 
- cur_arg   | refcursor | {name:                                              +| 
-           |           | is_open:        f                                   +| 
-           |           | found:  f                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      0}                                   | 
- index_1   | int4      | 1                                                    | 
+  varname  |  vartype  |                        value                         | package_name | isconst 
+-----------+-----------+------------------------------------------------------+--------------+---------
+ x         | int4      | 4                                                    |              | f
+ sql_stmt  | varchar   | select a from test where b = :1;                     |              | f
+ test.a    | int4      | 7                                                    |              | f
+ test.b    | varchar   | Treasures in Heaven                                  |              | f
+ test.c    | timestamp | Mon Apr 02 00:00:00 2040                             |              | f
+ r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] |              | f
+ rec       | Rec       | [ 3, Prayer, Thu Dec 02 00:00:00 2021,]              |              | f
+ b_tmp     | text      | Treasures in Heaven                                  |              | f
+ cnt       | int4      | 0                                                    |              | f
+ a_tmp     | int4      | 0                                                    |              | f
+ cur       | refcursor | {name:                                              +|              | f
+           |           | is_open:        f                                   +|              | 
+           |           | found:  f                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      0}                                   |              | 
+ n_tmp     | numeric   | <UNKNOWN>                                            |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                                            |              | f
+ criterion | int4      | 0                                                    |              | f
+ cur_arg   | refcursor | {name:                                              +|              | f
+           |           | is_open:        f                                   +|              | 
+           |           | found:  f                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      0}                                   |              | 
+ index_1   | int4      | 1                                                    |              | f
 (16 rows)
 
 select * from dbe_pldebugger.print_var('row');
- varname | vartype | value | package_name 
----------+---------+-------+--------------
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
 (0 rows)
 
 select funcname, lineno, query from dbe_pldebugger.step();
@@ -306,38 +333,38 @@ select funcname, lineno, query from dbe_pldebugger.next();
 (1 row)
 
 select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |                        value                         | package_name 
------------+-----------+------------------------------------------------------+--------------
- $1        | int4      | 4                                                    | 
- sql_stmt  | varchar   | select a from test where b = :1;                     | 
- test.a    | int4      | 7                                                    | 
- test.b    | varchar   | Treasures in Heaven                                  | 
- test.c    | timestamp | Mon Apr 02 00:00:00 2040                             | 
- r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] | 
- rec       | Rec       | [ 3, Prayer, Thu Dec 02 00:00:00 2021,]              | 
- b_tmp     | text      | Treasures in Heaven                                  | 
- cnt       | int4      | 0                                                    | 
- a_tmp     | int4      | 7                                                    | 
- cur       | refcursor | {name:  <unnamed portal 3>                          +| 
-           |           | is_open:        t                                   +| 
-           |           | found:  t                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      1}                                   | 
- n_tmp     | numeric   | <UNKNOWN>                                            | 
- t_tmp     | tsquery   | <UNKNOWN>                                            | 
- criterion | int4      | 0                                                    | 
- cur_arg   | refcursor | {name:                                              +| 
-           |           | is_open:        f                                   +| 
-           |           | found:  f                                           +| 
-           |           | not_found:      f                                   +| 
-           |           | row_count:      0}                                   | 
- index_1   | int4      | 1                                                    | 
+  varname  |  vartype  |                        value                         | package_name | isconst 
+-----------+-----------+------------------------------------------------------+--------------+---------
+ x         | int4      | 4                                                    |              | f
+ sql_stmt  | varchar   | select a from test where b = :1;                     |              | f
+ test.a    | int4      | 7                                                    |              | f
+ test.b    | varchar   | Treasures in Heaven                                  |              | f
+ test.c    | timestamp | Mon Apr 02 00:00:00 2040                             |              | f
+ r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,] |              | f
+ rec       | Rec       | [ 3, Prayer, Thu Dec 02 00:00:00 2021,]              |              | f
+ b_tmp     | text      | Treasures in Heaven                                  |              | f
+ cnt       | int4      | 0                                                    |              | f
+ a_tmp     | int4      | 7                                                    |              | f
+ cur       | refcursor | {name:  <unnamed portal 3>                          +|              | f
+           |           | is_open:        t                                   +|              | 
+           |           | found:  t                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      1}                                   |              | 
+ n_tmp     | numeric   | <UNKNOWN>                                            |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                                            |              | f
+ criterion | int4      | 0                                                    |              | f
+ cur_arg   | refcursor | {name:                                              +|              | f
+           |           | is_open:        f                                   +|              | 
+           |           | found:  f                                           +|              | 
+           |           | not_found:      f                                   +|              | 
+           |           | row_count:      0}                                   |              | 
+ index_1   | int4      | 1                                                    |              | f
 (16 rows)
 
 select * from dbe_pldebugger.print_var('b_tmp');
- varname | vartype |        value        | package_name 
----------+---------+---------------------+--------------
- b_tmp   | text    | Treasures in Heaven | 
+ varname | vartype |        value        | package_name | isconst 
+---------+---------+---------------------+--------------+---------
+ b_tmp   | text    | Treasures in Heaven |              | f
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
@@ -420,9 +447,6 @@ select funcname, lineno, query from dbe_pldebugger.next();
  test_debug2 |      0 | [EXECUTION FINISHED]
 (1 row)
 
-select funcname, lineno, query from dbe_pldebugger.next();
-ERROR:  must attach a execute func before execute dbe_pldebugger.next
-DETAIL:  execute func not attached before execute dbe_pldebugger.next
 -- wait for test_debug3
 select pg_sleep(1);
  pg_sleep 
@@ -433,38 +457,38 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_debug3,2,BEGIN)
+--? (.*,test_debug3,5,"    CASE a")
 (1 row)
-
-select funcname, lineno, query from dbe_pldebugger.next();
-  funcname   | lineno |   query    
--------------+--------+------------
- test_debug3 |      3 |     CASE a
-(1 row)
-
-select * from dbe_pldebugger.info_locals();
- varname | vartype | value | package_name 
----------+---------+-------+--------------
- $1      | int4    | 1     | 
- $2      | int4    | 0     | 
-(2 rows)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |         query         
 -------------+--------+-----------------------
- test_debug3 |      5 |             b := 111;
+ test_debug3 |      7 |             b := 111;
 (1 row)
+
+select * from dbe_pldebugger.info_locals();
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ a       | int4    | 1     |              | f
+ b       | int4    | 0     |              | f
+(2 rows)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |                   query                    
 -------------+--------+--------------------------------------------
- test_debug3 |      9 |     raise info 'pi_return : %',pi_return ;
+ test_debug3 |     11 |     raise info 'pi_return : %',pi_return ;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.next();
   funcname   | lineno |       query       
 -------------+--------+-------------------
- test_debug3 |     11 |         b := 101;
+ test_debug3 |     14 |         b := 101;
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |     query     
+-------------+--------+---------------
+ test_debug3 |     15 |     return b;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
@@ -473,6 +497,9 @@ select funcname, lineno, query from dbe_pldebugger.continue();
  test_debug3 |      0 | [EXECUTION FINISHED]
 (1 row)
 
+select funcname, lineno, query from dbe_pldebugger.next();
+ERROR:  must attach a execute func before execute dbe_pldebugger.next
+DETAIL:  execute func not attached before execute dbe_pldebugger.next
 -- wait for test_debug4
 select pg_sleep(1);
  pg_sleep 
@@ -483,32 +510,26 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_debug4,2,BEGIN)
+--? (.*,test_debug4,5,"    CASE a")
 (1 row)
-
-select funcname, lineno, query from dbe_pldebugger.step();
-  funcname   | lineno |   query    
--------------+--------+------------
- test_debug4 |      3 |     CASE a
-(1 row)
-
-select * from dbe_pldebugger.info_locals();
- varname | vartype | value | package_name 
----------+---------+-------+--------------
- $1      | int4    | 1     | 
- $2      | int4    | 0     | 
-(2 rows)
 
 select funcname, lineno, query from dbe_pldebugger.step();
   funcname   | lineno |         query         
 -------------+--------+-----------------------
- test_debug4 |      5 |             b := 111;
+ test_debug4 |      7 |             b := 111;
 (1 row)
+
+select * from dbe_pldebugger.info_locals();
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ a       | int4    | 1     |              | f
+ b       | int4    | 0     |              | f
+(2 rows)
 
 select funcname, lineno, query from dbe_pldebugger.step();
   funcname   | lineno |              query              
 -------------+--------+---------------------------------
- test_debug4 |      6 |             call test_debug(a);
+ test_debug4 |      8 |             call test_debug(a);
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.step();
@@ -535,10 +556,16 @@ select funcname, lineno, query from dbe_pldebugger.step();
  test_debug |     19 |         RETURN NEXT r;
 (1 row)
 
+select funcname, lineno, query from dbe_pldebugger.step();
+  funcname  | lineno |         query          
+------------+--------+------------------------
+ test_debug |     19 |         RETURN NEXT r;
+(1 row)
+
 select funcname, lineno, query from dbe_pldebugger.continue();
   funcname   | lineno |       query       
 -------------+--------+-------------------
- test_debug4 |     12 |         b := 101;
+ test_debug4 |     15 |         b := 101;
 (1 row)
 
 select funcname, lineno, query from dbe_pldebugger.continue();
@@ -547,6 +574,56 @@ select funcname, lineno, query from dbe_pldebugger.continue();
  test_debug4 |      0 | [EXECUTION FINISHED]
 (1 row)
 
+-- test with client error in exception
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+               attach               
+------------------------------------
+--? (.*,test_debug4,5,"    CASE a")
+(1 row)
+
+SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
+  funcname   | lineno |         query         
+-------------+--------+-----------------------
+ test_debug4 |      7 |             b := 111;
+(1 row)
+
+SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
+  funcname   | lineno |              query              
+-------------+--------+---------------------------------
+ test_debug4 |      8 |             call test_debug(a);
+(1 row)
+
+SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
+  funcname  | lineno |     query     
+------------+--------+---------------
+ test_debug |     15 |     cnt := 0;
+(1 row)
+
+SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
+  funcname  | lineno |              query              
+------------+--------+---------------------------------
+ test_debug |     16 |     FOR r IN SELECT * FROM test
+(1 row)
+
+SELECT funcname, lineno, query FROM DBE_PLDEBUGGER.step(); 
+  funcname  | lineno |         query          
+------------+--------+------------------------
+ test_debug |     19 |         RETURN NEXT r;
+(1 row)
+
+SELECT * FROM DBE_PLDEBUGGER.abort();
+ abort 
+-------
+ t
+(1 row)
+
+-- test with breakpoint
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -556,7 +633,219 @@ select pg_sleep(1);
 select dbe_pldebugger.attach(nodename, port) from debug_info;
 --?.*
 --?.*
---? (.*,test_debug4,2,BEGIN)
+--? (.*,test_debug4,5,"    CASE a")
+(1 row)
+
+truncate tmp_holder;
+do $$
+declare
+    funcoid oid;
+    funcoid2 oid;
+begin
+    select oid from pg_proc into funcoid where proname = 'test_debug';
+    select oid from pg_proc into funcoid2 where proname = 'test_debug4';
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 31);
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 44);
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid2, 12);
+    insert into tmp_holder select breakpointno || ':' || lineno || ':' || query from dbe_pldebugger.info_breakpoints();
+end;
+$$;
+select * from tmp_holder;
+                         res                         
+-----------------------------------------------------
+ 0
+ 1
+ 2
+ 0:31:    SELECT b FROM test where a = 7 INTO b_tmp;
+ 1:44:    RAISE INFO 'cnt is %', cnt;
+ 2:12:    return b;
+(6 rows)
+
+select funcname, lineno, query from dbe_pldebugger.continue();
+  funcname  | lineno |     query     
+------------+--------+---------------
+ test_debug |     15 |     cnt := 0;
+(1 row)
+
+select * from dbe_pldebugger.info_locals();
+  varname  |  vartype  |           value            | package_name | isconst 
+-----------+-----------+----------------------------+--------------+---------
+ x         | int4      | 1                          |              | f
+ sql_stmt  | varchar   | <UNKNOWN>                  |              | f
+ test.a    | int4      | 0                          |              | f
+ test.b    | varchar   | <UNKNOWN>                  |              | f
+ test.c    | timestamp | Sat Jan 01 00:00:00 2000   |              | f
+ r         | Row       | [ (null), (null), (null),] |              | f
+ rec       | Rec       | <UNKNOWN>                  |              | f
+ b_tmp     | text      | <UNKNOWN>                  |              | f
+ cnt       | int4      | 0                          |              | f
+ a_tmp     | int4      | 0                          |              | f
+ cur       | refcursor | {name:                    +|              | f
+           |           | is_open:        f         +|              | 
+           |           | found:  f                 +|              | 
+           |           | not_found:      f         +|              | 
+           |           | row_count:      0}         |              | 
+ n_tmp     | numeric   | <UNKNOWN>                  |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                  |              | f
+ criterion | int4      | 0                          |              | f
+ cur_arg   | refcursor | {name:                    +|              | f
+           |           | is_open:        f         +|              | 
+           |           | found:  f                 +|              | 
+           |           | not_found:      f         +|              | 
+           |           | row_count:      0}         |              | 
+ index_1   | int4      | 0                          |              | f
+(16 rows)
+
+select funcname, lineno, query from dbe_pldebugger.continue();
+  funcname  | lineno |                     query                      
+------------+--------+------------------------------------------------
+ test_debug |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
+(1 row)
+
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
+ frameno |  funcname   | lineno |                     query                      
+---------+-------------+--------+------------------------------------------------
+       0 | test_debug  |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
+       1 | test_debug4 |      8 |             call test_debug(a);
+(2 rows)
+
+select * from dbe_pldebugger.info_locals();
+  varname  |  vartype  |                         value                          | package_name | isconst 
+-----------+-----------+--------------------------------------------------------+--------------+---------
+ x         | int4      | 1                                                      |              | f
+ sql_stmt  | varchar   | <UNKNOWN>                                              |              | f
+ test.a    | int4      | 7                                                      |              | f
+ test.b    | varchar   | Treasures in Heaven                                    |              | f
+ test.c    | timestamp | Mon Apr 02 00:00:00 2040                               |              | f
+ r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,]   |              | f
+ rec       | Rec       | [ 0, Happy Children's Day!, Tue Jun 01 00:00:00 2021,] |              | f
+ b_tmp     | text      | <UNKNOWN>                                              |              | f
+ cnt       | int4      | 0                                                      |              | f
+ a_tmp     | int4      | 0                                                      |              | f
+ cur       | refcursor | {name:                                                +|              | f
+           |           | is_open:        f                                     +|              | 
+           |           | found:  f                                             +|              | 
+           |           | not_found:      f                                     +|              | 
+           |           | row_count:      0}                                     |              | 
+ n_tmp     | numeric   | <UNKNOWN>                                              |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                                              |              | f
+ criterion | int4      | 0                                                      |              | f
+ cur_arg   | refcursor | {name:                                                +|              | f
+           |           | is_open:        f                                     +|              | 
+           |           | found:  f                                             +|              | 
+           |           | not_found:      f                                     +|              | 
+           |           | row_count:      0}                                     |              | 
+ index_1   | int4      | 1                                                      |              | f
+(16 rows)
+
+select funcname, lineno, query from dbe_pldebugger.continue();
+  funcname  | lineno |              query              
+------------+--------+---------------------------------
+ test_debug |     44 |     RAISE INFO 'cnt is %', cnt;
+(1 row)
+
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
+ frameno |  funcname   | lineno |              query              
+---------+-------------+--------+---------------------------------
+       0 | test_debug  |     44 |     RAISE INFO 'cnt is %', cnt;
+       1 | test_debug4 |      8 |             call test_debug(a);
+(2 rows)
+
+select * from dbe_pldebugger.info_locals();
+  varname  |  vartype  |                         value                          | package_name | isconst 
+-----------+-----------+--------------------------------------------------------+--------------+---------
+ x         | int4      | 1                                                      |              | f
+ sql_stmt  | varchar   | select a from test where b = :1;                       |              | f
+ test.a    | int4      | 7                                                      |              | f
+ test.b    | varchar   | Treasures in Heaven                                    |              | f
+ test.c    | timestamp | Mon Apr 02 00:00:00 2040                               |              | f
+ r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,]   |              | f
+ rec       | Rec       | [ 0, Happy Children's Day!, Tue Jun 01 00:00:00 2021,] |              | f
+ b_tmp     | text      | Treasures in Heaven                                    |              | f
+ cnt       | int4      | 3                                                      |              | f
+ a_tmp     | int4      | 7                                                      |              | f
+ cur       | refcursor | {name:  <unnamed portal 10>                           +|              | f
+           |           | is_open:        f                                     +|              | 
+           |           | found:  f                                             +|              | 
+           |           | not_found:      f                                     +|              | 
+           |           | row_count:      0}                                     |              | 
+ n_tmp     | numeric   | <UNKNOWN>                                              |              | f
+ t_tmp     | tsquery   | <UNKNOWN>                                              |              | f
+ criterion | int4      | 0                                                      |              | f
+ cur_arg   | refcursor | {name:                                                +|              | f
+           |           | is_open:        f                                     +|              | 
+           |           | found:  f                                             +|              | 
+           |           | not_found:      f                                     +|              | 
+           |           | row_count:      0}                                     |              | 
+ index_1   | int4      | 1                                                      |              | f
+(16 rows)
+
+select funcname, lineno, query from dbe_pldebugger.continue();
+  funcname   | lineno |        query         
+-------------+--------+----------------------
+ test_debug4 |      0 | [EXECUTION FINISHED]
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.continue();
+ERROR:  must attach a execute func before execute dbe_pldebugger.continue
+DETAIL:  execute func not attached before execute dbe_pldebugger.continue
+-- test with finish without encountered breakpoint
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+               attach               
+------------------------------------
+--? (.*,test_debug4,5,"    CASE a")
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |         query         
+-------------+--------+-----------------------
+ test_debug4 |      7 |             b := 111;
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |              query              
+-------------+--------+---------------------------------
+ test_debug4 |      8 |             call test_debug(a);
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |       query       
+-------------+--------+-------------------
+ test_debug4 |     15 |         b := 101;
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.step();
+  funcname   | lineno |     query     
+-------------+--------+---------------
+ test_debug4 |     16 |     return b;
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.finish();
+  funcname   | lineno |        query         
+-------------+--------+----------------------
+ test_debug4 |      0 | [EXECUTION FINISHED]
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.finish();
+ERROR:  must attach a execute func before execute dbe_pldebugger.finish
+DETAIL:  execute func not attached before execute dbe_pldebugger.finish
+-- test with finish with encountered breakpoint and inner error
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+               attach               
+------------------------------------
+--? (.*,test_debug4,5,"    CASE a")
 (1 row)
 
 truncate tmp_holder;
@@ -570,140 +859,31 @@ begin
     insert into tmp_holder select breakpointno || ':' || lineno || ':' || query from dbe_pldebugger.info_breakpoints();
 end;
 $$;
-select * from tmp_holder;
-                         res                         
------------------------------------------------------
- 0
- 1
- 0:31:    SELECT b FROM test where a = 7 INTO b_tmp;
- 1:44:    RAISE INFO 'cnt is %', cnt;
-(4 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
+select funcname, lineno, query from dbe_pldebugger.finish();
   funcname  | lineno |     query     
 ------------+--------+---------------
  test_debug |     15 |     cnt := 0;
 (1 row)
 
-select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |           value            | package_name 
------------+-----------+----------------------------+--------------
- $1        | int4      | 1                          | 
- sql_stmt  | varchar   | <UNKNOWN>                  | 
- test.a    | int4      | 0                          | 
- test.b    | varchar   | <UNKNOWN>                  | 
- test.c    | timestamp | Sat Jan 01 00:00:00 2000   | 
- r         | Row       | [ (null), (null), (null),] | 
- rec       | Rec       | <UNKNOWN>                  | 
- b_tmp     | text      | <UNKNOWN>                  | 
- cnt       | int4      | 0                          | 
- a_tmp     | int4      | 0                          | 
- cur       | refcursor | {name:                    +| 
-           |           | is_open:        f         +| 
-           |           | found:  f                 +| 
-           |           | not_found:      f         +| 
-           |           | row_count:      0}         | 
- n_tmp     | numeric   | <UNKNOWN>                  | 
- t_tmp     | tsquery   | <UNKNOWN>                  | 
- criterion | int4      | 0                          | 
- cur_arg   | refcursor | {name:                    +| 
-           |           | is_open:        f         +| 
-           |           | found:  f                 +| 
-           |           | not_found:      f         +| 
-           |           | row_count:      0}         | 
- index_1   | int4      | 0                          | 
-(16 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
+select funcname, lineno, query from dbe_pldebugger.finish();
   funcname  | lineno |                     query                      
 ------------+--------+------------------------------------------------
  test_debug |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
- frameno |  funcname   | lineno |                     query                      
----------+-------------+--------+------------------------------------------------
-       0 | test_debug  |     31 |     SELECT b FROM test where a = 7 INTO b_tmp;
-       1 | test_debug4 |      6 |             call test_debug(a);
-(2 rows)
-
-select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |                         value                          | package_name 
------------+-----------+--------------------------------------------------------+--------------
- $1        | int4      | 1                                                      | 
- sql_stmt  | varchar   | <UNKNOWN>                                              | 
- test.a    | int4      | 7                                                      | 
- test.b    | varchar   | Treasures in Heaven                                    | 
- test.c    | timestamp | Mon Apr 02 00:00:00 2040                               | 
- r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,]   | 
- rec       | Rec       | [ 0, Happy Children's Day!, Tue Jun 01 00:00:00 2021,] | 
- b_tmp     | text      | <UNKNOWN>                                              | 
- cnt       | int4      | 0                                                      | 
- a_tmp     | int4      | 0                                                      | 
- cur       | refcursor | {name:                                                +| 
-           |           | is_open:        f                                     +| 
-           |           | found:  f                                             +| 
-           |           | not_found:      f                                     +| 
-           |           | row_count:      0}                                     | 
- n_tmp     | numeric   | <UNKNOWN>                                              | 
- t_tmp     | tsquery   | <UNKNOWN>                                              | 
- criterion | int4      | 0                                                      | 
- cur_arg   | refcursor | {name:                                                +| 
-           |           | is_open:        f                                     +| 
-           |           | found:  f                                             +| 
-           |           | not_found:      f                                     +| 
-           |           | row_count:      0}                                     | 
- index_1   | int4      | 1                                                      | 
-(16 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
-  funcname  | lineno |              query              
-------------+--------+---------------------------------
- test_debug |     44 |     RAISE INFO 'cnt is %', cnt;
+select funcname, lineno, query from dbe_pldebugger.finish();
+  funcname   | lineno |       query       
+-------------+--------+-------------------
+ test_debug4 |     15 |         b := 101;
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
- frameno |  funcname   | lineno |              query              
----------+-------------+--------+---------------------------------
-       0 | test_debug  |     44 |     RAISE INFO 'cnt is %', cnt;
-       1 | test_debug4 |      6 |             call test_debug(a);
-(2 rows)
-
-select * from dbe_pldebugger.info_locals();
-  varname  |  vartype  |                         value                          | package_name 
------------+-----------+--------------------------------------------------------+--------------
- $1        | int4      | 1                                                      | 
- sql_stmt  | varchar   | select a from test where b = :1;                       | 
- test.a    | int4      | 7                                                      | 
- test.b    | varchar   | Treasures in Heaven                                    | 
- test.c    | timestamp | Mon Apr 02 00:00:00 2040                               | 
- r         | Row       | [ 7, Treasures in Heaven, Mon Apr 02 00:00:00 2040,]   | 
- rec       | Rec       | [ 0, Happy Children's Day!, Tue Jun 01 00:00:00 2021,] | 
- b_tmp     | text      | Treasures in Heaven                                    | 
- cnt       | int4      | 3                                                      | 
- a_tmp     | int4      | 7                                                      | 
- cur       | refcursor | {name:  <unnamed portal 9>                            +| 
-           |           | is_open:        f                                     +| 
-           |           | found:  f                                             +| 
-           |           | not_found:      f                                     +| 
-           |           | row_count:      0}                                     | 
- n_tmp     | numeric   | <UNKNOWN>                                              | 
- t_tmp     | tsquery   | <UNKNOWN>                                              | 
- criterion | int4      | 0                                                      | 
- cur_arg   | refcursor | {name:                                                +| 
-           |           | is_open:        f                                     +| 
-           |           | found:  f                                             +| 
-           |           | not_found:      f                                     +| 
-           |           | row_count:      0}                                     | 
- index_1   | int4      | 1                                                      | 
-(16 rows)
-
-select funcname, lineno, query from dbe_pldebugger.continue();
+select funcname, lineno, query from dbe_pldebugger.finish();
   funcname   | lineno |        query         
 -------------+--------+----------------------
  test_debug4 |      0 | [EXECUTION FINISHED]
 (1 row)
 
+-- test recursive debug
 select pg_sleep(1);
  pg_sleep 
 ----------
@@ -732,7 +912,7 @@ select funcname, lineno, query from dbe_pldebugger.step();
  test_debug_recursive |      4 |     if ct < 5 then
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |       query        
 ---------+----------------------+--------+--------------------
        0 | test_debug_recursive |      4 |     if ct < 5 then
@@ -750,7 +930,7 @@ select funcname, lineno, query from dbe_pldebugger.step();
  test_debug_recursive |      3 |     return query select ct, pr;
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |                                     query                                     
 ---------+----------------------+--------+-------------------------------------------------------------------------------
        0 | test_debug_recursive |      3 |     return query select ct, pr;
@@ -769,7 +949,7 @@ select funcname, lineno, query from dbe_pldebugger.step();
  test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |                                     query                                     
 ---------+----------------------+--------+-------------------------------------------------------------------------------
        0 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
@@ -782,7 +962,7 @@ select funcname, lineno, query from dbe_pldebugger.continue();
  test_debug_recursive |      3 |     return query select ct, pr;
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |                                     query                                     
 ---------+----------------------+--------+-------------------------------------------------------------------------------
        0 | test_debug_recursive |      3 |     return query select ct, pr;
@@ -796,7 +976,7 @@ select funcname, lineno, query from dbe_pldebugger.continue();
  test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |                                     query                                     
 ---------+----------------------+--------+-------------------------------------------------------------------------------
        0 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
@@ -810,7 +990,7 @@ select funcname, lineno, query from dbe_pldebugger.continue();
  test_debug_recursive |      3 |     return query select ct, pr;
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
  frameno |       funcname       | lineno |                                     query                                     
 ---------+----------------------+--------+-------------------------------------------------------------------------------
        0 | test_debug_recursive |      3 |     return query select ct, pr;
@@ -818,6 +998,105 @@ select * from dbe_pldebugger.backtrace();
        2 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
        3 | test_debug_recursive |      5 |         return query select * from test_debug_recursive(ct+ 1, pr * (ct+ 1));
 (4 rows)
+
+select * from dbe_pldebugger.info_locals();
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 4     |              | f
+ pr      | int4    | 24    |              | f
+ counter | int4    | 0     |              | f
+ product | int4    | 0     |              | f
+(4 rows)
+
+select * from dbe_pldebugger.info_locals(0);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 4     |              | f
+ pr      | int4    | 24    |              | f
+ counter | int4    | 0     |              | f
+ product | int4    | 0     |              | f
+(4 rows)
+
+select * from dbe_pldebugger.info_locals(1);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 3     |              | f
+ pr      | int4    | 6     |              | f
+ counter | int4    | 0     |              | f
+ product | int4    | 0     |              | f
+(4 rows)
+
+select * from dbe_pldebugger.info_locals(2);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 2     |              | f
+ pr      | int4    | 2     |              | f
+ counter | int4    | 0     |              | f
+ product | int4    | 0     |              | f
+(4 rows)
+
+select * from dbe_pldebugger.info_locals(3);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 1     |              | f
+ pr      | int4    | 1     |              | f
+ counter | int4    | 0     |              | f
+ product | int4    | 0     |              | f
+(4 rows)
+
+select * from dbe_pldebugger.info_locals(4); -- exceeds
+WARNING:  Frame number exceeds current stack depth. Please use dbe_pldebugger.backtrace for depth info.
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+(0 rows)
+
+select * from dbe_pldebugger.info_locals(-1); -- exceeds
+WARNING:  frameno value must be positive
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+(0 rows)
+
+select * from dbe_pldebugger.print_var('ct');
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 4     |              | f
+(1 row)
+
+select * from dbe_pldebugger.print_var('ct', 0);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 4     |              | f
+(1 row)
+
+select * from dbe_pldebugger.print_var('ct', 1);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 3     |              | f
+(1 row)
+
+select * from dbe_pldebugger.print_var('ct', 2);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 2     |              | f
+(1 row)
+
+select * from dbe_pldebugger.print_var('ct', 3);
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+ ct      | int4    | 1     |              | f
+(1 row)
+
+select * from dbe_pldebugger.print_var('ct', 4);
+WARNING:  Frame number exceeds current stack depth. Please use dbe_pldebugger.backtrace for depth info.
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+(0 rows)
+
+select * from dbe_pldebugger.print_var('ct', -1); -- exceeds
+WARNING:  frameno value must be positive
+ varname | vartype | value | package_name | isconst 
+---------+---------+-------+--------------+---------
+(0 rows)
 
 do $$
 declare
@@ -834,9 +1113,387 @@ select funcname, lineno, query from dbe_pldebugger.continue();
  test_debug_recursive |      0 | [EXECUTION FINISHED]
 (1 row)
 
-select * from dbe_pldebugger.backtrace();
+select frameno, funcname, lineno, query from dbe_pldebugger.backtrace();
 ERROR:  must attach a execute func before execute dbe_pldebugger.backtrace
 DETAIL:  execute func not attached before execute dbe_pldebugger.backtrace
 select funcname, lineno, query from dbe_pldebugger.continue();
 ERROR:  must attach a execute func before execute dbe_pldebugger.continue
 DETAIL:  execute func not attached before execute dbe_pldebugger.continue
+-- test set_var
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+--?.*
+--?.*
+--? (.*,test_setvar,14,"    RAISE INFO E'vint:%\\nvnum:%\\nvfloat:%\\nvtext:%\\nvvarchar:%\\nvrow:%\\nvrefcursor:%',")
+(1 row)
+
+select * from dbe_pldebugger.info_locals();
+  varname   |  vartype  |           value            | package_name | isconst 
+------------+-----------+----------------------------+--------------+---------
+ x          | int4      | 0                          |              | f
+ vint       | int8      | 0                          |              | f
+ vnum       | numeric   | <UNKNOWN>                  |              | f
+ vfloat     | float8    | 0                          |              | f
+ vtext      | text      | <UNKNOWN>                  |              | f
+ vvarchar   | varchar   | <UNKNOWN>                  |              | f
+ test.a     | int4      | 0                          |              | f
+ test.b     | varchar   | <UNKNOWN>                  |              | f
+ test.c     | timestamp | Sat Jan 01 00:00:00 2000   |              | f
+ vrow       | Row       | [ (null), (null), (null),] |              | f
+ vrec       | Rec       | <UNKNOWN>                  |              | f
+ vrefcursor | refcursor | {name:                    +|              | f
+            |           | is_open:        f         +|              | 
+            |           | found:  f                 +|              | 
+            |           | not_found:      f         +|              | 
+            |           | row_count:      0}         |              | 
+ vconst     | int2      | 0                          |              | t
+ vpoint     | point     | <UNKNOWN>                  |              | f
+(14 rows)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |    query    
+-------------+--------+-------------
+ test_setvar |     16 |     COMMIT;
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |                                  query                                  
+-------------+--------+-------------------------------------------------------------------------
+ test_setvar |     17 |     SELECT * FROM test ORDER BY 1 LIMIT 1 INTO vrow; -- do set var here
+(1 row)
+
+-- immutable to sql injection
+select * from dbe_pldebugger.set_var('x', '1; create table injection(a int)');
+WARNING:  Exception occurs when trying to set variable: invalid value for set_var
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('x', 'create table injection(a int)');
+WARNING:  Exception occurs when trying to set variable: syntax error at or near "create"
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('x', '1');
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vint', '1+1'); -- can be expresion
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vnum', '1'); -- support type cast
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vfloat', '1');
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vvarchar', 'there is no spoon'); -- fails if not quoted
+WARNING:  Exception occurs when trying to set variable: syntax error at or near "no"
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('vvarchar', '$$there is no spoon$$'); -- this works
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vtext', '$$Why oh why didnt I take the blue pill?$$');
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vrow', '1'); -- can not directly assign row type
+WARNING:  Exception occurs when trying to set variable: cannot assign non-composite value to a row variable
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('vrow', 'select * from test order by 1 limit 1'); -- syntax error
+WARNING:  Exception occurs when trying to set variable: syntax error at or near "select"
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('vrow', '$$select * from test order by 1 limit 1$$'); -- still won't work
+WARNING:  Exception occurs when trying to set variable: cannot assign non-composite value to a row variable
+ set_var 
+---------
+ f
+(1 row)
+
+-- row should be changed by assignment member by member
+select * from dbe_pldebugger.set_var('test.a', '1');
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('test.b', '$$now$$');
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('test.c', '$$2021-07-31$$::timestamp + now() - now()'); -- function call is not ok
+WARNING:  Exception occurs when trying to set variable: operator does not exist: timestamp without time zone + timestamp with time zone
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('test.c', '$$2021-07-31$$::timestamp'); -- function call is ok
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vrec', '(1,1,1)::test%rowtype'); -- not ok
+WARNING:  Exception occurs when trying to set variable: syntax error at or near "rowtype"
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('vrec', 'ROW(1,1,1)');
+ set_var 
+---------
+ t
+(1 row)
+
+select * from dbe_pldebugger.set_var('vrefcursor', '1'); -- set cursor variable directly is not allowed
+WARNING:  Not allowed to directly set value for recursor variables
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('vconst', '1'); -- set constant variable is not allowed
+WARNING:  Not allowed to set value for constant variables
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('vint', '1;SELECT OID FROM PG_PROC limit 1;'); -- embedding of another sql is not allowed
+WARNING:  Exception occurs when trying to set variable: invalid value for set_var
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.set_var('vint', '1;S'); -- incomplete second stmt will give warning
+WARNING:  Exception occurs when trying to set variable: syntax error at or near "S"
+ set_var 
+---------
+ f
+(1 row)
+
+select * from dbe_pldebugger.info_locals();
+  varname   |  vartype  |                 value                  | package_name | isconst 
+------------+-----------+----------------------------------------+--------------+---------
+ x          | int4      | 1                                      |              | f
+ vint       | int8      | 2                                      |              | f
+ vnum       | numeric   | 1.000000                               |              | f
+ vfloat     | float8    | 1                                      |              | f
+ vtext      | text      | Why oh why didnt I take the blue pill? |              | f
+ vvarchar   | varchar   | there is no spoon                      |              | f
+ test.a     | int4      | 1                                      |              | f
+ test.b     | varchar   | now                                    |              | f
+ test.c     | timestamp | Sat Jul 31 00:00:00 2021               |              | f
+ vrow       | Row       | [ 1, now, Sat Jul 31 00:00:00 2021,]   |              | f
+ vrec       | Rec       | [ 1, 1, 1,]                            |              | f
+ vrefcursor | refcursor | {name:                                +|              | f
+            |           | is_open:        f                     +|              | 
+            |           | found:  f                             +|              | 
+            |           | not_found:      f                     +|              | 
+            |           | row_count:      0}                     |              | 
+ vconst     | int2      | 0                                      |              | t
+ vpoint     | point     | <UNKNOWN>                              |              | f
+(14 rows)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |                                         query                                          
+-------------+--------+----------------------------------------------------------------------------------------
+ test_setvar |     18 |     RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+(1 row)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |     query     
+-------------+--------+---------------
+ test_setvar |     20 |     ROLLBACK;
+(1 row)
+
+select * from dbe_pldebugger.info_locals();
+  varname   |  vartype  |                         value                          | package_name | isconst 
+------------+-----------+--------------------------------------------------------+--------------+---------
+ x          | int4      | 1                                                      |              | f
+ vint       | int8      | 2                                                      |              | f
+ vnum       | numeric   | 1.000000                                               |              | f
+ vfloat     | float8    | 1                                                      |              | f
+ vtext      | text      | Why oh why didnt I take the blue pill?                 |              | f
+ vvarchar   | varchar   | there is no spoon                                      |              | f
+ test.a     | int4      | 0                                                      |              | f
+ test.b     | varchar   | Happy Children's Day!                                  |              | f
+ test.c     | timestamp | Tue Jun 01 00:00:00 2021                               |              | f
+ vrow       | Row       | [ 0, Happy Children's Day!, Tue Jun 01 00:00:00 2021,] |              | f
+ vrec       | Rec       | [ 1, 1, 1,]                                            |              | f
+ vrefcursor | refcursor | {name:                                                +|              | f
+            |           | is_open:        f                                     +|              | 
+            |           | found:  f                                             +|              | 
+            |           | not_found:      f                                     +|              | 
+            |           | row_count:      0}                                     |              | 
+ vconst     | int2      | 0                                                      |              | t
+ vpoint     | point     | <UNKNOWN>                                              |              | f
+(14 rows)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |                                         query                                          
+-------------+--------+----------------------------------------------------------------------------------------
+ test_setvar |     21 |     RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+(1 row)
+
+select * from dbe_pldebugger.info_locals();
+  varname   |  vartype  |                         value                          | package_name | isconst 
+------------+-----------+--------------------------------------------------------+--------------+---------
+ x          | int4      | 1                                                      |              | f
+ vint       | int8      | 2                                                      |              | f
+ vnum       | numeric   | 1.000000                                               |              | f
+ vfloat     | float8    | 1                                                      |              | f
+ vtext      | text      | Why oh why didnt I take the blue pill?                 |              | f
+ vvarchar   | varchar   | there is no spoon                                      |              | f
+ test.a     | int4      | 0                                                      |              | f
+ test.b     | varchar   | Happy Children's Day!                                  |              | f
+ test.c     | timestamp | Tue Jun 01 00:00:00 2021                               |              | f
+ vrow       | Row       | [ 0, Happy Children's Day!, Tue Jun 01 00:00:00 2021,] |              | f
+ vrec       | Rec       | [ 1, 1, 1,]                                            |              | f
+ vrefcursor | refcursor | {name:                                                +|              | f
+            |           | is_open:        f                                     +|              | 
+            |           | found:  f                                             +|              | 
+            |           | not_found:      f                                     +|              | 
+            |           | row_count:      0}                                     |              | 
+ vconst     | int2      | 0                                                      |              | t
+ vpoint     | point     | <UNKNOWN>                                              |              | f
+(14 rows)
+
+select funcname, lineno, query from dbe_pldebugger.next();
+  funcname   | lineno |        query         
+-------------+--------+----------------------
+ test_setvar |      0 | [EXECUTION FINISHED]
+(1 row)
+
+-- test package
+select pg_sleep(1);
+ pg_sleep 
+----------
+ 
+(1 row)
+
+select dbe_pldebugger.attach(nodename, port) from debug_info;
+--?.*
+--?.*
+--? (.*,z_pk.pro1,7,"      select 'aa',2 into aa;")
+(1 row)
+
+select * from dbe_pldebugger.info_locals();
+   varname   |  vartype  |       value        | package_name | isconst 
+-------------+-----------+--------------------+--------------+---------
+ b           | int4      | 2                  | z_pk         | f
+ p1          | int4      | 1                  | z_pk         | f
+ p2          | int4      | 2                  | z_pk         | f
+ p3          | varchar   | +                  | z_pk         | f
+ aa.c1       | varchar   | <UNKNOWN>          | z_pk         | f
+ aa.c2       | int4      | 0                  | z_pk         | f
+ aa          | Record    | [ (null), (null),] | z_pk         | f
+--?.*
+--?.*
+ bb          | Row       | [ (null), (null),] | z_pk         | f
+--?.*
+--?.*
+ p4          | int4      | 0                  | z_pk         | f
+ a           | int4      | 10                 | z_pk2        | f
+(14 rows)
+
+select * from dbe_pldebugger.next();
+ funcoid | funcname  | lineno |            query             
+---------+-----------+--------+------------------------------
+--?.*
+(1 row)
+
+select * from dbe_pldebugger.next();
+ funcoid | funcname  | lineno |          query          
+---------+-----------+--------+-------------------------
+--?.*
+(1 row)
+
+truncate tmp_holder;
+do $$
+declare
+    funcoid oid;
+begin
+    select oid from pg_proc into funcoid where proname = 'pro1';
+    insert into tmp_holder select * from dbe_pldebugger.add_breakpoint(funcoid, 12);
+    insert into tmp_holder select breakpointno || ':' || lineno || ':' || query from dbe_pldebugger.info_breakpoints();
+end;
+$$;
+select funcname, lineno, query from dbe_pldebugger.continue();
+ funcname  | lineno |          query          
+-----------+--------+-------------------------
+ z_pk.pro1 |     12 |       if p3 = '+' then 
+(1 row)
+
+SELECT * FROM DBE_PLDEBUGGER.info_locals();
+   varname   |  vartype  |   value    | package_name | isconst 
+-------------+-----------+------------+--------------+---------
+ b           | int4      | 2          | z_pk         | f
+ p1          | int4      | 1          | z_pk         | f
+ p2          | int4      | 2          | z_pk         | f
+ p3          | varchar   | +          | z_pk         | f
+ aa.c1       | varchar   | aa         | z_pk         | f
+ aa.c2       | int4      | 2          | z_pk         | f
+ aa          | Record    | [ aa, 2,]  | z_pk         | f
+--?.*
+--?.*
+ bb          | Row       | [ bb, 2,]  | z_pk         | f
+--?.*
+--?.*
+ p4          | int4      | 0          | z_pk         | f
+ a           | int4      | 10         | z_pk2        | f
+(14 rows)
+
+SELECT * FROM DBE_PLDEBUGGER.backtrace();
+ frameno | funcname  | lineno |          query          | funcoid 
+---------+-----------+--------+-------------------------+---------
+--?.*
+(1 row)
+
+SELECT * FROM DBE_PLDEBUGGER.continue();
+ funcoid | funcname  | lineno |        query         
+---------+-----------+--------+----------------------
+--?.*
+(1 row)
+

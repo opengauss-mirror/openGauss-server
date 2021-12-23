@@ -7,6 +7,7 @@
  * information for an old server, but not to fail outright.
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/bin/psql/describe.c
  */
@@ -760,7 +761,7 @@ bool permissionsList(const char* pattern)
         "SELECT n.nspname as \"%s\",\n"
         "  c.relname as \"%s\",\n"
         "  CASE c.relkind WHEN 'r' THEN '%s' WHEN 'v' THEN '%s' WHEN 'm' THEN '%s'"
-        "  WHEN 'S' THEN '%s' WHEN 'f' THEN '%s' END as \"%s\",\n"
+        "  WHEN 'S' THEN '%s' WHEN 'L' THEN '%s' WHEN 'f' THEN '%s' END as \"%s\",\n"
         "  ",
         gettext_noop("Schema"),
         gettext_noop("Name"),
@@ -768,6 +769,7 @@ bool permissionsList(const char* pattern)
         gettext_noop("view"),
         gettext_noop("materialized view"),
         gettext_noop("sequence"),
+        gettext_noop("large sequence"),
         gettext_noop("foreign table"),
         gettext_noop("Type"));
 
@@ -856,7 +858,8 @@ bool listDefaultACLs(const char* pattern)
     printfPQExpBuffer(&buf,
         "SELECT pg_catalog.pg_get_userbyid(d.defaclrole) AS \"%s\",\n"
         "  n.nspname AS \"%s\",\n"
-        "  CASE d.defaclobjtype WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' END AS "
+        "  CASE d.defaclobjtype WHEN '%c' THEN '%s' WHEN '%c' THEN '%s'"
+        " WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' WHEN '%c' THEN '%s' END AS "
         "\"%s\",\n"
         "  ",
         gettext_noop("Owner"),
@@ -865,6 +868,8 @@ bool listDefaultACLs(const char* pattern)
         gettext_noop("table"),
         DEFACLOBJ_SEQUENCE,
         gettext_noop("sequence"),
+        DEFACLOBJ_LARGE_SEQUENCE,
+        gettext_noop("large sequence"),
         DEFACLOBJ_FUNCTION,
         gettext_noop("function"),
         DEFACLOBJ_TYPE,
@@ -1419,7 +1424,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
      * If it's a sequence, fetch its values and store into an array that will
      * be used later.
      */
-    if (tableinfo.relkind == 'S') {
+    if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L') {
         printfPQExpBuffer(&buf, "SELECT * FROM %s", fmtId(schemaname));
         /* must be separate because fmtId isn't reentrant */
         appendPQExpBuffer(&buf, ".%s;", fmtId(relationname));
@@ -1562,6 +1567,9 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         case 'S':
             printfPQExpBuffer(&title, _("Sequence \"%s.%s\""), schemaname, relationname);
             break;
+        case 'L':
+            printfPQExpBuffer(&title, _("Large Sequence \"%s.%s\""), schemaname, relationname);
+            break;
         case 'i':
         case 'I':
             if (tableinfo.relpersistence == 'u')
@@ -1610,7 +1618,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         modifiers = (char**)pg_malloc_zero((unsigned long)(numrows + 1) * sizeof(*modifiers));
     }
 
-    if (tableinfo.relkind == 'S')
+    if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L')
         headers[cols++] = gettext_noop("Value");
 
     if (tableinfo.relkind == 'i' || tableinfo.relkind == 'I')
@@ -1691,32 +1699,39 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             /* handle "default" here */
             /* (note: above we cut off the 'default' string at 128) */
             char *default_value = PQgetvalue(res, i, 2);
+#ifdef HAVE_CE
+            unsigned char *plaintext = NULL;
+#endif
             if (strlen(default_value) != 0) {
 #ifdef HAVE_CE
-            if (hasFullEncryptFeature &&
-                strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
-                size_t plainTextSize = 0;
-                unsigned char *plaintext = NULL;
-                int original_type_id = atoi(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type_oid")));
-                ValuesProcessor::deprocess_value(pset.db, (unsigned char *)default_value, strlen(default_value),
-                    original_type_id, 0, &plaintext, plainTextSize, true);
-                default_value = (char *)plaintext;
-            }
+                if (hasFullEncryptFeature &&
+                    strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
+                    size_t plainTextSize = 0;
+                    int original_type_id = atoi(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type_oid")));
+                    ProcessStatus process_status = ADD_TYPE;
+                    ValuesProcessor::deprocess_value(pset.db, (unsigned char *)default_value, strlen(default_value),
+                        original_type_id, 0, &plaintext, plainTextSize, process_status);
+                    default_value = (char *)plaintext;
+                }
 #endif
-            if (tmpbuf.len > 0) {
-                appendPQExpBufferStr(&tmpbuf, " ");
-            }
-            /* translator: default values of column definitions */
-            if (strlen(PQgetvalue(res, i, PQfnumber(res, "generated_column"))) > 0) {
-                appendPQExpBuffer(&tmpbuf, _("generated always as (%s) stored"), default_value);
-            } else {
-                appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
-            }
+                if (tmpbuf.len > 0) {
+                    appendPQExpBufferStr(&tmpbuf, " ");
+                }
+                /* translator: default values of column definitions */
+                if (strlen(PQgetvalue(res, i, PQfnumber(res, "generated_column"))) > 0) {
+                    appendPQExpBuffer(&tmpbuf, _("generated always as (%s) stored"), default_value);
+                } else {
+                    appendPQExpBuffer(&tmpbuf, _("default %s"), default_value);
+                }
             }
 #ifdef HAVE_CE
             if (hasFullEncryptFeature &&
                 strlen(PQgetvalue(res, i, PQfnumber(res, "clientlogic_original_type"))) > 0) {
                 appendPQExpBufferStr(&tmpbuf, _(" encrypted"));
+                if (plaintext != NULL) {
+                    free(plaintext);
+                    plaintext = NULL;
+                }
             } 
 #endif /* HAVE_CE */
 
@@ -1725,7 +1740,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
         }
 
         /* Value: for sequences only */
-        if (tableinfo.relkind == 'S')
+        if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L')
             printTableAddCell(&cont, seq_values[i], false, false);
 
         /* Expression for index column */
@@ -1902,7 +1917,7 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             }
             PQclear(result);
         }
-    } else if (tableinfo.relkind == 'S') {
+    } else if (tableinfo.relkind == 'S' || tableinfo.relkind == 'L') {
         /* Footer information about a sequence */
         PGresult* result = NULL;
 
@@ -2567,9 +2582,9 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
          * Show information about partition table.
          * 1. Get the partition key postition and partition strategy from pg_partition.
          */
-        printfPQExpBuffer(
-            &buf, "select partkey,partstrategy from pg_partition where parentid = %s order by partkey", oid);
-        PGresult* tmp_result = NULL;
+        printfPQExpBuffer(&buf,
+            "select partkey,partstrategy,interval[1] from pg_partition where parentid = %s and parttype = 'r'", oid);
+        PGresult *tmp_result = NULL;
 
         result = PSQLexec(buf.data, false);
         if (result == NULL)
@@ -2584,18 +2599,20 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
             char separator_symbol[] = " "; /* the separator between multiple partition keys. */
             char* next_key = NULL;         /*store the next partition key in strtok_s. */
             bool first_flag = false;
+            int parttuples = 0;
+            int subtuples = 0;
+            PGresult* partresult = NULL;
+            PGresult* subresult = NULL;
 
             /* 2. Show partition strategy by the partstrategy of pg_partition. */
-            if (strcmp(partition_type, "r") == 0)
-                printfPQExpBuffer(&tmp_part_buf, "%s(", "Range partition by");
-            else if (strcmp(partition_type, "i") == 0)
-                printfPQExpBuffer(&tmp_part_buf, "%s(", "Interval partition by");
+            if (strcmp(partition_type, "r") == 0 || strcmp(partition_type, "i") == 0)
+                printfPQExpBuffer(&tmp_part_buf, "Partition By RANGE(");
             else if (strcmp(partition_type, "v") == 0)
-                printfPQExpBuffer(&tmp_part_buf, "%s(", "Value partition by");
+                printfPQExpBuffer(&tmp_part_buf, "Partition By VALUE(");
             else if (strcmp(partition_type, "l") == 0)
-                printfPQExpBuffer(&tmp_part_buf, "%s(", "List partition by");
+                printfPQExpBuffer(&tmp_part_buf, "Partition By LIST(");
             else if (strcmp(partition_type, "h") == 0)
-                printfPQExpBuffer(&tmp_part_buf, "%s(", "Hash partition by");
+                printfPQExpBuffer(&tmp_part_buf, "Partition By HASH(");
             /* 3. Get partition key name through partition key postition and pg_attribute. */
             printfPQExpBuffer(&buf,
                 "SELECT attname\n"
@@ -2622,6 +2639,56 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
                 key_position = strtok_s(NULL, separator_symbol, &next_key);
             }
             appendPQExpBuffer(&tmp_part_buf, ")");
+
+            if (strcmp(partition_type, "i") == 0) {
+                char* interval = PQgetvalue(result, 0, 2);
+                appendPQExpBuffer(&tmp_part_buf, " INTERVAL('%s')", interval);
+            }
+
+            printfPQExpBuffer(
+                &buf, "select partkey from pg_partition where parentid = %s and parttype = 'p'", oid);
+            partresult = PSQLexec(buf.data, false);
+            parttuples = PQntuples(partresult);
+
+            /* show subpartition details */
+            printfPQExpBuffer(&buf,
+                "select partstrategy from pg_partition where parttype = 's' and parentid in (select "
+                "oid from pg_partition where parttype = 'p' and parentid = %s)",
+                oid);
+            subresult = PSQLexec(buf.data, false);
+            if (subresult != NULL) {
+                subtuples = PQntuples(subresult);
+            }
+            if (subtuples > 0) {
+                appendPQExpBuffer(&tmp_part_buf, " ");
+
+                char* subpartition_type = PQgetvalue(subresult, 0, 0);
+                if (strcmp(subpartition_type, "r") == 0) {
+                    appendPQExpBuffer(&tmp_part_buf, "Subpartition By RANGE(");
+                } else if (strcmp(subpartition_type, "l") == 0) {
+                    appendPQExpBuffer(&tmp_part_buf, "Subpartition By LIST(");
+                } else if (strcmp(subpartition_type, "h") == 0) {
+                    appendPQExpBuffer(&tmp_part_buf, "Subpartition By HASH(");
+                } else {
+                    goto error_return;
+                }
+
+                char* subpartition_key = PQgetvalue(partresult, 0, 0);
+                char* next_subkey = NULL;
+                char* subkey_position = strtok_s(subpartition_key, separator_symbol, &next_subkey);
+                first_flag = false;
+                while (subkey_position != NULL) {
+                    if (!first_flag) {
+                        appendPQExpBuffer(&tmp_part_buf, "%s", PQgetvalue(tmp_result, atoi(subkey_position) - 1, 0));
+                        first_flag = true;
+                    } else {
+                        appendPQExpBuffer(&tmp_part_buf, ", %s", PQgetvalue(tmp_result, atoi(subkey_position) - 1, 0));
+                    }
+                    subkey_position = strtok_s(NULL, separator_symbol, &next_subkey);
+                }
+                appendPQExpBuffer(&tmp_part_buf, ")");
+            }
+
             printTableAddFooter(&cont, tmp_part_buf.data);
 
             /*
@@ -2630,9 +2697,18 @@ static bool describeOneTableDetails(const char* schemaname, const char* relation
              */
             if (strcmp(partition_type, "v") != 0) {
                 printfPQExpBuffer(
-                    &buf, _("Number of partition: %d (View pg_partition to check each partition range.)"), tuples - 1);
+                    &buf, _("Number of partitions: %d (View pg_partition to check each partition range.)"), parttuples);
                 printTableAddFooter(&cont, buf.data);
             }
+            /* show subpartition  num and notice the method to check subpartition range. */
+            if (subtuples > 0) {
+                printfPQExpBuffer(&buf,
+                    _("Number of subpartitions: %d (View pg_partition to check each subpartition range.)"), subtuples);
+                printTableAddFooter(&cont, buf.data);
+            }
+
+            PQclear(partresult);
+            PQclear(subresult);
             PQclear(tmp_result);
         }
         PQclear(result);
@@ -2999,7 +3075,8 @@ bool describeRoles(const char* pattern, bool verbose)
         appendPQExpBufferStr(&buf, "\nFROM pg_catalog.pg_roles r\n");
         if (!pattern) {
             appendPQExpBufferStr(&buf, "WHERE r.rolname not in ('gs_role_copy_files', 'gs_role_signal_backend', "
-                "'gs_role_tablespace', 'gs_role_replication', 'gs_role_account_lock', 'gs_role_pldebugger')\n");
+                "'gs_role_tablespace', 'gs_role_replication', 'gs_role_account_lock', 'gs_role_pldebugger', "
+                "'gs_role_directory_create', 'gs_role_directory_drop')\n");
         }
 
         (void)processSQLNamePattern(pset.db, &buf, pattern, false, false, NULL, "r.rolname", NULL, NULL);
@@ -3259,7 +3336,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         "SELECT n.nspname as \"%s\",\n"
         "  c.relname as \"%s\",\n"
         "  CASE c.relkind WHEN 'r' THEN '%s' WHEN 'v' THEN '%s' WHEN 'i' THEN '%s' WHEN 'I' THEN '%s' "
-        "WHEN 'S' THEN '%s' WHEN 's' THEN '%s' WHEN 'f' THEN '%s' WHEN 'm' THEN '%s'  WHEN 'e' THEN '%s' "
+        "WHEN 'S' THEN '%s' WHEN 'L' THEN '%s' WHEN 'f' THEN '%s' WHEN 'm' THEN '%s'  WHEN 'e' THEN '%s' "
         "WHEN 'o' THEN '%s' END as \"%s\",\n"
         "  pg_catalog.pg_get_userbyid(c.relowner) as \"%s\"",
         gettext_noop("Schema"),
@@ -3269,7 +3346,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
         gettext_noop("index"),
         gettext_noop("global partition index"),
         gettext_noop("sequence"),
-        gettext_noop("special"),
+        gettext_noop("large sequence"),
         gettext_noop("foreign table"),
         gettext_noop("materialized view"),
         gettext_noop("stream"),
@@ -3320,7 +3397,7 @@ bool listTables(const char* tabtypes, const char* pattern, bool verbose, bool sh
     if (showIndexes)
         appendPQExpBuffer(&buf, "'i','I',");
     if (showSeq)
-        appendPQExpBuffer(&buf, "'S',");
+        appendPQExpBuffer(&buf, "'S','L',");
     if (showSystem || NULL != pattern)
         appendPQExpBuffer(&buf, "'s',"); /* was RELKIND_SPECIAL in <=
                                           * 8.1 */

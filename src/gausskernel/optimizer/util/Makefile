@@ -19,8 +19,8 @@ endif
 
 SUBDIRS	= learn
 
-OBJS = clauses.o joininfo.o orclauses.o pathnode.o placeholder.o plancat.o predtest.o \
+OBJS = clauses.o joininfo.o pathnode.o placeholder.o plancat.o predtest.o \
        relnode.o restrictinfo.o tlist.o var.o pruningboundary.o pgxcship.o pruning.o randomplan.o optimizerdebug.o planmem_walker.o \
-       nodegroups.o plananalyzer.o optcommon.o dataskew.o joinskewinfo.o autoanalyzer.o bucketinfo.o bucketpruning.o
+       nodegroups.o plananalyzer.o optcommon.o dataskew.o joinskewinfo.o autoanalyzer.o bucketinfo.o bucketpruning.o subpartitionpruning.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

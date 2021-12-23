@@ -101,9 +101,11 @@ BuildErrorCode libpqGetParameters(void)
     if (strcmp(str, "f") != 0) {
         pg_log(PG_ERROR, "source server must not be in recovery mode\n");
         pg_free(str);
+        str = NULL;
         return BUILD_ERROR;
     }
     pg_free(str);
+    str = NULL;
 
     /*
      * Also check that full_page_writes is enabled. We can get torn pages if
@@ -123,10 +125,14 @@ BuildErrorCode libpqGetParameters(void)
             "full_page_writes must be enabled in the source server when the incremental checkpoint is not used.\n");
         pg_free(str);
         pg_free(str2);
+        str = NULL;
+        str2 = NULL;
         return BUILD_FATAL;
     }
     pg_free(str);
     pg_free(str2);
+    str = NULL;
+    str2 = NULL;
 
     /* Get the pgxc_node_name */
     str = run_simple_query("SHOW pgxc_node_name");
@@ -136,6 +142,7 @@ BuildErrorCode libpqGetParameters(void)
     ss_c = snprintf_s(pgxcnodename, MAX_VALUE_LEN, MAX_VALUE_LEN - 1, "%s", str);
     securec_check_ss_c(ss_c, "\0", "\0");
     pg_free(str);
+    str = NULL;
 
     pg_log(PG_DEBUG, "pgxc_node_name is %s.\n", pgxcnodename);
 
@@ -149,6 +156,7 @@ BuildErrorCode libpqGetParameters(void)
     }
     replication_type = atoi(str);
     pg_free(str);
+    str = NULL;
 
     pg_log(PG_DEBUG, "replication_type is %d.\n", replication_type);
     return BUILD_SUCCESS;
@@ -436,6 +444,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             pg_log(PG_DEBUG, "received null value for chunk for file \"%s\", file has been deleted", filename);
             remove_target_file(filename, true);
             pg_free(filename);
+            filename = NULL;
             PQclear(res);
             res = NULL;
             continue;
@@ -450,6 +459,7 @@ static BuildErrorCode receiveFileChunks(const char* sql, FILE* file)
             fprintf(file, "received chunk for file \"%s\", offset %d, size %d\n", filename, chunkoff, chunksize);
             open_target_file(filename, false);
             pg_free(filename);
+            filename = NULL;
             PG_CHECKBUILD_AND_FREE_PGRESULT_RETURN(res);
             write_target_range(chunk, chunkoff, chunksize, chunkspace);
         } else {
@@ -664,11 +674,17 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
     for (i = 0; i < map->narray; i++) {
         entry = map->array[i];
 
+        if ((IS_CROSS_CLUSTER_BUILD && strcmp(entry->path, "pg_hba.conf") == 0) ||
+            strcmp(entry->path, "pg_hba.conf.old") == 0) {
+            continue;
+        }
+
         /* report all the path to check whether it's correct */
         if (entry->rewindCompressInfo.compressed) {
             pg_log(PG_PROGRESS, "path: %s, type: %d, action: %d\n", entry->path, entry->type, entry->action);
 
         }
+
         pg_log(PG_DEBUG, "path: %s, type: %d, action: %d\n", entry->path, entry->type, entry->action);
         fprintf(file, "path: %s, type: %d, action: %d\n", entry->path, entry->type, entry->action);
 
@@ -754,6 +770,7 @@ BuildErrorCode executeFileMap(filemap_t* map, FILE* file)
      * We've now copied the list of file ranges that we need to fetch to the
      * temporary table. Now, actually fetch all of those ranges.
      */
+
     sql = "SELECT path, begin, \n"
           "  pg_read_binary_file(path, begin, len, true) AS chunk, len, algorithm, chunksize,rebuild \n"
           "FROM fetchchunks where algorithm =0 \n"
@@ -911,6 +928,7 @@ static BuildErrorCode execute_pagemap(file_entry_t* entry, FILE* file)
         }
     }
     pg_free(iter);
+    iter = NULL;
     return BUILD_SUCCESS;
 }
 

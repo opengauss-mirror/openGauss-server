@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -29,6 +30,7 @@
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/tlist.h"
+#include "optimizer/planner.h"
 #include "parser/analyze.h"
 #include "parser/parsetree.h"
 #include "parser/parse_clause.h"
@@ -38,6 +40,7 @@
 #include "parser/parse_oper.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_target.h"
+#include "parser/parse_cte.h"
 #include "pgxc/pgxc.h"
 #include "rewrite/rewriteManip.h"
 #include "storage/tcap.h"
@@ -129,6 +132,13 @@ static RangeTblRef* transformItem(ParseState* pstate, RangeTblEntry* rte, RangeT
 void transformFromClause(ParseState* pstate, List* frmList, bool isFirstNode, bool isCreateView)
 {
     ListCell* fl = NULL;
+
+    /*
+     * copy original fromClause for future start with rewrite
+     */
+    if (pstate->p_addStartInfo) {
+        pstate->sw_fromClause = (List *)copyObject(frmList);
+    }
 
     /*
      * The grammar will have produced a list of RangeVars, RangeSubselects,
@@ -478,7 +488,7 @@ static RangeTblEntry* transformCTEReference(ParseState* pstate, RangeVar* r, Com
 {
     RangeTblEntry* rte = NULL;
 
-    if (r->ispartition) {
+    if (r->ispartition || r->issubpartition) {
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" is not partitioned table", r->relname)));
     }
@@ -784,14 +794,41 @@ Node* transformFromClauseItem(ParseState* pstate, Node* n, RangeTblEntry** top_r
         }
 
         rtr = transformItem(pstate, rte, top_rte, top_rti, relnamespace);
+
+        /* add startinfo if needed */
+        if (pstate->p_addStartInfo) {
+            AddStartWithTargetRelInfo(pstate, n, rte, rtr);
+        }
+
         return (Node*)rtr;
     } else if (IsA(n, RangeSubselect)) {
         /* sub-SELECT is like a plain relation */
         RangeTblRef* rtr = NULL;
         RangeTblEntry* rte = NULL;
+        Node *sw_backup = NULL;
+
+        if (pstate->p_addStartInfo) {
+            /*
+             * In start with case we should back up SubselectStmt for further
+             * SW Rewrite.
+             * */
+            sw_backup = (Node *)copyObject(n);
+        }
 
         rte = transformRangeSubselect(pstate, (RangeSubselect*)n);
         rtr = transformItem(pstate, rte, top_rte, top_rti, relnamespace);
+
+        /* add startinfo if needed */
+        if (pstate->p_addStartInfo) {
+            AddStartWithTargetRelInfo(pstate, sw_backup, rte, rtr);
+
+            /*
+             * (RangeSubselect*)n is mainly related to RTE during whole transform as pointer,
+             * so anything fixed on sw_backup could also fix back to (RangeSubselect*)n.
+             * */
+            ((RangeSubselect*)n)->alias->aliasname = ((RangeSubselect*)sw_backup)->alias->aliasname;
+        }
+
         return (Node*)rtr;
     } else if (IsA(n, RangeFunction)) {
         /* function is like a plain relation */

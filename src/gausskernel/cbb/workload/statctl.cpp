@@ -276,6 +276,7 @@ void InitCollectInfo(WLMCollectInfo* pCollectInfo)
     int rc;
 
     /* reset collect info */
+    pfree_ext(pCollectInfo->sdetail.statement);
     rc = memset_s(pCollectInfo, sizeof(WLMCollectInfo), 0, sizeof(WLMCollectInfo));
     securec_check(rc, "\0", "\0");
 
@@ -5694,13 +5695,7 @@ void WLMSetDNodeInfoStatus(const Qid* qid, WLMStatusTag status)
 
             break;
         case WLM_STATUS_RUNNING: {
-            TimestampTz now = GetCurrentTimestamp();
-
-            /* use cpu_collect_timer to compute interval end time and set a timer */
-            t_thrd.wlm_cxt.except_ctl->intvalEndTime =
-                TimestampTzPlusMilliseconds(now, u_sess->attr.attr_resource.cpu_collect_timer * MSECS_PER_SEC);
-            (void)WLMSetTimer(now, t_thrd.wlm_cxt.except_ctl->intvalEndTime);
-
+            /* set cpu time */
             WLMCheckPoint(WLM_STATUS_RUNNING);
 
             /* resource track is valid, we must save the session info */
@@ -6449,7 +6444,6 @@ void WLMInitializeStatInfo(void)
  */
 void WLMSetStatInfo(const char* sqltext)
 {
-    pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.statement);
     /* reset all statistics info */
     ResetAllStatInfo();
 
@@ -6938,6 +6932,29 @@ void WLMFillGeneralDataSingleNode(WLMGeneralData* gendata, WLMDNodeInfo* nodeInf
     setTopNWLMSessionInfo(gendata, queryMemInChunks, totalCpuTime, g_instance.attr.attr_common.PGXCNodeName, TOP5);
 }
 
+static bool WLMCheckSessionStatisticsAllowed()
+{
+    if (! (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
+        ereport(WARNING, (errmsg("This view is not allowed on datanode.")));
+        return false;
+    }
+
+    /* check workload manager is valid */
+    if (!ENABLE_WORKLOAD_CONTROL) {
+        ereport(WARNING, (errmsg("workload manager is not valid.")));
+        return false;
+    }
+
+    /* disable resource track function, nothing to fetch */
+    if (!u_sess->attr.attr_resource.enable_resource_track) {
+        ereport(WARNING, (errmsg("enable_resource_track is not valid.")));
+        return false;
+    }
+
+    return true;
+}
+
+
 /*
  * function name: WLMGetSessionStatistics
  * description  : get session statistics
@@ -6953,20 +6970,7 @@ void* WLMGetSessionStatistics(int* num)
 
     HASH_SEQ_STATUS hash_seq;
 
-    if (! (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
-        ereport(WARNING, (errmsg("This view is not allowed on datanode.")));
-        return NULL;
-    }
-
-    /* check workload manager is valid */
-    if (!ENABLE_WORKLOAD_CONTROL) {
-        ereport(WARNING, (errmsg("workload manager is not valid.")));
-        return NULL;
-    }
-
-    /* disable resource track function, nothing to fetch */
-    if (!u_sess->attr.attr_resource.enable_resource_track) {
-        ereport(WARNING, (errmsg("enable_resource_track is not valid.")));
+    if (!WLMCheckSessionStatisticsAllowed()) {
         return NULL;
     }
 
@@ -7003,7 +7007,15 @@ void* WLMGetSessionStatistics(int* num)
 
             SessionLevelMemory* entry = (SessionLevelMemory*)pDNodeInfo->mementry;
 
-            stat_element->statement = (pDNodeInfo->statement == NULL) ? (char*)"" : pstrdup(pDNodeInfo->statement);
+            /* Mask password in query string */
+            char* queryMaskedPassWd = NULL;
+            if (pDNodeInfo->statement != NULL) {
+                queryMaskedPassWd = maskPassword(pDNodeInfo->statement);
+            }
+            if (queryMaskedPassWd == NULL) {
+                queryMaskedPassWd = pDNodeInfo->statement == NULL ? (char*)"" : pDNodeInfo->statement;
+            }
+            stat_element->statement = queryMaskedPassWd;
             stat_element->query_plan = (entry->query_plan == NULL) ? (char*)"NoPlan" : pstrdup(entry->query_plan);
             stat_element->query_plan_issue =
                 (entry->query_plan_issue == NULL) ? (char*)"" : pstrdup(entry->query_plan_issue);
@@ -7815,6 +7827,8 @@ int WLMProcessThreadMain(void)
 
         /* Since not using PG_TRY, we must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevents interrupts while cleaning up */
         HOLD_INTERRUPTS();

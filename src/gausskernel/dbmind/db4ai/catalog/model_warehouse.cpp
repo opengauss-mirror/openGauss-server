@@ -203,8 +203,8 @@ Model *get_model(const char *model_name, bool only_model)
     }
     model->algorithm = algorithm;
     model->model_name = model_name;
-    model->exec_time_secs = tuplePointer->exec_time;
-    model->pre_time_secs = tuplePointer->pre_process_time;
+    model->exec_time_secs = tuplePointer->exectime;
+    model->pre_time_secs = tuplePointer->preprocesstime;
     model->processed_tuples = tuplePointer->processedtuples;
     model->discarded_tuples = tuplePointer->discardedtuples;
     model->return_type = tuplePointer->outputtype;

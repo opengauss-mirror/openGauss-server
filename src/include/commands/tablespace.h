@@ -19,6 +19,7 @@
 #include "nodes/parsenodes.h"
 #include "storage/dfs/dfs_connector.h"
 #include "workload/workload.h"
+#include "catalog/indexing.h"
 
 /* XLOG stuff */
 #define XLOG_TBLSPC_CREATE 0x00
@@ -93,7 +94,7 @@ typedef struct TableSpaceOpts {
     {                                                                                                          \
         if (RelationIsSegmentTable(relation)) {                                                            \
             TableSpaceUsageManager::IsExceedMaxsize(relation->rd_node.spcNode, 0, true);                       \
-        } else {                                                                                               \
+        } else if (relation->rd_id != ClassOidIndexId) {                                                                                               \
             TableSpaceUsageManager::IsExceedMaxsize(relation->rd_node.spcNode, requestSize, false);            \
         }                                                                                                      \
         perm_space_increase(                                                                                   \

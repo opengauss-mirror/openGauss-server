@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -29,6 +30,7 @@
 #include "access/sysattr.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_directory.h"
 #include "commands/directory.h"
 #include "miscadmin.h"
@@ -56,8 +58,16 @@ static void directory_path_check(CreateDirectoryStmt* stmt, char* dirpath)
     /* Three phases to check path legality */
     /* Step 1: check if the directory path name has any special forbidden characters or sensitive words,it should be
      * absolute path */
+    if (!is_absolute_path(dirpath)) {
+        ereport(ERROR, (errmodule(MOD_OPT), errcode(ERRCODE_INVALID_NAME),
+            errmsg("directory path cannot be relative"),
+            errdetail("N/A"), errcause("relative directory path is not supported"),
+            erraction("substitute relative path by absolute path")));
+    }
+
     const char* danger_character_list[] = {"|", ";", "&", "$", "<", ">", "`","\\","\'","'",
-        "\"","{","}","(",")","[","]","~","*","?","!","\n",".","pg_audit", NULL};
+        "\"","{","}","(",")","[","]","~","*","?","!","\n", "pg_audit", NULL};
+
     int i = 0;
 
     for (i = 0; danger_character_list[i] != NULL; i++) {
@@ -99,6 +109,32 @@ static void directory_path_check(CreateDirectoryStmt* stmt, char* dirpath)
 }
 
 /*
+ * Check permission for create directory.
+ */
+static void CheckCreateDirectoryPermission()
+{
+    /*
+     * When enable_access_server_directory is off, only initial user can create directory.
+     * When enable_access_server_directory is on, sysadmin and the member of gs_role_directory_create role
+     * can create directory.
+     */
+    if (g_instance.attr.attr_storage.enable_access_server_directory) {
+        if (!superuser() && !is_member_of_role(GetUserId(), DEFAULT_ROLE_DIRECTORY_CREATE)) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create directory"),
+                    errhint("must be sysadmin or a member of the gs_role_directory_create role "
+                        "to create a directory")));
+        }
+    } else {
+        if (!initialuser()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to create directory"),
+                    errhint("must be initial user to create a directory")));
+        }
+    }
+}
+
+/*
  * @@GaussDB@@
  * Brief		: Create a directory.
  * Description	: Only superusers can create a directory. This seems a reasonable
@@ -120,17 +156,9 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
     HeapTuple tup = NULL;
     TupleDesc tupDesc = NULL;
     errno_t rc;
-    /*
-     * when enable_access_server_directory is off, only initial user can create directory
-     * otherwise, only superuser can create directory
-     */
-    if ((!g_instance.attr.attr_storage.enable_access_server_directory && !initialuser()) ||
-        (g_instance.attr.attr_storage.enable_access_server_directory && !superuser()))
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied to create directory \"%s\"", stmt->directoryname),
-                errhint("must be %s to create a directory.",
-                    g_instance.attr.attr_storage.enable_access_server_directory ? "superuser" : "initial user")));
+
+    /* Permission check. */
+    CheckCreateDirectoryPermission();
 
     /* get the current user id */
     ownerId = GetUserId();
@@ -172,6 +200,7 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
             }
             tup = (HeapTuple) tableam_tops_modify_tuple(oldtup, tupDesc, values, nulls, replaces);
             simple_heap_update(rel, &tup->t_self, tup);
+            CatalogUpdateIndexes(rel, tup);
 
             ReleaseSysCache(oldtup);
             tableam_tops_free_tuple(tup);
@@ -199,6 +228,31 @@ void CreatePgDirectory(CreateDirectoryStmt* stmt)
 }
 
 /*
+ * Check permission for drop directory.
+ */
+static void CheckDropDirectoryPermission(Oid directoryId, const char* directoryName)
+{
+    /*
+     * When enable_access_server_directory is off, only initial user can drop directory,
+     * When enable_access_server_directory is on, directory owner or users have drop privileges of the directory or
+     * the member of the gs_role_directory_drop role can drop directory.
+     */
+    if (g_instance.attr.attr_storage.enable_access_server_directory) {
+        AclResult aclresult = pg_directory_aclcheck(directoryId, GetUserId(), ACL_DROP);
+        if (aclresult != ACLCHECK_OK && !superuser() && !pg_directory_ownercheck(directoryId, GetUserId())
+            && !is_member_of_role(GetUserId(), DEFAULT_ROLE_DIRECTORY_DROP)) {
+            aclcheck_error(ACLCHECK_NO_PRIV, ACL_KIND_DIRECTORY, directoryName);
+        }
+    } else {
+        if (!initialuser()) {
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied to drop directory \"%s\"", directoryName),
+                    errhint("must be initial user to drop a directory")));
+        }
+    }
+}
+
+/*
  * @@GaussDB@@
  * Brief		: Drop a directory.
  * Description	: Drop a directory by its name. If the directory exists, then
@@ -211,17 +265,6 @@ void DropPgDirectory(DropDirectoryStmt* stmt)
     HeapTuple tuple = NULL;
     ScanKeyData entry[1];
     Oid directoryId = InvalidOid;
-    /*
-     * when enable_access_server_directory is off, only initial user can drop directory
-     * otherwise, only superuser can drop directory
-     */
-    if ((!g_instance.attr.attr_storage.enable_access_server_directory && !initialuser()) ||
-        (g_instance.attr.attr_storage.enable_access_server_directory && !superuser()))
-        ereport(ERROR,
-            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                errmsg("permission denied to drop directory \"%s\"", stmt->directoryname),
-                errhint("must be %s to drop a directory.",
-                    g_instance.attr.attr_storage.enable_access_server_directory ? "superuser" : "initial user")));
 
     /* find the target tuple */
     rel = heap_open(PgDirectoryRelationId, RowExclusiveLock);
@@ -239,6 +282,9 @@ void DropPgDirectory(DropDirectoryStmt* stmt)
         directoryId = InvalidOid;
 
     if (OidIsValid(directoryId)) {
+        /* Permission check. */
+        CheckDropDirectoryPermission(directoryId, stmt->directoryname);
+
         /* Remove the pg_directory tuple (this will roll back if we fail below) */
         simple_heap_delete(rel, &tuple->t_self);
         /* Remove dependency on owner. */
@@ -384,33 +430,21 @@ void AlterDirectoryOwner(const char* dirname, Oid newOwnerId)
         HeapTuple newtuple;
         errno_t rc;
 
-        /* Otherwise, must be owner of the existing object */
-        if (!pg_directory_ownercheck(HeapTupleGetOid(tuple), GetUserId()))
-            aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, dirname);
-
-        /*
-         * when enable_access_server_directory is off, only initial user can change onwer
-         * otherwise, only superuser can change owner
-         */
-        if ((!g_instance.attr.attr_storage.enable_access_server_directory && !initialuser()) ||
-            (g_instance.attr.attr_storage.enable_access_server_directory && !superuser()))
-            ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+        if (g_instance.attr.attr_storage.enable_access_server_directory) {
+            /* must be sysadmin or owner of the existing object */
+            if (!superuser() && !pg_directory_ownercheck(HeapTupleGetOid(tuple), GetUserId())) {
+                aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DIRECTORY, dirname);
+            }
+        } else {
+            if (!initialuser()) {
+                ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                     errmsg("permission denied to change owner of directory"),
-                    errhint("must be %s to change owner of a directory.",
-                        g_instance.attr.attr_storage.enable_access_server_directory ? "superuser" : "initial user")));
+                        errhint("must be initial user to change owner of a directory")));
+            }
+        }
 
         /* Must be able to become new owner */
         check_is_member_of_role(GetUserId(), newOwnerId);
-
-        /*
-         * must be superuser or DBA
-         */
-        if (!superuser_arg(newOwnerId) && !systemDBA_arg(newOwnerId))
-            ereport(ERROR,
-                (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
-                    errmsg("permission denied to change owner of directory"),
-                    errhint("new owner must be superuser to alter a directory.")));
 
         rc = memset_s(repl_null, sizeof(repl_null), false, sizeof(repl_null));
         securec_check(rc, "\0", "\0");

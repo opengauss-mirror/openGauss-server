@@ -4,6 +4,14 @@
 # By convention, we put no more than twenty tests in any one parallel group;
 # this limits the number of connections needed to run the tests.
 # ----------
+
+# test nlssort_pinyin
+test: nlssort_pinyin
+
+# test replace func and trunc func
+test: replace_func_with_two_args
+test: trunc_func_for_date
+
 test: analyze_commands
 #test: single_node_job
 test: single_node_ddl
@@ -15,6 +23,8 @@ test: median
 # we'd prefer not to have checkpoints later in the tests because that
 # interferes with crash-recovery testing.
 test: single_node_tablespace
+
+test: large_sequence int16 gs_dump_sequence
 
 # ----------
 # The first group of parallel tests
@@ -43,7 +53,7 @@ test: single_node_inet single_node_macaddr single_node_tstypes single_node_comme
 #test: single_node_geometry single_node_horology 
 #test: single_node_regex
 test: single_node_regex_temp 
-test: single_node_oidjoins single_node_type_sanity single_node_opr_sanity
+test: single_node_oidjoins single_node_type_sanity
 
 # ----------
 # These four each depend on the previous one
@@ -262,7 +272,8 @@ test: hw_dba_enable_partition hw_tablespace
 test: hw_procedure_define 
 #test: hw_anonymous_block
 #test: hw_procedure#
-test: hw_grant_all hw_dynamic_sql hw_func_return_out
+test: hw_grant_all hw_func_return_out
+#hw_dynamic_sql
 test: hw_package_function
 
 #show plan
@@ -376,7 +387,17 @@ test: temp__3
 # so keep this parallel group to at most 19 tests
 # ----------
 #test: plpgsql
+test: plpgsql_array_opengauss plpgsql_table_opengauss plpgsql_multiset arrayinterface_single 
+#arrayinterface_ted
 #test: plancache limit rangefuncs prepare
+test: plpgsql_array_opengauss arrayinterface_single
+# arrayinterface_ted
+test: plpgsql_assign_value_to_array_attribute plpgsql_cursor_rowtype
+test: plpgsql_array_of_record
+test: plpgsql_assign_list
+test: plpgsql_package_type
+test: plpgsql_record_attrname
+test: hw_package_valriable
 test: returning largeobject
 test: hw_explain_pretty1 hw_explain_pretty2 hw_explain_pretty3
 test: goto
@@ -415,6 +436,7 @@ test: col_function_1 col_function_2 col_count_distinct_1 col_count_distinct_2 co
 test: directory_test
 test: analyse_verify
 test: create_compositetype
+test: hw_pct_type_and_rowtype
 #test: create_basetype
 #test: tabletype
 #test with recursive
@@ -498,7 +520,8 @@ test: advisory_lock
 # ----------
 # Another group of parallel tests
 # ----------
-test: cluster dependency bitmapops tsdicts functional_deps json
+test: cluster dependency bitmapops tsdicts functional_deps
+test: json_and_jsonb json jsonb jsonb2
 #test: guc
 
 # test for vec sonic hash
@@ -527,3 +550,4 @@ test: llvm_vecsort llvm_vecsort2
 test: udf_crem create_c_function
 
 test: smp
+# test: hw_package

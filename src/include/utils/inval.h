@@ -65,7 +65,7 @@ extern void CommandEndInvalidationMessages(void);
 
 extern void CacheInvalidateHeapTuple(Relation relation, HeapTuple tuple, HeapTuple newtuple);
 
-extern void CacheInvalidateFunction(Oid funcOid);
+extern void CacheInvalidateFunction(Oid funcOid, Oid pkgId);
 
 extern void CacheInvalidateCatalog(Oid catalogId);
 

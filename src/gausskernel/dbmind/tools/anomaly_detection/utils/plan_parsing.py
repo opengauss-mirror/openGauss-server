@@ -184,7 +184,6 @@ class Plan:
     def parse(self, text: str):
         # Remove redundant text to interference with the parsing process.
         tidy_text = text.strip('\n')
-        # lines = tidy_text.split(r'\n')
         lines = tidy_text.splitlines()
         if len(lines) == 0:
             return

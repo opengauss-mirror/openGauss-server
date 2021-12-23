@@ -163,11 +163,13 @@ static const char *BuiltinTrancheNames[] = {
     "OldSerXid SLRU Ctl",
     "WALInsertLock",
     "DoubleWriteLock",
-    "DWSingleFlushPosLock",
-    "DWSingleFlushWriteLock",
+    "DWSingleFlushFirstLock",
+    "DWSingleFlushSecondLock",
+    "DWSingleFlushSecondBufTagLock",
     "RestartPointQueueLock",
     "PruneDirtyQueueLock",
     "UnlinkRelHashTblLock",
+    "UnlinkRelForkHashTblLock",
     "LWTRANCHE_ACCOUNT_TABLE",
     "GeneralExtendedLock",
     "MPFLLOCK",
@@ -332,7 +334,6 @@ static lwlock_stats *get_lwlock_stats_entry(LWLock *lock)
 }
 #endif /* LWLOCK_STATS */
 
-const int NUM_DW_SINGLE_FLUSH_LOCK = 161; /* one page correspond to one lock */
 /*
  * Compute number of LWLocks to allocate.
  */
@@ -387,8 +388,8 @@ int NumLWLocks(void)
     numLocks += g_instance.attr.attr_storage.max_replication_slots;
 
     /* double write.c needs flush lock */
-    numLocks += 1;                              /* batch flush lock */
-    numLocks += NUM_DW_SINGLE_FLUSH_LOCK + 1;  /* single flush write lock and the get pos lock */
+    numLocks += 1;   /* dw batch flush lock */
+    numLocks += 3;  /* dw single flush pos lock (two version) + second version buftag page lock */
 
     /* for materialized view */
     numLocks += 1;
@@ -402,8 +403,8 @@ int NumLWLocks(void)
     /* for prune dirty queue */
     numLocks += 1;
 
-    /* for unlink rel hashtbl */
-    numLocks += 1;
+    /* for unlink rel hashtbl, one is for all fork relation hashtable, one is for one fork relation hash table */
+    numLocks += 2;
 
     /*
      * Add any requested by loadable modules; for backwards-compatibility

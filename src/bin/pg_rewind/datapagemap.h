@@ -21,7 +21,6 @@ typedef struct datapagemap datapagemap_t;
 typedef struct datapagemap_iterator datapagemap_iterator_t;
 
 extern void datapagemap_add(datapagemap_t* map, BlockNumber blkno);
-extern void datapagemap_clear(datapagemap_t* map);
 extern datapagemap_iterator_t* datapagemap_iterate(datapagemap_t* map);
 extern bool datapagemap_next(datapagemap_iterator_t* iter, BlockNumber* blkno);
 extern void datapagemap_print(datapagemap_t* map);

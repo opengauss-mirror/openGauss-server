@@ -38,7 +38,7 @@ CATALOG(pg_auth_history,3457) BKI_SHARED_RELATION BKI_SCHEMA_MACRO
 {
 	Oid roloid;		    			/* role OID*/
 	timestamptz passwordtime;   	/* the time while create or alter password */
-	text rolpassword;				/* role password, md5-encryption,sha256-encryption, or none-encryption */
+	text rolpassword;				/* role password, md5-encryption, sha256-encryption */
 } FormData_pg_auth_history;
 
 #undef timestamptz

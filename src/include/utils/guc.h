@@ -268,9 +268,8 @@ extern void GetConfigOptionByNum(int varnum, const char** values, bool* noshow);
 extern int GetNumConfigOptions(void);
 
 extern void SetPGVariable(const char* name, List* args, bool is_local);
-extern void GetPGVariable(const char* name, DestReceiver* dest);
+extern void GetPGVariable(const char* name, const char* likename, DestReceiver* dest);
 extern TupleDesc GetPGVariableResultDesc(const char* name);
-extern int get_fixed_bgwriter_thread_num();
 #ifdef PGXC
 extern char* RewriteBeginQuery(char* query_string, const char* name, List* args);
 #endif
@@ -373,7 +372,10 @@ typedef enum {
     JOIN_SEL_WITH_CAST_FUNC = 128, /* support cast function while calculating join selectivity */
     CANONICAL_PATHKEY = 256, /* Use canonicalize pathkeys directly */
     INDEX_COST_WITH_LEAF_PAGES_ONLY = 512, /* compute index cost with consideration of leaf-pages-only */
-    PARTITION_OPFUSION = 1024 /* Enable partition opfusion */
+    PARTITION_OPFUSION = 1024, /* Enable partition opfusion */
+    SPI_DEBUG = 2048,
+    RESOWNER_DEBUG = 4096,
+    A_STYLE_COERCE = 8192
 } sql_beta_param;
 
 #define ENABLE_PRED_PUSH(root) \
@@ -390,6 +392,11 @@ typedef enum {
 
 #define ENABLE_SQL_BETA_FEATURE(feature) \
     ((bool)((uint)u_sess->attr.attr_sql.sql_beta_feature & feature))
+
+#define PARTITION_OPFUSION_MAX_NUMA_NODE 4
+#define PARTITION_ENABLE_CACHE_OPFUSION             \
+    (ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION) && \
+        g_instance.shmem_cxt.numaNodeNum <= PARTITION_OPFUSION_MAX_NUMA_NODE)
 
 typedef enum {
     SUMMARY = 0, /* not collect multi column statistics info */

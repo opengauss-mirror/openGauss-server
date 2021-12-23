@@ -170,6 +170,10 @@ void HeapXlogVisibleOperatorPage(RedoBufferInfo *buffer, void *recorddata)
      */
 
     PageSetAllVisible(page);
+    if (IsSegmentFileNode(buffer->blockinfo.rnode)) {
+        PageSetLSN(page, buffer->lsn);
+    }
+
     if (xlrec->free_dict && PageIsCompressed(page)) {
         (void)PageFreeDict(page);
     }

@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -19,11 +20,13 @@
 #include "access/heapam.h"
 #include "access/transam.h"
 #include "catalog/dependency.h"
+#include "catalog/gs_package.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/pg_depend.h"
 #include "catalog/pg_extension.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_synonym.h"
 #include "commands/extension.h"
 #include "miscadmin.h"
 #include "storage/tcap.h"
@@ -573,7 +576,7 @@ List* getOwnedSequences(Oid relid, List* attrList)
          * can also have auto dependencies on columns.)
          */
         if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->refobjsubid != 0 &&
-            deprec->deptype == DEPENDENCY_AUTO && get_rel_relkind(deprec->objid) == RELKIND_SEQUENCE) {
+            deprec->deptype == DEPENDENCY_AUTO && RELKIND_IS_SEQUENCE(get_rel_relkind(deprec->objid))) {
             if (attrList != NULL) {
                 if (list_member_int(attrList, deprec->refobjsubid))
                     result = lappend_oid(result, deprec->objid);
@@ -680,4 +683,110 @@ Oid get_index_constraint(Oid indexId)
     heap_close(depRel, AccessShareLock);
 
     return constraintId;
+}
+
+long DeleteTypesDenpendOnPackage(Oid classId, Oid objectId, bool isSpec)
+{
+    long count = 0;
+    Relation depRel;
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    HeapTuple tup;
+    ObjectAddresses* objects = new_object_addresses();
+    ObjectAddress address;
+    const int keyNumber = 2;
+    char* typName = NULL;
+    bool isPkgDepTyp = false;
+    Form_pg_depend depTuple = NULL;
+
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+
+    ScanKeyInit(&key[0], Anum_pg_depend_refclassid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(classId));
+    ScanKeyInit(&key[1], Anum_pg_depend_refobjid, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(objectId));
+
+    scan = systable_beginscan(depRel, DependReferenceIndexId, true, NULL, keyNumber, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        depTuple = (Form_pg_depend)GETSTRUCT(tup);
+        isPkgDepTyp = (depTuple->deptype == DEPENDENCY_AUTO) &&
+            (depTuple->classid == TypeRelationId || depTuple->classid == PgSynonymRelationId);
+        if (!isPkgDepTyp) {
+            continue;
+        }
+
+        if (!isSpec) {
+            /* body just delete private type */
+            if (depTuple->classid == TypeRelationId) {
+                typName = get_typename(depTuple->objid);
+            } else {
+                typName = pstrdup(GetQualifiedSynonymName(depTuple->objid, false));
+            }
+            if (typName[0] != '$') {
+                pfree(typName);
+                continue;
+            }
+            pfree(typName);
+        }
+
+        address.classId = depTuple->classid;
+        address.objectId = depTuple->objid;
+        address.objectSubId = 0;
+        add_exact_object_address(&address, objects);
+        count++;
+    }
+
+    systable_endscan(scan);
+
+    heap_close(depRel, RowExclusiveLock);
+
+    CommandCounterIncrement();
+    performMultipleDeletions(objects, DROP_CASCADE, PERFORM_DELETION_INTERNAL, true);
+
+    return count;
+}
+
+bool IsPackageDependType(Oid typOid, Oid pkgOid, bool isRefCur)
+{
+    Relation depRel;
+    ScanKeyData key[2];
+    SysScanDesc scan;
+    HeapTuple tup;
+    const int keyNumber = 2;
+    bool isFind = false;
+
+    depRel = heap_open(DependRelationId, RowExclusiveLock);
+    if (isRefCur) {
+        ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber,
+            F_OIDEQ, ObjectIdGetDatum(PgSynonymRelationId));
+    } else {
+        ScanKeyInit(&key[0], Anum_pg_depend_classid, BTEqualStrategyNumber,
+            F_OIDEQ, ObjectIdGetDatum(TypeRelationId));
+    }
+    ScanKeyInit(&key[1], Anum_pg_depend_objid, BTEqualStrategyNumber,
+        F_OIDEQ, ObjectIdGetDatum(typOid));
+
+    scan = systable_beginscan(depRel, DependDependerIndexId, true, NULL, keyNumber, key);
+
+    while (HeapTupleIsValid(tup = systable_getnext(scan))) {
+        if (((Form_pg_depend)GETSTRUCT(tup))->deptype == DEPENDENCY_AUTO) {
+            if (OidIsValid(pkgOid)) {
+                if (((Form_pg_depend)GETSTRUCT(tup))->refobjid == pkgOid) {
+                    isFind = true;
+                    break;
+                }
+            } else {
+                if (((Form_pg_depend)GETSTRUCT(tup))->refclassid == PackageRelationId
+                    || ((Form_pg_depend)GETSTRUCT(tup))->refclassid == ProcedureRelationId) {
+                    isFind = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    systable_endscan(scan);
+
+    heap_close(depRel, RowExclusiveLock);
+
+    return isFind;
 }

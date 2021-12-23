@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2012-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -1351,6 +1352,7 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
             Oid reloid;
             Oid partitionReltoastrelid = InvalidOid;
             bool stopDecoding = false;
+            bool isSegment = false;
 
             switch (change->action) {
                 case REORDER_BUFFER_CHANGE_INSERT:
@@ -1358,11 +1360,12 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                 case REORDER_BUFFER_CHANGE_DELETE:
                     Assert(snapshot_now);
 
+                    isSegment = IsSegmentFileNode(change->data.tp.relnode);
                     reloid =
-                        RelidByRelfilenode(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, false);
+                        RelidByRelfilenode(change->data.tp.relnode.spcNode, change->data.tp.relnode.relNode, isSegment);
                     if (reloid == InvalidOid) {
                         reloid = PartitionRelidByRelfilenode(change->data.tp.relnode.spcNode,
-                            change->data.tp.relnode.relNode, partitionReltoastrelid, NULL, false);
+                            change->data.tp.relnode.relNode, partitionReltoastrelid, NULL, isSegment);
                     }
                     /*
                      * Catalog tuple without data, emitted while catalog was
@@ -1400,7 +1403,7 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                          * understand, so it doesn't make sense to handle the
                          * few cases we do.
                          */
-                        if (relation->rd_rel->relkind == RELKIND_SEQUENCE) {
+                        if (RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
                         } else if (!IsToastRelation(relation)) { /* user-triggered change */
                             ReorderBufferToastReplace(rb, txn, relation, change, partitionReltoastrelid);
                             rb->apply_change(rb, txn, relation, change);
@@ -1530,7 +1533,7 @@ void ReorderBufferCommit(ReorderBuffer *rb, TransactionId xid, XLogRecPtr commit
                          * understand, so it doesn't make sense to handle the
                          * few cases we do.
                          */
-                        if (relation->rd_rel->relkind == RELKIND_SEQUENCE) {
+                        if (RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
                         } else if (!IsToastRelation(relation)) { /* user-triggered change */
                             ReorderBufferToastReplace(rb, txn, relation, change, partitionReltoastrelid);
                             rb->apply_change(rb, txn, relation, change);

@@ -10,6 +10,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1995, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/postgres.h
  *
@@ -702,6 +703,12 @@ extern Datum Int64GetDatum(int64 X);
 #define UInt64GetDatum(X) Int64GetDatum((int64)(X))
 #endif
 
+#ifndef WIN32
+/* Always pass by reference for int128 type. */
+extern Datum Int128GetDatum(int128 X);
+#define DatumGetInt128(X) (*((int128*)DatumGetPointer(X)))
+#endif
+
 /*
  * DatumGetFloat4
  *		Returns 4-byte floating point value of a datum.
@@ -925,8 +932,11 @@ extern void cJSON_internal_free(void* pointer);
 
 extern void InitThreadLocalWhenSessionExit();
 extern void RemoveTempNamespace();
-
+#ifndef ENABLE_MULTIPLE_NODES
+#define CacheIsProcNameArgNsp(cache) ((cache)->id == PROCNAMEARGSNSP || (cache)->id == PROCALLARGS)
+#else 
 #define CacheIsProcNameArgNsp(cache) ((cache)->id == PROCNAMEARGSNSP)
+#endif 
 #define CacheIsProcOid(cache) ((cache)->id == PROCOID)
 #define IsBootingPgProc(rel) IsProcRelation(rel)
 #define BootUsingBuiltinFunc true
@@ -939,9 +949,17 @@ void ResetInterruptCxt();
 
 #define MSG_A_REPEAT_NUM_MAX 1024
 #define OVERRIDE_STACK_LENGTH_MAX 1024
+
+typedef enum {
+    RUN_MODE_PRIMARY,
+    RUN_MODE_STANDBY,
+} ClusterRunMode;
+
 #ifdef ENABLE_UT
 #include "lib/stringinfo.h"
 extern void exec_describe_statement_message(const char* stmt_name);
 extern void exec_get_ddl_params(StringInfo input_message);
 #endif
+
+
 #endif /* POSTGRES_H */

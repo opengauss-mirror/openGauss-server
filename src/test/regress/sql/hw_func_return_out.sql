@@ -1,4 +1,7 @@
 ---RETURN---
+create database pl_test_func_out DBCOMPATIBILITY 'pg';
+\c pl_test_func_out;
+
 SET CHECK_FUNCTION_BODIES TO ON;
 --default return out arg. not supported in A db
 CREATE OR REPLACE FUNCTION test_return( i in integer, j out integer) 
@@ -1355,3 +1358,5 @@ select * from pro_cursor_c0104(1);
   select * from pro_cursor_c012(1);
 
 SET CHECK_FUNCTION_BODIES TO OFF;
+\c regression;
+drop database IF EXISTS pl_test_func_out;

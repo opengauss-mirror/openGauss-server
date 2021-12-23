@@ -46,6 +46,7 @@
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeSubplan.h"
 #include "executor/node/nodeAgg.h"
+#include "executor/node/nodeCtescan.h"
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
@@ -239,9 +240,9 @@ static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, 
     int j = 0;
     IntArray upper, lower;
     int* lIndex = NULL;
+    Oid typOid = astate->xprstate.resultType;
 
     array_source = (ArrayType*)DatumGetPointer(ExecEvalExpr(astate->refexpr, econtext, isNull, isDone));
-
     /*
      * If refexpr yields NULL, and it's a fetch, then result is NULL. In the
      * assignment case, we'll cons up something below.
@@ -253,6 +254,14 @@ static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, 
             return (Datum)NULL;
     }
 
+    Oid tableOfIndexType;
+    bool isnestedtable = false;
+    HTAB* tableOfIndex = ExecEvalParamExternTableOfIndex(astate->refexpr, econtext, &tableOfIndexType, &isnestedtable);
+    if (u_sess->SPI_cxt.cur_tableof_index != NULL) {
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType = tableOfIndexType;
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex = tableOfIndex;
+    }
+
     foreach (l, astate->refupperindexpr) {
         ExprState* eltstate = (ExprState*)lfirst(l);
 
@@ -260,8 +269,38 @@ static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, 
             ereport(ERROR,
                 (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                     errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)", i + 1, MAXDIM)));
-
-        upper.indx[i++] = DatumGetInt32(ExecEvalExpr(eltstate, econtext, &eisnull, NULL));
+        if (OidIsValid(tableOfIndexType) || isnestedtable) {
+            Datum exprValue = ExecEvalExpr(eltstate, econtext, &eisnull, NULL);
+            TableOfIndexKey key;
+            PLpgSQL_var* node = NULL;
+            key.exprtypeid = tableOfIndexType;
+            key.exprdatum = exprValue;
+            int index = getTableOfIndexByDatumValue(key, tableOfIndex, &node);
+            if (isnestedtable) {
+                /* for nested table, we should take inner table's array and skip current indx */
+                if (node == NULL || index == -1) {
+                    eisnull = true;
+                } else {
+                    PLpgSQL_var* var = node;
+                    isnestedtable  = (var->nest_table != NULL);
+                    array_source = (ArrayType*)DatumGetPointer(var->value);
+                    tableOfIndexType = var->datatype->tableOfIndexType;
+                    tableOfIndex = var->tableOfIndex;
+                    eisnull = var->isnull;
+                    if (plpgsql_estate)
+                        plpgsql_estate->curr_nested_table_type = var->datatype->typoid;
+                    continue;
+                }
+            }
+            if (index == -1) {
+                eisnull = true;
+            } else {
+                upper.indx[i++] = index;
+            }
+        } else {
+            upper.indx[i++] = DatumGetInt32(ExecEvalExpr(eltstate, econtext, &eisnull, NULL));
+        }
+        
         /* If any index expr yields NULL, result is NULL or error */
         if (eisnull) {
             if (isAssignment)
@@ -282,7 +321,13 @@ static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, 
                     (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
                         errmsg("number of array dimensions (%d) exceeds the maximum allowed (%d)", j + 1, MAXDIM)));
 
-            lower.indx[j++] = DatumGetInt32(ExecEvalExpr(eltstate, econtext, &eisnull, NULL));
+            if (tableOfIndexType == VARCHAROID || isnestedtable) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+                            errmsg("index by varchar or nested table don't support two subscripts")));
+            } else {
+                lower.indx[j++] = DatumGetInt32(ExecEvalExpr(eltstate, econtext, &eisnull, NULL));
+            }
             /* If any index expr yields NULL, result is NULL or error */
             if (eisnull) {
                 if (isAssignment)
@@ -364,7 +409,11 @@ static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, 
 
         econtext->caseValue_datum = save_datum;
         econtext->caseValue_isNull = save_isNull;
-
+        if (u_sess->SPI_cxt.cur_tableof_index != NULL) {
+            u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType = InvalidOid;
+            u_sess->SPI_cxt.cur_tableof_index->tableOfIndex = NULL;
+        }
+        
         /*
          * For an assignment to a fixed-length array type, both the original
          * array and the value to be assigned into it must be non-NULL, else
@@ -408,17 +457,36 @@ static Datum ExecEvalArrayRef(ArrayRefExprState* astate, ExprContext* econtext, 
                 astate->refelemalign);
         return PointerGetDatum(resultArray);
     }
-
-    if (lIndex == NULL)
-        return array_ref(array_source,
-            i,
-            upper.indx,
-            astate->refattrlength,
-            astate->refelemlength,
-            astate->refelembyval,
-            astate->refelemalign,
-            isNull);
-    else {
+    /* for nested table, if get inner table's elem, need cover elem type */
+    if (list_length(astate->refupperindexpr) > i && i > 0 && plpgsql_estate) {
+        if (plpgsql_estate->curr_nested_table_type != typOid) {
+            plpgsql_estate->curr_nested_table_type = ARR_ELEMTYPE(array_source);
+            get_typlenbyvalalign(plpgsql_estate->curr_nested_table_type,
+                                &astate->refelemlength,
+                                &astate->refelembyval,
+                                &astate->refelemalign);
+        }
+    }
+    if (u_sess->SPI_cxt.cur_tableof_index != NULL) {
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndexType = InvalidOid;
+        u_sess->SPI_cxt.cur_tableof_index->tableOfIndex = NULL;
+    }
+    if (lIndex == NULL) {
+        if (unlikely(i == 0)) {
+            /* get nested table's inner table */
+            *isNull = eisnull;
+            return (Datum)array_source;
+        } else {
+            return array_ref(array_source,
+                i,
+                upper.indx,
+                astate->refattrlength,
+                astate->refelemlength,
+                astate->refelembyval,
+                astate->refelemalign,
+                isNull);
+        }
+    } else {
         resultArray = array_get_slice(array_source,
             i,
             upper.indx,
@@ -989,7 +1057,7 @@ static Datum ExecEvalRownum(RownumState* exprstate, ExprContext* econtext, bool*
         *isDone = ExprSingleResult;
     *isNull = false;
 
-    return Int64GetDatum(exprstate->ps->ps_rownum + 1);
+    return DirectFunctionCall1(int8_numeric, Int64GetDatum(exprstate->ps->ps_rownum + 1));
 }
 
 /* ----------------------------------------------------------------
@@ -1074,6 +1142,83 @@ static Datum ExecEvalParamExtern(ExprState* exprstate, ExprContext* econtext, bo
     ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("no value found for parameter %d", thisParamId)));
     return (Datum)0; /* keep compiler quiet */
 }
+
+static bool get_tableofindex_param_walker(Node* node, Param* expression)
+{
+    if (node == NULL)
+        return false;
+    if (IsA(node, Param)) {
+        expression->paramid = ((Param*)node)->paramid;
+        expression->paramtype = ((Param*)node)->paramtype;
+        return true;
+    } else if (IsA(node, FuncExpr)) {
+        FuncExpr* funcExpr = (FuncExpr*)(node);
+        const Oid array_function_start_oid = 7881;
+        const Oid array_function_end_oid = 7892;
+
+        bool isArrayFunction = funcExpr->funcid >= array_function_start_oid &&
+                               funcExpr->funcid <= array_function_end_oid;
+        if (isArrayFunction) {
+            expression->paramid = ((Param*)linitial(funcExpr->args))->paramid;
+            expression->paramtype = ((Param*)linitial(funcExpr->args))->paramtype;
+            return true;
+        }
+    }
+    return expression_tree_walker(node, (bool (*)())get_tableofindex_param_walker, expression);
+}
+
+/* ----------------------------------------------------------------
+ *		ExecEvalParamExternTableOfIndex
+ *
+ *		Returns the value of a PARAM_EXTERN table of index and type parameter .
+ * ----------------------------------------------------------------
+ */
+HTAB* ExecEvalParamExternTableOfIndex(ExprState* exprstate, ExprContext* econtext,
+                                      Oid* tableOfIndexType, bool *isnestedtable)
+{
+    Param expression;
+    expression.paramid = -1;
+    get_tableofindex_param_walker((Node*)exprstate->expr, &expression);
+
+    if (expression.paramid == -1) {
+        *tableOfIndexType = InvalidOid;
+        *isnestedtable = false;
+        return NULL;
+    }
+
+    int thisParamId = expression.paramid;
+    ParamListInfo paramInfo = econtext->ecxt_param_list_info;
+
+    /*
+     * PARAM_EXTERN parameters must be sought in ecxt_param_list_info.
+     */
+    if (paramInfo && thisParamId > 0 && thisParamId <= paramInfo->numParams) {
+        ParamExternData* prm = &paramInfo->params[thisParamId - 1];
+
+        /* give hook a chance in case parameter is dynamic */
+        if (!OidIsValid(prm->ptype) && paramInfo->paramFetch != NULL)
+            (*paramInfo->paramFetch)(paramInfo, thisParamId);
+
+        if (OidIsValid(prm->ptype)) {
+            /* safety check in case hook did something unexpected */
+            if (prm->ptype != expression.paramtype)
+                ereport(ERROR,
+                    (errcode(ERRCODE_DATATYPE_MISMATCH),
+                        errmsg("type of parameter %d (%s) does not match that when preparing the plan (%s)",
+                            thisParamId,
+                            format_type_be(prm->ptype),
+                            format_type_be(expression.paramtype))));
+
+            *tableOfIndexType = prm->tableOfIndexType;
+            *isnestedtable = prm->isnestedtable;
+            return prm->tableOfIndex;
+        }
+    }
+    *isnestedtable = false;
+    *tableOfIndexType = InvalidOid;
+    return NULL;
+}
+
 
 /* ----------------------------------------------------------------
  *		ExecEvalOper / ExecEvalFunc support routines
@@ -1894,6 +2039,7 @@ restart:
                         MemoryContext oldcontext = MemoryContextSwitchTo(estate->tuple_store_cxt);
                         estate->cursor_return_data =
                             (Cursor_Data*)palloc0(sizeof(Cursor_Data) * fcinfo->refcursor_data.return_number);
+                        estate->cursor_return_numbers = fcinfo->refcursor_data.return_number;
                         (void)MemoryContextSwitchTo(oldcontext);
                     }
 
@@ -2112,11 +2258,11 @@ static Datum ExecMakeFunctionResultNoSets(
             }
 
             /* if proIsProcedure is ture means it was a stored procedure */
-            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+            u_sess->SPI_cxt.is_stp = savedIsSTP;
             ReleaseSysCache(tp);
         } else {
             proIsProcedure = PROC_IS_PRO(fcache->prokind);
-            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+            u_sess->SPI_cxt.is_stp = savedIsSTP;
         }
     }
 
@@ -2138,6 +2284,19 @@ static Datum ExecMakeFunctionResultNoSets(
     /* Only allow commit at CN, therefore need to set callcontext in CN only */
     if (supportTranaction) {
         fcinfo->context = (Node *)node;
+    }
+
+    /*
+     * Incause of connet_by_root() and sys_connect_by_path() we need get the
+     * current scan tuple slot so attach the econtext here
+     *
+     * NOTE: Have to revisit!! so I don't have better solution to handle the case
+     *       where scantuple is available in built in funct
+     */
+    if (fcinfo->flinfo->fn_oid == CONNECT_BY_ROOT_FUNCOID ||
+                fcinfo->flinfo->fn_oid == SYS_CONNECT_BY_PATH_FUNCOID) {
+        fcinfo->swinfo.sw_econtext = (Node *)econtext;
+        fcinfo->swinfo.sw_exprstate = (Node *)linitial(fcache->args);
     }
 
     if (has_cursor_return) {
@@ -2230,6 +2389,7 @@ static Datum ExecMakeFunctionResultNoSets(
              */
             if (estate->cursor_return_data == NULL) {
                 estate->cursor_return_data = (Cursor_Data*)palloc0(sizeof(Cursor_Data));
+                estate->cursor_return_numbers = 1;
             }
             int rc = memcpy_s(estate->cursor_return_data,
                 sizeof(Cursor_Data),
@@ -2248,8 +2408,7 @@ static Datum ExecMakeFunctionResultNoSets(
             pfree_ext(var_dno);
     }
 
-    if(node != NULL)
-        pfree_ext(node);
+    pfree_ext(node);
 
     u_sess->SPI_cxt.is_stp = savedIsSTP;
     u_sess->SPI_cxt.is_proconfig_set = savedProConfigIsSet;
@@ -2313,7 +2472,6 @@ static bool func_has_refcursor_args(Oid Funcid, FunctionCallInfoData* fcinfo)
     ReleaseSysCache(proctup);
     return use_cursor;
 }
-
 /*
  *		ExecMakeTableFunctionResult
  *
@@ -2385,7 +2543,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
                 (reinterpret_cast<FuncExprState*>(funcexpr))->prokind = 'f';
             }
             /* if proIsProcedure means it was a stored procedure */
-            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+            u_sess->SPI_cxt.is_stp = savedIsSTP;
             if (!heap_attisnull(tp, Anum_pg_proc_proconfig, NULL) || u_sess->SPI_cxt.is_proconfig_set) {
                 u_sess->SPI_cxt.is_proconfig_set = true;
                 node->atomic = true;
@@ -2394,7 +2552,7 @@ Tuplestorestate* ExecMakeTableFunctionResult(
             ReleaseSysCache(tp);
         } else {
             proIsProcedure = PROC_IS_PRO(prokind);
-            u_sess->SPI_cxt.is_stp = savedIsSTP && proIsProcedure;
+            u_sess->SPI_cxt.is_stp = savedIsSTP;
         }
     }
 
@@ -2548,9 +2706,16 @@ Tuplestorestate* ExecMakeTableFunctionResult(
 
             if (econtext->plpgsql_estate != NULL) {
                 PLpgSQL_execstate* estate = econtext->plpgsql_estate;
-
-                if (fcinfo.refcursor_data.return_number > 0 && estate->cursor_return_data != NULL &&
-                    fcinfo.refcursor_data.returnCursor != NULL) {
+                bool isVaildReturn = (fcinfo.refcursor_data.return_number > 0 &&
+                    estate->cursor_return_data != NULL && fcinfo.refcursor_data.returnCursor != NULL);
+                if (isVaildReturn) {
+                    bool isVaildReturnNum = (fcinfo.refcursor_data.return_number > estate->cursor_return_numbers);
+                    if (isVaildReturnNum) {
+                        pgstat_end_function_usage(&fcusage, rsinfo.isDone != ExprMultipleResult);
+                        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmodule(MOD_PLSQL),
+                            errmsg("The expected output of the cursor:%d and function:%d does not match",
+                            estate->cursor_return_numbers, fcinfo.refcursor_data.return_number)));
+                    }
                     for (int i = 0; i < fcinfo.refcursor_data.return_number; i++) {
                         CopyCursorInfoData(&estate->cursor_return_data[i], &fcinfo.refcursor_data.returnCursor[i]);
                     }
@@ -2807,8 +2972,8 @@ static Datum ExecEvalFunc(FuncExprState* fcache, ExprContext* econtext, bool* is
 
         if (HeapTupleIsValid(cast_tuple)) {
             Relation cast_rel = heap_open(CastRelationId, AccessShareLock);
-            int castowner_Anum = Anum_pg_cast_castowner;
-            if (castowner_Anum <= (int) HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
+            uint32 castowner_Anum = Anum_pg_cast_castowner;
+            if (castowner_Anum <= HeapTupleHeaderGetNatts(cast_tuple->t_data, cast_rel->rd_att)) {
                 bool isnull = true;
                 Datum datum = fastgetattr(cast_tuple, Anum_pg_cast_castowner, cast_rel->rd_att, &isnull);
                 if (!isnull) {
@@ -4169,6 +4334,32 @@ static Datum ExecEvalNullTest(NullTestState* nstate, ExprContext* econtext, bool
         return result; /* nothing to check */
 
     if (ntest->argisrow && !(*isNull)) {
+        /*
+         * The SQL standard defines IS [NOT] NULL for a non-null rowtype
+         * argument as:
+         *
+         * "R IS NULL" is true if every field is the null value.
+         *
+         * "R IS NOT NULL" is true if no field is the null value.
+         *
+         * This definition is (apparently intentionally) not recursive; so our
+         * tests on the fields are primitive attisnull tests, not recursive
+         * checks to see if they are all-nulls or no-nulls rowtypes.
+         *
+         * The standard does not consider the possibility of zero-field rows,
+         * but here we consider them to vacuously satisfy both predicates.
+         * 
+         * e.g.
+         *            r      | isnull | isnotnull 
+         *      -------------+--------+-----------
+         *       (1,"(1,2)") | f      | t
+         *       (1,"(,)")   | f      | t
+         *       (1,)        | f      | f
+         *       (,"(1,2)")  | f      | f
+         *       (,"(,)")    | f      | f
+         *       (,)         | t      | f
+         * 
+         */
         HeapTupleHeader tuple;
         Oid tupType;
         int32 tupTypmod;

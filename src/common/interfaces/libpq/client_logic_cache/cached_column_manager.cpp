@@ -537,6 +537,16 @@ bool CachedColumnManager::load_cache(PGconn *conn)
     return m_cache_loader->fetch_catalog_tables(conn);
 }
 
+/**
+ * Reloads the client logic cache only if the local timestamp
+ * is earlier than the maximum timestmp on the server
+ * @param conn database connection
+ */
+void CachedColumnManager::reload_cache_if_needed(PGconn *conn)
+{
+    m_cache_loader->reload_cache_if_needed(conn);
+}
+
 CachedProc* CachedColumnManager::get_cached_proc(const char* dbName, const char* schemaName,
     const char* functionName) const
 {

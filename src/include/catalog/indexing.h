@@ -9,6 +9,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/indexing.h
  *
@@ -213,8 +214,14 @@ DECLARE_UNIQUE_INDEX(pg_pltemplate_name_index, 1137, on pg_pltemplate using btre
 
 DECLARE_UNIQUE_INDEX(pg_proc_oid_index, 2690, on pg_proc using btree(oid oid_ops));
 #define ProcedureOidIndexId  2690
-DECLARE_UNIQUE_INDEX(pg_proc_proname_args_nsp_index, 2691, on pg_proc using btree(proname name_ops, proargtypes oidvector_ops, pronamespace oid_ops));
+
+DECLARE_INDEX(pg_proc_proname_args_nsp_index, 2691, on pg_proc using btree(proname name_ops, proargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
 #define ProcedureNameArgsNspIndexId  2691
+DECLARE_UNIQUE_INDEX(pg_proc_proname_all_args_nsp_index, 9666, on pg_proc using btree(proname name_ops, allargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
+#define ProcedureNameAllArgsNspIndexId  9666
+
+DECLARE_INDEX(pg_proc_proname_args_nsp_new_index, 9378, on pg_proc using btree(proname name_ops, proargtypes oidvector_ops, pronamespace oid_ops, propackageid oid_ops));
+#define ProcedureNameArgsNspNewIndexId  9378
 
 DECLARE_UNIQUE_INDEX(pg_rewrite_oid_index, 2692, on pg_rewrite using btree(oid oid_ops));
 #define RewriteOidIndexId  2692
@@ -409,6 +416,20 @@ DECLARE_UNIQUE_INDEX(pg_job_proc_oid_index, 3455, on pg_job_proc using btree(oid
 #define PgJobProcOidIndexId	3455
 DECLARE_UNIQUE_INDEX(pg_job_proc_id_index, 3449, on pg_job_proc using btree(job_id int4_ops));
 #define PgJobProcIdIndexId	3449
+
+/* Add index of gs_job_argument */
+DECLARE_UNIQUE_INDEX(gs_job_argument_oid_index, 4458, on gs_job_argument using btree(oid oid_ops));
+#define GsJobArgumentProcOidIndexId 4458
+DECLARE_UNIQUE_INDEX(gs_job_argument_name_index, 4459, on gs_job_argument using btree(job_name text_ops, argument_name text_ops));
+#define GsJobArgumentNameIndexId	4459
+DECLARE_UNIQUE_INDEX(gs_job_argument_position_index, 4460, on gs_job_argument using btree(job_name text_ops, argument_position int4_ops));
+#define GsJobArgumentPositionIndexId	4460
+
+/* Add index of gs_job_attribute */
+DECLARE_UNIQUE_INDEX(gs_job_attribute_oid_index, 4456, on gs_job_attribute using btree(oid oid_ops));
+#define GsJobAttributeProcOidIndexId 4456
+DECLARE_UNIQUE_INDEX(gs_job_attribute_name_index, 4457, on gs_job_attribute using btree(job_name text_ops, attribute_name text_ops));
+#define GsJobAttributeNameIndexId	4457
 
 DECLARE_INDEX(gs_asp_sampletime_index, 2999, on gs_asp using btree(sample_time timestamptz_ops));
 #define GsAspSampleIdTimedexId 2999

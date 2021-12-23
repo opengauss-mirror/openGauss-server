@@ -85,6 +85,14 @@ extern bool EndPacket(Packet* pack);
 extern bool CheckPacketReady(Packet* pack);
 extern void ClearPacket(Packet** pack);
 
+#ifdef ENABLE_UT
+void ProcessControlRequest(ThreadPoolCommunicator* comm);
+void ProcessRecvRequest(ThreadPoolCommunicator* comm);
+void ProcessSendRequest(ThreadPoolCommunicator* comm);
+void ProcessControlRequestInternal(ThreadPoolCommunicator* comm, SocketRequest* sockreq);
+int GetSysCommErrno(ThreadPoolCommunicator* comm, int fd);
+#endif
+
 /*
  * Special values indicate different proxy combinations
  */

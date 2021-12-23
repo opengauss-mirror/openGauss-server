@@ -7,6 +7,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -74,6 +75,8 @@
 #include "catalog/pg_inherits.h"
 #include "catalog/pg_job.h"
 #include "catalog/pg_job_proc.h"
+#include "catalog/gs_job_argument.h"
+#include "catalog/gs_job_attribute.h"
 #include "catalog/gs_asp.h"
 #include "catalog/pg_language.h"
 #include "catalog/pg_largeobject.h"
@@ -280,6 +283,8 @@ static const FormData_pg_attribute Desc_pgxc_node[Natts_pgxc_node] = {Schema_pgx
 static const FormData_pg_attribute Desc_pg_partition[Natts_pg_partition] = {Schema_pg_partition};
 static const FormData_pg_attribute Desc_pg_job[Natts_pg_job] = {Schema_pg_job};
 static const FormData_pg_attribute Desc_pg_job_proc[Natts_pg_job_proc] = {Schema_pg_job_proc};
+static const FormData_pg_attribute Desc_gs_job_argument[Natts_gs_job_argument] = {Schema_gs_job_argument};
+static const FormData_pg_attribute Desc_gs_job_attribute[Natts_gs_job_attribute] = {Schema_gs_job_attribute};
 static const FormData_pg_attribute Desc_pg_object[Natts_pg_object] = {Schema_pg_object};
 static const FormData_pg_attribute Desc_pg_synonym[Natts_pg_synonym] = {Schema_pg_synonym};
 static const FormData_pg_attribute Desc_pg_hashbucket[Natts_pg_hashbucket] = {Schema_pg_hashbucket};
@@ -842,6 +847,51 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Desc_gs_global_chain,
         false,
         true},
+    {SubscriptionRelationId,
+        "pg_subscription",
+        SubscriptionRelation_Rowtype_Id,
+        true,
+        true,
+        Natts_pg_subscription,
+        Desc_pg_subscription,
+        false,
+        true},
+    {PublicationRelationId,
+        "pg_publication",
+        PublicationRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_pg_publication,
+        Desc_pg_publication,
+        false,
+        true},
+    {PublicationRelRelationId,
+        "pg_publication_rel",
+        PublicationRelRelationId_Rowtype_Id,
+        false,
+        true,
+        Natts_pg_publication_rel,
+        Desc_pg_publication_rel,
+        false,
+        true},
+    {ReplicationOriginRelationId,
+        "pg_replication_origin",
+        ReplicationOriginRelationId_Rowtype_Id,
+        true,
+        false,
+        Natts_pg_replication_origin,
+        Desc_pg_replication_origin,
+        false,
+        true},
+    {PackageRelationId,
+        "gs_package",
+        PackageRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_package,
+        Desc_gs_package,
+        false,
+        true},
     {RecyclebinRelationId,
         "gs_recyclebin",
         RecyclebinRelation_Rowtype_Id,
@@ -951,6 +1001,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Desc_streaming_reaper_status, 
         false,
         true},
+    {GsJobAttributeRelationId,
+        "gs_job_attribute",
+        GsJobAttributeRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_job_attribute,
+        Desc_gs_job_attribute,
+        false,
+        true},
     {PgxcSliceRelationId,
         "pgxc_slice",
         PgxcSliceRelation_Rowtype_Id,
@@ -958,6 +1017,15 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         false,
         Natts_pgxc_slice,
         Desc_pgxc_slice,
+        false,
+        true},
+    {GsJobArgumentRelationId,
+        "gs_job_argument",
+        GsJobArgumentRelation_Rowtype_Id,
+        false,
+        true,
+        Natts_gs_job_argument,
+        Desc_gs_job_argument,
         false,
         true},
     {GsGlobalConfigRelationId,
@@ -1130,51 +1198,6 @@ static struct CatalogRelationBuildParam catalogBuildParam[CATALOG_NUM] = {{Defau
         Natts_gs_opt_model,
         Desc_gs_opt_model,
         false,
-        true},
-    {SubscriptionRelationId,
-        "pg_subscription",
-        SubscriptionRelation_Rowtype_Id,
-        true,
-        true,
-        Natts_pg_subscription,
-        Desc_pg_subscription,
-        false,
-        true},
-    {PublicationRelationId,
-        "pg_publication",
-        PublicationRelation_Rowtype_Id,
-        false,
-        true,
-        Natts_pg_publication,
-        Desc_pg_publication,
-        false,
-        true},
-    {PublicationRelRelationId,
-        "pg_publication_rel",
-        PublicationRelRelationId_Rowtype_Id,
-        false,
-        true,
-        Natts_pg_publication_rel,
-        Desc_pg_publication_rel,
-        false,
-        true},
-    {ReplicationOriginRelationId,
-        "pg_replication_origin",
-        ReplicationOriginRelationId_Rowtype_Id,
-        true,
-        false,
-        Natts_pg_replication_origin,
-        Desc_pg_replication_origin,
-        false,
-        true},
-    {PackageRelationId,
-        "gs_package",
-        PackageRelation_Rowtype_Id,
-        false,
-        true,
-        Natts_gs_package,
-        Desc_gs_package,
-        false,
         true}};
 
 // Get cluster information of relation
@@ -1245,9 +1268,6 @@ typedef struct opclasscacheent {
 } OpClassCacheEnt;
 
 /* non-export function prototypes */
-static void partitionMapDestroyRangeArray(RangeElement* rangeArray, int arrLen);
-static void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen);
-static void RelationDestroyPartitionMap(Relation relation);
 static void RelationDestroyRelation(Relation relation, bool remember_tupdesc);
 static void RememberToFreeTupleDescAtEOX(TupleDesc td);
 static void RelationClearRelation(Relation relation, bool rebuild);
@@ -1342,6 +1362,12 @@ HeapTuple ScanPgRelation(Oid targetRelId, bool indexOK, bool force_non_historic)
     pg_class_scan = systable_beginscan(
         pg_class_desc, ClassOidIndexId, indexOK && u_sess->relcache_cxt.criticalRelcachesBuilt, snapshot, 1, key);
 
+#ifdef ENABLE_MULTIPLE_NODES
+    /* If we do seqscan on pg_class, skip sync. */
+    if (pg_class_scan->irel == NULL && snapshot == SnapshotNow) {
+        pg_class_scan->scan->rs_base.rs_snapshot = SnapshotNowNoSync;
+    }
+#endif
     pg_class_tuple = systable_getnext(pg_class_scan);
 
     /*
@@ -1566,7 +1592,9 @@ static void RelationBuildTupleDesc(Relation relation, bool onlyLoadInitDefVal)
              * its attnum should be zero, use it to check if above scenario happened.
              */
             if (relation->rd_att->attrs[attp->attnum - 1]->attnum != 0) {
-                ereport(ERROR,(errmsg("Catalog attribute %d for relation \"%s\" has been updated concurrently",
+                /* Panic if we hit here many times, plus 2 make sure it has enough room in err stack */
+                int eLevel = ((t_thrd.log_cxt.errordata_stack_depth + 2) < ERRORDATA_STACK_SIZE) ? ERROR : PANIC;
+                ereport(eLevel,(errmsg("Catalog attribute %d for relation \"%s\" has been updated concurrently",
                     attp->attnum, RelationGetRelationName(relation))));
             }
             errno_t rc = memcpy_s(
@@ -3091,8 +3119,14 @@ Relation RelationIdGetRelation(Oid relationId)
      * it.
      */
     rd = RelationBuildDesc(relationId, true);
-    if (RelationIsValid(rd))
+    if (RelationIsValid(rd)) {
         RelationIncrementReferenceCount(rd);
+        /* Insert TDE key to buffer cache for tde table */
+        if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE && RelationisEncryptEnable(rd)) {
+            RelationInsertTdeInfoToCache(rd);
+        }
+    }
+
     return rd;
 }
 
@@ -3310,139 +3344,6 @@ static void RelationReloadIndexInfo(Relation relation)
     relation->rd_isvalid = true;
 }
 
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		:
- * Description	:
- * Notes		:
- */
-static void partitionMapDestroyRangeArray(RangeElement* rangeArray, int arrLen)
-{
-    int i, j;
-    RangeElement* range = NULL;
-    Const* maxConst = NULL;
-
-    if (NULL == rangeArray || arrLen < 1) {
-        return;
-    }
-
-    /*before free range array, free max array in each rangeElement*/
-    for (i = 0; i < arrLen; i++) {
-        range = &(rangeArray[i]);
-        for (j = 0; j < range->len; j++) {
-            maxConst = range->boundary[j];
-            if (PointerIsValid(maxConst)) {
-                if (!maxConst->constbyval && !maxConst->constisnull &&
-                    PointerIsValid(DatumGetPointer(maxConst->constvalue))) {
-                    pfree(DatumGetPointer(maxConst->constvalue));
-                }
-
-                pfree_ext(maxConst);
-                maxConst = NULL;
-            }
-        }
-    }
-
-    /*free range array*/
-    pfree_ext(rangeArray);
-}
-
-static void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen)
-{
-    int i;
-    HashPartElement* hashValues = NULL;
-    Const* value = NULL;
-
-    if (NULL == hashArray || arrLen < 1) {
-        return;
-    }
-
-    /*before free range array, free max array in each rangeElement*/
-    for (i = 0; i < arrLen; i++) {
-        hashValues = &(hashArray[i]);
-
-        value = hashValues->boundary[0];
-        if (PointerIsValid(value)) {
-            if (!value->constbyval && !value->constisnull &&
-                PointerIsValid(DatumGetPointer(value->constvalue))) {
-                pfree(DatumGetPointer(value->constvalue));
-            }
-
-            pfree_ext(value);
-            value = NULL;
-        }
-        
-    }
-    pfree_ext(hashArray);
-}
-
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		:
- * Description	:
- * Notes		:
- */
-static void RelationDestroyPartitionMap(Relation relation)
-{
-    /*already a non-partitioned relation, just return*/
-    if (!relation->partMap)
-        return;
-
-    /*partitioned relation, destroy the partition map*/
-    if (relation->partMap->type == PART_TYPE_RANGE || relation->partMap->type == PART_TYPE_INTERVAL) {
-        RangePartitionMap* range_map = ((RangePartitionMap*)(relation->partMap));
-
-        /*first free partKeyNum/partitionKeyDataType/ranges in the range map*/
-        if (range_map->partitionKey) {
-            pfree_ext(range_map->partitionKey);
-        }
-        if (range_map->partitionKeyDataType) {
-            pfree_ext(range_map->partitionKeyDataType);
-        }
-        if (range_map->intervalValue) {
-            pfree_ext(range_map->intervalValue);
-        }
-        if (range_map->intervalTablespace) {
-            pfree_ext(range_map->intervalTablespace);
-        }
-        if (range_map->rangeElements) {
-            partitionMapDestroyRangeArray(range_map->rangeElements, range_map->rangeElementsNum);
-        }
-    }  else if (relation->partMap->type == PART_TYPE_LIST) {
-        ListPartitionMap* list_map = (ListPartitionMap*)(relation->partMap);
-        if (list_map->partitionKey) {
-            pfree_ext(list_map->partitionKey);
-            list_map->partitionKey = NULL;
-        }
-        if (list_map->partitionKeyDataType) {
-            pfree_ext(list_map->partitionKeyDataType);
-            list_map->partitionKeyDataType = NULL;
-        }
-        if (list_map->listElements) {
-            DestroyListElements(list_map->listElements, list_map->listElementsNum);
-            list_map->listElements = NULL;
-        }
-    } else if (relation->partMap->type == PART_TYPE_HASH) {
-        HashPartitionMap* hash_map = (HashPartitionMap*)(relation->partMap);
-        if (hash_map->partitionKey) {
-            pfree_ext(hash_map->partitionKey);
-            hash_map->partitionKey = NULL;
-        }
-        if (hash_map->partitionKeyDataType) {
-            pfree_ext(hash_map->partitionKeyDataType);
-            hash_map->partitionKeyDataType = NULL;
-        }
-        if (hash_map->hashElements) {
-            PartitionMapDestroyHashArray(hash_map->hashElements, hash_map->hashElementsNum);
-            hash_map->hashElements = NULL;
-        }
-    }
-    pfree_ext(relation->partMap);
-    return;
-}
-
 static void RelationDestroySliceMap(Relation relation)
 {
     RangePartitionMap* range_map = (RangePartitionMap*)(relation->sliceMap);
@@ -3499,8 +3400,8 @@ static void RelationDestroyRelation(Relation relation, bool remember_tupdesc)
     }
     list_free_ext(relation->rd_indexlist);
     bms_free_ext(relation->rd_indexattr);
-    bms_free_ext(relation->rd_keyattr);
     bms_free_ext(relation->rd_pkattr);
+    bms_free_ext(relation->rd_keyattr);
     bms_free_ext(relation->rd_idattr);
     if (relation->rd_options) {
         pfree_ext(relation->rd_pubactions);
@@ -3523,7 +3424,7 @@ static void RelationDestroyRelation(Relation relation, bool remember_tupdesc)
     if (relation->rd_fdwroutine)
         pfree_ext(relation->rd_fdwroutine);
     if (relation->partMap) {
-        RelationDestroyPartitionMap(relation);
+        RelationDestroyPartitionMap(relation->partMap);
     }
     if (REALTION_BUCKETKEY_VALID(relation)) {
         pfree_ext(relation->rd_bucketkey->bucketKey);
@@ -3611,6 +3512,10 @@ static void RelationClearRelation(Relation relation, bool rebuild)
             if (relation->rd_refcnt > 1)
                 RelationReloadIndexInfo(relation);
         }
+        list_free_ext(relation->rd_indexlist);
+        relation->rd_indexlist = NIL;
+        relation->rd_oidindex = InvalidOid;
+        relation->rd_indexvalid = 0;
         return;
     }
 
@@ -4598,7 +4503,7 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, Multi
     bool modifyPgClass = !RELATION_IS_GLOBAL_TEMP(relation);
     bool isbucket;
     /* Indexes, sequences must have Invalid frozenxid; other rels must not */
-    Assert(((RelationIsIndex(relation) || relation->rd_rel->relkind == RELKIND_SEQUENCE)
+    Assert(((RelationIsIndex(relation) || RELKIND_IS_SEQUENCE(relation->rd_rel->relkind))
                    ? freezeXid == InvalidTransactionId
                    : TransactionIdIsNormal(freezeXid)) ||
            relation->rd_rel->relkind == RELKIND_RELATION);
@@ -4702,7 +4607,7 @@ void RelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, Multi
             classform->relfilenode = newrelfilenode;
 
         /* These changes are safe even for a mapped relation */
-        if (relation->rd_rel->relkind != RELKIND_SEQUENCE) {
+        if (!RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
             classform->relpages = 0; /* it's empty until further notice */
             classform->reltuples = 0;
             classform->relallvisible = 0;
@@ -4806,7 +4711,7 @@ void UpdatePgclass(Relation relation, TransactionId freezeXid, const RelFileNode
     classform->relfilenode = rnode->node.relNode;
 
     /* These changes are safe even for a mapped relation */
-    if (relation->rd_rel->relkind != RELKIND_SEQUENCE) {
+    if (!RELKIND_IS_SEQUENCE(relation->rd_rel->relkind)) {
         classform->relpages = 0; /* it's empty until further notice */
         classform->reltuples = 0;
         classform->relallvisible = 0;
@@ -5989,7 +5894,11 @@ Oid RelationGetReplicaIndex(Relation relation)
         replidindex = RelationGetReplicaIndex(parentRelation);
         return replidindex;
     } else if (RelationIsPartition(relation)) {
-        parentRelation = RelationIdGetRelation(relation->parentId);
+        if (RelationIsSubPartitionOfSubPartitionTable(relation)) {
+            parentRelation = RelationIdGetRelation(relation->grandparentId);
+        } else {
+            parentRelation = RelationIdGetRelation(relation->parentId);
+        }
         if (!RelationIsValid(parentRelation)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -6309,16 +6218,16 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
      * won't be returned at all by RelationGetIndexList.
      */
     indexattrs = NULL;
-    uindexattrs = NULL;
     pkindexattrs = NULL;
+    uindexattrs = NULL;
     idindexattrs = NULL;
     foreach (l, indexoidlist) {
         Oid indexOid = lfirst_oid(l);
         Relation indexDesc;
         IndexInfo* indexInfo = NULL;
         int i;
+        bool isPK;		      /* primary key */
         bool isKey = false;    /* candidate key */
-        bool isPK = false; /* primary key */
         bool isIDKey = false; /* replica identity index */
 
         indexDesc = index_open(indexOid, AccessShareLock);
@@ -6326,10 +6235,10 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
         /* Extract index key information from the index's pg_index row */
         indexInfo = BuildIndexInfo(indexDesc);
 
-        /* Can this index be referenced by a foreign key? */
-        isKey = indexInfo->ii_Unique && indexInfo->ii_Expressions == NIL && indexInfo->ii_Predicate == NIL;
         /* Is this a primary key? */
         isPK = (indexOid == relpkindex);
+        /* Can this index be referenced by a foreign key? */
+        isKey = indexInfo->ii_Unique && indexInfo->ii_Expressions == NIL && indexInfo->ii_Predicate == NIL;
 
         /* Is this index the configured (or default) replica identity? */
         isIDKey = (indexOid == relreplindex);
@@ -6387,8 +6296,8 @@ Bitmapset* RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind att
      * empty.
      */
     oldcxt = MemoryContextSwitchTo(u_sess->cache_mem_cxt);
-    relation->rd_keyattr = bms_copy(uindexattrs);
     relation->rd_pkattr = bms_copy(pkindexattrs);
+    relation->rd_keyattr = bms_copy(uindexattrs);
     relation->rd_idattr = bms_copy(idindexattrs);
     relation->rd_indexattr = bms_copy(indexattrs);
     (void)MemoryContextSwitchTo(oldcxt);
@@ -7023,8 +6932,8 @@ static bool load_relcache_init_file(bool shared)
         rel->rd_oidindex = InvalidOid;
         rel->rd_pkindex = InvalidOid;
         rel->rd_indexattr = NULL;
-        rel->rd_keyattr = NULL;
         rel->rd_pkattr = NULL;
+        rel->rd_keyattr = NULL;
         rel->rd_idattr = NULL;
         rel->rd_pubactions = NULL;
         rel->rd_createSubid = InvalidSubTransactionId;
@@ -7944,45 +7853,6 @@ void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info)
     }
 }
 
-/* setup page compress options for relation */
-static void SetupPageCompressForRelation(Relation relation, PageCompressOpts* compress_options)
-{
-    relation->rd_node.opt = 0;
-    uint1 algorithm = compress_options->compressType;
-    if (algorithm != COMPRESS_TYPE_NONE) {
-        if (!SUPPORT_PAGE_COMPRESSION) {
-            elog(ERROR, "unsupported page compression on this platform");
-        }
-
-        uint1 compressLevel;
-        bool symbol = false;
-        if (compress_options->compressLevel >= 0) {
-            symbol = true;
-            compressLevel = compress_options->compressLevel;
-        } else {
-            symbol = false;
-            compressLevel = -compress_options->compressLevel;
-        }
-        bool success = false;
-        uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
-        if (!success) {
-            elog(ERROR, "invalid compress_chunk_size %d , must be one of %d, %d, %d or %d for %s",
-                 compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
-                 RelationGetRelationName(relation));
-        }
-        uint1 preallocChunks;
-        if (compress_options->compressPreallocChunks >= BLCKSZ / compress_options->compressChunkSize) {
-            preallocChunks = (uint1)(BLCKSZ / compress_options->compressChunkSize - 1);
-        } else {
-            preallocChunks = (uint1)(compress_options->compressPreallocChunks);
-        }
-        Assert(preallocChunks <= MAX_PREALLOC_CHUNKS);
-        SET_COMPRESS_OPTION(relation->rd_node, compress_options->compressByteConvert,
-                            compress_options->compressDiffConvert, preallocChunks,
-                            symbol, compressLevel, algorithm, chunkSize);
-    }
-}
-
 char RelationGetRelReplident(Relation r)
 {
     bool isNull = false;
@@ -8007,4 +7877,45 @@ char RelationGetRelReplident(Relation r)
     ReleaseSysCache(tuple);
 
     return relreplident;
+}
+
+/* setup page compress options for relation */
+static void SetupPageCompressForRelation(Relation relation, PageCompressOpts* compress_options)
+{
+    relation->rd_node.opt = 0;
+    uint1 algorithm = compress_options->compressType;
+    if (algorithm != COMPRESS_TYPE_NONE) {
+        if (!SUPPORT_PAGE_COMPRESSION) {
+            elog(ERROR, "unsupported page compression on this platform");
+        }
+
+        uint1 compressLevel;
+        bool symbol = false;
+        if (compress_options->compressLevel >= 0) {
+            symbol = true;
+            compressLevel = compress_options->compressLevel;
+        } else {
+            symbol = false;
+            compressLevel = -compress_options->compressLevel;
+        }
+
+        bool success = false;
+        uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
+        if (!success) {
+            elog(ERROR, "invalid compress_chunk_size %d , must be one of %d, %d, %d or %d for %s",
+                 compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
+                 RelationGetRelationName(relation));
+        }
+
+        uint1 preallocChunks;
+        if (compress_options->compressPreallocChunks >= BLCKSZ / compress_options->compressChunkSize) {
+            preallocChunks = (uint1)(BLCKSZ / compress_options->compressChunkSize - 1);
+        } else {
+            preallocChunks = (uint1)(compress_options->compressPreallocChunks);
+        }
+        Assert(preallocChunks <= MAX_PREALLOC_CHUNKS);
+        SET_COMPRESS_OPTION(relation->rd_node, compress_options->compressByteConvert,
+                            compress_options->compressDiffConvert, preallocChunks,
+                            symbol, compressLevel, algorithm, chunkSize);
+    }
 }

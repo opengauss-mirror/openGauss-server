@@ -22,6 +22,8 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/remote
     ${CMAKE_CURRENT_SOURCE_DIR}/smgr
     ${CMAKE_CURRENT_SOURCE_DIR}/tcap
+    ${CMAKE_CURRENT_SOURCE_DIR}/xlog_share_storage
+    ${CMAKE_CURRENT_SOURCE_DIR}/dorado_operation
 )
 
 if("${ENABLE_MOT}" STREQUAL "ON")
@@ -45,6 +47,8 @@ add_subdirectory(page)
 add_subdirectory(remote)
 add_subdirectory(smgr)
 add_subdirectory(tcap)
+add_subdirectory(xlog_share_storage)
+add_subdirectory(dorado_operation)
 
 if("${ENABLE_MOT}" STREQUAL "ON")
     add_subdirectory(mot)

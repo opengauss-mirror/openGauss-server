@@ -1,3 +1,5 @@
+create database pl_test_cursor_part8 DBCOMPATIBILITY 'pg';
+\c pl_test_cursor_part8;
 CREATE schema hw_cursor_part8;
 SET current_schema = hw_cursor_part8;
 CREATE TABLE TEST_TB(ID INTEGER);
@@ -534,3 +536,5 @@ drop cascades to type pro_type_04
 drop cascades to function pro_base13_03(character varying,character varying,character varying)
 drop cascades to function pro_base13_04(character varying,character varying,character varying)
 drop cascades to function pro_base12_01()
+\c regression;
+drop database IF EXISTS pl_test_cursor_part8;

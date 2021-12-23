@@ -170,3 +170,18 @@ const int *PGClientLogic::get_rec_origial_ids(const Oid typid, const char *pname
         return rec->get_original_ids();
     }
 }
+
+/**
+ * gets the length of original oids for a type
+ * @param typid the type oid as returned from the database
+ * @param pname the type name as returned from the database
+ * @return the number of original oids
+ */
+size_t PGClientLogic::get_rec_origial_ids_length(const Oid typid, const char *pname) const
+{
+    const ICachedRec *rec = get_cl_rec(typid, pname);
+    if (rec == NULL) {
+        return 0;
+    }
+    return rec->get_num_processed_args();
+}

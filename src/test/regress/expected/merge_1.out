@@ -56,43 +56,29 @@ MERGE INTO products_row p
 USING newproducts_row np
 ON p.product_id = np.product_id
 WHEN MATCHED THEN
-  UPDATE SET product_name = np.product_name, category = np.category, total = np.total where np.product_id = 5;
-                                                                QUERY PLAN                                                                 
--------------------------------------------------------------------------------------------------------------------------------------------
- Merge on mergeinto_1.products_row p
-   Update Cond: (p.product_id = 5)
-   ->  Hash Join
-         Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, np.ctid
-         Hash Cond: (p.product_id = np.product_id)
-         ->  Seq Scan on mergeinto_1.products_row p
-               Output: p.product_id, p.product_name, p.category, p.total, p.ctid
-         ->  Hash
-               Output: np.product_id, np.product_name, np.category, np.total, np.ctid
-               ->  Seq Scan on mergeinto_1.newproducts_row np
-                     Output: np.product_id, np.product_name, np.category, np.total, np.ctid
-(11 rows)
-
-EXPLAIN (VERBOSE on, COSTS off)
-MERGE INTO products_row p
-USING newproducts_row np
-ON p.product_id = np.product_id
-WHEN MATCHED THEN
   UPDATE SET product_name = np.product_name, category = np.category, total = np.total
 WHEN NOT MATCHED THEN  
   INSERT VALUES (np.product_id, np.product_name, np.category, np.total);
-                                                                QUERY PLAN                                                                 
--------------------------------------------------------------------------------------------------------------------------------------------
- Merge on mergeinto_1.products_row p
-   ->  Hash Right Join
-         Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, np.ctid
-         Hash Cond: (p.product_id = np.product_id)
-         ->  Seq Scan on mergeinto_1.products_row p
-               Output: p.product_id, p.product_name, p.category, p.total, p.ctid
-         ->  Hash
-               Output: np.product_id, np.product_name, np.category, np.total, np.ctid
-               ->  Seq Scan on mergeinto_1.newproducts_row np
-                     Output: np.product_id, np.product_name, np.category, np.total, np.ctid
-(10 rows)
+                                                                                                                QUERY PLAN                                                                                                                
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Streaming (type: GATHER)
+   Node/s: All datanodes
+   ->  Merge on mergeinto_1.products_row p
+         ->  Streaming(type: REDISTRIBUTE)
+               Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, np.ctid, (CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END)
+               Distribute Key: (CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END)
+               Spawn on: All datanodes
+               Consumer Nodes: All datanodes
+               ->  Nested Loop Left Join
+                     Output: np.product_id, np.product_name, np.category, np.total, p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id, np.ctid, CASE WHEN (p.ctid IS NULL) THEN np.product_id ELSE p.product_id END
+                     Join Filter: (p.product_id = np.product_id)
+                     ->  Seq Scan on mergeinto_1.newproducts_row np
+                           Output: np.product_id, np.product_name, np.category, np.total, np.ctid
+                           Distribute Key: np.product_id
+                     ->  Seq Scan on mergeinto_1.products_row p
+                           Output: p.product_id, p.product_name, p.category, p.total, p.ctid, p.xc_node_id
+                           Distribute Key: p.product_id
+(17 rows)
 
 -- only MATCHED clause
 MERGE INTO products_row p

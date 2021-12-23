@@ -14,6 +14,7 @@
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *	Copyright (c) 2001-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/gausskernel/process/postmaster/pgstat.cpp
@@ -57,6 +58,7 @@
 #include "postmaster/postmaster.h"
 #include "postmaster/pagewriter.h"
 #include "replication/catchup.h"
+#include "replication/walsender.h"
 #include "storage/backendid.h"
 #include "storage/smgr/fd.h"
 #include "storage/ipc.h"
@@ -1541,7 +1543,9 @@ void pgstat_report_sql_rt(uint64 UniqueSQLId, int64 start_time, int64 rt)
     }
     if (g_instance.stat_cxt.pgStatSock == PGINVALID_SOCKET || !u_sess->attr.attr_common.enable_instr_rt_percentile)
         return;
-
+    if (!PMstateIsRun()) {
+        return;
+    }
     pgstat_setheader(&msg.m_hdr, PGSTAT_MTYPE_RESPONSETIME);
     msg.sqlRT.UniqueSQLId = UniqueSQLId;
     msg.sqlRT.start_time = start_time;
@@ -1874,7 +1878,7 @@ void pgstat_initstats(Relation rel)
 
     /* We only count stats for things that have storage */
     if (!(relkind == RELKIND_RELATION || relkind == RELKIND_MATVIEW || relkind == RELKIND_INDEX ||
-            relkind == RELKIND_GLOBAL_INDEX || relkind == RELKIND_TOASTVALUE || relkind == RELKIND_SEQUENCE)) {
+            relkind == RELKIND_GLOBAL_INDEX || relkind == RELKIND_TOASTVALUE || RELKIND_IS_SEQUENCE(relkind))) {
         rel->pgstat_info = NULL;
         return;
     }
@@ -2218,6 +2222,7 @@ void pgstat_count_cu_update(Relation rel, int n)
 
         /* cstore and dfs don't have hot update chain */
         pgstat_info->trans->tuples_updated += n;
+        pgstat_info->trans->tuples_updated_accum += n;
     }
 }
 
@@ -2236,6 +2241,7 @@ void pgstat_count_cu_delete(Relation rel, int n)
             add_tabstat_xact_level(pgstat_info, nest_level);
 
         pgstat_info->trans->tuples_deleted += n;
+        pgstat_info->trans->tuples_deleted_accum += n;
     }
 }
 
@@ -2264,10 +2270,17 @@ void AtEOXact_PgStat(bool isCommit)
      * Count transaction commit or abort.  (We use counters, not just bools,
      * in case the reporting message isn't sent right away.)
      */
-    if (isCommit)
+    if (isCommit) {
         u_sess->stat_cxt.pgStatXactCommit++;
-    else
+    } else if (!AM_WAL_DB_SENDER) {
+        /*
+         * Walsender for logical decoding will not count rollback transaction
+         * any more. Logical decoding frequently starts and rollback transactions
+         * to access system tables and syscache, see ReorderBufferCommit()
+         * for more details.
+         */
         u_sess->stat_cxt.pgStatXactRollback++;
+    }
 
     pgstatCountTransactionCommit4SessionLevel(isCommit);
 
@@ -7297,7 +7310,13 @@ void pgstat_initstats_partition(Partition part)
     }
 
     /* find or make the PgStat_TableStatus entry, and update link */
-    part->pd_pgstat_info = get_tabstat_entry(part_id, false, PartitionGetRelid(part));
+    Oid relid;
+    if (part->pd_part->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        relid = partid_get_parentid(part->pd_part->parentid);
+    } else {
+        relid = PartitionGetRelid(part);
+    }
+    part->pd_pgstat_info = get_tabstat_entry(part_id, false, relid);
 }
 
 /*
@@ -9119,6 +9138,30 @@ TableDistributionInfo* get_remote_stat_bgwriter(TupleDesc tuple_desc)
     return distribuion_info;
 }
 
+TableDistributionInfo* get_remote_stat_candidate(TupleDesc tuple_desc)
+{
+    StringInfoData buf;
+    TableDistributionInfo* distribuion_info = NULL;
+
+    /* the memory palloced here should be free outside where it was called. */
+    distribuion_info = (TableDistributionInfo*)palloc0(sizeof(TableDistributionInfo));
+
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf,
+        "select                                                                     "
+        "node_name,candidate_slots,get_buf_from_list,get_buf_clock_sweep,           "
+        "seg_candidate_slots,seg_get_buf_from_list,seg_get_buf_clock_sweep          "
+        "from local_candidate_stat();                                               ");
+
+    /* send sql and parallel fetch distribution info from all data nodes */
+    distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);
+    distribuion_info->slot = MakeSingleTupleTableSlot(tuple_desc);
+
+    return distribuion_info;
+}
+
+
 TableDistributionInfo* get_remote_single_flush_dw_stat(TupleDesc tuple_desc)
 {
     StringInfoData buf;
@@ -9224,6 +9267,29 @@ TableDistributionInfo* get_recovery_stat(TupleDesc tuple_desc)
         "SELECT node_name, standby_node_name, source_ip, source_port, dest_ip, dest_port, current_rto, target_rto, "
         "current_sleep_time FROM "
         "local_recovery_status();");
+
+    /* send sql and parallel fetch distribution info from all data nodes */
+    distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);
+    distribuion_info->slot = MakeSingleTupleTableSlot(tuple_desc);
+
+    return distribuion_info;
+}
+
+TableDistributionInfo* streaming_hadr_get_recovery_stat(TupleDesc tuple_desc)
+{
+    StringInfoData buf;
+    TableDistributionInfo* distribuion_info = NULL;
+
+    /* the memory palloced here should be free outside where it was called. */
+    distribuion_info = (TableDistributionInfo*)palloc0(sizeof(TableDistributionInfo));
+
+    initStringInfo(&buf);
+
+    appendStringInfo(&buf,
+        "SELECT hadr_sender_node_name, hadr_receiver_node_name, "
+        "source_ip, source_port, dest_ip, dest_port, current_rto, target_rto, current_rpo, target_rpo, "
+        "current_sleep_time FROM "
+        "hadr_local_rto_and_rpo_stat();");
 
     /* send sql and parallel fetch distribution info from all data nodes */
     distribuion_info->state = RemoteFunctionResultHandler(buf.data, NULL, NULL, true, EXEC_ON_ALL_NODES, true);

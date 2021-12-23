@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -119,7 +120,6 @@ Node* ParseFuncOrColumn(ParseState* pstate, List* funcname, List* fargs, FuncCal
     for (l = list_head(fargs); l != NULL; l = nextl) {
         Node* arg = (Node*)lfirst(l);
         Oid argtype = exprType(arg);
-
         nextl = lnext(l);
 
         if (argtype == VOIDOID && IsA(arg, Param) && !is_column && !agg_within_group) {
@@ -1398,7 +1398,30 @@ FuncCandidateList func_select_candidate(int nargs, Oid* input_typeids, FuncCandi
 
     if (ncandidates == 1)
         return candidates;
+#ifndef ENABLE_MULTIPLE_NODES
+    Oid caller_pkg_oid = InvalidOid;
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+        caller_pkg_oid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_oid;
+    } else {
+        caller_pkg_oid = u_sess->plsql_cxt.running_pkg_oid;
+    }
+    nbestMatch = 0;
+    ncandidates = 0;
+    last_candidate = NULL;
+    for (current_candidate = candidates; current_candidate != NULL; current_candidate = current_candidate->next) {
+        nmatch = 0;
 
+        if (current_candidate->packageOid == caller_pkg_oid) {
+            nmatch++;
+        }
+        keep_candidate(nmatch, nbestMatch, current_candidate, last_candidate, candidates, ncandidates);
+    }
+    if (last_candidate) /* terminate rebuilt list */
+        last_candidate->next = NULL;
+    if (ncandidates == 1)
+        return candidates;
+#endif
     return NULL; /* failed to select a best candidate */
 } /* func_select_candidate() */
 
@@ -1460,6 +1483,34 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
         *refSynOid = InvalidOid;
     }
 
+#ifndef ENABLE_MULTIPLE_NODES
+    if (enable_out_param_override()) {
+        /* For A compatiablity, CALL statement only can invoke Procedure in SQL or Function in PLSQL, */ 
+        /* and SELECT statement can only invoke Function. but now it does't distinguish for compatible with the old code.*/
+        raw_candidates = FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false, true, PROKIND_UNKNOWN);
+    } else {
+        /* Get list of possible candidates from namespace search */
+        raw_candidates = FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false);
+
+        /* Get list of possible candidates from namespace search including proallargtypes for package function */
+        if (call_func && IsPackageFunction(funcname)) {
+            all_candidates =
+                FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false, true);
+            if (all_candidates != NULL) {
+                if (raw_candidates != NULL) {
+                    best_candidate = raw_candidates;
+                    while (best_candidate && best_candidate->next) {
+                        best_candidate = best_candidate->next;
+                    }
+
+                    best_candidate->next = all_candidates;
+                } else {
+                    raw_candidates = all_candidates;
+                }
+            }
+        }
+    }
+#else
     /* Get list of possible candidates from namespace search */
     raw_candidates = FuncnameGetCandidates(funcname, nargs, fargnames, expand_variadic, expand_defaults, false);
 
@@ -1480,14 +1531,16 @@ FuncDetailCode func_get_detail(List* funcname, List* fargs, List* fargnames, int
             }
         }
     }
+#endif	
 
     /*
      * Quickly check if there is an exact match to the input datatypes (there
      * can be only one)
      */
     for (best_candidate = raw_candidates; best_candidate != NULL; best_candidate = best_candidate->next) {
-        if (memcmp(argtypes, best_candidate->args, nargs * sizeof(Oid)) == 0)
+        if (memcmp(argtypes, best_candidate->args, nargs * sizeof(Oid)) == 0) {
             break;
+        }
     }
 
     if (best_candidate == NULL) {
@@ -1933,7 +1986,7 @@ Oid LookupFuncName(List* funcname, int nargs, const Oid* argtypes, bool noError)
  * LookupTypeNameOid
  *		Convenience routine to look up a type, silently accepting shell types
  */
-static Oid LookupTypeNameOid(const TypeName* typname)
+Oid LookupTypeNameOid(const TypeName* typname)
 {
     Oid result;
     Type typtup;

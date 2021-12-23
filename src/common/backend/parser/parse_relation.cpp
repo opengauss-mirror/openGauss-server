@@ -29,6 +29,8 @@
 #include "parser/parse_hint.h"
 #include "parser/parse_relation.h"
 #include "parser/parse_type.h"
+#include "parser/parse_clause.h"
+#include "parser/parse_expr.h"
 #ifdef PGXC
 #include "access/transam.h"
 #include "pgxc/pgxc.h"
@@ -38,9 +40,11 @@
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/syscache.h"
+#include "utils/pl_package.h"
 #include "catalog/pg_partition_fn.h"
 #include "catalog/pg_synonym.h"
 #include "parser/parse_utilcmd.h"
+#include "parser/parse_expr.h"
 #include "commands/tablecmds.h"
 #include "catalog/pg_user_status.h"
 #include "commands/user.h"
@@ -49,9 +53,11 @@
 #include "storage/lmgr.h"
 #include "tcop/utility.h"
 #include "optimizer/bucketinfo.h"
+#include "optimizer/planner.h"
 #include "storage/tcap.h"
 #include "gs_ledger/ledger_utils.h"
 
+#define MAXSTRLEN ((1 << 11) - 1)
 static RangeTblEntry* scanNameSpaceForRefname(ParseState* pstate, const char* refname, int location);
 static RangeTblEntry* scanNameSpaceForRelid(ParseState* pstate, Oid relid, int location);
 static void markRTEForSelectPriv(ParseState* pstate, RangeTblEntry* rte, int rtindex, AttrNumber col);
@@ -65,7 +71,40 @@ static int32* getValuesTypmods(RangeTblEntry* rte);
 static int specialAttNum(const char* attname);
 #endif
 
-static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseState* pstate, Relation rel);
+static Oid getPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel);
+static Oid getSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel,
+                                    Oid *partOid);
+
+static char *ReplaceSWCTEOutSrting(ParseState *pstate, RangeTblEntry *rte, char *label)
+{
+    ListCell *lc = NULL;
+    char *result = NULL;
+    char *relname = NULL;
+
+    if (pstate->parentParseState != NULL) {
+        return label;
+    }
+
+    foreach(lc, rte->origin_index) {
+        int index = (int)lfirst_int(lc);
+        RangeTblEntry *old_rte = (RangeTblEntry *)list_nth(pstate->p_rtable, index - 1);
+
+        if (old_rte->rtekind == RTE_RELATION || old_rte->rtekind == RTE_CTE) {
+            relname = old_rte->relname;
+        } else if (old_rte->rtekind == RTE_SUBQUERY) {
+            relname = old_rte->alias->aliasname;
+        }
+
+        /* replace cte alias name t1@c1 to c1 */
+        if (strrchr(label, '@')) {
+            label = strrchr(label, '@');
+            label += 1;
+        }
+    }
+
+    result = pstrdup(label);
+    return result;
+}
 
 /*
  * @Description: set the RTE common flags
@@ -218,6 +257,19 @@ static RangeTblEntry* scanNameSpaceForRefname(ParseState* pstate, const char* re
             result = rte;
         }
     }
+
+    /* handle start with...conenct by replace result with cte */
+    if (result != NULL && pstate->p_hasStartWith && result->swAborted) {
+        foreach(l, pstate->p_rtable) {
+            RangeTblEntry *tbl = (RangeTblEntry *)lfirst(l);
+
+            if (tbl->swConverted) {
+                result = tbl;
+                break;
+            }
+        }
+    }
+
     return result;
 }
 
@@ -991,7 +1043,7 @@ static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseSt
                 rangePartDef = makeNode(RangePartitionDefState);
                 rangePartDef->boundary = relation->partitionKeyValuesList;
 
-                transformRangePartitionValue(pstate, (Node*)rangePartDef, false);
+                transformPartitionValue(pstate, (Node*)rangePartDef, false);
 
                 rangePartDef->boundary = transformConstIntoTargetType(
                         rel->rd_att->attrs, ((RangePartitionMap*)rel->partMap)->partitionKey, rangePartDef->boundary);
@@ -1023,6 +1075,53 @@ static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseSt
 }
 
 /*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		: select * from subpartition (subpartition_name)
+ * Description	: get partition oid for rte->partitionOid
+ */
+static Oid getSubPartitionOidForRTE(RangeTblEntry *rte, RangeVar *relation, ParseState *pstate, Relation rel,
+                                    Oid *partOid)
+{
+    Oid subPartitionOid = InvalidOid;
+
+    if (!PointerIsValid(rte) || !PointerIsValid(relation) || !PointerIsValid(pstate) || !PointerIsValid(rel)) {
+        return InvalidOid;
+    }
+
+    /* relation is not partitioned table. */
+    if (!rte->ispartrel || rte->relkind != RELKIND_RELATION) {
+        ereport(ERROR,
+            (errcode(ERRCODE_UNDEFINED_TABLE), errmsg("relation \"%s\" is not partitioned table", relation->relname)));
+    } else {
+        /* relation is partitioned table, from clause is subpartition (subpartition_name). */
+        if (PointerIsValid(relation->subpartitionname)) {
+            subPartitionOid = partitionNameGetPartitionOid(rte->relid,
+                relation->subpartitionname,
+                PART_OBJ_TYPE_TABLE_SUB_PARTITION,
+                AccessShareLock,
+                true,
+                false,
+                NULL,
+                NULL,
+                NoLock,
+                partOid);
+            /* partiton does not exist. */
+            if (!OidIsValid(subPartitionOid)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNDEFINED_TABLE),
+                        errmsg("subpartition \"%s\" of relation \"%s\" does not exist",
+                            relation->subpartitionname,
+                            relation->relname)));
+            }
+
+            rte->pname = makeAlias(relation->subpartitionname, NIL);
+        }
+    }
+    return subPartitionOid;
+}
+
+/*
  * Open a table during parse analysis
  *
  * This is essentially just the same as heap_openrv(), except that it caters
@@ -1033,8 +1132,8 @@ static Oid getPartitionOidForRTE(RangeTblEntry* rte, RangeVar* relation, ParseSt
  * would require importing storage/lock/lock.h into parse_relation.h.  Since
  * LOCKMODE is typedef'd as int anyway, that seems like overkill.
  */
-Relation parserOpenTable(ParseState* pstate, const RangeVar* relation, int lockmode, bool isFirstNode,
-    bool isCreateView, bool isSupportSynonym)
+Relation parserOpenTable(ParseState *pstate, const RangeVar *relation, int lockmode, bool isFirstNode,
+                         bool isCreateView, bool isSupportSynonym)
 {
     Relation rel = NULL;
     ParseCallbackState pcbstate;
@@ -1107,12 +1206,17 @@ Relation parserOpenTable(ParseState* pstate, const RangeVar* relation, int lockm
                             relation->relname),
                         errhint("Use WITH RECURSIVE, or re-order the WITH items to remove forward references.")));
             } else {
+                errno_t rc = 0;
                 if (IS_PGXC_DATANODE) {
                     /*
                      * support multi-nodegroup, maybe the relation is in coordinator,
                      * but not in datanode.
                      */
                     if (detailInfo.len > 0) {
+                        char message[MAXSTRLEN];
+                        rc = sprintf_s(message, MAXSTRLEN, "relation \"%s\" does not exist", relation->relname);
+                        securec_check_ss_c(rc, "", "");
+                        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
                         ereport(ERROR,
                             (errcode(ERRCODE_UNDEFINED_TABLE),
                                 errmsg("relation \"%s\" does not exist on%s %s",
@@ -1121,6 +1225,10 @@ Relation parserOpenTable(ParseState* pstate, const RangeVar* relation, int lockm
                                     g_instance.attr.attr_common.PGXCNodeName),
                                 errdetail("%s", detailInfo.data)));
                     } else {
+                        char message[MAXSTRLEN];
+                        rc = sprintf_s(message, MAXSTRLEN, "relation \"%s\" does not exist", relation->relname);
+                        securec_check_ss_c(rc, "", "");
+                        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
                         ereport(ERROR,
                             (errcode(ERRCODE_UNDEFINED_TABLE),
                                 errmsg("relation \"%s\" does not exist on%s %s",
@@ -1129,12 +1237,20 @@ Relation parserOpenTable(ParseState* pstate, const RangeVar* relation, int lockm
                                     g_instance.attr.attr_common.PGXCNodeName)));
                     }
                 } else {
+                    char message[MAXSTRLEN];
+                    rc = sprintf_s(message, MAXSTRLEN, "relation \"%s\" does not exist", relation->relname);
+                    securec_check_ss_c(rc, "", "");
+                    InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
                     if (detailInfo.len > 0) {
                         ereport(ERROR,
                             (errcode(ERRCODE_UNDEFINED_TABLE),
                                 errmsg("relation \"%s\" does not exist", relation->relname),
                                 errdetail("%s", detailInfo.data)));
                     } else {
+                        char message[MAXSTRLEN];
+                        rc = sprintf_s(message, MAXSTRLEN, "relation \"%s\" does not exist", relation->relname);
+                        securec_check_ss_c(rc, "", "");
+                        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
                         ereport(ERROR,
                             (errcode(ERRCODE_UNDEFINED_TABLE),
                                 errmsg("relation \"%s\" does not exist", relation->relname)));
@@ -1150,9 +1266,9 @@ Relation parserOpenTable(ParseState* pstate, const RangeVar* relation, int lockm
 
     /* check wlm session info whether is valid in this database */
     if (!CheckWLMSessionInfoTableValid(relation->relname) && !u_sess->attr.attr_common.IsInplaceUpgrade) {
-        ereport(ERROR,
+        ereport(NOTICE,
             (errcode(ERRCODE_UNDEFINED_TABLE),
-                errmsg("relation \"%s\" does not exist", relation->relname),
+                errmsg("relation \"%s\" has data only in database \"postgres\"", relation->relname),
                 errhint("please use database \"postgres\"")));
     }
 
@@ -1235,6 +1351,11 @@ RangeTblEntry* addRangeTableEntry(ParseState* pstate, RangeVar* relation, Alias*
     if (relation->ispartition) {
         rte->isContainPartition = true;
         rte->partitionOid = getPartitionOidForRTE(rte, relation, pstate, rel);
+    }
+    /* select from clause contain subpartition. */
+    if (relation->issubpartition) {
+        rte->isContainSubPartition = true;
+        rte->subpartitionOid = getSubPartitionOidForRTE(rte, relation, pstate, rel, &rte->partitionOid);
     }
     if (!rte->relhasbucket && relation->isbucket) {
         ereport(ERROR, (errmsg("table is normal,cannot contains buckets(0,1,2...)")));
@@ -1423,7 +1544,18 @@ RangeTblEntry* addRangeTableEntryForSubquery(
         if (varattno > numaliases) {
             char* attrname = NULL;
 
-            attrname = pstrdup(te->resname);
+            if (te->resname != NULL &&
+                IsQuerySWCBRewrite(subquery) &&
+                strstr(te->resname, "@")) {
+                rte->swSubExist = true;
+
+                char *label = strrchr(te->resname, '@');
+                label += 1;
+                attrname = pstrdup(label);
+            } else {
+                attrname = pstrdup(te->resname);
+            }
+
             eref->colnames = lappend(eref->colnames, makeString(attrname));
         }
     }
@@ -1702,9 +1834,14 @@ RangeTblEntry* addRangeTableEntryForCTE(
     rte->rtekind = RTE_CTE;
     rte->ctename = cte->ctename;
     rte->ctelevelsup = levelsup;
+    if (levelsup > 0) {
+        cte->referenced_by_subquery = true;
+    }
 
     /* Self-reference if and only if CTE's parse analysis isn't completed */
     rte->self_reference = !IsA(cte->ctequery, Query);
+    cte->self_reference = rte->self_reference;
+    rte->cterecursive = cte->cterecursive;
     AssertEreport(cte->cterecursive || !rte->self_reference, MOD_OPT, "");
     /* Bump the CTE's refcount if this isn't a self-reference */
     if (!rte->self_reference) {
@@ -1783,7 +1920,15 @@ RangeTblEntry* addRangeTableEntryForCTE(
      */
     if (pstate != NULL) {
         pstate->p_rtable = lappend(pstate->p_rtable, rte);
-	}
+    }
+
+    /*
+     * If the CTE is rewrited from startwith/connectby. We need to add pseudo columns
+     * because it return parser tree from sub level and don't have pseudo column infos.
+     */
+    if (cte->swoptions != NULL && IsA(cte->ctequery, Query) && pstate != NULL) {
+        AddStartWithCTEPseudoReturnColumns(cte, rte, list_length(pstate->p_rtable));
+    }
 
     return rte;
 }
@@ -1930,7 +2075,7 @@ void addRTEtoQuery(
  * output pointer for the unwanted one.
  */
 void expandRTE(RangeTblEntry* rte, int rtindex, int sublevels_up, int location, bool include_dropped, List** colnames,
-    List** colvars)
+    List** colvars, ParseState* pstate)
 {
     int varattno;
 
@@ -2165,15 +2310,25 @@ void expandRTE(RangeTblEntry* rte, int rtindex, int sublevels_up, int location, 
                 int32 coltypmod = lfirst_int(lcm);
                 Oid colcoll = lfirst_oid(lcc);
 
-                varattno++;
-
                 if (colnames != NULL) {
                     /* Assume there is one alias per output column */
                     char* label = strVal(lfirst(aliasp_item));
 
+                    if (rte->swConverted) {
+                        /* skip pseudo return column in case of RTE expension for CTE case */
+                        if (IsPseudoReturnColumn(label)) {
+                            continue;
+                        }
+
+                        label = ReplaceSWCTEOutSrting(pstate, rte, label);
+                    }
+
                     *colnames = lappend(*colnames, makeString(pstrdup(label)));
                     aliasp_item = lnext(aliasp_item);
                 }
+
+                /* counting varattno */
+                varattno++;
 
                 if (colvars != NULL) {
                     Var* varnode = NULL;
@@ -2346,7 +2501,7 @@ List* expandRelAttrs(ParseState* pstate, RangeTblEntry* rte, int rtindex, int su
     List* te_list = NIL;
     bool is_ledger = is_ledger_usertable(rte->relid);
 
-    expandRTE(rte, rtindex, sublevels_up, location, false, &names, &vars);
+    expandRTE(rte, rtindex, sublevels_up, location, false, &names, &vars, pstate);
 
     /*
      * Require read access to the table.  This is normally redundant with the
@@ -2606,7 +2761,6 @@ bool get_rte_attribute_is_dropped(RangeTblEntry* rte, AttrNumber attnum)
             tp = SearchSysCache2(ATTNUM, ObjectIdGetDatum(rte->relid), Int16GetDatum(attnum));
             if (!HeapTupleIsValid(tp)) {
                 /* shouldn't happen */
-                Assert(0);
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
                         errmsg("cache lookup failed for attribute %d of relation %u", attnum, rte->relid)));
@@ -2921,12 +3075,17 @@ errorMissingColumn(ParseState *pstate,
     * bad qualification name should end up at errorMissingRTE, not here, so
     * no need to work hard on this case.)
     */
-   if (relname)
-       ereport(ERROR,
+   if (relname) {
+        char message[MAXSTRLEN]; 
+        errno_t rc = 0;
+        rc = sprintf_s(message, MAXSTRLEN, "column %s.%s does not exist", relname, colname);
+        securec_check_ss_c(rc, "", "");
+        InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc, true);
+        ereport(ERROR,
                (errcode(ERRCODE_UNDEFINED_COLUMN),
                 errmsg("column %s.%s does not exist", relname, colname),
                 parser_errposition(pstate, location)));
-
+   }
    /*
     * Otherwise, search the entire rtable looking for possible matches.  If
     * we find one, emit a hint about it.

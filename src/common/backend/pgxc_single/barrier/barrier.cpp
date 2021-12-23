@@ -268,13 +268,47 @@ void DisasterRecoveryRequestBarrier(const char* id, bool isSwitchoverBarrier)
     LWLockRelease(BarrierLock);
 }
 
+void CreateHadrSwitchoverBarrier()
+{
+    XLogRecPtr recptr;
+    char barrier_id[MAX_BARRIER_ID_LENGTH] = HADR_SWITCHOVER_BARRIER_ID;
+    ereport(LOG, (errmsg("DISASTER RECOVERY CREATE SWITCHOVER BARRIER <%s>", barrier_id)));
+
+    /*
+     * Ensure that we are a DataNode 
+     */
+    if (!IS_PGXC_DATANODE)
+        ereport(ERROR,
+            (errcode(ERRCODE_OPERATE_NOT_SUPPORTED), 
+                errmsg("DISASTER RECOVERY CREATE BARRIER command must be sent to a DataNode")));
+
+
+    // The access of all users is not blocked temporarily.
+    /*
+     * Force a checkpoint before starting the switchover. This will force dirty
+     * buffers out to disk, to ensure source database is up-to-date on disk
+     */
+    RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
+
+    XLogBeginInsert();
+    XLogRegisterData((char*)barrier_id, strlen(barrier_id) + 1);
+
+    recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, false, InvalidBktId, true);
+    XLogWaitFlush(recptr);
+
+    g_instance.streaming_dr_cxt.switchoverBarrierLsn = recptr;
+}
+
 static void barrier_redo_pause()
 {
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     while (IS_DISASTER_RECOVER_MODE) {
         RedoInterruptCallBack();
-        if (strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryTargetBarrierId) < 0 ||
+        if ((strncmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryTargetBarrierId, 
+            BARRIER_ID_WITHOUT_TIMESTAMP_LEN) < 0 || 
+            strcmp((char *)walrcv->lastRecoveredBarrierId + BARRIER_ID_WITHOUT_TIMESTAMP_LEN + 1, 
+            (char *)walrcv->recoveryTargetBarrierId + BARRIER_ID_WITHOUT_TIMESTAMP_LEN + 1) < 0) ||
             strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoveryStopBarrierId) == 0 ||
             strcmp((char *)walrcv->lastRecoveredBarrierId, (char *)walrcv->recoverySwitchoverBarrierId) == 0) {
             break;
@@ -306,6 +340,15 @@ void barrier_redo(XLogReaderState* record)
     /* Nothing to do */
     XLogRecPtr barrierLSN = record->EndRecPtr;
     char* barrierId = XLogRecGetData(record);
+
+    if (strcmp(barrierId, HADR_SWITCHOVER_BARRIER_ID) == 0) {
+        walrcv->lastSwitchoverBarrierLSN = barrierLSN;
+        ereport(LOG, (errmsg("GET SWITCHOVER BARRIER <%s>, LSN <%X/%X>", barrierId,
+                (uint32)(walrcv->lastSwitchoverBarrierLSN >> 32),
+                (uint32)(walrcv->lastSwitchoverBarrierLSN))));
+        return;
+    }
+
     walrcv->lastRecoveredBarrierLSN = barrierLSN;
     if (strcmp(barrierId, (char *)walrcv->lastRecoveredBarrierId) <= 0) {
             ereport(WARNING, (errmodule(MOD_REDO), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
@@ -314,6 +357,11 @@ void barrier_redo(XLogReaderState* record)
 
     rc = strncpy_s((char *)walrcv->lastRecoveredBarrierId, MAX_BARRIER_ID_LENGTH, barrierId, MAX_BARRIER_ID_LENGTH - 1);
     securec_check_ss(rc, "\0", "\0");
+
+    if (XLByteLE(barrierLSN, t_thrd.xlog_cxt.minRecoveryPoint)) {
+        return;
+    }
+    UpdateMinRecoveryPoint(barrierLSN, false);
     barrier_redo_pause();
     return;
 }

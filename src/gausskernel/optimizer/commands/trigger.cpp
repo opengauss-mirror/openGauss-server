@@ -1719,6 +1719,8 @@ static HeapTuple ExecCallTriggerFunc(
     Datum result;
     Oid old_uesr = 0;
     int save_sec_context = 0;
+    bool saved_is_allow_commit_rollback = false;
+    bool need_reset_err_msg;
 
     /* Guard against stack overflow due to infinite loop firing trigger. */
     check_stack_depth();
@@ -1733,6 +1735,10 @@ static HeapTuple ExecCallTriggerFunc(
         fmgr_info(trigdata->tg_trigger->tgfoid, finfo);
 
     Assert(finfo->fn_oid == trigdata->tg_trigger->tgfoid);
+
+    stp_set_commit_rollback_err_msg(STP_XACT_IN_TRIGGER);
+
+    need_reset_err_msg = stp_disable_xact_and_set_err_msg(&saved_is_allow_commit_rollback, STP_XACT_IN_TRIGGER);
 
     /*
      * If doing EXPLAIN ANALYZE, start charging time to this trigger.
@@ -1771,10 +1777,13 @@ static HeapTuple ExecCallTriggerFunc(
     }
     PG_CATCH();
     {
+        stp_reset_xact_state_and_err_msg(saved_is_allow_commit_rollback, need_reset_err_msg);
         u_sess->tri_cxt.MyTriggerDepth--;
         PG_RE_THROW();
     }
     PG_END_TRY();
+
+    stp_reset_xact_state_and_err_msg(saved_is_allow_commit_rollback, need_reset_err_msg);
     u_sess->tri_cxt.MyTriggerDepth--;
 
     pgstat_end_function_usage(&fcusage, true);
@@ -3649,6 +3658,10 @@ static void AfterTriggerExecute(AfterTriggerEvent event, Relation rel, Oid oldPa
     Partition newPart = NULL;
     Relation oldPartRel = NULL;
     Relation newPartRel = NULL;
+    Partition oldPartForSubPart = NULL;
+    Partition newPartForSubPart = NULL;
+    Relation oldPartRelForSubPart = NULL;
+    Relation newPartRelForSubPart = NULL;
 #ifdef PGXC
     HeapTuple rs_tuple1 = NULL;
     HeapTuple rs_tuple2 = NULL;
@@ -3711,9 +3724,19 @@ static void AfterTriggerExecute(AfterTriggerEvent event, Relation rel, Oid oldPa
             if (RELATION_IS_PARTITIONED(rel)) {
                 Assert(OidIsValid(oldPartOid) || OidIsValid(newPartOid));
                 Assert(!RELATION_OWN_BUCKET(rel) || bucketid != InvalidBktId);
-                oldPart = partitionOpen(rel, OidIsValid(oldPartOid) ? oldPartOid : newPartOid, NoLock, bucketid);
+                if (RelationIsSubPartitioned(rel)) {
+                    Oid subPartOid = OidIsValid(oldPartOid) ? oldPartOid : newPartOid;
+                    Oid partOid = partid_get_parentid(subPartOid);
+                    Assert(OidIsValid(partOid));
+                    oldPartForSubPart = partitionOpen(rel, partOid, NoLock, bucketid);
+                    oldPartRelForSubPart = partitionGetRelation(rel, oldPartForSubPart);
+                    oldPart = partitionOpen(oldPartRelForSubPart, subPartOid, NoLock, bucketid);
+                    oldPartRel = partitionGetRelation(oldPartRelForSubPart, oldPart);
+                } else {
+                    oldPart = partitionOpen(rel, OidIsValid(oldPartOid) ? oldPartOid : newPartOid, NoLock, bucketid);
 
-                oldPartRel = partitionGetRelation(rel, oldPart);
+                    oldPartRel = partitionGetRelation(rel, oldPart);
+                }
             } else if (RELATION_OWN_BUCKET(rel)) {
                 Assert(bucketid != InvalidBktId);
                 oldPartRel = bucketGetRelation(rel, NULL, bucketid);
@@ -3737,9 +3760,19 @@ static void AfterTriggerExecute(AfterTriggerEvent event, Relation rel, Oid oldPa
             if (RELATION_IS_PARTITIONED(rel) && (newPartOid != oldPartOid)) {
                 Assert(OidIsValid(newPartOid));
                 Assert(!RELATION_OWN_BUCKET(rel) || bucketid != InvalidBktId);
-                newPart = partitionOpen(rel, newPartOid, NoLock, bucketid);
+                if (RelationIsSubPartitioned(rel)) {
+                    Oid subPartOid = newPartOid;
+                    Oid partOid = partid_get_parentid(subPartOid);
+                    Assert(OidIsValid(partOid));
+                    newPartForSubPart = partitionOpen(rel, partOid, NoLock, bucketid);
+                    newPartRelForSubPart = partitionGetRelation(rel, newPartForSubPart);
+                    newPart = partitionOpen(newPartRelForSubPart, subPartOid, NoLock, bucketid);
+                    newPartRel = partitionGetRelation(newPartRelForSubPart, newPart);
+                } else {
+                    newPart = partitionOpen(rel, newPartOid, NoLock, bucketid);
 
-                newPartRel = partitionGetRelation(rel, newPart);
+                    newPartRel = partitionGetRelation(rel, newPart);
+                }
             } else {
                 Assert(PointerIsValid(oldPartRel) || bucketid == InvalidBktId);
                 newPartRel = oldPartRel;
@@ -3808,16 +3841,38 @@ static void AfterTriggerExecute(AfterTriggerEvent event, Relation rel, Oid oldPa
         InstrStopNode(instr + tgindx, 1);
 
     if (PointerIsValid(oldPartRel)) {
-        if (PointerIsValid(oldPart)) {
-            partitionClose(rel, oldPart, NoLock);
+        if (RelationIsSubPartitioned(rel)) {
+            releaseDummyRelation(&oldPartRel);
+            if (PointerIsValid(oldPart)) {
+                partitionClose(oldPartRelForSubPart, oldPart, NoLock);
+            }
+            releaseDummyRelation(&oldPartRelForSubPart);
+            if (PointerIsValid(oldPartForSubPart)) {
+                partitionClose(rel, oldPartForSubPart, NoLock);
+            }
+        } else {
+            if (PointerIsValid(oldPart)) {
+                partitionClose(rel, oldPart, NoLock);
+            }
+            releaseDummyRelation(&oldPartRel);
         }
-        releaseDummyRelation(&oldPartRel);
     }
     if (PointerIsValid(newPartRel) && (oldPartOid != newPartOid)) {
-        if (PointerIsValid(newPart)) {
-            partitionClose(rel, newPart, NoLock);
+        if (RelationIsSubPartitioned(rel)) {
+            releaseDummyRelation(&newPartRel);
+            if (PointerIsValid(newPart)) {
+                partitionClose(newPartRelForSubPart, newPart, NoLock);
+            }
+            releaseDummyRelation(&newPartRelForSubPart);
+            if (PointerIsValid(newPartForSubPart)) {
+                partitionClose(rel, newPartForSubPart, NoLock);
+            }
+        } else {
+            if (PointerIsValid(newPart)) {
+                partitionClose(rel, newPart, NoLock);
+            }
+            releaseDummyRelation(&newPartRel);
         }
-        releaseDummyRelation(&newPartRel);
     }
 }
 

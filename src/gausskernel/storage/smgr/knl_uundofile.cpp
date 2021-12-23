@@ -299,7 +299,12 @@ void ExtendUndoFile(SMgrRelation reln, ForkNumber forknum, BlockNumber blockno, 
 
     /* Extend file to undoFileSize. */
     while (seekpos < (off_t)undoFileSize) {
-        nbytes = FilePWrite(fd, (char *)undoBuffer, BLCKSZ, seekpos, WAIT_EVENT_UNDO_FILE_EXTEND);
+        off_t diffSize = (off_t)undoFileSize - seekpos;
+        if (diffSize < BLCKSZ) {
+            nbytes = FilePWrite(fd, (char *)undoBuffer, diffSize, seekpos, WAIT_EVENT_UNDO_FILE_EXTEND);
+        } else {
+            nbytes = FilePWrite(fd, (char *)undoBuffer, BLCKSZ, seekpos, WAIT_EVENT_UNDO_FILE_EXTEND);
+        }
         if (nbytes < 0) {
             CloseUndoFile(reln, forknum, InvalidBlockNumber);
             if (unlink(path) != 0) {
@@ -395,17 +400,17 @@ static UndoFileState *OpenUndoFile(SMgrRelation reln, ForkNumber forknum, BlockN
 
     SetUndoFileState(state, segno, fd);
     blockNum = GetUndoFileBlocks(reln, forknum, state);
-    if (blockNum != undoFileBlocks) {
-        if (t_thrd.xlog_cxt.InRecovery) {
-            ereport(WARNING, (errmsg(UNDOFORMAT("The undo file \"%s\" size is incorrect, file blockNum=%u, we will extend undo file in recovery."),
-                path, blockNum)));
-            ExtendUndoFile(reln, forknum, blockno, NULL, false);
-        } else {
-            /* Clear residual undo file. */
-            UnlinkUndoFile(reln->smgr_rnode, forknum, true, blockno);
-            ereport(PANIC, (errmsg(UNDOFORMAT(
-                "The physical space is insufficient. The undo file \"%s\" size is incorrect, file blockNum=%u."), path, blockNum)));
-        }
+    if (blockNum < undoFileBlocks) {
+        ereport(WARNING, (errmsg(UNDOFORMAT("The undo file \"%s\" size is small than undoFileBlocks, "
+            "file blockNum=%u, we will extend undo file."), path, blockNum)));
+        ExtendUndoFile(reln, forknum, blockno, NULL, false);
+    } else if (blockNum > undoFileBlocks) {
+        ereport(WARNING, (errmsg(UNDOFORMAT("The undo file \"%s\" size is big than undoFileBlocks, "
+            "file blockNum=%u, we will extend undo file."), path, blockNum)));
+        /* close undofile before unlink undo file */
+        CloseUndoFile(reln, forknum, InvalidBlockNumber);
+        UnlinkUndoFile(reln->smgr_rnode, forknum, true, blockno);
+        ExtendUndoFile(reln, forknum, blockno, NULL, false);
     }
     return state;
 }
@@ -664,5 +669,10 @@ bool CheckUndoFileExists(SMgrRelation reln, ForkNumber forkNum, BlockNumber bloc
      */
     CloseUndoFile(reln, forkNum, blockNum);
 
-    return (OpenUndoFile(reln, forkNum, blockNum, EXTENSION_RETURN_NULL) != NULL);
+    bool isExist = false;
+    if (OpenUndoFile(reln, forkNum, blockNum, EXTENSION_RETURN_NULL) != NULL) {
+        isExist = true;
+    }
+    CloseUndoFile(reln, forkNum, blockNum);
+    return isExist;
 }

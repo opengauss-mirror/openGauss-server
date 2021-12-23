@@ -11,6 +11,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -121,6 +122,9 @@ typedef struct ResourceOwnerData {
     int maxGlobalMemContexts;
 
     MemoryContext memCxt;
+
+    /* whether this is a complete one. FALSE is setted while its transaction finishes. */
+    bool valid;
 } ResourceOwnerData;
 
 THR_LOCAL ResourceOwner IsolatedResourceOwner = NULL;
@@ -166,6 +170,7 @@ ResourceOwner ResourceOwnerCreate(ResourceOwner parent, const char* name, Memory
     owner = (ResourceOwner)MemoryContextAllocZero(memCxt, sizeof(ResourceOwnerData));
     owner->name = name;
     owner->memCxt = memCxt;
+    owner->valid = true;
 
     if (parent) {
         owner->parent = parent;
@@ -414,39 +419,42 @@ static void ResourceOwnerReleaseInternal(
     t_thrd.utils_cxt.CurrentResourceOwner = save;
 }
 
-static void ResourceOwnerFreeOwner(ResourceOwner owner)
+static void ResourceOwnerFreeOwner(ResourceOwner owner, bool whole)
 {
-    if (owner->buffers)
-        pfree(owner->buffers);
-    if (owner->catrefs)
-        pfree(owner->catrefs);
-    if (owner->catlistrefs)
-        pfree(owner->catlistrefs);
-    if (owner->relrefs)
-        pfree(owner->relrefs);
-    if (owner->partrefs)
-        pfree(owner->partrefs);
-    if (owner->planrefs)
-        pfree(owner->planrefs);
-    if (owner->tupdescs)
-        pfree(owner->tupdescs);
-    if (owner->snapshots)
-        pfree(owner->snapshots);
-    if (owner->files)
-        pfree(owner->files);
-    if (owner->dataCacheSlots)
-        pfree(owner->dataCacheSlots);
-    if (owner->metaCacheSlots)
-        pfree(owner->metaCacheSlots);
-    if (owner->pThdMutexs)
-        pfree(owner->pThdMutexs);
-    if (owner->partmaprefs)
-        pfree(owner->partmaprefs);
-    if (owner->fakepartrefs)
-        pfree(owner->fakepartrefs);
-    if (owner->globalMemContexts)
-        pfree(owner->globalMemContexts);
-    pfree(owner);
+    if (owner->valid) {
+        if (owner->buffers)
+            pfree(owner->buffers);
+        if (owner->catrefs)
+            pfree(owner->catrefs);
+        if (owner->catlistrefs)
+            pfree(owner->catlistrefs);
+        if (owner->relrefs)
+            pfree(owner->relrefs);
+        if (owner->partrefs)
+            pfree(owner->partrefs);
+        if (owner->planrefs)
+            pfree(owner->planrefs);
+        if (owner->tupdescs)
+            pfree(owner->tupdescs);
+        if (owner->snapshots)
+            pfree(owner->snapshots);
+        if (owner->files)
+            pfree(owner->files);
+        if (owner->dataCacheSlots)
+            pfree(owner->dataCacheSlots);
+        if (owner->metaCacheSlots)
+            pfree(owner->metaCacheSlots);
+        if (owner->pThdMutexs)
+            pfree(owner->pThdMutexs);
+        if (owner->partmaprefs)
+            pfree(owner->partmaprefs);
+        if (owner->fakepartrefs)
+            pfree(owner->fakepartrefs);
+        if (owner->globalMemContexts)
+            pfree(owner->globalMemContexts);
+    }
+    if (whole)
+        pfree(owner);
 }
 
 /*
@@ -498,7 +506,7 @@ void ResourceOwnerDelete(ResourceOwner owner)
     }
 
     /* And free the object. */
-    ResourceOwnerFreeOwner(owner);
+    ResourceOwnerFreeOwner(owner, true);
 }
 
 /*
@@ -724,7 +732,7 @@ void ResourceOwnerRememberDataCacheSlot(ResourceOwner owner, CacheSlotId_t sloti
  */
 void ResourceOwnerRememberMetaCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
 {
-    if (owner != NULL) {
+    if (owner != NULL && owner->valid) {
         Assert(owner->nMetaCacheSlots < owner->maxMetaCacheSlots);
         owner->metaCacheSlots[owner->nMetaCacheSlots] = slotid;
         owner->nMetaCacheSlots++;
@@ -739,7 +747,7 @@ void ResourceOwnerRememberMetaCacheSlot(ResourceOwner owner, CacheSlotId_t sloti
  */
 void ResourceOwnerForgetDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
 {
-    if (owner != NULL) {
+    if (owner != NULL && owner->valid) {
         CacheSlotId_t* dataCacheSlots = owner->dataCacheSlots;
         int nb1 = owner->nDataCacheSlots - 1;
         int i;
@@ -770,7 +778,7 @@ void ResourceOwnerForgetDataCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
  */
 void ResourceOwnerForgetMetaCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
 {
-    if (owner != NULL) {
+    if (owner != NULL && owner->valid) {
         CacheSlotId_t* metaCacheSlots = owner->metaCacheSlots;
         int nb1 = owner->nMetaCacheSlots - 1;
         int i;
@@ -804,7 +812,7 @@ void ResourceOwnerForgetMetaCacheSlot(ResourceOwner owner, CacheSlotId_t slotid)
  */
 void ResourceOwnerForgetBuffer(ResourceOwner owner, Buffer buffer)
 {
-    if (owner != NULL) {
+    if (owner != NULL && owner->valid) {
         Buffer* buffers = owner->buffers;
         int nb1 = owner->nbuffers - 1;
         int i;
@@ -876,6 +884,9 @@ void ResourceOwnerForgetCatCacheRef(ResourceOwner owner, HeapTuple tuple)
     int nc1 = owner->ncatrefs - 1;
     int i;
 
+    if (!owner->valid)
+        return;
+
     for (i = nc1; i >= 0; i--) {
         if (catrefs[i] == tuple) {
             while (i < nc1) {
@@ -937,6 +948,9 @@ void ResourceOwnerForgetCatCacheListRef(ResourceOwner owner, CatCList* list)
     int nc1 = owner->ncatlistrefs - 1;
     int i;
 
+    if (!owner->valid)
+        return;
+
     for (i = nc1; i >= 0; i--) {
         if (catlistrefs[i] == list) {
             while (i < nc1) {
@@ -997,6 +1011,9 @@ void ResourceOwnerForgetRelationRef(ResourceOwner owner, Relation rel)
     Relation* relrefs = owner->relrefs;
     int nr1 = owner->nrelrefs - 1;
     int i;
+
+    if (!owner->valid)
+        return;
 
     for (i = nr1; i >= 0; i--) {
         if (relrefs[i] == rel) {
@@ -1077,6 +1094,9 @@ void ResourceOwnerForgetPartitionRef(ResourceOwner owner, Partition part)
     int nr1 = owner->npartrefs - 1;
     int i;
 
+    if (!owner->valid)
+        return;
+
     for (i = nr1; i >= 0; i--) {
         if (partrefs[i] == part) {
             while (i < nr1) {
@@ -1101,7 +1121,10 @@ void ResourceOwnerRememberFakerelRef(ResourceOwner owner, Relation fakerel)
 }
 
 void ResourceOwnerForgetFakerelRef(ResourceOwner owner, Relation fakerel)
-{    
+{
+    if (!owner->valid)
+        return;
+
     if (fakerel->node.next != NULL && fakerel->node.prev != NULL) {
         dlist_delete(&(fakerel->node));
         DListNodeInit(&(fakerel->node));
@@ -1147,6 +1170,9 @@ void ResourceOwnerForgetFakepartRef(ResourceOwner owner, Partition fakepart)
     Partition* fakepartrefs = owner->fakepartrefs;
     int nr1 = owner->nfakepartrefs - 1;
     int i;
+
+    if (!owner->valid)
+        return;
 
     for (i = nr1; i >= 0; i--) {
         if (fakepartrefs[i] == fakepart) {
@@ -1232,6 +1258,10 @@ void ResourceOwnerForgetPlanCacheRef(ResourceOwner owner, CachedPlan* plan)
     int np1 = owner->nplanrefs - 1;
     int i;
 
+    if (!owner->valid) {
+        return;
+    }
+
     for (i = np1; i >= 0; i--) {
         if (planrefs[i] == plan) {
             while (i < np1) {
@@ -1301,6 +1331,9 @@ void ResourceOwnerForgetTupleDesc(ResourceOwner owner, TupleDesc tupdesc)
     int nt1 = owner->ntupdescs - 1;
     int i;
 
+    if (!owner->valid)
+        return;
+
     for (i = nt1; i >= 0; i--) {
         if (tupdescs[i] == tupdesc) {
             while (i < nt1) {
@@ -1367,11 +1400,14 @@ void ResourceOwnerRememberSnapshot(ResourceOwner owner, Snapshot snapshot)
 /*
  * Forget that a snapshot reference is owned by a ResourceOwner
  */
-void ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot)
+bool ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot, bool ereport)
 {
     Snapshot* snapshots = owner->snapshots;
     int ns1 = owner->nsnapshots - 1;
     int i;
+
+    if (!owner->valid)
+        return false;
 
     for (i = ns1; i >= 0; i--) {
         if (snapshots[i] == snapshot) {
@@ -1380,12 +1416,25 @@ void ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot)
                 i++;
             }
             owner->nsnapshots = ns1;
-            return;
+            return true;
         }
     }
-    ereport(ERROR,
-        (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
-            errmsg("snapshot is not owned by resource owner %s", owner->name)));
+
+    bool allValid = true;
+    for (ResourceOwner child = owner->firstchild; child != NULL; child = child->nextchild) {
+        allValid = (allValid && child->valid);
+        if (ResourceOwnerForgetSnapshot(child, snapshot, false)) {
+            return true;
+        }
+    }
+
+    if (ereport && allValid) {
+        ereport(ERROR,
+            (errcode(ERRCODE_WARNING_PRIVILEGE_NOT_GRANTED),
+                errmsg("snapshot is not owned by resource owner %s", owner->name)));
+    }
+
+    return false;
 }
 
 /*
@@ -1395,7 +1444,7 @@ void ResourceOwnerForgetSnapshot(ResourceOwner owner, Snapshot snapshot)
 void ResourceOwnerDecrementNsnapshots(ResourceOwner owner, void *queryDesc)
 {
     QueryDesc *queryDesc_temp = (QueryDesc *)queryDesc;
-    while(owner->nsnapshots > 0) {
+    while(owner->valid && owner->nsnapshots > 0) {
         if(queryDesc_temp) {
             // check if owner's snapshot is same as queryDesc's snapshot, need to set queryDesc
             // snapshot to null, because this function will clean up those snapshots.
@@ -1425,10 +1474,10 @@ void ResourceOwnerDecrementNsnapshots(ResourceOwner owner, void *queryDesc)
  */
 void ResourceOwnerDecrementNPlanRefs(ResourceOwner owner, bool useResOwner)
 {
-    if(!owner) {
+    if(!owner || !owner->valid) {
         return;
     }
-       
+
     while(owner->nplanrefs > 0) {
        ReleaseCachedPlan(owner->planrefs[owner->nplanrefs - 1], useResOwner);
     }
@@ -1487,6 +1536,9 @@ void ResourceOwnerForgetFile(ResourceOwner owner, File file)
     File* files = owner->files;
     int ns1 = owner->nfiles - 1;
     int i;
+
+    if (!owner->valid)
+        return;
 
     for (i = ns1; i >= 0; i--) {
         if (files[i] == file) {
@@ -1555,6 +1607,9 @@ void ResourceOwnerForgetPthreadMutex(ResourceOwner owner, pthread_mutex_t* pMute
     int ns1 = owner->nPthreadMutex - 1;
     int i;
 
+    if (!owner->valid)
+        return;
+
     for (i = ns1; i >= 0; i--) {
         if (mutexs[i] == pMutex) {
             while (i < ns1) {
@@ -1592,7 +1647,7 @@ void ResourceOwnerReleasePthreadMutex()
     ResourceOwner owner = t_thrd.utils_cxt.TopTransactionResourceOwner;
     ResourceOwner child;
 
-    if (owner) {
+    if (owner && owner->valid) {
         for (child = owner->firstchild; child != NULL; child = child->nextchild) {
             // Ditto for pthread mutex
             //
@@ -1651,6 +1706,9 @@ void ResourceOwnerForgetPartitionMapRef(ResourceOwner owner, PartitionMap* partm
     int nr1 = owner->npartmaprefs - 1;
     int i;
 
+    if (!owner->valid)
+        return;
+
     for (i = nr1; i >= 0; i--) {
         if (partmaprefs[i] == partmap) {
             while (i < nr1) {
@@ -1677,6 +1735,9 @@ void ResourceOwnerForgetGMemContext(ResourceOwner owner, MemoryContext memcontex
 {
     MemoryContext* gMemContexts = owner->globalMemContexts;
     int num = owner->nglobalMemContext - 1;
+
+    if (!owner->valid)
+        return;
 
     for (int i = num; i >= 0; i--) {
         if (memcontext == gMemContexts[i]) {
@@ -1714,3 +1775,29 @@ void PrintGMemContextLeakWarning(MemoryContext memcontext)
     char *name = memcontext->name;
     ereport(WARNING, (errmsg("global memory context: %s leak", name)));
 }
+
+/*
+ * Mark this ResourceOwner and its children as incomplete ones.
+ */
+void ResourceOwnerMarkInvalid(ResourceOwner owner)
+{
+    if (owner->valid) {
+        for (ResourceOwner child = owner->firstchild; child != NULL; child = child->nextchild) {
+            ResourceOwnerMarkInvalid(child);
+        }
+
+        ResourceOwnerFreeOwner(owner, false);
+        owner->valid = false;
+    }
+}
+
+/*
+ * whether this ResourceOwner is a complete one.
+ *
+ * NOTE: it doesn't take child ResourceOwner into consideration.
+ */
+bool ResourceOwnerIsValid(ResourceOwner owner)
+{
+    return owner->valid;
+}
+

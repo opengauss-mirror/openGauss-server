@@ -8,7 +8,6 @@
 #--------------------------
 ## DB4AI
 #--------------------------
-test: single_node_opr_sanity
 test: db4ai_snapshots
 test: db4ai_gd_train_predict
 test: db4ai_gd_houses

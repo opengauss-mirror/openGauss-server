@@ -1,0 +1,102 @@
+drop database if exists dump_subpartition_db;
+drop database if exists restore_subpartition_db;
+
+create database dump_subpartition_db with dbcompatibility = 'B';
+create database restore_subpartition_db;
+
+\c dump_subpartition_db
+
+-- create subpartition table
+CREATE TABLE range_range
+(
+    id int,
+    gender varchar not null,
+    birthday date not null,
+    primary key(id,birthday)
+)
+PARTITION BY RANGE (id) SUBPARTITION BY RANGE (birthday)
+(
+    PARTITION p_1 VALUES LESS THAN(100)
+    (
+        SUBPARTITION p_1_a VALUES LESS THAN('2010-01-01'),
+        SUBPARTITION p_1_b VALUES LESS THAN(MAXVALUE)
+    ),
+    PARTITION p_2 VALUES LESS THAN(200)
+    (
+        SUBPARTITION p_2_a VALUES LESS THAN('2010-01-01'),
+        SUBPARTITION p_2_b VALUES LESS THAN(MAXVALUE)
+    ),
+    PARTITION p_3 VALUES LESS THAN(MAXVALUE)
+    (
+        SUBPARTITION p_3_a VALUES LESS THAN('2010-01-01'),
+        SUBPARTITION p_3_b VALUES LESS THAN(MAXVALUE)
+    )
+);
+insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
+insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
+insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
+
+CREATE TABLE range_list
+(
+    id int primary key,
+    gender varchar not null,
+    birthday date not null
+)
+PARTITION BY RANGE (id) SUBPARTITION BY LIST (gender)
+(
+    PARTITION p_1 VALUES LESS THAN(100)
+    (
+        SUBPARTITION p_1_a VALUES ('boy'),
+        SUBPARTITION p_1_b VALUES ('girl')
+    ),
+    PARTITION p_2 VALUES LESS THAN(200)
+    (
+        SUBPARTITION p_2_a VALUES ('boy'),
+        SUBPARTITION p_2_b VALUES ('girl')
+    ),
+    PARTITION p_3 VALUES LESS THAN(MAXVALUE)
+    (
+        SUBPARTITION p_3_a VALUES ('boy','girl')
+    )
+);
+create index on range_list(birthday) local;
+insert into range_list values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
+insert into range_list values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
+insert into range_list values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
+
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1', '2' ),
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1', '2' ),
+    SUBPARTITION p_201902_b VALUES ( default )
+  )
+);
+
+\! @abs_bindir@/gs_dump dump_subpartition_db -p @portstring@ -f @abs_bindir@/dump_subpartition.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d restore_subpartition_db -p @portstring@ @abs_bindir@/dump_subpartition.tar >/dev/null 2>&1; echo $?
+
+\c restore_subpartition_db
+select count(*) from range_range;
+select count(*) from range_list;
+select relname, parttype, partstrategy, partkey, boundaries from pg_partition where parttype in ('r', 'p', 's') order by oid;
+\d+ range_range
+\d+ range_list
+\d+ list_list
+
+\c regression
+drop database if exists restore_subpartition_db;
+drop database if exists dump_subpartition_db;
+

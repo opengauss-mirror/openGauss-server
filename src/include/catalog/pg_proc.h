@@ -63,7 +63,7 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
      * proargtypes
      */
     oidvector    proargtypes;    /* parameter types (excludes OUT params) */
-
+	
 #ifdef CATALOG_VARLEN
     Oid         proallargtypes[1];        /* all param types (NULL if IN only) */
     char        proargmodes[1];           /* parameter modes (NULL if IN only) */
@@ -84,6 +84,9 @@ CATALOG(pg_proc,1255) BKI_BOOTSTRAP BKI_ROWTYPE_OID(81) BKI_SCHEMA_MACRO
     bool        proisprivate;
     oidvector_extend proargtypesext;
     int2vector_extend prodefaultargposext;
+    oidvector allargtypes;	 /* all parameter types */
+
+    oidvector_extend allargtypesext;
 #endif
 } FormData_pg_proc;
 
@@ -98,7 +101,7 @@ typedef FormData_pg_proc *Form_pg_proc;
  *        compiler constants for pg_proc
  * ----------------
  */
-#define Natts_pg_proc 37
+#define Natts_pg_proc 39
 #define Anum_pg_proc_proname 1
 #define Anum_pg_proc_pronamespace 2
 #define Anum_pg_proc_proowner 3
@@ -136,11 +139,14 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define Anum_pg_proc_proisprivate 35
 #define Anum_pg_proc_proargtypesext 36
 #define Anum_pg_proc_prodefaultargposext 37
+#define Anum_pg_proc_allargtypes 38
+#define Anum_pg_proc_allargtypesext 39
+
 
 /* proc_oid is only for builitin
  * func view shouldn't be included in Natts_pg_proc
  */
-#define Anum_pg_proc_oid 38
+#define Anum_pg_proc_oid 40
 
 /* ----------------
  *        initial contents of pg_proc
@@ -422,11 +428,13 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define PROKIND_AGGREGATE   'a'
 #define PROKIND_WINDOW      'w'
 #define PROKIND_PROCEDURE   'p'
+#define PROKIND_UNKNOWN     'u'
 
 #define PROC_IS_FUNC(prokind)   ((prokind) == PROKIND_FUNCTION)
 #define PROC_IS_AGG(prokind)    ((prokind) == PROKIND_AGGREGATE)
 #define PROC_IS_WIN(prokind)    ((prokind) == PROKIND_WINDOW)
 #define PROC_IS_PRO(prokind)    ((prokind) == PROKIND_PROCEDURE)
+#define PROC_IS_UNKNOWN(prokind)    ((prokind) == PROKIND_UNKNOWN)
 
 /*
  * Symbolic values for provolatile column: these indicate whether the result
@@ -550,7 +558,6 @@ typedef FormData_pg_proc *Form_pg_proc;
 #define FLOAT4TOBPCHARFUNCOID 4070
 #define FLOAT8TOBPCHARFUNCOID 4071
 #define NUMERICTOBPCHARFUNCOID 4072
-
 
 #endif   /* PG_PROC_H */
 

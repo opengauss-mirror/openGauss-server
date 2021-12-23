@@ -142,8 +142,8 @@ cluster inventory_table_02 using global_inventory_table_02_index2;
 Indexes:
     "global_inventory_table_02_index1" btree (inv_date_sk) TABLESPACE pg_default
     "global_inventory_table_02_index2" btree (inv_item_sk) TABLESPACE pg_default CLUSTER
-Range partition by(inv_date_sk)
-Number of partition: 7 (View pg_partition to check each partition range.)
+Partition By RANGE(inv_date_sk)
+Number of partitions: 7 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 

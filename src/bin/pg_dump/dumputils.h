@@ -38,6 +38,7 @@
 #define DIR_LOCK_FILE "dir.lock"
 #define DIR_SEPARATOR "/"
 #define FILE_PERMISSION 0600
+#define MAX_PASSWDLEN 100
 
 /* Data structures for simple lists of OIDs and strings.  The support for
  * these is very primitive compared to the backend's List facilities, but

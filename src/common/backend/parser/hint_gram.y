@@ -33,7 +33,7 @@ static double convert_to_numeric(Node *value);
 
 %}
 
-%pure-parser
+%define api.pure
 %expect 0
 
 %parse-param {yyscan_t yyscanner}

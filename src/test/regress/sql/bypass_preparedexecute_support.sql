@@ -371,6 +371,17 @@ explain execute p609 (3,'Ruby3'::text,1);
 prepare p6091 as delete from test_bypass_sq6 where col1 = $1;
 execute p6091(1);
 
+create table test_bypass_sq7(a int, b int);
+create index itest_bypass_sq7 on test_bypass_sq7(a);
+insert into test_bypass_sq7 values(1,2);
+insert into test_bypass_sq7 values(2,2);
+prepare p71 as select * from test_bypass_sq7 where a=$1;
+execute p71(1);
+explain execute p71(1);
+execute p71(1);
+drop index itest_bypass_sq7;
+execute p71(1);
+
 reset enable_seqscan;
 reset enable_bitmapscan;
 reset opfusion_debug_mode;
@@ -382,4 +393,5 @@ drop table test_bypass_sq2;
 drop table test_bypass_sq3;
 drop table test_bypass_sq4;
 drop table test_bypass_sq6;
+drop table test_bypass_sq7;
 drop type complextype;

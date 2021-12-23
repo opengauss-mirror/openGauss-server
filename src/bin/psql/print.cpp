@@ -2,6 +2,7 @@
  * psql - the openGauss interactive terminal
  *
  * Copyright (c) 2000-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/bin/psql/print.c
  */
@@ -2265,6 +2266,7 @@ void printQuery(const PGresult* result, const printQueryOpt* opt, FILE* fout, FI
             case INT2OID:
             case INT4OID:
             case INT8OID:
+            case INT16OID:
             case FLOAT4OID:
             case FLOAT8OID:
             case NUMERICOID:

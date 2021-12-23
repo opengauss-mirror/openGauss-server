@@ -11,7 +11,7 @@ SELECT '"\u"'::jsonb;			-- ERROR, incomplete escape
 SELECT '"\u00"'::jsonb;			-- ERROR, incomplete escape
 SELECT '"\u000g"'::jsonb;		-- ERROR, g is not a hex digit
 SELECT '"\u0000"'::jsonb;		-- OK, legal escape
-SELECT '"哈1哈"'::jsonb;		-- OK
+SELECT '"哈哈"'::jsonb;			-- OK
 -- use octet_length here so we don't get an odd unicode char in the
 -- output
 SELECT octet_length('"\uaBcD"'::jsonb::text); -- OK, uppercase and lower case both OK

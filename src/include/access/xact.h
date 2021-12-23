@@ -8,6 +8,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/access/xact.h
  *
@@ -363,17 +364,17 @@ extern void AbortCurrentTransactionOnce(void);
 #endif
 extern void AbortCurrentTransaction(bool STP_rollback = false);
 extern void AbortSubTransaction(bool STP_rollback = false);
-extern void CleanupSubTransaction(void);
+extern void CleanupSubTransaction(bool inSTP = false);
 extern void BeginTransactionBlock(void);
 extern bool EndTransactionBlock(void);
 extern bool PrepareTransactionBlock(const char* gid);
 extern void UserAbortTransactionBlock(void);
-extern void ReleaseSavepoint(List* options);
+extern void ReleaseSavepoint(const char* name, bool inSTP);
 extern void DefineSavepoint(const char* name);
-extern void RollbackToSavepoint(List* options);
+extern void RollbackToSavepoint(const char* name, bool inSTP);
 extern void BeginInternalSubTransaction(const char* name);
-extern void ReleaseCurrentSubTransaction(void);
-extern void RollbackAndReleaseCurrentSubTransaction(void);
+extern void ReleaseCurrentSubTransaction(bool inSTP = false);
+extern void RollbackAndReleaseCurrentSubTransaction(bool inSTP = false);
 extern bool IsSubTransaction(void);
 extern void SetCurrentTransactionId(TransactionId tid);
 extern bool IsTransactionBlock(void);
@@ -461,5 +462,10 @@ extern void SetUndoActionsInfo(void);
 extern void ResetUndoActionsInfo(void);
 extern bool CanPerformUndoActions(void);
 extern void push_unlink_rel_to_hashtbl(ColFileNodeRel *xnodes, int nrels);
+
+extern void XactReserveSPIContext();
+extern void XactResumeSPIContext(bool clean);
+extern void XactCleanExceptionSubTransaction(SubTransactionId head, bool hasAbort);
+extern char* GetCurrentTransactionName();
 
 #endif /* XACT_H */

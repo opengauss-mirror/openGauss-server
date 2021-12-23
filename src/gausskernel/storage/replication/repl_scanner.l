@@ -96,6 +96,8 @@ IDENTIFY_AZ		{ return K_IDENTIFY_AZ; }
 LABEL			{ return K_LABEL; }
 NOWAIT			{ return K_NOWAIT; }
 BUILDSTANDBY            { return K_BUILDSTANDBY; }
+COPYSECUREFILE            { return K_COPYSECUREFILE; }
+NEEDUPGRADEFILE         { return K_NEEDUPGRADEFILE; }
 OBSMODE                 { return K_OBSMODE; }
 PROGRESS			{ return K_PROGRESS; }
 WAL			{ return K_WAL; }

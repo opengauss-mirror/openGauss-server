@@ -100,7 +100,7 @@ void TrRelationSetNewRelfilenode(Relation relation, TransactionId freezeXid, voi
     RelFileNodeBackend newrnode;
 
     /* Indexes, sequences must have Invalid frozenxid; other rels must not. */
-    Assert((((relation->rd_rel->relkind == RELKIND_INDEX) || (relation->rd_rel->relkind == RELKIND_SEQUENCE)) ?
+    Assert((((relation->rd_rel->relkind == RELKIND_INDEX) || (RELKIND_IS_SEQUENCE(relation->rd_rel->relkind))) ?
         (freezeXid == InvalidTransactionId) :
         TransactionIdIsNormal(freezeXid)) ||
         relation->rd_rel->relkind == RELKIND_RELATION);

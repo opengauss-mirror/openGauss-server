@@ -187,9 +187,11 @@ typedef struct knl_session_attr_storage {
     char* XactIsoLevel_string;
     char* SyncRepStandbyNames;
     char* ReplConnInfoArr[GUC_MAX_REPLNODE_NUM];
+    char* CrossClusterReplConnInfoArr[GUC_MAX_REPLNODE_NUM];
     char* PrimarySlotName;
     char* logging_module;
     char* Inplace_upgrade_next_system_object_oids;
+    char* hadr_super_user_record_path;
     int resource_track_log;
     int guc_synchronous_commit;
     int sync_rep_wait_mode;
@@ -201,6 +203,8 @@ typedef struct knl_session_attr_storage {
     bool enable_copy_server_files;
     int target_rto;
     int time_to_target_rpo;
+    int hadr_recovery_time_target;
+    int hadr_recovery_point_target;
     bool enable_twophase_commit;
     int ustats_tracker_naptime;
     int umax_search_length_for_prune;
@@ -234,6 +238,7 @@ typedef struct knl_session_attr_storage {
 #endif
     bool reserve_space_for_nullable_atts;
     knl_session_attr_dcf dcf_attr;
+    int catchup2normal_wait_time;
 } knl_session_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_STORAGE */

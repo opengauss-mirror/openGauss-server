@@ -8,6 +8,7 @@ set(TGT_adt_INC
     ${PROJECT_TRUNK_DIR}/distribute/include
     ${PROJECT_SRC_DIR}/include
     ${PROJECT_SRC_DIR}/lib/gstrace
+    ${LIBXML_INCLUDE_PATH}/libxml2
     ${LZ4_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
     ${LIBOPENSSL_INCLUDE_PATH}

@@ -38,7 +38,6 @@
 #include "comm_connection.h"
 #include "communication/commproxy_interface.h"
 #include "communication/libnet_extern.h"
-#include "gs_policy/gs_string.h"
 
 #define DIE_STRING_LENGTH  5
 
@@ -326,11 +325,13 @@ int CommCheckLtranProcess()
     return ltran_exist;
 }
 
-static int FindCommProxyAttrKey(const gs_stl::gs_string& str_attr, const gs_stl::gs_string& key)
+static int FindCommProxyAttrKey(const char* str_attr, const char* key)
 {
     int npos = -1;
-    for (int i = 0; i <= (int)str_attr.size() - (int)key.size(); ++i) {
-        if (str_attr.substr(i, key.size()) == key) {
+    int attr_len = strlen(str_attr);
+    int key_len = strlen(key); 
+    for (int i = 0; i <= attr_len - key_len; ++i) {
+        if (strncmp(&str_attr[i], key, key_len) == 0) {
             npos = i;
             break;
         }
@@ -339,18 +340,18 @@ static int FindCommProxyAttrKey(const gs_stl::gs_string& str_attr, const gs_stl:
     return npos;
 }
 
-static void ReportParseCommProxyError(const gs_stl::gs_string& key)
+static void ReportParseCommProxyError(const char* key)
 {
     ereport(ERROR, (errmodule(MOD_COMM_PROXY),
             errcode(ERRCODE_SYSTEM_ERROR),
-            errmsg("parse %s error in comm_proxy_attr.", key.c_str()),
+            errmsg("parse %s error in comm_proxy_attr.", key),
             errdetail("N/A"),
             errcause("System error."),
             erraction("Contact Huawei Engineer.")));
 }
 
 template<typename T>
-static T GetCommProxySubParameter(const gs_stl::gs_string& str_attr, const gs_stl::gs_string& key)
+static T GetCommProxySubParameter(const char* str_attr, const char* key)
 {
     T res = T();
     int attr_pos = FindCommProxyAttrKey(str_attr, key);
@@ -359,19 +360,19 @@ static T GetCommProxySubParameter(const gs_stl::gs_string& str_attr, const gs_st
         exit(-1);
     }
 
-    if (key == "enable_libnet") {
+    if (strcmp(key, "enable_libnet") == 0) {
         if (str_attr[attr_pos + strlen("enable_libnet:")] == 't') {
             res = true;
         } else {
             res = false;
         }
-    } else if (key == "enable_dfx") {
+    } else if (strcmp(key, "enable_dfx") == 0) {
         if (str_attr[attr_pos + strlen("enable_dfx:")] == 't') {
             res = true;
         } else {
             res = false;
         }
-    } else if (key == "numa_num") {
+    } else if (strcmp(key, "numa_num") == 0) {
         if (str_attr[attr_pos + strlen("numa_num:")] == '4') {
             res = 4;
         } else if (str_attr[attr_pos + strlen("numa_num:")] == '8') {
@@ -379,7 +380,7 @@ static T GetCommProxySubParameter(const gs_stl::gs_string& str_attr, const gs_st
         } else {
             ReportParseCommProxyError(key);
         }
-    } else if (key == "numa_bind") {
+    } else if (strcmp(key, "numa_bind") == 0) {
         res = attr_pos;
     }
 
@@ -387,7 +388,7 @@ static T GetCommProxySubParameter(const gs_stl::gs_string& str_attr, const gs_st
 }
 
 static void ParseCommProxyNumaBind(
-    const gs_stl::gs_string& str_attr, const int pos, const int numa_num, int* numa_bind)
+    const char* str_attr, const int pos, const int numa_num, int* numa_bind)
 {
     int numa_num_cnt = 0;
 
@@ -417,11 +418,7 @@ static void ParseCommProxyNumaBind(
  ** Proxy attribute parsing functions
  ******************************************************************************************
  **/
-#ifndef ENABLE_UT
 bool ParseCommProxyAttr(CommProxyConfig* config)
-#else
-bool ParseCommProxyAttr(CommProxyConfig* config, char* path)
-#endif
 {
     if (g_instance.attr.attr_common.comm_proxy_attr == NULL) {
         ereport(ERROR, (errmodule(MOD_COMM_PROXY),
@@ -433,11 +430,7 @@ bool ParseCommProxyAttr(CommProxyConfig* config, char* path)
         return false;
     }
 
-#ifndef ENABLE_UT
     char* attr = TrimStr(g_instance.attr.attr_common.comm_proxy_attr);
-#else
-    char* attr = path;
-#endif
     int numa_bind[THREADPOOL_TOTAL_GROUP*CPU_NUM_PER_NUMA] = { 0 };
     int numa_bind_pos = 0;
     int all_comms = 0;

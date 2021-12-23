@@ -2,6 +2,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * formatter.cpp
@@ -52,6 +53,42 @@ static char* StrnTrimTo(char* dst, uint32* dstlen, const char* src, uint32 srcle
     return dst;
 }
 
+static void ReadAttributeSequence(CopyState cstate)
+{
+    StringInfo sequence_buf_ptr = &cstate->sequence_buf;
+    resetStringInfo(sequence_buf_ptr);
+
+    int numattrs = list_length(cstate->attnumlist);
+
+    for (int i = 0; i < numattrs; i++) {
+        if (cstate->sequence != NULL && cstate->sequence[i] != NULL) {
+            cstate->raw_fields[i] = &sequence_buf_ptr->data[sequence_buf_ptr->len];
+            appendStringInfo(sequence_buf_ptr, "%ld", cstate->sequence[i]->start);
+            cstate->sequence[i]->start += cstate->sequence[i]->step;
+            cstate->sequence_buf.len++;
+        } else if (cstate->constant != NULL && cstate->constant[i] != NULL) {
+            cstate->raw_fields[i] = cstate->constant[i]->consVal;
+        }
+    }
+}
+
+static int FixGetColumnListIndex(List *attnamelist, int attnum)
+{
+    ListCell *col = NULL;
+    int index = 0;
+
+    foreach (col, attnamelist) {
+        index++;
+        if (lfirst_int(col) == attnum) {
+            return index;
+        }
+    }
+    ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Attnum %d not find", attnum)));
+
+    /* on failure */
+    return InvalidAttrNumber;
+}
+
 int ReadAttributesFixedWith(CopyState cstate)
 {
     Assert(cstate != NULL);
@@ -90,10 +127,12 @@ int ReadAttributesFixedWith(CopyState cstate)
         enlargeStringInfo(&cstate->attribute_buf, cstate->line_buf.len + formatter->nfield * 2);
     outptr = cstate->attribute_buf.data;
 
+    ReadAttributeSequence(cstate);
+
     for (int i = 0; i < formatter->nfield; i++) {
         FieldDesc* desc = &(formatter->fieldDesc[i]);
         uint32 inputSize = 0;
-        int attnum = desc->attnum;
+        int attnum = FixGetColumnListIndex(cstate->attnumlist, desc->attnum);
 
         // if the rest length of data < position of current field,
         // we make the field as a NULL field

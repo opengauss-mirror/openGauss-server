@@ -851,6 +851,8 @@ src/gausskernel/security/gs_policy/gs_policy_utils.cpp
 src/gausskernel/security/gs_policy/gs_string.cpp
 src/gausskernel/security/gs_policy/policy_common.cpp
 src/gausskernel/security/iprange/iprange.cpp
+src/gausskernel/storage/access/archive/archive_am.cpp
+src/gausskernel/storage/access/archive/nas_am.cpp
 src/gausskernel/storage/access/cbtree/cbtree.cpp
 src/gausskernel/storage/access/common/cstorescankey.cpp
 src/gausskernel/storage/access/common/heaptuple.cpp
@@ -1027,6 +1029,7 @@ src/gausskernel/storage/access/transam/slru.cpp
 src/gausskernel/storage/access/transam/transam.cpp
 src/gausskernel/storage/access/transam/twophase.cpp
 src/gausskernel/storage/access/transam/twophase_rmgr.cpp
+src/gausskernel/storage/access/transam/seg_double_write.cpp
 src/gausskernel/storage/access/transam/varsup.cpp
 src/gausskernel/storage/access/transam/xact.cpp
 src/gausskernel/storage/access/transam/xlog.cpp
@@ -1288,6 +1291,7 @@ src/gausskernel/storage/page/itemptr.cpp
 src/gausskernel/storage/page/pagecompress.cpp
 src/gausskernel/storage/remote/remote_adapter.cpp
 src/gausskernel/storage/remote/remote_read.cpp
+src/gausskernel/storage/replication/archive_walreceiver.cpp
 src/gausskernel/storage/replication/basebackup.cpp
 src/gausskernel/storage/replication/bcm.cpp
 src/gausskernel/storage/replication/catchup.cpp
@@ -1310,7 +1314,6 @@ src/gausskernel/storage/replication/logical/logical.cpp
 src/gausskernel/storage/replication/logical/logicalfuncs.cpp
 src/gausskernel/storage/replication/logical/reorderbuffer.cpp
 src/gausskernel/storage/replication/logical/snapbuild.cpp
-src/gausskernel/storage/replication/obswalreceiver.cpp
 src/gausskernel/storage/replication/rto_statistic.cpp
 src/gausskernel/storage/replication/slot.cpp
 src/gausskernel/storage/replication/slotfuncs.cpp

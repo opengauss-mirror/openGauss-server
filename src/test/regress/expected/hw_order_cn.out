@@ -101,7 +101,8 @@ SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'NLS_SORT = generic_m_ci');
 (28 rows)
 
 SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'NLS_SORT = SCHINESE');
-ERROR:  Sort method NLS_SORT = SCHINESE  is not supported!
+ERROR:  Sort method NLS_SORT = SCHINESE is not supported!
+DETAIL:  Not support the given sort method.
 SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'nls_sort = schinese_pinyin_m') desc nulls first;
  cn | sort 
 ----+------
@@ -213,13 +214,13 @@ SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'nls_sort = SCHINESE_PINYIN_M'
 (2 rows)
 
 explain (verbose, costs off) SELECT * FROM order_cn_table ORDER BY NLSSORT(cn, 'nls_sort = SCHINESE_PINYIN_M');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
  Sort
-   Output: cn, (convert_to_nocase((cn)::text, 'gbk'::name))
-   Sort Key: (convert_to_nocase((order_cn_table.cn)::text, 'gbk'::name))
+   Output: cn, (nlssort((cn)::text, 'nls_sort = SCHINESE_PINYIN_M'::text))
+   Sort Key: (nlssort((order_cn_table.cn)::text, 'nls_sort = SCHINESE_PINYIN_M'::text))
    ->  Seq Scan on public.order_cn_table
-         Output: cn, convert_to_nocase((cn)::text, 'gbk'::name)
+         Output: cn, nlssort((cn)::text, 'nls_sort = SCHINESE_PINYIN_M'::text)
 (5 rows)
 
 DROP TABLE order_cn_table;
