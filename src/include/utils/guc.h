@@ -358,7 +358,9 @@ typedef enum {
     PARAM_PATH_OPT = 16, /* Parametrized Path Optimization. */
     PAGE_EST_OPT = 32,   /* More accurate (rowstored) index pages estimation */
     NO_UNIQUE_INDEX_FIRST = 64, /* use unique index first rule in path generation */
-    JOIN_SEL_WITH_CAST_FUNC = 128 /* support cast function while calculating join selectivity */
+    JOIN_SEL_WITH_CAST_FUNC = 128, /* support cast function while calculating join selectivity */
+    CANONICAL_PATHKEY = 256, /* Use canonicalize pathkeys directly */
+    INDEX_COST_WITH_LEAF_PAGES_ONLY = 512 /* compute index cost with consideration of leaf-pages-only */
 } sql_beta_param;
 
 #define ENABLE_PRED_PUSH(root) \

@@ -5,6 +5,7 @@ set enable_seqscan=off;
 set opfusion_debug_mode = 'log';
 set log_min_messages=debug;
 set logging_module = 'on(OPFUSION)';
+set sql_beta_feature = 'index_cost_with_leaf_pages_only';
 --create table
 drop table if exists test_bypass_sql_partition;
 NOTICE:  table "test_bypass_sql_partition" does not exist, skipping
@@ -282,7 +283,6 @@ select col1,col2 from test_bypass_sql_partition where col1=10 and col2=0 order b
  col1 | col2 
 ------+------
 (0 rows)
-
 
 explain select col1,col2 from test_bypass_sql_partition where col1 is not null and col2 is not null order by col1,col2;
                                                             QUERY PLAN                                                             
@@ -1502,10 +1502,8 @@ explain select col1, col2 from test_bypass_sql_partition where col1 < 20 order b
                Selected Partitions:  1..2
 (7 rows)
 
-
 --update 
 --bypass
-
 explain update test_bypass_sql_partition set col2=col2-1,col3='test_update' where col1=0 and col2=0;
                                                              QUERY PLAN                                                              
 -------------------------------------------------------------------------------------------------------------------------------------
@@ -1578,8 +1576,6 @@ explain update test_bypass_sql_partition set col3='test_null' where col1 is null
 (7 rows)
 
 update test_bypass_sql_partition set col3='test_null' where col1 is null and col2 is null;
-
-
 --bypass
 explain update test_bypass_sql_partition set col2=111,col3='test_update2' where  col1=0;
                                                               QUERY PLAN                                                              
@@ -1659,7 +1655,6 @@ select * from test_bypass_sql_partition where col1=1 and col2=20 order by col1 f
 ------+------+---------
     1 |   20 | aaaaaaa
 (1 row)
-
 
 --nobypass
 explain select * from test_bypass_sql_partition where col2=20 order by col1;
@@ -1878,8 +1873,6 @@ select * from test_bypass_sql_partition where col1>=0 and col2>0 order by col1 l
     0 |  111 | test_update2
 (3 rows)
 
-
-
 drop table if exists test_bypass_sql_partition;
 create table test_bypass_sql_partition(col1 int, col2 int, col3 text)
 partition by range (col1)
@@ -1895,7 +1888,6 @@ partition test_bypass_sql_partition_8 values less than(80)
 );
 create index itest_bypass_sql_partition on test_bypass_sql_partition(col1,col2) local;
 insert into test_bypass_sql_partition select generate_series(0,79,1), generate_series(0,100,10), repeat('a',7);
-
 --bypass though index only scan
 set enable_indexscan = off;
 explain select col1,col2 from  test_bypass_sql_partition where col1=0 order by col2;
@@ -2127,7 +2119,6 @@ select col2,col1 from test_bypass_sql_partition where col2=2 order by col1 limit
 ------+------
 (0 rows)
 
-
 explain select col1,col2 from test_bypass_sql_partition where col1 is null and col2 is null limit 10;
                                                                           QUERY PLAN                                                                           
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -2144,7 +2135,6 @@ select col1,col2 from test_bypass_sql_partition where col1 is null and col2 is n
  col1 | col2 
 ------+------
 (0 rows)
-
 
 explain select col1,col2 from test_bypass_sql_partition where col2<5 order by col1 limit 10;
                                                                            QUERY PLAN                                                                            
@@ -2200,9 +2190,7 @@ select col1,col2 from test_bypass_sql_partition where col1>=0 and col1<=10 and c
     0 |  100
 (10 rows)
 
-
 reset enable_indexscan;
-
 --nobypass
 explain select * from test_bypass_sql_partition where col1>col2 limit 10;
                                                         QUERY PLAN                                                        
@@ -2243,7 +2231,6 @@ explain select * from test_bypass_sql_partition where col3='test_update2';
          Filter: (col3 = 'test_update2'::text)
          Selected Partitions:  1..8
 (6 rows)
-
 
 explain select * from test_bypass_sql_partition where col1>0 and col1<10 and col2>0 order by col1 limit 3 offset 3;
                                                               QUERY PLAN                                                              
@@ -2605,7 +2592,6 @@ select col1, col2 from test_bypass_sql_partition where true order by col1 limit 
 (10 rows)
 
 --bypass
-
 select col2, col1 from test_bypass_sql_partition where col1>0 and col1<10 order by col1 limit 10;
  col2 | col1 
 ------+------
@@ -2648,15 +2634,12 @@ explain insert into test_bypass_sql_partition select * from test_bypass_sql_part
                Selected Partitions:  1
 (7 rows)
 
-
 delete from test_bypass_sql_partition where col1=1;
 delete from test_bypass_sql_partition where col1 > 10 and col1 < 0;
 delete from test_bypass_sql_partition where col1 <= 11 and col1 >= 15;
-
 --nobypass
 delete from test_bypass_sql_partition where col1 > 10;
 delete from test_bypass_sql_partition where col1 < 10;
 delete from test_bypass_sql_partition where col1 >= 10 and col1 <= 30;
 reset enable_partition_opfusion;
 drop table test_bypass_sql_partition;
-
