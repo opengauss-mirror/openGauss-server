@@ -442,6 +442,22 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
 
         pfree_ext(conninfoList);
         pfree_ext(encryptConninfo);
+
+        /* check whether new conninfo can be used to connect to new publisher */
+        if (sub->enabled || (enabled_given && enabled)) {
+            /* Try to connect to the publisher. */
+            volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+            SpinLockAcquire(&walrcv->mutex);
+            walrcv->conn_target = REPCONNTARGET_PUBLICATION;
+            SpinLockRelease(&walrcv->mutex);
+            bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(conninfo, NULL, sub->slotname, -1);
+            if (!connectSuccess) {
+                ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("The new conninfo cannot connect to new publisher.")));
+            }
+
+            /* And we are done with the remote side. */
+            (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+        }
     }
     if (slotname_given) {
         if (sub->enabled && !slot_name) {
