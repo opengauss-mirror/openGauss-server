@@ -6518,7 +6518,8 @@ static void genericcostestimate(PlannerInfo* root, IndexPath* path, double loop_
      * enough to not alter index-vs-seqscan decisions, but will prevent
      * indexes of different sizes from looking exactly equally attractive.
      */
-    *indexTotalCost += index->pages * spc_random_page_cost / 100000.0;
+    if (ENABLE_SQL_BETA_FEATURE(INDEX_COST_WITH_LEAF_PAGES_ONLY))
+        *indexTotalCost += index->pages * spc_random_page_cost / 100000.0;
 
     /*
      * CPU cost: any complex expressions in the indexquals will need to be

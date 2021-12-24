@@ -119,12 +119,11 @@ select * from gpi_index_test where a < 200 and b > 190 order by a;
 -- multi column index with global index
 create index gpi_index_test_global_a_b on gpi_index_test(a,b) global;
 explain (costs off) select * from gpi_index_test where a = 200 and b = 100;
-                         QUERY PLAN                         
-------------------------------------------------------------
- Index Scan using gpi_index_test_global_b on gpi_index_test
-   Index Cond: (b = 100)
-   Filter: (a = 200)
-(3 rows)
+                          QUERY PLAN                          
+--------------------------------------------------------------
+ Index Scan using gpi_index_test_global_a_b on gpi_index_test
+   Index Cond: ((a = 200) AND (b = 100))
+(2 rows)
 
 select * from gpi_index_test where a = 100 and b = 100 order by a;
   a  |  b  |       c        
