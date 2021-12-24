@@ -251,6 +251,7 @@ struct es_candidate {
 class ES_SELECTIVITY : public BaseObject {
 public:
     List* es_candidate_list;
+    List* es_candidate_saved; /* temporarily save es_candidate_list */
     List* unmatched_clause_group;
     PlannerInfo* root;       /* root from input */
     SpecialJoinInfo* sjinfo; /* sjinfo from input */
@@ -289,8 +290,10 @@ private:
     Selectivity cal_eqjoinsel_semi(es_candidate* es, RelOptInfo* inner_rel, bool inner_on_left);
     void cal_stadistinct_eqsel(es_candidate* es);
     bool cal_stadistinct_eqjoinsel(es_candidate* es);
+    void CalSelWithUniqueIndex(Selectivity &result);
     void clear_extended_stats(ExtendedStats* extended_stats) const;
     void clear_extended_stats_list(List* stats_list) const;
+    bool ContainIndexCols(const es_candidate* es, const IndexOptInfo* index) const;
     ExtendedStats* copy_stats_ptr(ListCell* l) const;
     void debug_print();
     double estimate_local_numdistinct(es_bucketsize* bucket, bool left, Path* path);
@@ -302,6 +305,7 @@ private:
     Bitmapset* make_attnums_by_clause_map(es_candidate* es, Bitmapset* attnums, bool left) const;
     void match_extended_stats(es_candidate* es, List* stats_list, bool left);
     bool match_pseudo_clauselist(List* clauses, es_candidate* es, List* origin_clause);
+    bool MatchUniqueIndex(const es_candidate* es) const;
     void modify_distinct_by_possion_model(es_candidate* es, bool left, SpecialJoinInfo* sjinfo) const;
     char* print_expr(const Node* expr, const List* rtable) const;
     void print_rel(RangeTblEntry* rel) const;

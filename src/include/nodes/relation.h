@@ -31,6 +31,11 @@
  */
 typedef enum CostSelector { STARTUP_COST, TOTAL_COST } CostSelector;
 
+/* Different rules are used for path generation */
+typedef enum {
+    NO_PATH_GEN_RULE = 0,
+    BTREE_INDEX_CONTAIN_UNIQUE_COLS = 1 /* an equivalence constraint btree index scan contains unique cols */
+} RulesForPathGen;
 /*
  * The cost estimate produced by cost_qual_eval() includes both a one-time
  * (startup) cost, and a per-tuple cost.
@@ -971,6 +976,10 @@ typedef struct Path {
  * ORDER BY expression is meant to be used with.  (There is no restriction
  * on which index column each ORDER BY can be used with.)
  *
+ * 'rulesforindexgen' is a bitmapset. It is used for recording some rules which
+ * are satisfied in current index path. These recorded rules will be used for
+ * filtering paths. We can consider it as the supplement of CBO (cost based optimize).
+ *
  * 'indexscandir' is one of:
  *		ForwardScanDirection: forward scan of an ordered index
  *		BackwardScanDirection: backward scan of an ordered index
@@ -993,6 +1002,7 @@ typedef struct IndexPath {
     List* indexqualcols;
     List* indexorderbys;
     List* indexorderbycols;
+    int rulesforindexgen = NO_PATH_GEN_RULE;
     ScanDirection indexscandir;
     Cost indextotalcost;
     Selectivity indexselectivity;
