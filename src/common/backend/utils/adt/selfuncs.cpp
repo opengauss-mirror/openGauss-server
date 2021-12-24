@@ -139,6 +139,7 @@
 #include "utils/bytea.h"
 #include "utils/date.h"
 #include "utils/datum.h"
+#include "utils/expr_distinct.h"
 #include "utils/extended_statistics.h"
 #include "utils/fmgroids.h"
 #include "utils/lsyscache.h"
@@ -193,7 +194,7 @@ static Const* string_to_bytea_const(const char* str, size_t str_len);
 static List* specialExpr_group_num(PlannerInfo* root, List* nodeList, double* numdistinct, double rows);
 static List* add_unique_group_var(
     PlannerInfo* root, List* varinfos, Node* var, VariableStatData* vardata, STATS_EST_TYPE eType = STATS_TYPE_LOCAL);
-static double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo);
+extern double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo);
 bool can_use_possion(VariableStatData* vardata, SpecialJoinInfo* sjinfo, double* ratio);
 extern Datum pg_stat_get_last_analyze_time(PG_FUNCTION_ARGS);
 extern List* find_skew_join_distribute_keys(Plan* plan);
@@ -2275,9 +2276,9 @@ static double eqjoinsel_inner(
     double relfrac1 = 1.0, relfrac2 = 1.0, relfrac;
 
     nd1 = get_variable_numdistinct(
-        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     nd2 = get_variable_numdistinct(
-        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     opfuncoid = get_opcode(opera);
 
     if (HeapTupleIsValid(vardata1->statsTuple)) {
@@ -2655,9 +2656,9 @@ static double eqjoinsel_semi(
 
     Oid opfuncoid = OidIsValid(opera) ? get_opcode(opera) : InvalidOid;
     nd1 = get_variable_numdistinct(
-        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     nd2 = get_variable_numdistinct(
-        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     /*
      * We clamp nd2 to be not more than what we estimate the inner relation's
      * size to be.	This is intuitively somewhat reasonable since obviously
@@ -2861,9 +2862,9 @@ static double neqjoinsel_semi(
 
     nullfrac1 = stats1 ? stats1->stanullfrac : 0.0;
     nd1 = get_variable_numdistinct(
-        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata1, &isdefault1, true, get_join_ratio(vardata1, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
     nd2 = get_variable_numdistinct(
-        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL);
+        vardata2, &isdefault2, true, get_join_ratio(vardata2, sjinfo), sjinfo, STATS_TYPE_GLOBAL, true);
 
     /*
      * When one of the sides contains zero distinct values, the selectivity is zero;
@@ -4550,6 +4551,8 @@ void examine_variable(PlannerInfo* root, Node* node, int varRelid, VariableStatD
     errno_t rc = memset_s(vardata, sizeof(VariableStatData), 0, sizeof(VariableStatData));
     securec_check(rc, "\0", "\0");
 
+    vardata->root = root;
+
     /* we enable possion to estimate distinct for default. */
     vardata->enablePossion = true;
     /* Save the exposed type of the expression */
@@ -4980,7 +4983,7 @@ statistic_proc_security_check(const VariableStatData *vardata, Oid func_oid)
  * compare the result to exact integer counts, or might divide by it.
  */
 double get_variable_numdistinct(VariableStatData* vardata, bool* isdefault, bool adjust_rows, double join_ratio,
-    SpecialJoinInfo* sjinfo, STATS_EST_TYPE eType)
+    SpecialJoinInfo* sjinfo, STATS_EST_TYPE eType, bool isJoinVar)
 {
     double stadistinct;
     double stanullfrac = 0.0;
@@ -5066,6 +5069,19 @@ double get_variable_numdistinct(VariableStatData* vardata, bool* isdefault, bool
      */
     if (vardata->isunique)
         stadistinct = -1.0 * (1.0 - stanullfrac);
+
+    /*
+     * If no stats, try to get the estimation
+     */
+    if (ENABLE_SQL_BETA_FEATURE(JOIN_SEL_WITH_CAST_FUNC) && !HeapTupleIsValid(vardata->statsTuple) && 
+        stadistinct == 0.0) {
+        stadistinct = GetExprNumDistinctRouter(vardata, adjust_rows, eType, isJoinVar);
+        if (stadistinct > 0.0) {
+            ereport(DEBUG2, (errmodule(MOD_OPT),
+                errmsg("[Get Variable Distinct]: direct distinct is %.0lf by router, early return", stadistinct)));
+            return clamp_row_est(stadistinct);
+        }
+    }
 
     /*
      * Otherwise we need to get the relation size; punt if not available.
@@ -6502,7 +6518,8 @@ static void genericcostestimate(PlannerInfo* root, IndexPath* path, double loop_
      * enough to not alter index-vs-seqscan decisions, but will prevent
      * indexes of different sizes from looking exactly equally attractive.
      */
-    *indexTotalCost += index->pages * spc_random_page_cost / 100000.0;
+    if (ENABLE_SQL_BETA_FEATURE(INDEX_COST_WITH_LEAF_PAGES_ONLY))
+        *indexTotalCost += index->pages * spc_random_page_cost / 100000.0;
 
     /*
      * CPU cost: any complex expressions in the indexquals will need to be
@@ -8697,7 +8714,7 @@ void set_varratio_after_calc_selectivity(
  * Return:
  *	minimum join ratio with specific relation
  */
-static double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo)
+double get_join_ratio(VariableStatData* vardata, SpecialJoinInfo* sjinfo)
 {
     double ratio = 1.0;
     ListCell* lc = NULL;

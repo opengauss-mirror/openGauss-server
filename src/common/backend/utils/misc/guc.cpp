@@ -994,6 +994,9 @@ static const struct config_enum_entry sql_beta_options[] = {
     {"page_est_opt", PAGE_EST_OPT, false},
     {"param_path_opt", PARAM_PATH_OPT, false},
     {"no_unique_index_first", NO_UNIQUE_INDEX_FIRST, false},
+    {"join_sel_with_cast_func", JOIN_SEL_WITH_CAST_FUNC, false},
+    {"canonical_pathkey", CANONICAL_PATHKEY, false},
+    {"index_cost_with_leaf_pages_only", INDEX_COST_WITH_LEAF_PAGES_ONLY, false},
     {NULL, 0, false}
 };
 
