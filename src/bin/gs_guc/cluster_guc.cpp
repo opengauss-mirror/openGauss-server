@@ -2659,6 +2659,10 @@ static void readPopenOutputParallel(const char* cmd, bool if_for_all_instance)
                 }
                 curr_cxt->readbuf[0] = '\0';
                 curr_cxt->cur_buf_loc = 0;
+                endsp = strstr(result, "WARNING");
+                if (NULL != endsp) {
+                    (void)write_stderr("%s", result);
+                }
                 endsp = strstr(result, "Success to perform gs_guc");
                 if (NULL != endsp) {
                     successNumber++;
