@@ -2788,7 +2788,8 @@ static int ServerLoop(void)
         if (g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode) {
             obs_slot = getObsReplicationSlot();
             if ((XLogArchivingActive() && pmState == PM_RUN) ||
-                ((pmState == PM_RUN || pmState == PM_HOT_STANDBY) && obs_slot != NULL)) {
+                ((pmState == PM_RUN || pmState == PM_HOT_STANDBY) && obs_slot != NULL &&
+                    get_local_dbstate() == NORMAL_STATE)) {
                  g_instance.pid_cxt.PgArchPID = pgarch_start();
             }
         }
@@ -5420,7 +5421,8 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.pid_cxt.PgArchPID == 0 && !dummyStandbyMode) {
                 obs_slot = getObsReplicationSlot();
                 if ((XLogArchivingActive() && pmState == PM_RUN) ||
-                    ((pmState == PM_RUN || pmState == PM_HOT_STANDBY) && obs_slot != NULL)) {
+                    ((pmState == PM_RUN || pmState == PM_HOT_STANDBY) && obs_slot != NULL &&
+                        get_local_dbstate() == NORMAL_STATE)) {
                     g_instance.pid_cxt.PgArchPID = pgarch_start();
                 }
             }
