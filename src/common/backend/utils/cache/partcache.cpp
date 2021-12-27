@@ -1963,12 +1963,10 @@ bool PartitionLocalIndexSkipping(Datum datumPartType)
 
     parttype = DatumGetChar(datumPartType);
     if (parttype == PART_OBJ_TYPE_INDEX_PARTITION) {
-        return false;
-    
+        return false; 
     } 
 
     return true;
-   
 }
 
 /*
