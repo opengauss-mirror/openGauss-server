@@ -1948,6 +1948,30 @@ void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace)
 }
 
 /*
+ * check one partition's invisible metadata whether need to skip the check of gpi for global index
+ * 
+ * Notes: if datumPartType is 'x', that is local index of one partiiton, this case can skip the check
+ * of wait_clean_gpi for partition's global index
+ */
+bool PartitionLocalIndexSkipping(Datum datumPartType);
+{
+    char parttype;
+    
+    if (!PointerIsValid(datumPartType)) {
+        return false;
+    }
+
+    parttype = DatumGetChar(datumPartType);
+    if (parttype == PART_OBJ_TYPE_INDEX_PARTITION) {
+        return false;
+    
+    } 
+
+    return true;
+   
+}
+
+/*
  * Check one partition's invisible metadata tuple whether still keep
  *
  * Notes: if wait_clean_gpi=y is contained in reloptions, determine to keep

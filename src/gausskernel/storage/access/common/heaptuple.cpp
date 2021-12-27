@@ -3281,6 +3281,7 @@ void heap_slot_store_heap_tuple(HeapTuple tuple, TupleTableSlot* slot, Buffer bu
 bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc)
 {
     static KeepInvisbleOpt keepInvisibleArray[] = {
+        {PartitionRelationId, Anum_pg_partition_parttypt}, PartitionLocalIndexSkipping},
         {PartitionRelationId, Anum_pg_partition_reloptions, PartitionInvisibleMetadataKeep},
         {PartitionRelationId, Anum_pg_partition_parentid, PartitionParentOidIsLive}};
 
