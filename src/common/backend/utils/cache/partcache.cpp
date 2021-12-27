@@ -1953,7 +1953,7 @@ void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace)
  * Notes: if datumPartType is 'x', that is local index of one partiiton, this case can skip the check
  * of wait_clean_gpi for partition's global index
  */
-bool PartitionLocalIndexSkipping(Datum datumPartType);
+bool PartitionLocalIndexSkipping(Datum datumPartType)
 {
     char parttype;
     
