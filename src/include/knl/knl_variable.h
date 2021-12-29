@@ -22,7 +22,7 @@
  * ---------------------------------------------------------------------------------------
  */
 
-#ifndef SRC_INCLUDE_KNL_BARIABLE_H_
+#ifndef SRC_INCLUDE_KNL_VARIABLE_H_
 #define SRC_INCLUDE_KNL_VARIABLE_H_
 
 #include "knl/knl_instance.h"
