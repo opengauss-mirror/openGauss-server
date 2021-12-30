@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/utils/builtins.h
  *
@@ -383,6 +384,7 @@ extern void pg_itoa(int16 i, char* a);
 extern void pg_ltoa(int32 l, char* a);
 extern void pg_ctoa(uint8 i, char* a);
 extern void pg_lltoa(int64 ll, char* a);
+extern void pg_i128toa(int128 value, char* a, int length);
 
 /*
  *		Per-opclass comparison functions for new btrees.  These are
@@ -430,6 +432,7 @@ extern float get_float4_infinity(void);
 extern double get_float8_nan(void);
 extern float get_float4_nan(void);
 extern int is_infinite(double val);
+extern double float8in_internal(char* str, char** s, bool* hasError);
 
 extern Datum float4in(PG_FUNCTION_ARGS);
 extern Datum float4out(PG_FUNCTION_ARGS);
@@ -879,6 +882,7 @@ extern Datum nvarchar2(PG_FUNCTION_ARGS);
 extern text* cstring_to_text(const char* s);
 extern text* cstring_to_text_with_len(const char* s, size_t len);
 extern bytea *cstring_to_bytea_with_len(const char *s, int len);
+extern BpChar* cstring_to_bpchar_with_len(const char* s, int len);
 extern char* text_to_cstring(const text* t);
 extern void text_to_cstring_buffer(const text* src, char* dst, size_t dst_len);
 extern int text_instr_3args(text* textStr, text* textStrToSearch, int32 beginIndex);
@@ -949,6 +953,7 @@ extern List* textToQualifiedNameList(text* textval);
 extern bool SplitIdentifierString(char* rawstring, char separator, List** namelist, bool downCase = true, bool truncateToolong = true);
 extern bool SplitIdentifierInteger(char* rawstring, char separator, List** namelist);
 extern Datum replace_text(PG_FUNCTION_ARGS);
+extern Datum replace_text_with_two_args(PG_FUNCTION_ARGS);
 extern text* replace_text_regexp(text* src_text, void* regexp, text* replace_text, bool glob);
 extern Datum split_text(PG_FUNCTION_ARGS);
 extern Datum text_to_array(PG_FUNCTION_ARGS);
@@ -1215,6 +1220,8 @@ extern Datum numeric_avg_accum(PG_FUNCTION_ARGS);
 extern Datum int2_accum(PG_FUNCTION_ARGS);
 extern Datum int4_accum(PG_FUNCTION_ARGS);
 extern Datum int8_accum(PG_FUNCTION_ARGS);
+extern Datum numeric_bool(PG_FUNCTION_ARGS);
+extern Datum bool_numeric(PG_FUNCTION_ARGS);
 #ifdef PGXC
 extern Datum numeric_collect(PG_FUNCTION_ARGS);
 #endif
@@ -1558,6 +1565,9 @@ extern bool isEncryptedCluster();
 /* pg_lsn.cpp */
 extern Datum pg_lsn_in(PG_FUNCTION_ARGS);
 
+/* nlssort.cpp */
+extern Datum nlssort(PG_FUNCTION_ARGS);
+
 // template function implementation
 //
 
@@ -1611,6 +1621,10 @@ extern Datum ledger_gchain_check(PG_FUNCTION_ARGS);
 extern Datum ledger_gchain_repair(PG_FUNCTION_ARGS);
 extern Datum ledger_gchain_archive(PG_FUNCTION_ARGS);
 extern Datum gs_is_recycle_object(PG_FUNCTION_ARGS);
+
+/* Oracle connect by */
+extern Datum sys_connect_by_path(PG_FUNCTION_ARGS);
+extern Datum connect_by_root(PG_FUNCTION_ARGS);
 
 /* origin.cpp */
 extern Datum pg_replication_origin_advance(PG_FUNCTION_ARGS);

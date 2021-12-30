@@ -62,13 +62,18 @@ void StatementData::replace_raw_values()
     conn->client_logic->rawValuesForReplace->sort_by_location();
 
     /*
-     *   we are iterating over the array from top to bottom
-     *   the location of the value to replace is always correct in the loop because we start from the end
+     * we are iterating over the array from top to bottom
+     * the location of the value to replace is always correct in the loop because we start from the end
      */
     int i = (int)(size - 1);
     for (; i >= 0; --i) {
         RawValue *raw_value = conn->client_logic->rawValuesForReplace->at(i);
-        if (!raw_value) {
+        /*
+         * if the raw value is null, there is no need to replace it.
+         * if is param, there is no need to replace it in the query, as the query is already saved in the server
+         * the param is being saved in the list only for replacing value in post query in case of error
+         */
+        if (!raw_value || raw_value->m_is_param || !raw_value->m_processed_data) {
             continue;
         }
         if (raw_value->m_location > params.new_query_size) {
@@ -130,6 +135,7 @@ void StatementData::replace_raw_values()
 
     params.adjusted_query = params.new_query;
     params.adjusted_query_size = params.new_query_size;
+    conn->client_logic->raw_values_for_post_query.merge_from(conn->client_logic->rawValuesForReplace);
 }
 
 void StatementData::copy_params()
@@ -137,7 +143,7 @@ void StatementData::copy_params()
     stmtName = stmtName ? stmtName : "";
     if (paramTypes) {
         libpq_free(params.adjusted_paramTypes);
-        params.adjusted_paramTypes = (Oid *)malloc(nParams * sizeof(Oid));
+        params.adjusted_paramTypes = (Oid *)calloc(nParams, sizeof(Oid));
         if (params.adjusted_paramTypes == NULL) {
             return;
         }
@@ -145,7 +151,7 @@ void StatementData::copy_params()
     }
     if (paramValues) {
         libpq_free(params.adjusted_param_values);
-        params.adjusted_param_values = (const char **)malloc(nParams * sizeof(const char *));
+        params.adjusted_param_values = (const char **)calloc(nParams, sizeof(const char *));
         if (params.adjusted_param_values == NULL) {
             return;
         }
@@ -155,7 +161,7 @@ void StatementData::copy_params()
     }
     if (paramLengths) {
         libpq_free(params.adjusted_param_lengths);
-        params.adjusted_param_lengths = (int *)malloc(nParams * sizeof(int));
+        params.adjusted_param_lengths = (int *)calloc(nParams, sizeof(int));
         if (params.adjusted_param_lengths == NULL) {
             return;
         }

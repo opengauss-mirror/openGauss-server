@@ -1518,6 +1518,8 @@ static PLDebug_variable* _readPLDebug_variable(void)
     READ_STRING_FIELD(name);
     READ_STRING_FIELD(var_type);
     READ_STRING_FIELD(value);
+    READ_STRING_FIELD(pkgname);
+    READ_BOOL_FIELD(isconst);
 
     READ_DONE();
 }
@@ -1529,6 +1531,7 @@ static PLDebug_breakPoint* _readPLDebug_breakPoint(void)
     READ_OID_FIELD(funcoid);
     READ_INT_FIELD(lineno);
     READ_STRING_FIELD(query);
+    READ_BOOL_FIELD(active);
 
     READ_DONE();
 }
@@ -1540,6 +1543,7 @@ static PLDebug_frame* _readPLDebug_frame(void)
     READ_STRING_FIELD(funcname);
     READ_INT_FIELD(lineno);
     READ_STRING_FIELD(query);
+    READ_INT_FIELD(funcoid);
 
     READ_DONE();
 }
@@ -1624,6 +1628,9 @@ static CommonTableExpr* _readCommonTableExpr(void)
 
     READ_STRING_FIELD(ctename);
     READ_NODE_FIELD(aliascolnames);
+    IF_EXIST(ctematerialized) {
+        READ_ENUM_FIELD(ctematerialized, CTEMaterialize);
+    }
     READ_NODE_FIELD(ctequery);
     READ_LOCATION_FIELD(location);
     READ_BOOL_FIELD(cterecursive);
@@ -1639,6 +1646,34 @@ static CommonTableExpr* _readCommonTableExpr(void)
      * in SS_process_ctes later.
      */
     local_node->locator_type = LOCATOR_TYPE_NONE;
+    IF_EXIST(self_reference) {
+        READ_BOOL_FIELD(self_reference);
+    }
+    IF_EXIST(swoptions) {
+        READ_NODE_FIELD(swoptions);
+    }
+    IF_EXIST(referenced_by_subquery) {
+        READ_BOOL_FIELD(referenced_by_subquery);
+    }
+    READ_DONE();
+}
+
+/*
+ * _readStartWithTargetRelInfo
+ */
+static StartWithTargetRelInfo* _readStartWithTargetRelInfo(void)
+{
+    READ_LOCALS(StartWithTargetRelInfo);
+
+    READ_STRING_FIELD(relname);
+    READ_STRING_FIELD(aliasname);
+    READ_STRING_FIELD(ctename);
+    READ_NODE_FIELD(columns);
+    READ_NODE_FIELD(tblstmt);
+
+    READ_ENUM_FIELD(rtekind, RTEKind);
+    READ_NODE_FIELD(rte);
+    READ_NODE_FIELD(rtr);
 
     READ_DONE();
 }
@@ -1687,11 +1722,17 @@ static RangeVar* _readRangeVar(void)
     READ_STRING_FIELD(schemaname);
     READ_STRING_FIELD(relname);
     READ_STRING_FIELD(partitionname);
+    IF_EXIST(subpartitionname) {
+        READ_STRING_FIELD(subpartitionname);
+    }
     READ_ENUM_FIELD(inhOpt, InhOption);
     READ_CHAR_FIELD(relpersistence);
     READ_NODE_FIELD(alias);
     READ_LOCATION_FIELD(location);
     READ_BOOL_FIELD(ispartition);
+    IF_EXIST(issubpartition) {
+        READ_BOOL_FIELD(issubpartition);
+    }
     READ_NODE_FIELD(partitionKeyValuesList);
 
     IF_EXIST(isbucket){
@@ -1845,7 +1886,14 @@ static Param* _readParam(void)
     READ_LOCATION_FIELD(location);
 
     READ_TYPEINFO_FIELD(paramtype);
-
+    IF_EXIST(tableOfIndexType)
+    {
+        READ_OID_FIELD(tableOfIndexType);
+    }
+    IF_EXIST(recordVarTypOid)
+    {
+        READ_OID_FIELD(recordVarTypOid);
+    }
     READ_DONE();
 }
 
@@ -2656,6 +2704,19 @@ static TargetEntry* _readTargetEntry(void)
 }
 
 /*
+ * _readPseudoTargetEntry
+ */
+static PseudoTargetEntry* _readPseudoTargetEntry(void)
+{
+    READ_LOCALS(PseudoTargetEntry);
+
+    READ_NODE_FIELD(tle);
+    READ_NODE_FIELD(srctle);
+
+    READ_DONE();
+}
+
+/*
  * _readRangeTblRef
  */
 static RangeTblRef* _readRangeTblRef(void)
@@ -2760,6 +2821,12 @@ static RangeTblEntry* _readRangeTblEntry(void)
 
             READ_OID_FIELD(partitionOid);
             READ_BOOL_FIELD(isContainPartition);
+            IF_EXIST(subpartitionOid) {
+                READ_OID_FIELD(subpartitionOid);
+            }
+            IF_EXIST(isContainSubPartition) {
+                READ_BOOL_FIELD(isContainSubPartition);
+            }
 
             IF_EXIST(refSynOid)
             {
@@ -2877,9 +2944,25 @@ static RangeTblEntry* _readRangeTblEntry(void)
             READ_STRING_FIELD(ctename);
             READ_UINT_FIELD(ctelevelsup);
             READ_BOOL_FIELD(self_reference);
+            IF_EXIST(cterecursive) {
+                READ_BOOL_FIELD(cterecursive);
+            }
             READ_NODE_FIELD(ctecoltypes);
             READ_NODE_FIELD(ctecoltypmods);
             READ_NODE_FIELD(ctecolcollations);
+
+            IF_EXIST(swConverted) {
+                READ_BOOL_FIELD(swConverted);
+            }
+            IF_EXIST(origin_index) {
+                READ_NODE_FIELD(origin_index);
+            }
+            IF_EXIST(swAborted) {
+                READ_BOOL_FIELD(swAborted);
+            }
+            IF_EXIST(swSubExist) {
+                READ_BOOL_FIELD(swSubExist);
+            }
 
             READ_TYPEINFO_LIST(ctecoltypes);
             break;
@@ -2987,6 +3070,9 @@ static Plan* _readPlan(Plan* local_node)
     READ_NODE_FIELD(righttree);
     READ_BOOL_FIELD(ispwj);
     READ_INT_FIELD(paramno);
+    IF_EXIST(subparamno) {
+        READ_INT_FIELD(subparamno);
+    }
     READ_NODE_FIELD(initPlan);
     READ_NODE_FIELD(distributed_keys);
     READ_NODE_FIELD(exec_nodes);
@@ -3192,12 +3278,29 @@ static PruningResult* _readPruningResult(PruningResult* local_node)
     READ_INT_FIELD(intervalOffset);
     READ_BITMAPSET_FIELD(intervalSelectedPartitions);
     READ_NODE_FIELD(ls_rangeSelectedPartitions);
+    IF_EXIST(ls_selectedSubPartitions) {
+        READ_NODE_FIELD(ls_selectedSubPartitions);
+    }
     if (t_thrd.proc->workingVersionNum >= num) {
         READ_NODE_FIELD(expr);
     }
 
     READ_DONE();
 }
+
+static SubPartitionPruningResult* _readSubPartitionPruningResult(SubPartitionPruningResult* local_node)
+{
+    READ_LOCALS_NULL(SubPartitionPruningResult);
+    READ_TEMP_LOCALS();
+
+    /* skip boundary info */
+    READ_INT_FIELD(partSeq);
+    READ_BITMAPSET_FIELD(bm_selectedSubPartitions);
+    READ_NODE_FIELD(ls_selectedSubPartitions);
+
+    READ_DONE();
+}
+
 static BucketInfo* _readBucketInfo(BucketInfo* local_node)
 {
     READ_LOCALS_NULL(BucketInfo);
@@ -3260,6 +3363,9 @@ static PartIteratorParam* _readPartIteratorParam(PartIteratorParam* local_node)
     READ_TEMP_LOCALS();
 
     READ_INT_FIELD(paramno);
+    IF_EXIST(subPartParamno) {
+        READ_INT_FIELD(subPartParamno);
+    }
 
     READ_DONE();
 }
@@ -3273,6 +3379,13 @@ static CteScan* _readCteScan(CteScan* local_node)
 
     READ_INT_FIELD(ctePlanId);
     READ_INT_FIELD(cteParam);
+
+    IF_EXIST(cteRef) {
+        READ_NODE_FIELD(cteRef);
+    }
+    IF_EXIST(internalEntryList) {
+        READ_NODE_FIELD(internalEntryList);
+    }
 
     READ_DONE();
 }
@@ -3831,7 +3944,7 @@ static ModifyTable* _readModifyTable(ModifyTable* local_node)
     IF_EXIST(exclRelRTIndex) {
         READ_INT_FIELD(exclRelRTIndex);
     }
-    READ_BOOL_FIELD(partKeyUpsert);
+
     READ_DONE();
 }
 
@@ -3843,7 +3956,7 @@ static UpsertExpr* _readUpsertExpr(void)
     READ_NODE_FIELD(updateTlist);
     READ_NODE_FIELD(exclRelTlist);
     READ_INT_FIELD(exclRelIndex);
-    READ_BOOL_FIELD(partKeyUpsert);
+
     READ_DONE();
 }
 
@@ -4298,6 +4411,47 @@ static RecursiveUnion* _readRecursiveUnion(RecursiveUnion* local_node)
     READ_BOOL_FIELD(has_outer_stream);
     READ_BOOL_FIELD(is_used);
     READ_BOOL_FIELD(is_correlated);
+    IF_EXIST(internalEntryList) {
+        READ_NODE_FIELD(internalEntryList);
+    }
+
+    READ_DONE();
+}
+
+static StartWithOp* _readStartWithOp(StartWithOp* local_node)
+{
+    READ_LOCALS_NULL(StartWithOp);
+
+    READ_TEMP_LOCALS();
+
+    // Read Plan
+    _readPlan(&local_node->plan);
+
+    READ_NODE_FIELD(cteplan);
+    READ_NODE_FIELD(ruplan);
+
+    READ_NODE_FIELD(keyEntryList);
+    READ_NODE_FIELD(colEntryList);
+    READ_NODE_FIELD(internalEntryList);
+    READ_NODE_FIELD(fullEntryList);
+
+    READ_NODE_FIELD(swoptions);
+
+    READ_DONE();
+}
+
+static StartWithOptions* _readStartWithOptions(StartWithOptions* local_node)
+{
+    READ_LOCALS_NULL(StartWithOptions);
+
+    READ_TEMP_LOCALS();
+
+    READ_NODE_FIELD(siblings_orderby_clause);
+    READ_NODE_FIELD(prior_key_index);
+    READ_ENUM_FIELD(connect_by_type, StartWithConnectByType);
+    READ_NODE_FIELD(connect_by_level_quals);
+    READ_NODE_FIELD(connect_by_other_quals);
+    READ_BOOL_FIELD(nocycle);
 
     READ_DONE();
 }
@@ -4311,6 +4465,9 @@ static WorkTableScan* _readWorkTableScan(WorkTableScan* local_node)
     _readScan(&local_node->scan);
 
     READ_INT_FIELD(wtParam);
+    IF_EXIST(forStartWith) {
+        READ_BOOL_FIELD(forStartWith);
+    }
 
     READ_DONE();
 }
@@ -5054,6 +5211,12 @@ static ColumnRef* _readColumnRef()
     READ_LOCALS(ColumnRef);
 
     READ_NODE_FIELD(fields);
+    IF_EXIST(prior) {
+        READ_BOOL_FIELD(prior);
+    }
+    IF_EXIST(indnum) {
+        READ_INT_FIELD(indnum);
+    }
     READ_LOCATION_FIELD(location);
 
     READ_DONE();
@@ -5076,6 +5239,10 @@ static TypeName* _readTypeName()
     READ_INT_FIELD(typemod);
     READ_NODE_FIELD(arrayBounds);
     READ_LOCATION_FIELD(location);
+    IF_EXIST(pct_rowtype)
+    {
+        READ_BOOL_FIELD(pct_rowtype);
+    }
     IF_EXIST(end_location)
     {
         READ_LOCATION_FIELD(end_location);
@@ -5405,10 +5572,16 @@ static SplitPartitionState* _readSplitPartitionState()
 {
     READ_LOCALS(SplitPartitionState);
 
+    IF_EXIST(splitType) {
+        READ_ENUM_FIELD(splitType, SplitPartitionType);
+    }
     READ_STRING_FIELD(src_partition_name);
     READ_NODE_FIELD(partition_for_values);
     READ_NODE_FIELD(split_point);
     READ_NODE_FIELD(dest_partition_define_list);
+    IF_EXIST(newListSubPartitionBoundry) {
+        READ_NODE_FIELD(newListSubPartitionBoundry);
+    }
 
     READ_DONE();
 }
@@ -5503,6 +5676,8 @@ Node* parseNodeString(void)
         return_value = _readRowMarkClause();
     } else if (MATCH("COMMONTABLEEXPR", 15)) {
         return_value = _readCommonTableExpr();
+    } else if (MATCH("STARTWITHTARGETRELINFO", 22)) {
+        return_value = _readStartWithTargetRelInfo();
     } else if (MATCH("SETOPERATIONSTMT", 16)) {
         return_value = _readSetOperationStmt();
     } else if (MATCH("ALIAS", 5)) {
@@ -5591,6 +5766,12 @@ Node* parseNodeString(void)
         return_value = _readCurrentOfExpr();
     } else if (MATCH("TARGETENTRY", 11)) {
         return_value = _readTargetEntry();
+    } else if (MATCH("PSEUDOTARGETENTRY", 17)) {
+        return_value = _readPseudoTargetEntry();
+    } else if (MATCH("STARTWITHOPTIONS", 16)) {
+        return_value = _readStartWithOptions(NULL);
+    } else if (MATCH("STARTWITHOP", 11)) {
+        return_value = _readStartWithOp(NULL);
     } else if (MATCH("RANGETBLREF", 11)) {
         return_value = _readRangeTblRef();
     } else if (MATCH("JOINEXPR", 8)) {
@@ -5723,6 +5904,8 @@ Node* parseNodeString(void)
         return_value = _readCStoreIndexOr(NULL);
     } else if (MATCH("PRUNINGRESULT", 13)) {
         return_value = _readPruningResult(NULL);
+    } else if (MATCH("SUBPARTITIONPRUNINGRESULT", 25)) {
+        return_value = _readSubPartitionPruningResult(NULL);
     } else if (MATCH("PARTITERATOR", 12)) {
         return_value = _readPartIterator(NULL);
     } else if (MATCH("PARTITERATORPARAM", 17)) {

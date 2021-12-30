@@ -392,93 +392,36 @@ Datum mode_final(PG_FUNCTION_ARGS)
 
 static void Merge(TdigestData *td);
 
-#ifdef ENABLE_MULTIPLE_NODES
-
-/*
- *    get palloc BufSize
- */
-
-static Size GetRequiredBufSize(double compression)
-{
-    int compressNum = 6;
-    int compressAdd = 10;
-    return sizeof(TdigestData) + 
-        (((compressNum * (int)(compression)) + compressAdd) * sizeof(CentroidPoint));
-}
-
-/*
- *    InitTidigest and palloc
- */
-
-static TdigestData *InitTidigest(double compression, Size buf_size, char *buf)
-{
-    TdigestData *td = (TdigestData *)(buf);
-    if (!td) {
-        return NULL;
-    }
-    SET_VARSIZE(td, buf_size);
-    td->compression = compression;
-    td->cap = (buf_size - sizeof(TdigestData)) / sizeof(CentroidPoint);
-    td->merged_nodes = 0;
-    td->merged_count = 0;
-    td->unmerged_nodes = 0;
-    td->unmerged_count = 0;
-    return td;
-}
-
-/*
- *    New TdigestData
- */
-
-TdigestData *NewTidigest(double compression)
-{
-    Size memsize = GetRequiredBufSize(compression);
-    return InitTidigest(compression, memsize, (char *)(palloc(memsize)));
-}
-#endif
-
 /*
  *    add one point to TdigestData
  */
 
 void TdAdd(TdigestData *td, double mean, int64 count)
 {
+    CentroidPoint cp;
+    
     if ((td->merged_nodes + td->unmerged_nodes) == td->cap) {
         Merge(td);
     }
-    td->nodes[td->merged_nodes + td->unmerged_nodes] = (CentroidPoint) {
-        .mean = mean,
-        .count = count,
-    };
+    
+    cp.count = count;
+    cp.mean = mean;
+    td->nodes[td->merged_nodes + td->unmerged_nodes] = cp;
     td->unmerged_nodes++;
     td->unmerged_count += count;
-}
-
-/*
- *    merge TdigestData in TdigestData from every dn
- */
-
-void TdMerge(TdigestData *td1, TdigestData *td2)
-{
-    Merge(td1);
-    Merge(td2);
-    for (int i = 0; i < td2->merged_nodes; i++) {
-        CentroidPoint *cp = &td2->nodes[i];
-        TdAdd(td1, cp->mean, cp->count);
-    }
 }
 
 /*
  *    comepare points when sort
  */
 
-static int CompareNodes(const void *n1, const void *n2)
+static int CompareNodes(const void *firstNode, const void *secondNode)
 {
-    CentroidPoint *cp1 = (CentroidPoint *)(n1);
-    CentroidPoint *cp2 = (CentroidPoint *)(n2);
-    if (cp1->mean < cp2->mean) {
+    CentroidPoint *firstCp = (CentroidPoint *)(firstNode);
+    CentroidPoint *secondCp = (CentroidPoint *)(secondNode);
+    if (firstCp->mean < secondCp->mean) {
         return -1;
-    } else if (cp1->mean > cp2->mean) {
+    } else if (firstCp->mean > secondCp->mean) {
         return 1;
     } else {
         return 0;
@@ -489,55 +432,62 @@ static int CompareNodes(const void *n1, const void *n2)
  *    merge the points
  */
 
-static void Merge(TdigestData *td)
+static void MergeAct(TdigestData *td, int num)
 {
-    int num = 0;
+    int i = 1;
     int cur = 0;
     double denom = 0;
-    double TotalCount = 0;
     double normalizer = 0;
     int64 CountSoFar = 0;
-   
-    if (td->unmerged_nodes == 0) {
-        return;
-    }
-    // 1. sort all point
-    num = td->merged_nodes + td->unmerged_nodes;
-    qsort((void *)(td->nodes), num, sizeof(CentroidPoint), &CompareNodes);
-    
+    double TotalCount = 0;
     TotalCount = td->merged_count + td->unmerged_count;
     denom = 2 * M_PI * TotalCount * log(TotalCount);
     normalizer = td->compression / denom;
-
-    // 2. Go through all the points and merge
-    for (int i = 1; i < num; i++) {
+    
+    while (i < num) {
         double ProposedCount = td->nodes[cur].count + td->nodes[i].count;
         double z = ProposedCount * normalizer;
         double q0 = (double)CountSoFar / TotalCount;
         double q2 = ((double)CountSoFar + ProposedCount) / TotalCount;
         bool ShouldAdd = (z <= (q0 * (1 - q0))) && (z <= (q2 * (1 - q2)));
         if (ShouldAdd) {
-            // 3. add nodes[i] to nodes[cur]
+            // add nodes[i] to nodes[cur]
             td->nodes[cur].count += td->nodes[i].count;
             double delta = td->nodes[i].mean - td->nodes[cur].mean;
             double WeightedDelta = (delta * (double)td->nodes[i].count) / (double)td->nodes[cur].count;
             td->nodes[cur].mean += WeightedDelta;
         } else {
-            // 4. don't add nodes[i] to nodes[cur] and move nodes[i] to nodes[cur+1]
+            // don't add nodes[i] to nodes[cur] and move nodes[i] to nodes[cur+1]
             CountSoFar += td->nodes[cur].count;
             cur++;
             td->nodes[cur] = td->nodes[i];
         }
         if (cur != i) {
-            // 5. empty nodes[i]
+            // empty nodes[i]
             CentroidPoint cp;
             cp.count = 0;
             cp.mean = 0;
             td->nodes[i] = cp;
         }
+        i++;
     }
     td->merged_nodes = cur + 1;
     td->merged_count = TotalCount;
+}
+
+static void Merge(TdigestData *td)
+{
+    int num = 0;
+
+    if (td->unmerged_nodes == 0) {
+        return;
+    }
+    // 1. sort all point
+    num = td->merged_nodes + td->unmerged_nodes;
+    qsort((void *)(td->nodes), num, sizeof(CentroidPoint), &CompareNodes);
+    // 2. Go through all the points and merge
+    MergeAct(td, num);
+    // 3. set unmerged_nodes to 0
     td->unmerged_nodes = 0;
     td->unmerged_count = 0;
 }
@@ -546,37 +496,21 @@ static void Merge(TdigestData *td)
  *    Calculate the percentile_of_value from all the points
  */
 
-double TdQuantileOf(TdigestData *td, double val)
+double CalQuantile(TdigestData *td, double val, int index, CentroidPoint *cp, double CountVal)
 {
-    double CountVal = 0;
-    int i = 0;
-    CentroidPoint *cp = NULL;
-   
-    Merge(td);
-    if (td->merged_nodes == 0) {
-        return NAN;
-    }
-     
-    // find a value greater than val
-    for (i = 0; i < td->merged_nodes; i++) {
-        cp = &td->nodes[i];
-        if (cp->mean >= val) {
-            break;
-        }
-        CountVal += cp->count;
-    }
-    // compute result
     if (val == cp->mean) {
         // 1.current point. If have the same number, take the middle numberTake the middle number
         double CountAtValue = cp->count;
-        for (i += 1; i < td->merged_nodes && td->nodes[i].mean == cp->mean; i++) {
-            CountAtValue += td->nodes[i].count;
+        while (index < td->merged_nodes && td->nodes[index].mean == cp->mean) {
+            CountAtValue += td->nodes[index].count;
+            index++;
         }
-        return (CountVal + (CountAtValue / 2)) / td->merged_count;
+        double res = (CountVal + (CountAtValue / 2)) / td->merged_count;
+        return res;
     } else if (val > cp->mean) {
         // 2.biggest
         return 1;
-    } else if (i == 0) {
+    } else if (index == 0) {
         // 3.minimum
         return 0;
     }
@@ -587,45 +521,54 @@ double TdQuantileOf(TdigestData *td, double val)
     
     double m = (cpr->mean - cpl->mean) / ((double)cpl->count / 2 + (double)cpr->count / 2);
     double x = (val - cpl->mean) / m;
-    return (CountVal + x) / td->merged_count;
+    double res = (CountVal + x) / td->merged_count;
+    return res;
+}
+
+double TdQuantileOf(TdigestData *td, double val)
+{
+    double CountVal = 0;
+    int i = 0;
+    CentroidPoint *cp = NULL;
+    double res = 0;
+   
+    Merge(td);
+    if (td->merged_nodes == 0) {
+        return NAN;
+    }
+     
+    // find a value greater than val
+    while (i < td->merged_nodes) {
+        cp = &td->nodes[i];
+        if (cp->mean >= val) {
+            break;
+        }
+        CountVal += cp->count;
+        i++;
+    }
+    i++;
+    // compute result
+    res =  CalQuantile(td, val, i, cp, CountVal);
+    return res;
 }
 
 /*
  *    Calculate the value_of_percentile from all the points
  */
-
-double TdValueAt(TdigestData *td, double q)
+double CalValue(TdigestData *td, CentroidPoint *cp, double goal, double count, int index)
 {
-    int i = 0;
-    double k = 0;
-    double goal = 0;
-    CentroidPoint *cp = NULL;
     double minright = 0.000000001;
     double minleft = -0.000000001;
 
-    Merge(td);
-    if (q < 0 || q > 1 || td->merged_nodes == 0) {
-        return NAN;
-    }
-     
-    // find a count greater than cur_count
-    goal = q * td->merged_count;
-    for (i = 0; i < td->merged_nodes; i++) {
-        cp = &td->nodes[i];
-        if (k + cp->count > goal) {
-            break;
-        }
-        k += cp->count;
-    }
     // 1.current point
-    double DeltaK = goal - k - ((double)cp->count / 2);
+    double DeltaK = goal - count - ((double)cp->count / 2);
     if (!(DeltaK > minright || DeltaK < minleft)) {
         return cp->mean;
     }
     // 2.biggest or minimum
     bool right = DeltaK > 0;
-    if ((right && ((i + 1) == td->merged_nodes)) ||
-        (!right && (i == 0))) {
+    if ((right && ((index + 1) == td->merged_nodes)) ||
+        (!right && (index == 0))) {
         return cp->mean;
     }
     // 3.Interpolation calculation
@@ -633,17 +576,44 @@ double TdValueAt(TdigestData *td, double q)
     CentroidPoint *cpr;
     if (right) {
         cpl = cp;
-        cpr = &td->nodes[i + 1];
-        k += ((double)cpl->count / 2);
+        cpr = &td->nodes[index + 1];
+        count += ((double)cpl->count / 2);
     } else {
-        cpl = &td->nodes[i - 1];
+        cpl = &td->nodes[index - 1];
         cpr = cp;
-        k -= ((double)cpl->count / 2);
+        count -= ((double)cpl->count / 2);
     }
-     
-    double x = goal - k;
+    
+    double x = goal - count;
     double m = (cpr->mean - cpl->mean) / ((double)cpl->count / 2 + (double)cpr->count / 2);
     return m * x + cpl->mean;
+}
+
+double TdValueAt(TdigestData *td, double q)
+{
+    int i = 0;
+    double k = 0;
+    double goal = 0;
+    CentroidPoint *cp = NULL;
+    double res = 0;
+
+    Merge(td);
+    if (td->merged_nodes == 0) {
+        return NAN;
+    }
+    // find a count greater than cur_count
+    goal = q * td->merged_count;
+    while (i < td->merged_nodes) {
+        cp = &td->nodes[i];
+        if (k + cp->count > goal) {
+            break;
+        }
+        k += cp->count;
+        i++;
+    }
+    // compute result
+    res = CalValue(td, cp, goal, k, i);
+    return res;
 }
 
 /*
@@ -671,14 +641,22 @@ Datum tdigest_merge(PG_FUNCTION_ARGS)
         if (compression <= 0 || compression > 500) {
             compression = 300;
         }
-        TdigestData* res = NewTidigest(compression);
-        if (res == NULL) {
+        int compressNum = 6;
+        int compressAdd = 10;
+        Size memsize = sizeof(TdigestData) +
+            (((compressNum * (int)(compression)) + compressAdd) * sizeof(CentroidPoint));
+        TdigestData *res = (TdigestData *)(palloc0(memsize));
+        if (!res) {
             ereport(ERROR, (errmodule(MOD_OPT_AGG), errcode(ERRCODE_OUT_OF_MEMORY),
-                            errmsg("Failed to apply for memory"), errdetail("N/A"),
-                            errcause("palloc failed"),
-                            erraction("Check memory")));
+                errmsg("Failed to apply for memory"), errdetail("N/A"),
+                errcause("palloc failed"),
+                erraction("Check memory")));
             PG_RETURN_NULL();
         }
+        SET_VARSIZE(res, memsize);
+        res->compression = compression;
+        res->cap = (memsize - sizeof(TdigestData)) / sizeof(CentroidPoint);
+
         res->valuetoc = PG_GETARG_FLOAT8(2);
 
         TdAdd(res, newval, 1);
@@ -723,7 +701,14 @@ Datum tdigest_merge_to_one(PG_FUNCTION_ARGS)
         }
         TdigestData* newval = (TdigestData*)PG_DETOAST_DATUM(PG_GETARG_DATUM(1));
         // merge data from dn to param 0
-        TdMerge(oldres, newval);
+        Merge(oldres);
+        Merge(newval);
+        int i = 0;
+        while (i < newval->merged_nodes) {
+            CentroidPoint *cp = &newval->nodes[i];
+            TdAdd(oldres, cp->mean, cp->count);
+            i++;
+        }
         PG_RETURN_POINTER(oldres);
     }
 }
@@ -772,14 +757,22 @@ Datum tdigest_mergep(PG_FUNCTION_ARGS)
         if (compression <= 0 || compression > 500) {
             compression = 300;
         }
-        TdigestData* res = NewTidigest(compression);
-        if (res == NULL) {
+        int compressNum = 6;
+        int compressAdd = 10;
+        Size memsize = sizeof(TdigestData) +
+            (((compressNum * (int)(compression)) + compressAdd) * sizeof(CentroidPoint));
+        TdigestData *res = (TdigestData *)(palloc0(memsize));
+        if (!res) {
             ereport(ERROR, (errmodule(MOD_OPT_AGG), errcode(ERRCODE_OUT_OF_MEMORY),
-                            errmsg("Failed to apply for memory"), errdetail("N/A"),
-                            errcause("palloc failed"),
-                            erraction("Check memory")));
+                errmsg("Failed to apply for memory"), errdetail("N/A"),
+                errcause("palloc failed"),
+                erraction("Check memory")));
             PG_RETURN_NULL();
         }
+        SET_VARSIZE(res, memsize);
+        res->compression = compression;
+        res->cap = (memsize - sizeof(TdigestData)) / sizeof(CentroidPoint);
+        
         res->valuetoc = PG_GETARG_FLOAT8(2);
         /* add one point */
         TdAdd(res, newval, 1);

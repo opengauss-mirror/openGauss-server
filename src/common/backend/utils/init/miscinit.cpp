@@ -451,33 +451,6 @@ const char* show_nodegroup_mode(void)
             return "unknown";
     }
 }
-
-#endif
-
-#ifndef ENABLE_MULTIPLE_NODES
-const int GetCustomParserId()
-{
-    int id = 0;
-    switch (u_sess->attr.attr_sql.sql_compatibility) {
-        case A_FORMAT:
-            id = DB_CMPT_A;
-            break;
-        case B_FORMAT:
-            id = DB_CMPT_B;
-            break;
-        case C_FORMAT:
-            id = DB_CMPT_C;
-            break;
-        case PG_FORMAT:
-            id = DB_CMPT_PG;
-            break;
-        default:
-            ereport(WARNING, (errmsg("Unknown sql compatibility: %d", u_sess->attr.attr_sql.sql_compatibility)));
-            return -1;
-    }
-    Assert(id >= 0 && id < DB_CMPT_MAX);
-    return id;
-}
 #endif
 
 /*
@@ -788,10 +761,17 @@ bool has_rolvcadmin(Oid roleid)
     return result;
 }
 
+static void DecreaseUserCountReuse(Oid roleid, bool ispoolerreuse)
+{
+    if (ispoolerreuse == true && ENABLE_THREAD_POOL) {
+        DecreaseUserCount(roleid);
+    }
+}
+
 /*
  * Initialize user identity during normal backend startup
  */
-void InitializeSessionUserId(const char* rolename, Oid useroid)
+void InitializeSessionUserId(const char* rolename, bool ispoolerreuse, Oid useroid)
 {
     HeapTuple roleTup;
     Form_pg_authid rform;
@@ -899,6 +879,7 @@ void InitializeSessionUserId(const char* rolename, Oid useroid)
 
     /* Also mark our PGPROC entry with the authenticated user id */
     /* (We assume this is an atomic store so no lock is needed) */
+    DecreaseUserCountReuse(roleid, ispoolerreuse);
     t_thrd.proc->roleId = roleid;
 
     /*
@@ -910,6 +891,10 @@ void InitializeSessionUserId(const char* rolename, Oid useroid)
         /*
          * Is role allowed to login at all?
          */
+        if (ENABLE_THREAD_POOL) {
+            IncreaseUserCount(roleid);
+        }
+
         if (!rform->rolcanlogin)
             ereport(FATAL,
                 (errcode(ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION),
@@ -925,7 +910,6 @@ void InitializeSessionUserId(const char* rolename, Oid useroid)
          * exactly seems more trouble than it is worth, however; instead we
          * just document that the connection limit is approximate.
          */
-        IncreaseUserCount(roleid);
         if (rform->rolconnlimit >= 0 && !u_sess->misc_cxt.AuthenticatedUserIsSuperuser &&
             CountUserBackends(roleid) > rform->rolconnlimit) {
             ReportAlarmTooManyDbUserConn(rolename);

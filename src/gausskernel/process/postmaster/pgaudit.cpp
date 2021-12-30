@@ -376,7 +376,7 @@ static void flush_pipe_input(char* auditbuffer, int* bytes_in_auditbuffer);
 static void pgaudit_write_file(char* buffer, int count);
 static void pgaudit_write_policy_audit_file(const char* buffer, int count);
 
-static void auditfile_init(void);
+static void auditfile_init(bool allow_errors = false);
 static FILE *auditfile_open(pg_time_t timestamp, const char *mode, bool allow_errors,
     const char *filename = pgaudit_filename, bool ignore_num = false);
 static void auditfile_close(AuditFileType flag);
@@ -570,7 +570,7 @@ NON_EXEC_STATIC void PgAuditorMain()
 
         if (!t_thrd.audit.rotation_requested && u_sess->attr.attr_security.Audit_RotationSize > 0 &&
             !t_thrd.audit.rotation_disabled) {
-            int64 filesize = ftell(t_thrd.audit.sysauditFile);
+            int64 filesize = (t_thrd.audit.sysauditFile != NULL) ? ftell(t_thrd.audit.sysauditFile) : 0;
             /* Do a rotation if file is too big */
             if (filesize >= (int64)u_sess->attr.attr_security.Audit_RotationSize * 1024L ||
                 filesize >= (int64)u_sess->attr.attr_security.Audit_SpaceLimit * 1024L) {
@@ -616,15 +616,15 @@ NON_EXEC_STATIC void PgAuditorMain()
 #ifndef WIN32
         rc = WaitLatchOrSocket(
             &t_thrd.audit.sysAuditorLatch, WL_LATCH_SET | WL_SOCKET_READABLE | cur_flags, sysauditPipe[0], cur_timeout);
-
         if (rc & WL_SOCKET_READABLE) {
-            int bytesRead;
-            /*
-            * Check the current audit file.
-            */
-            CheckAuditFile();
-            bytesRead = read(
+            int bytesRead = read(
                 sysauditPipe[0], auditbuffer + bytes_in_auditbuffer, sizeof(auditbuffer) - bytes_in_auditbuffer - 1);
+            if (bytesRead > 0) {
+                /*
+                 * Check the current audit file.
+                 */
+                CheckAuditFile();
+            }
             if (bytesRead < 0) {
                 if (errno != EINTR)
                     ereport(LOG, (errcode_for_socket_access(), errmsg("could not read from auditor pipe: %m")));
@@ -666,6 +666,7 @@ NON_EXEC_STATIC void PgAuditorMain()
         if (t_thrd.audit.pipe_eof_seen) {
             break;
         }
+
     }
 
     /*
@@ -1157,21 +1158,23 @@ static unsigned int __stdcall pipeThread(void* arg)
 
 /*
  * Brief        : initialize the audit file.
- * Description    :
+ * Description  : set parameter allow_erros as error level, do not allow error as default
  */
-static void auditfile_init(void)
+static void auditfile_init(bool allow_errors)
 {
     /*
      * The initial auditfile is created right in the postmaster, to verify that
      * the Audit_directory is writable.
      */
     if (!t_thrd.audit.sysauditFile) {
-        t_thrd.audit.sysauditFile = auditfile_open(time(NULL), "a", false);
-        if (ftell(t_thrd.audit.sysauditFile) == 0)
+        t_thrd.audit.sysauditFile = auditfile_open(time(NULL), "a", allow_errors);
+        if (t_thrd.audit.sysauditFile != NULL) {
+            /* trigger one internal event in traditional audit log */
             audit_report(AUDIT_INTERNAL_EVENT, AUDIT_OK, "file", "create a new audit file");
+        }
     }
     if (!t_thrd.audit.policyauditFile && IS_PGXC_COORDINATOR) {
-        t_thrd.audit.policyauditFile = auditfile_open(time(NULL), "a", false, policy_audit_filename, true);
+        t_thrd.audit.policyauditFile = auditfile_open(time(NULL), "a", allow_errors, policy_audit_filename, true);
     }
 }
 
@@ -2831,19 +2834,21 @@ static void CheckAuditFile(void)
     rc = snprintf_s(t_thrd.audit.pgaudit_filepath, MAXPGPATH, MAXPGPATH - 1, pgaudit_filename,
                     g_instance.attr.attr_security.Audit_directory, fnum);
     securec_check_ss(rc, "\0", "\0");
+
     /*
      * If the current write file is not exist, we'll reinit the sysauditFile.
      * Also, when we querying the auditfile and finding invalid header file,
      * we'll truncate it. And in there we'll reinit it too.
-     * 
+     * allow error here as process have been rnning but not startup
      */
     if (lstat(t_thrd.audit.pgaudit_filepath, &statBuf) == -1 ||
         (lstat(t_thrd.audit.pgaudit_filepath, &statBuf) == 0 && statBuf.st_size == 0)) {
         if (t_thrd.audit.sysauditFile != NULL) {
             fclose(t_thrd.audit.sysauditFile);
             t_thrd.audit.sysauditFile = NULL;
-            auditfile_init();
         }
     }
+    /* make sure init audit file if pgaudit_filepath accessable */
+    auditfile_init(true);
 }
 

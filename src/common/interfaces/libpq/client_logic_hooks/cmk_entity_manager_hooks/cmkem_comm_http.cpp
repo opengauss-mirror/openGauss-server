@@ -22,6 +22,7 @@
  * -------------------------------------------------------------------------
  */
 
+#include "pg_config.h"
 #include "cmkem_comm_http.h"
 
 #include <stdio.h>
@@ -29,6 +30,10 @@
 #include <string.h>
 #include "curl/curl.h"
 #include "cjson/cJSON.h"
+
+#ifdef ENABLE_UT
+#define static
+#endif
 
 static size_t dump_http_response_msg_callback(void *tmp_cur_res_str, size_t chr_size, size_t cur_res_size,
     void *tmp_http_res_list)

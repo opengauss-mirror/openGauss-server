@@ -78,12 +78,13 @@ def check_ip(obj):
     """
     if not isinstance(obj, str):
         raise ValueError(Errors.ILLEGAL['gauss_0603'] % (str(obj), 'ip string'))
-    valid = re.match("^(25[0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[1-9])\.(25["
-                     "0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[1-9]|0)\.(25["
-                     "0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[1-9]|0)\.(25["
-                     "0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[0-9])$", obj)
     if obj == '0.0.0.0':
         valid = True
+    else:
+        valid = re.match("^(25[0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[1-9])\.(25["
+                         "0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[1-9]|0)\.(25["
+                         "0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[1-9]|0)\.(25["
+                         "0-5]|2[0-4][0-9]|[0-1]{1}[0-9]{2}|[1-9]{1}[0-9]{1}|[0-9])$", obj)
     if not valid:
         raise ValueError(Errors.ILLEGAL['gauss_0602'] % 'ip')
 
@@ -95,9 +96,7 @@ def check_port(obj):
     if not str(obj).isdigit():
         raise Exception(Errors.ILLEGAL['gauss_0603'] % ('port', 'digit'))
     port = int(obj)
-    if port < 0 or port > 65535:
-        raise Exception(Errors.ILLEGAL['gauss_0602'] % 'port')
-    if 0 <= port <= 1023:
+    if port <=1023 or port > 65535:
         raise Exception(Errors.ILLEGAL['gauss_0602'] % 'port')
 
 

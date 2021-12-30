@@ -44,6 +44,10 @@
 
 #ifndef ENABLE_MULTIPLE_NODES
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 bool SyncConfigFile(unsigned int* follower_id = nullptr);
 
 /*
@@ -223,43 +227,21 @@ void ProcessStandbyFileTimeMessage(unsigned int src_node_id, const char* msg)
 
 static bool GetNodeInfo(const uint32 nodeID, char *nodeIP, uint32 nodeIPLen, uint32 *nodePort)
 {
-    char replicInfo[DCF_MAX_STREAM_INFO_LEN] = {0};
-    int rc;
-    int len = dcf_query_stream_info(1, replicInfo, DCF_MAX_STREAM_INFO_LEN * sizeof(char));
-    if (len == 0) {
-        ereport(ERROR, (errmsg("Failed to query dcf config!")));
-    }
-    cJSON *nodeInfos = cJSON_Parse(replicInfo);
-    const cJSON *nodeJsons = NULL;
-    const cJSON *nodeJson = NULL;
-    if (nodeInfos == NULL) {
-        const char* errorPtr = cJSON_GetErrorPtr();
-        if (errorPtr != NULL) {
-            ereport(ERROR,
-                (errmsg("Failed to parse dcf config!")));
-        } else {
-            ereport(ERROR,
-                (errmsg("Failed to parse dcf config: unkonwn error.")));
-        }
+    cJSON *nodeInfos = nullptr;
+    /* nodeInfos is null when GetNodeInfos returned false */
+    if (!GetNodeInfos(&nodeInfos)) {
         return false;
     }
-    nodeJsons = cJSON_GetObjectItem(nodeInfos, "nodes");
-    if (cJSON_IsArray(nodeJsons)) {
-        cJSON_ArrayForEach(nodeJson, nodeJsons)
-        {
-            cJSON *idJson = cJSON_GetObjectItem(nodeJson, "node_id");
-            if (uint32(idJson->valueint) == nodeID) {
-                cJSON *ipJson = cJSON_GetObjectItem(nodeJson, "ip");
-                rc = strncpy_s(nodeIP, nodeIPLen, ipJson->valuestring, nodeIPLen - 1);
-                securec_check(rc, "\0", "\0");
-                cJSON *portJson = cJSON_GetObjectItem(nodeJson, "port");
-                *nodePort = (uint32)portJson->valueint;
-            }
-        }
-    } else {
+    const cJSON *nodeJsons = cJSON_GetObjectItem(nodeInfos, "nodes");
+    if (nodeJsons == nullptr) {
         cJSON_Delete(nodeInfos);
-        ereport(ERROR,
-            (errmsg("Must exist array format in the json file.")));
+        ereport(ERROR, (errmodule(MOD_DCF), errmsg("Get nodes info failed from DCF!")));
+        return false;
+    }
+    const int DCF_ROLE_LEN = 64;
+    char localDCFRole[DCF_ROLE_LEN] = {0};
+    if (!GetDCFNodeInfo(nodeJsons, nodeID, localDCFRole, DCF_ROLE_LEN, nodeIP, nodeIPLen, (int*)nodePort)) {
+        cJSON_Delete(nodeInfos);
         return false;
     }
     cJSON_Delete(nodeInfos);
@@ -277,7 +259,7 @@ static void SetGlobalCurRto(int nodeIndex, int64 currentRto)
 
         g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_rto =
             t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].current_RTO;
-        ereport(LOG, (errmsg("current rto is %ld",
+        ereport(DEBUG1, (errmsg("current rto is %ld",
             g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_rto)));
     }
 }
@@ -286,7 +268,7 @@ static void DoActualSleep(int nodeIndex, bool forceUpdate)
 {
     /* try to control log sent rate so that standby can flush and apply log under RTO seconds */
     if (IS_PGXC_DATANODE) {
-        if (u_sess->attr.attr_storage.target_rto > 0 || u_sess->attr.attr_storage.time_to_target_rpo > 0) {
+        if (t_thrd.dcf_cxt.dcfCtxInfo->targetRTO > 0 || t_thrd.dcf_cxt.dcfCtxInfo->targetRPO > 0) {
             if ((t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count %
                 t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count_limit == 0)
                 || t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].just_keep_alive || forceUpdate) {
@@ -309,20 +291,20 @@ static void SetGlobalRtoData(int nodeIndex, uint32 srcNodeID)
     if (IS_PGXC_DATANODE) {
         g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_rto =
             t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].current_RTO;
-        if (u_sess->attr.attr_storage.target_rto == 0) {
+        if (t_thrd.dcf_cxt.dcfCtxInfo->targetRTO == 0) {
             g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_sleep_time = 0;
         } else {
             g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_sleep_time =
                 t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_time;
         }
-        if (g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto != u_sess->attr.attr_storage.target_rto) {
+        if (g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto != t_thrd.dcf_cxt.dcfCtxInfo->targetRTO) {
             ereport(LOG, (errmodule(MOD_RTO_RPO),
                           errmsg("target_rto changes to %d, previous target_rto is %d, current the sleep time is %ld",
-                                 u_sess->attr.attr_storage.target_rto,
+                                 t_thrd.dcf_cxt.dcfCtxInfo->targetRTO,
                                  g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto,
                                  g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].current_sleep_time)));
 
-            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto = u_sess->attr.attr_storage.target_rto;
+            g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].target_rto = t_thrd.dcf_cxt.dcfCtxInfo->targetRTO;
         }
 
         char *remoteIP = g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].dest_ip;
@@ -341,6 +323,32 @@ static void SetGlobalRtoData(int nodeIndex, uint32 srcNodeID)
             ereport(WARNING, (errmsg("Get ip and port of leader failed")));
         }
     }
+}
+
+static bool GetFlowControlParam(void)
+{
+    /* Get current rto and rpo */
+    const int rtoLen = 10; /* 10 is enough for rto is between 0 and 3600 */
+    char tempRTO[rtoLen] = {0};
+    const int rpoLen = 10; /* 10 is enough for rpo is between 0 and 3600 */
+    char tempRPO[rtoLen] = {0};
+    if (dcf_get_param("DN_FLOW_CONTROL_RTO", tempRTO, rtoLen) != 0) {
+        ereport(WARNING, (errmodule(MOD_RTO_RPO), errmsg("Get rto from dcf failed!")));
+        return false;
+    }
+    t_thrd.dcf_cxt.dcfCtxInfo->targetRTO = atoi(tempRTO);
+    ereport(DEBUG1, (errmodule(MOD_RTO_RPO),
+                     errmsg("target rto got from dcf is %d",
+                            t_thrd.dcf_cxt.dcfCtxInfo->targetRTO)));
+    if (dcf_get_param("DN_FLOW_CONTROL_RPO", tempRPO, rpoLen) != 0) {
+        ereport(WARNING, (errmodule(MOD_RTO_RPO), errmsg("Get rpo from dcf failed!")));
+        return false;
+    }
+    t_thrd.dcf_cxt.dcfCtxInfo->targetRPO = atoi(tempRPO);
+    ereport(DEBUG1, (errmodule(MOD_RTO_RPO),
+                     errmsg("target rpo got from dcf is %d",
+                            t_thrd.dcf_cxt.dcfCtxInfo->targetRPO)));
+    return true;
 }
 
 /*
@@ -383,14 +391,15 @@ static void DCFProcessStandbyReplyMessage(uint32 srcNodeID, const char* msg, uin
     char* id = g_instance.rto_cxt.dcf_rto_standby_data[nodeIndex].id;
     rc = strncpy_s(id, DCF_STANDBY_NAME_SIZE, reply.id, strlen(reply.id));
     securec_check(rc, "\0", "\0");
-    if (t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_reply_time > 0) {
-        forceUpdate = IsForceUpdate(t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_reply_time, reply.sendTime);
-    }
+
     if (t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count_limit == 0) {
         ereport(WARNING, (errmsg("Sleep count limit of the node with id %d is 0", srcNodeID)));
         return;
     }
 
+    if (t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_reply_time > 0) {
+        forceUpdate = IsForceUpdate(t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_reply_time, reply.sendTime);
+    }
     if (IS_PGXC_DATANODE &&
         ((t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count %
         t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].sleep_count_limit) == 0 ||
@@ -403,7 +412,9 @@ static void DCFProcessStandbyReplyMessage(uint32 srcNodeID, const char* msg, uin
         t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_flush = reply.flush;
         t_thrd.dcf_cxt.dcfCtxInfo->log_ctrl[nodeIndex].prev_apply = reply.apply;
     }
-
+    if (!GetFlowControlParam()) {
+        return;
+    }
     DoActualSleep(nodeIndex, forceUpdate);
     SetGlobalRtoData(nodeIndex, srcNodeID);
 }

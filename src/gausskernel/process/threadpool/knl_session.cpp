@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -121,6 +122,8 @@ static void knl_u_attr_init(knl_session_attr* attr)
     attr->attr_sql.under_explain = false;
     attr->attr_resource.enable_auto_explain = false;
     attr->attr_sql.enable_upsert_to_merge = false;
+    attr->attr_sql.for_print_tuple = false;
+    attr->attr_sql.numeric_out_for_format = false;
     attr->attr_common.extension_session_vars_array_size = 0;
     attr->attr_common.extension_session_vars_array = NULL;
 }
@@ -268,6 +271,9 @@ static void knl_u_parser_init(knl_u_parser_context* parser_cxt)
     parser_cxt->has_dollar = false;
     parser_cxt->has_placeholder = false;
     parser_cxt->stmt_contains_operator_plus = false;
+    parser_cxt->is_load_copy = false;
+    parser_cxt->copy_fieldname = NULL;
+    parser_cxt->col_list = NIL;
     parser_cxt->hint_list = NIL;
     parser_cxt->hint_warning = NIL;
     parser_cxt->opr_cache_hash = NULL;
@@ -275,6 +281,7 @@ static void knl_u_parser_init(knl_u_parser_context* parser_cxt)
     parser_cxt->param_message = NULL;
     parser_cxt->ddl_pbe_context = NULL;
     parser_cxt->in_package_function_compile = false;
+    parser_cxt->isCreateFuncOrProc = false;
 }
 
 static void knl_u_advisor_init(knl_u_advisor_context* adv_cxt) 
@@ -345,6 +352,7 @@ static void knl_u_SPI_init(knl_u_SPI_context* spi)
     spi->current_stp_with_exception = false;
     spi->autonomous_session = NULL;
     spi->spi_exec_cplan_stack = NULL;
+    spi->cur_tableof_index = NULL;
 }
 
 static void knl_u_trigger_init(knl_u_trigger_context* tri_cxt)
@@ -456,6 +464,11 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->memory_context_limited_white_list = NULL;
     utils_cxt->enable_memory_context_control = false;
     (void)syscalllockInit(&utils_cxt->deleMemContextMutex);
+
+    utils_cxt->donothingDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
+    utils_cxt->debugtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
+    utils_cxt->spi_printtupDR = (DestReceiver*)palloc0(sizeof(DestReceiver));
+    init_sess_dest(utils_cxt->donothingDR, utils_cxt->debugtupDR, utils_cxt->spi_printtupDR);
 }
 
 static void knl_u_security_init(knl_u_security_context* sec_cxt) {
@@ -782,31 +795,18 @@ static void knl_u_upgrade_init(knl_u_upgrade_context* upg_cxt)
 static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
 {
     plsql_cxt->inited = false;
-    plsql_cxt->plpgsql_cxt = NULL;
-    plsql_cxt->plpgsql_pkg_cxt = NULL;
     plsql_cxt->plpgsql_HashTable = NULL;
+    plsql_cxt->plpgsql_pkg_HashTable = NULL;
     plsql_cxt->plpgsql_dlist_objects = NULL;
-    plsql_cxt->datums_alloc = 0;
-    plsql_cxt->plpgsql_nDatums = 0;
-    plsql_cxt->datums_last = 0;
+    plsql_cxt->plpgsqlpkg_dlist_objects = NULL;
+    plsql_cxt->compile_status = NONE_STATUS;
+    plsql_cxt->curr_compile_context = NULL;
+    plsql_cxt->compile_context_list = NIL;
     plsql_cxt->plpgsql_IndexErrorVariable = 0;
-    plsql_cxt->plpgsql_error_funcname = NULL;
-    plsql_cxt->plpgsql_DumpExecTree = false;
-    plsql_cxt->plpgsql_check_syntax = false;
-    plsql_cxt->compile_tmp_cxt = NULL;
-    plsql_cxt->plpgsql_parse_result = NULL;
-    plsql_cxt->plpgsql_Datums = NULL;
-    plsql_cxt->plpgsql_curr_compile = NULL;
     plsql_cxt->simple_eval_estate = NULL;
     plsql_cxt->simple_econtext_stack = NULL;
     plsql_cxt->context_array = NIL;
-    plsql_cxt->plpgsql_variable_conflict = PLPGSQL_RESOLVE_ERROR;
     plsql_cxt->plugin_ptr = NULL;
-    plsql_cxt->ns_top = NULL;
-    plsql_cxt->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
-    plsql_cxt->core_yy = (core_yy_extra_type*)palloc0(sizeof(core_yy_extra_type));
-    plsql_cxt->yyscanner = NULL;
-    plsql_cxt->goto_labels = NIL;
     plsql_cxt->rendezvousHash = NULL;
     plsql_cxt->debug_proc_htbl = NULL;
     plsql_cxt->debug_client = NULL;
@@ -814,9 +814,24 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->cur_debug_server = NULL;
     plsql_cxt->dbe_output_buffer_limit = DEFAULT_DBE_BUFFER_LIMIT;
     plsql_cxt->is_delete_function = false;
-    plsql_cxt->plpgsql_curr_compile_package = NULL;
-    plsql_cxt->is_compile_pkg_body = false;
-    plsql_cxt->is_compile_pkg_spec = false;
+    plsql_cxt->have_error = false;
+    plsql_cxt->client_info = NULL;
+    plsql_cxt->sess_cxt_htab = NULL;
+    plsql_cxt->have_error = false;
+    plsql_cxt->stp_savepoint_cnt = 0;
+    plsql_cxt->nextStackEntryId = 0;
+    plsql_cxt->spi_xact_context = NULL;
+    plsql_cxt->package_as_line = 0;
+    plsql_cxt->procedure_start_line = 0;
+    plsql_cxt->insertError = false;
+    plsql_cxt->errorList = NULL;
+    plsql_cxt->plpgsql_yylloc = 0;
+    plsql_cxt->rawParsePackageFunction = false;
+    plsql_cxt->isCreateFunction = false;
+    plsql_cxt->need_pkg_dependencies = false;
+    plsql_cxt->pkg_dependencies = NIL;
+    plsql_cxt->auto_parent_session_pkgs = NULL;
+    plsql_cxt->not_found_parent_session_pkgs = false;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
@@ -1041,6 +1056,7 @@ static void knl_u_statement_init(knl_u_statement_context* statement_cxt)
     statement_cxt->toFreeStatementList = NULL;
     statement_cxt->suspend_count = 0;
     statement_cxt->suspendStatementList = NULL;
+    statement_cxt->executer_run_level = 0;
 
     (void)syscalllockInit(&statement_cxt->list_protect);
     statement_cxt->stmt_stat_cxt = NULL;
@@ -1232,7 +1248,7 @@ static void knl_u_xact_init(knl_u_xact_context* xact_cxt)
     xact_cxt->sendSeqDbName = NULL;
     xact_cxt->sendSeqSchmaName = NULL;
     xact_cxt->sendSeqName = NULL;
-    xact_cxt->send_result = 0;
+    xact_cxt->send_result = NULL;
 }
 
 static void knl_u_ps_init(knl_u_ps_context* ps_cxt)
@@ -1285,6 +1301,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     sess_cxt->prog_name = NULL;
     sess_cxt->ClientAuthInProgress = false;
     sess_cxt->is_autonomous_session = false;
+    sess_cxt->autonomous_parent_sessionid = 0;
     sess_cxt->need_report_top_xid = false;
     sess_cxt->on_sess_exit_index = 0;
     sess_cxt->cn_session_abort_count = 0;
@@ -1491,6 +1508,10 @@ bool stp_set_commit_rollback_err_msg(stp_xact_err_type type)
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
                     "transaction statement in store procedure used as cursor is not supported");
                 break;
+            case STP_XACT_IN_TRIGGER:
+                rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
+                    "transaction statement in store procedure used in trigger is not supported");
+                break;
             case STP_XACT_USED_AS_EXPR:
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
                     "transaction statement in store procedure used as a expression is not supported");
@@ -1511,6 +1532,10 @@ bool stp_set_commit_rollback_err_msg(stp_xact_err_type type)
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
                     "can not use commit rollback in package instantiation");
                 break;
+            case STP_XACT_COMPL_SQL:
+                rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
+                    "can not use commit rollback in Complex SQL");
+                break;
             default:
                 rt = snprintf_s(u_sess->SPI_cxt.forbidden_commit_rollback_err_msg, maxMsgLen, maxMsgLen - 1, "%s",
                     "invalid transaction in store procedure");
@@ -1527,4 +1552,10 @@ bool stp_set_commit_rollback_err_msg(stp_xact_err_type type)
 __attribute__ ((__used__)) knl_session_context *GetCurrentSession()
 {
     return u_sess;
+}
+
+bool enable_out_param_override()
+{
+    return u_sess->attr.attr_sql.sql_compatibility == A_FORMAT
+                && PROC_OUTPARAM_OVERRIDE;
 }

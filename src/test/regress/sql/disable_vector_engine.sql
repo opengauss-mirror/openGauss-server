@@ -277,6 +277,20 @@ SELECT COUNT(8)
 -- unsupported feature in ctelist
 EXPLAIN (COSTS OFF)
 INSERT INTO store(s_store_sk)
+WITH v1 as materialized (
+	SELECT c_customer_sk,
+	SUM(c_customer_sk) over
+		(PARTITION BY c_customer_sk, c_customer_id)
+		avg_customer_sk,
+	STDDEV_SAMP(c_customer_sk) stdev
+	FROM customer
+	GROUP BY c_customer_sk, c_customer_id),
+	v2 as materialized (
+	SELECT v1.c_customer_sk FROM v1)
+	SELECT * FROM v2;
+
+EXPLAIN (COSTS OFF)
+INSERT INTO store(s_store_sk)
 WITH v1 as(
 	SELECT c_customer_sk,
 	SUM(c_customer_sk) over
@@ -288,6 +302,21 @@ WITH v1 as(
 	v2 as(
 	SELECT v1.c_customer_sk FROM v1)
 	SELECT * FROM v2;
+
+
+explain (costs off)
+INSERT INTO store(s_store_sk)
+WITH v1 as materialized (
+        SELECT c_customer_sk,
+        SUM(c_customer_sk) over
+                (PARTITION BY c_customer_sk, c_customer_id)
+                avg_customer_sk,
+        STDDEV_pop(c_customer_sk) stdev
+        FROM customer
+        GROUP BY c_customer_sk, c_customer_id),
+        v2 as materialized (
+        SELECT v1.c_customer_sk FROM v1)
+        SELECT * FROM v2;
 
 explain (costs off)
 INSERT INTO store(s_store_sk)

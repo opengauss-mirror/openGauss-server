@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -40,7 +41,6 @@
 
 static const char* getid(const char* s, char* n);
 static void putid(char* p, const char* s);
-static Acl* allocacl(int n);
 void check_acl(const Acl* acl);
 static const char* aclparse(const char* s, AclItem* aip);
 static bool aclitem_match(const AclItem* a1, const AclItem* a2);
@@ -122,7 +122,7 @@ const struct AclObjType {
     {ACL_OBJECT_SEQUENCE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_SEQUENCE},
     {ACL_OBJECT_DATABASE, (ACL_CREATE_TEMP | ACL_CONNECT), ACL_ALL_RIGHTS_DATABASE},
     {ACL_OBJECT_FUNCTION, ACL_EXECUTE, ACL_ALL_RIGHTS_FUNCTION},
-    {ACL_OBJECT_PACKAGE, ACL_EXECUTE, ACL_ALL_RIGHTS_PACKAGE},
+    {ACL_OBJECT_PACKAGE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_PACKAGE},
     {ACL_OBJECT_LARGEOBJECT, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_LARGEOBJECT},
     {ACL_OBJECT_NAMESPACE, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_NAMESPACE},
     {ACL_OBJECT_NODEGROUP, ACL_NO_RIGHTS, ACL_ALL_RIGHTS_NODEGROUP},
@@ -352,7 +352,7 @@ static const char* aclparse(const char* s, AclItem* aip)
  * RETURNS:
  *		the new Acl
  */
-static Acl* allocacl(int n)
+Acl* allocacl(int n)
 {
     Acl* new_acl = NULL;
     Size size;
@@ -2035,9 +2035,10 @@ Datum has_sequence_privilege_name_name(PG_FUNCTION_ARGS)
     roleid = get_role_oid_or_public(NameStr(*rolename));
     mode = convert_sequence_priv_string(priv_type_text);
     sequenceoid = convert_table_name(sequencename);
-    if (get_rel_relkind(sequenceoid) != RELKIND_SEQUENCE)
+    if (!(RELKIND_IS_SEQUENCE(get_rel_relkind(sequenceoid))))
         ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a sequence", text_to_cstring(sequencename))));
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a (large) sequence",
+                text_to_cstring(sequencename))));
 
     aclresult = pg_class_aclcheck(sequenceoid, roleid, mode, false);
 
@@ -2062,9 +2063,10 @@ Datum has_sequence_privilege_name(PG_FUNCTION_ARGS)
     roleid = GetUserId();
     mode = convert_sequence_priv_string(priv_type_text);
     sequenceoid = convert_table_name(sequencename);
-    if (get_rel_relkind(sequenceoid) != RELKIND_SEQUENCE)
+    if (!RELKIND_IS_SEQUENCE(get_rel_relkind(sequenceoid)))
         ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a sequence", text_to_cstring(sequencename))));
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a (large) sequence",
+                text_to_cstring(sequencename))));
 
     aclresult = pg_class_aclcheck(sequenceoid, roleid, mode, false);
 
@@ -2091,9 +2093,10 @@ Datum has_sequence_privilege_name_id(PG_FUNCTION_ARGS)
     relkind = get_rel_relkind(sequenceoid);
     if (relkind == '\0')
         PG_RETURN_NULL();
-    else if (relkind != RELKIND_SEQUENCE)
+    else if (!RELKIND_IS_SEQUENCE(relkind))
         ereport(
-            ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a sequence", get_rel_name(sequenceoid))));
+            ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a (large) sequence",
+                get_rel_name(sequenceoid))));
 
     aclresult = pg_class_aclcheck(sequenceoid, roleid, mode, false);
 
@@ -2120,9 +2123,10 @@ Datum has_sequence_privilege_id(PG_FUNCTION_ARGS)
     relkind = get_rel_relkind(sequenceoid);
     if (relkind == '\0')
         PG_RETURN_NULL();
-    else if (relkind != RELKIND_SEQUENCE)
+    else if (!RELKIND_IS_SEQUENCE(relkind))
         ereport(
-            ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a sequence", get_rel_name(sequenceoid))));
+            ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a (large) sequence",
+                get_rel_name(sequenceoid))));
 
     aclresult = pg_class_aclcheck(sequenceoid, roleid, mode, false);
 
@@ -2145,9 +2149,10 @@ Datum has_sequence_privilege_id_name(PG_FUNCTION_ARGS)
 
     mode = convert_sequence_priv_string(priv_type_text);
     sequenceoid = convert_table_name(sequencename);
-    if (get_rel_relkind(sequenceoid) != RELKIND_SEQUENCE)
+    if (!RELKIND_IS_SEQUENCE(get_rel_relkind(sequenceoid)))
         ereport(ERROR,
-            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a sequence", text_to_cstring(sequencename))));
+            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a (large) sequence",
+                text_to_cstring(sequencename))));
 
     aclresult = pg_class_aclcheck(sequenceoid, roleid, mode, false);
 
@@ -2172,9 +2177,10 @@ Datum has_sequence_privilege_id_id(PG_FUNCTION_ARGS)
     relkind = get_rel_relkind(sequenceoid);
     if (relkind == '\0')
         PG_RETURN_NULL();
-    else if (relkind != RELKIND_SEQUENCE)
+    else if (!RELKIND_IS_SEQUENCE(relkind))
         ereport(
-            ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a sequence", get_rel_name(sequenceoid))));
+            ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\" is not a (large) sequence",
+                get_rel_name(sequenceoid))));
 
     aclresult = pg_class_aclcheck(sequenceoid, roleid, mode, false);
 
@@ -4994,7 +5000,15 @@ static Oid convert_directory_name(text* dirName)
  */
 static AclMode convert_directory_priv_string(text* priv_dir_text)
 {
-    static const priv_map dir_priv_map[] = {{"READ", ACL_READ}, {"WRITE", ACL_WRITE}, {NULL, 0}};
+    static const priv_map dir_priv_map[] = {{"READ", ACL_READ},
+        {"READ WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_READ)},
+        {"WRITE", ACL_WRITE},
+        {"WRITE WITH GRANT OPTION", ACL_GRANT_OPTION_FOR(ACL_WRITE)},
+        {"ALTER", ACL_ALTER},
+        {"ALTER WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_ALTER)))},
+        {"DROP", ACL_DROP},
+        {"DROP WITH GRANT OPTION", ADD_DDL_FLAG(ACL_GRANT_OPTION_FOR(REMOVE_DDL_FLAG(ACL_DROP)))},
+        {NULL, 0}};
 
     return convert_any_priv_string(priv_dir_text, dir_priv_map);
 }

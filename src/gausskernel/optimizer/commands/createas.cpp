@@ -13,6 +13,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -370,6 +371,7 @@ static void intorel_startup(DestReceiver* self, int operation, TupleDesc typeinf
         coltype->typemod = attribute->atttypmod;
         coltype->arrayBounds = NIL;
         coltype->location = -1;
+        coltype->pct_rowtype = false;
 
         /*
          * It's possible that the column is of a collatable type but the

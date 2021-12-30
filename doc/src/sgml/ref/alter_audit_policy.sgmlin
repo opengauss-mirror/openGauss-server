@@ -10,11 +10,11 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-ALTER AUDIT POLICY [ IF EXISTS ] policy_name { ADD | REMOVE } { [ privilege_audit_clause ] [ access_audit_clause ] }; 
-ALTER AUDIT POLICY [ IF EXISTS ] policy_name MODIFY ( filter_group_clause ); 
-ALTER AUDIT POLICY [ IF EXISTS ] policy_name DROP FILTER; 
-ALTER AUDIT POLICY [ IF EXISTS ] policy_name COMMENTS policy_comments; 
-ALTER AUDIT POLICY [ IF EXISTS ] policy_name { ENABLE | DISABLE }; 
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name { ADD | REMOVE } { [ privilege_audit_clause ] [ access_audit_clause ] };
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name MODIFY ( filter_group_clause );
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name DROP FILTER;
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name COMMENTS policy_comments;
+ALTER AUDIT POLICY [ IF EXISTS ] policy_name { ENABLE | DISABLE };
 
 where privilege_audit_clause can be:
 PRIVILEGES { DDL | ALL }
@@ -28,8 +28,8 @@ FILTER ON { ( FILTER_TYPE ( filter_value [, ... ] ) ) [, ... ] }
 where DDL can be:
 { ( ALTER | ANALYZE | COMMENT | CREATE | DROP | GRANT | REVOKE | SET | SHOW | LOGIN_ACCESS | LOGIN_FAILURE | LOGOUT | LOGIN ) }
 
-where DML can be: 
-{ ( COPY | DEALLOCATE | DELETE_P | EXECUTE | REINDEX | INSERT | REPARE | SELECT | TRUNCATE | UPDATE ) }
+where DML can be:
+{ ( COPY | DEALLOCATE | DELETE_P | EXECUTE | REINDEX | INSERT | PREPARE | SELECT | TRUNCATE | UPDATE ) }
 </synopsis>
 </refsynopsisdiv>
 </refentry>

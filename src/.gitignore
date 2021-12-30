@@ -1,6 +1,6 @@
 #--- auto-generated file list
 #
-*.rej
+/Makefile.global
 /Makefile.port
 /bin/gs_cgroup/gs_cgroup
 /bin/gs_cgroup/gsconfig.cpp
@@ -143,6 +143,9 @@
 /common/backend/parser/gram.hpp
 /common/backend/parser/hint_gram.cpp
 /common/backend/parser/hint_gram.hpp
+/common/backend/client_logic/cstrings_map.cpp
+/common/backend/parser/lex.backup
+/common/interfaces/libpq/libpq_ce/
 /common/interfaces/ecpg/include/stamp-h
 /common/interfaces/libpq/frontend_parser/gram.cpp
 /common/interfaces/libpq/frontend_parser/gram.hpp
@@ -150,10 +153,15 @@
 /common/interfaces/libpq/frontend_parser/scan.cpp
 /common/pl/plpgsql/src/pl_gram.cpp
 /common/pl/plpgsql/src/pl_gram.hpp
+/common/port/port_srv/
 /gausskernel/storage/replication/repl_gram.cpp
 /gausskernel/storage/replication/repl_gram.hpp
 /gausskernel/storage/replication/syncrep_gram.cpp
 /gausskernel/storage/replication/syncrep_gram.hpp
+/gausskernel/storage/replication/lex.backup
+/gausskernel/storage/mot/core/obj/
+/gausskernel/storage/mot/fdw_adapter/obj/
+/gausskernel/storage/mot/jit_exec/obj/
 /include/gstrace/access_gstrace.h
 /include/gstrace/bootstrap_gstrace.h
 /include/gstrace/catalog_gstrace.h
@@ -180,3 +188,10 @@
 /include/replication/syncrep_gram.hpp
 /include/stamp-h
 /test/regress/pg_regress
+/test/regress/sql/*.sql
+/test/regress/sql/*/*.sql
+/test/regress/expected/*.out
+/test/regress/expected/*/*.out
+/test/regress/results/
+/test/regress/tmp_check/
+/test/isolation/specparse.cpp

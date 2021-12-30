@@ -122,7 +122,7 @@ ifeq ($(SUPPORT_HOTPATCH), yes)
     LIBS += -ldoprapatch
     LDFLAGS += -L$(LIBHOTPATCH_LIB_PATH)
     CXXFLAGS += -I$(LIBHOTPATCH_INCLUDE_PATH)
-    ifneq ($(findstring $(PLAT_FORM_STR), euleros2.0_sp8_aarch64 euleros2.0_sp9_aarch64 kylin_aarch64),)
+    ifneq ($(findstring $(PLAT_FORM_STR), euleros2.0_sp8_aarch64 euleros2.0_sp9_aarch64 kylinv10_sp1_aarch64),)
         ifeq ($(enable_debug), no)
             HOTPATCH_ATOMIC_LDS = -Wl,-T$(LIBHOTPATCH_TOOL_PATH)/atomic.lds
         else
@@ -628,7 +628,6 @@ endif
 	cp $(LIBOBS_LIB_PATH)/libpcre* '$(DESTDIR)$(libdir)/../temp/'
 	mv $(DESTDIR)$(libdir)/../temp/* '$(DESTDIR)$(libdir)/'
 	cp $(SECUREDYNAMICLIB_HOME)/libsecurec* '$(DESTDIR)$(libdir)/'
-	cp $(ZSTD_LIB_PATH)/libzstd* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/liblog4* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libeSDK* '$(DESTDIR)$(libdir)/'
 	cp $(LIBOBS_LIB_PATH)/libxml2* '$(DESTDIR)$(libdir)/'
@@ -705,10 +704,10 @@ else ifeq ($(PLAT_FORM_STR), openeuler_x86_64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else ifeq ($(PLAT_FORM_STR), centos7.6_x86_64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
-else ifeq ($(PLAT_FORM_STR), kylin_aarch64)
+else ifeq ($(PLAT_FORM_STR), kylinv10_sp1_aarch64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
-else ifeq ($(PLAT_FORM_STR), ubuntu18.04_x86_64)
-	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
+else ifeq ($(PLAT_FORM_STR), kylinv10_sp1_x86_64_intel)
+        cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
 else
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.5.0' '$(DESTDIR)$(libdir)/libcurl.so.4.5.0'
 endif

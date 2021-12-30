@@ -312,50 +312,60 @@ static int compare4(const void* p1, const void* p2)
 }
 
 /*
- * convert 32bit wide character to mutibye stream pointed to by iso
+ * store 32bit character representation into multibyte stream
  */
-static unsigned char *set_iso_code(unsigned char* iso, uint32 code)
+static inline unsigned char *store_coded_char(unsigned char* dest, uint32 code)
 {
     if (code & 0xff000000) {
-        *iso++ = code >> 24;
+        *dest++ = code >> 24;
     }
     if (code & 0x00ff0000) {
-        *iso++ = (code & 0x00ff0000) >> 16;
+        *dest++ = code >> 16;
     }
     if (code & 0x0000ff00) {
-        *iso++ = (code & 0x0000ff00) >> 8;
+        *dest++ = code >> 8;
     }
     if (code & 0x000000ff) {
-        *iso++ = code & 0x000000ff;
+        *dest++ = code;
     }
-    return iso;
+    return dest;
 }
 
 /*
  * UTF8 ---> local code
  *
- * utf: input UTF8 string (need not be null-terminated).
+ * utf: input string in UTF8 encoding (need not be null-terminated)
+ * len: length of input string (in bytes)
  * iso: pointer to the output area (must be large enough!)
- * map: the conversion map.
- * cmap: the conversion map for combined characters.
- *		  (optional)
- * size1: the size of the conversion map.
- * size2: the size of the conversion map for combined characters
- *		  (optional)
- * encoding: the PG identifier for the local encoding.
- * len: length of input string.
+ *        (output string will be null-terminated)
+ * map: conversion map for single characters
+ * mapsize: number of entries in the conversion map
+ * cmap: conversion map for combined characters
+ *		  (optional, pass NULL if none)
+ * cmapsize: number of entries in the conversion map for combined characters
+ *		  (optional, pass 0 if none)
+ * convfunc: algorithmic encoding conversion function
+ *		  (optional, pass NULL if none)
+ * encoding: PG identifier for the local encoding
+ *
+ * For each character, the cmap (if provided) is consulted first; if no match,
+ * the map is consulted next; if still no match, the convfunc (if provided)
+ * is applied.  An error is raised if no match is found.
+ *
+ * See pg_wchar.h for more details about the data structures used here.
  */
-void UtfToLocal(const unsigned char* utf, unsigned char* iso, const pg_utf_to_local* map,
-    const pg_utf_to_local_combined* cmap, int size1, int size2, int encoding, int len)
+void UtfToLocal(const unsigned char *utf, int len, unsigned char *iso, const pg_utf_to_local *map, int mapsize,
+    const pg_utf_to_local_combined *cmap, int cmapsize, utf_local_conversion_func convfunc, int encoding)
 {
     uint32 iutf;
-    uint32 cutf[2];
-    uint32 code = 0;
-    pg_utf_to_local* p = NULL;
-    pg_utf_to_local_combined* cp = NULL;
     int l;
+    const pg_utf_to_local *p = NULL;
+    const pg_utf_to_local_combined *cp = NULL;
     bool bulkload_illegal_chars_conversion = false;
 
+    if (!PG_VALID_ENCODING(encoding)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid encoding number: %d", encoding)));
+    }
     if (u_sess->cmd_cxt.bulkload_compatible_illegal_chars) {
         bulkload_illegal_chars_conversion = true;
     }
@@ -395,7 +405,9 @@ void UtfToLocal(const unsigned char* utf, unsigned char* iso, const pg_utf_to_lo
             /* ASCII case is easy */
             *iso++ = *utf++;
             continue;
-        } else if (l == 2) {
+        }
+        /* collect coded char of length l */
+        if (l == 2) {
             iutf = *utf++ << 8;
             iutf |= *utf++;
         } else if (l == 3) {
@@ -417,6 +429,7 @@ void UtfToLocal(const unsigned char* utf, unsigned char* iso, const pg_utf_to_lo
             int len_save = len;
             int l_save = l;
 
+            /* collect next character, same as above */
             len -= l;
 
             l = pg_utf_mblen(utf);
@@ -433,100 +446,64 @@ void UtfToLocal(const unsigned char* utf, unsigned char* iso, const pg_utf_to_lo
                     break;
                 }
             }
+            /* We assume ASCII character cannot be in combined map */
+            if (l > 1) {
+                uint32 iutf2 = 0;
+                uint32 cutf[2];
 
-            cutf[0] = iutf;
-
-            if (l == 1) {
-                if (len_save > 1) {
-                    p = (pg_utf_to_local*)bsearch(&cutf[0], map, size1, sizeof(pg_utf_to_local), compare1);
-                    if (p == NULL) {
-                        if (bulkload_illegal_chars_conversion) {
-                            /*
-                             * use '?' as conversion.
-                             */
-                            *iso++ = '?';
-                        } else {
-                            report_untranslatable_char(PG_UTF8, encoding, (const char*)(utf_save - l_save), len_save);
-                        }
-                    } else {
-                        iso = set_iso_code(iso, p->code);
-                    }
+                if (l == 2) {
+                    iutf2 = *utf++ << 8;
+                    iutf2 |= *utf++;
+                } else if (l == 3) {
+                    iutf2 = *utf++ << 16;
+                    iutf2 |= *utf++ << 8;
+                    iutf2 |= *utf++;
+                } else if (l == 4) {
+                    iutf2 = *utf++ << 24;
+                    iutf2 |= *utf++ << 16;
+                    iutf2 |= *utf++ << 8;
+                    iutf2 |= *utf++;
                 }
-
-                /* ASCII case is easy */
-                *iso++ = *utf++;
-                continue;
-            } else if (l == 2) {
-                iutf = *utf++ << 8;
-                iutf |= *utf++;
-            } else if (l == 3) {
-                iutf = *utf++ << 16;
-                iutf |= *utf++ << 8;
-                iutf |= *utf++;
-            } else if (l == 4) {
-                iutf = *utf++ << 24;
-                iutf |= *utf++ << 16;
-                iutf |= *utf++ << 8;
-                iutf |= *utf++;
-            }
-
-            cutf[1] = iutf;
-            cp = (pg_utf_to_local_combined*)bsearch(cutf, cmap, size2, sizeof(pg_utf_to_local_combined), compare3);
-            if (cp != NULL) {
-                code = cp->code;
-            } else {
-                /* not found in combined map. try with ordinary map */
-                p = (pg_utf_to_local*)bsearch(&cutf[0], map, size1, sizeof(pg_utf_to_local), compare1);
-                if (p == NULL) {
-                    if (bulkload_illegal_chars_conversion) {
-                        /*
-                         * the first map is converted to '?', and continue the next map.
-                         */
-                        *iso++ = '?';
-                    } else {
-                        report_untranslatable_char(PG_UTF8, encoding, (const char*)(utf_save - l_save), len_save);
-                    }
-                } else {
-                    iso = set_iso_code(iso, p->code);
-                }
-
-                p = (pg_utf_to_local*)bsearch(&cutf[1], map, size1, sizeof(pg_utf_to_local), compare1);
-                if (p == NULL) {
-                    if (bulkload_illegal_chars_conversion) {
-                        /*
-                         * the second map is converted to '?', all ordinary map check is done.
-                         */
-                        *iso++ = '?';
-                        continue;
-                    } else {
-                        report_untranslatable_char(PG_UTF8, encoding, (const char*)(utf - l), len);
-                    }
-                } else {
-                    code = p->code;
-                    /* FALL THRU */
-                }
-            }
-        } else {
-            /* no cmap or no remaining data */
-            p = (pg_utf_to_local*)bsearch(&iutf, map, size1, sizeof(pg_utf_to_local), compare1);
-            if (p == NULL) {
-                if (bulkload_illegal_chars_conversion) {
-                    /*
-                     * use '?' as conversion.
-                     */
-                    *iso++ = '?';
+                cutf[0] = iutf;
+                cutf[1] = iutf2;
+                cp = (pg_utf_to_local_combined *)bsearch(cutf,
+                    cmap, cmapsize, sizeof(pg_utf_to_local_combined), compare3);
+                if (cp != NULL) {
+                    iso = store_coded_char(iso, cp->code);
                     continue;
-                } else {
-                    report_untranslatable_char(PG_UTF8, encoding, (const char*)(utf - l), len);
                 }
-            } else {
-                code = p->code;
-                /* FALL THRU */
+            }
+            /* fail, so back up to reprocess second character next time */
+            utf = utf_save;
+            len = len_save;
+            l = l_save;
+        }
+        /* Now check ordinary map */
+        p = (pg_utf_to_local *)bsearch(&iutf, map, mapsize, sizeof(pg_utf_to_local), compare1);
+        if (p != NULL) {
+            iso = store_coded_char(iso, p->code);
+            continue;
+        }
+        /* if there's a conversion function, try that */
+        if (convfunc != NULL) {
+            uint32 converted = (*convfunc)(iutf);
+            if (converted) {
+                iso = store_coded_char(iso, converted);
+                continue;
             }
         }
-        iso = set_iso_code(iso, code);
+        /* failed to translate this character */
+        if (bulkload_illegal_chars_conversion) {
+            /*
+            * use '?' as conversion.
+            */
+            *iso++ = '?';
+        } else {
+            report_untranslatable_char(PG_UTF8, encoding, (const char *) (utf - l), len);
+        }
     }
 
+    /* if we broke out of loop early, must be invalid input */
     if (len > 0) {
         report_invalid_encoding(PG_UTF8, (const char*)utf, len);
     }
@@ -537,23 +514,31 @@ void UtfToLocal(const unsigned char* utf, unsigned char* iso, const pg_utf_to_lo
  * local code ---> UTF8
  *
  * iso: input local string (need not be null-terminated).
+ * len: length of input string (in bytes)
  * utf: pointer to the output area (must be large enough!)
  * map: the conversion map.
  * cmap: the conversion map for combined characters.
- *		  (optional)
- * size1: the size of the conversion map.
- * size2: the size of the conversion map for combined characters
- *		  (optional)
+ *        (optional)
+ * mapsize: the size of the conversion map.
+ * cmapsize: number of entries in the conversion map for combined characters
+ *        (optional, pass 0 if none)
+ * convfunc: algorithmic encoding conversion function
+ *        (optional, pass NULL if none)
  * encoding: the PG identifier for the local encoding.
- * len: length of input string.
+ *
+ * For each character, the map is consulted first; if no match, the cmap
+ * (if provided) is consulted next; if still no match, the convfunc
+ * (if provided) is applied.  An error is raised if no match is found.
+ *
+ * See pg_wchar.h for more details about the data structures used here.
  */
-void LocalToUtf(const unsigned char* iso, unsigned char* utf, const pg_local_to_utf* map,
-    const pg_local_to_utf_combined* cmap, int size1, int size2, int encoding, int len)
+void LocalToUtf(const unsigned char *iso, int len, unsigned char *utf, const pg_local_to_utf *map, int mapsize,
+    const pg_local_to_utf_combined *cmap, int cmapsize, utf_local_conversion_func convfunc, int encoding)
 {
-    unsigned int iiso;
+    uint32 iiso = 0;
     int l;
-    pg_local_to_utf* p = NULL;
-    pg_local_to_utf_combined* cp = NULL;
+    const pg_local_to_utf *p = NULL;
+    const pg_local_to_utf_combined *cp = NULL;
     bool bulkload_illegal_chars_conversion = false;
 
     if (u_sess->cmd_cxt.bulkload_compatible_illegal_chars) {
@@ -580,7 +565,7 @@ void LocalToUtf(const unsigned char* iso, unsigned char* utf, const pg_local_to_
         }
 
         if (!IS_HIGHBIT_SET(*iso)) {
-            /* ASCII case is easy */
+            /* ASCII case is easy, assume it's one-to-one conversion */
             *utf++ = *iso++;
             l = 1;
             continue;
@@ -600,7 +585,7 @@ void LocalToUtf(const unsigned char* iso, unsigned char* utf, const pg_local_to_
                 break;
             }
         }
-
+        /* collect coded char of length l */
         if (l == 1) {
             iiso = *iso++;
         } else if (l == 2) {
@@ -617,58 +602,43 @@ void LocalToUtf(const unsigned char* iso, unsigned char* utf, const pg_local_to_
             iiso |= *iso++;
         }
 
-        p = (pg_local_to_utf*)bsearch(&iiso, map, size1, sizeof(pg_local_to_utf), compare2);
-        if (p == NULL) {
-            /*
-             * not found in the ordinary map. if there's a combined character
-             * map, try with it
-             */
-            if (cmap != NULL) {
-                cp = (pg_local_to_utf_combined*)bsearch(&iiso, cmap, size2, sizeof(pg_local_to_utf_combined), compare4);
-                if (cp != NULL) {
-                    if (cp->utf1 & 0xff000000)
-                        *utf++ = cp->utf1 >> 24;
-                    if (cp->utf1 & 0x00ff0000)
-                        *utf++ = (cp->utf1 & 0x00ff0000) >> 16;
-                    if (cp->utf1 & 0x0000ff00)
-                        *utf++ = (cp->utf1 & 0x0000ff00) >> 8;
-                    if (cp->utf1 & 0x000000ff)
-                        *utf++ = cp->utf1 & 0x000000ff;
-
-                    if (cp->utf2 & 0xff000000)
-                        *utf++ = cp->utf2 >> 24;
-                    if (cp->utf2 & 0x00ff0000)
-                        *utf++ = (cp->utf2 & 0x00ff0000) >> 16;
-                    if (cp->utf2 & 0x0000ff00)
-                        *utf++ = (cp->utf2 & 0x0000ff00) >> 8;
-                    if (cp->utf2 & 0x000000ff)
-                        *utf++ = cp->utf2 & 0x000000ff;
-
-                    continue;
-                }
-            }
-
-            if (!bulkload_illegal_chars_conversion) {
-                report_untranslatable_char(encoding, PG_UTF8, (const char*)(iso - l), len);
-            }
-
-            // replace untranslatable char with '?'
-            if (u_sess->attr.attr_common.omit_encoding_error || bulkload_illegal_chars_conversion) {
-                *utf++ = '?';
+        p = (pg_local_to_utf*)bsearch(&iiso, map, mapsize, sizeof(pg_local_to_utf), compare2);
+        if (p != NULL) {
+            utf = store_coded_char(utf, p->utf);
+            continue;
+        }
+        /* If there's a combined character map, try that */
+        if (cmap != NULL) {
+            cp = (pg_local_to_utf_combined *)bsearch(&iiso, cmap, cmapsize, sizeof(pg_local_to_utf_combined), compare4);
+            if (cp != NULL) {
+                utf = store_coded_char(utf, cp->utf1);
+                utf = store_coded_char(utf, cp->utf2);
                 continue;
             }
-        } else {
-            if (p->utf & 0xff000000)
-                *utf++ = p->utf >> 24;
-            if (p->utf & 0x00ff0000)
-                *utf++ = (p->utf & 0x00ff0000) >> 16;
-            if (p->utf & 0x0000ff00)
-                *utf++ = (p->utf & 0x0000ff00) >> 8;
-            if (p->utf & 0x000000ff)
-                *utf++ = p->utf & 0x000000ff;
+        }
+
+        /* if there's a conversion function, try that */
+        if (convfunc != NULL) {
+            uint32 converted = (*convfunc)(iiso);
+            if (converted) {
+                utf = store_coded_char(utf, converted);
+                continue;
+            }
+        }
+
+        /* failed to translate this character */
+        if (!bulkload_illegal_chars_conversion) {
+            report_untranslatable_char(encoding, PG_UTF8, (const char *) (iso - l), len);
+        }
+
+        /* replace untranslatable char with '?' */
+        if (u_sess->attr.attr_common.omit_encoding_error || bulkload_illegal_chars_conversion) {
+            *utf++ = '?';
+            continue;
         }
     }
 
+    /* if we broke out of loop early, must be invalid input */
     if (len > 0) {
         report_invalid_encoding(encoding, (const char*)iso, len);
     }

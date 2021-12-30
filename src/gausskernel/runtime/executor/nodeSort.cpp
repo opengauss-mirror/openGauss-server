@@ -105,6 +105,16 @@ TupleTableSlot* ExecSort(SortState* node)
             plan_node->plan.plan_node_id,
             SET_DOP(plan_node->plan.dop));
 
+        /*
+         * Here used for start with order siblings by
+         * We need to set our customized sort function for siblings key
+         */
+        if (IsA(outer_node->plan, RecursiveUnion)) {
+            RecursiveUnion *ru = (RecursiveUnion *)outer_node->plan;
+
+            tuplesort_set_siblings(tuple_sortstate, plan_node->numCols, ru->internalEntryList);
+        }
+
         if (node->bounded) {
             tuplesort_set_bound(tuple_sortstate, node->bound);
         }

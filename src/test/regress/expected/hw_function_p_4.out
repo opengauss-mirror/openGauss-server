@@ -58,8 +58,6 @@ begin
 	savepoint a;
 end;
 $$ language plpgsql;
-ERROR:  SAVEPOINT in function/procedure is not yet supported.
-CONTEXT:  compilation of PL/pgSQL function "test_savepoint" near line 4
 drop function "Schema""quote"."Func""1"();
 drop function func3_RT();
 drop schema "Schema""quote";
@@ -353,8 +351,9 @@ end;
 ERROR:  schema "a" does not exist
 CONTEXT:  compilation of PL/pgSQL function "inline_code_block" near line 1
 drop schema hw_function_p_4 cascade;
-NOTICE:  drop cascades to 4 other objects
-DETAIL:  drop cascades to function func_tmp_test2(character varying)
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function test_savepoint(integer)
+drop cascades to function func_tmp_test2(character varying)
 drop cascades to function func_tmp_test(character varying)
 drop cascades to function fuc01()
 drop cascades to function fcompos1(compos)

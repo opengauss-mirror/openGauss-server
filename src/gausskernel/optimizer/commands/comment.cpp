@@ -7,6 +7,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/gausskernel/optimizer/commands/comment.cpp
@@ -56,6 +57,7 @@ static AclResult CheckObjectCommentPrivilege(const CommentStmt* stmt, Oid object
     AclResult aclresult = ACLCHECK_NO_PRIV;
     switch (stmt->objtype) {
         case OBJECT_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
         case OBJECT_MATVIEW:

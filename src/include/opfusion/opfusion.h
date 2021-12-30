@@ -84,6 +84,10 @@ public:
 
     void describe(StringInfo msg);
 
+    void fusionExecute(StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted);
+
+    void CheckLogDuration();
+
     virtual bool execute(long max_rows, char* completionTag)
     {
         Assert(false);

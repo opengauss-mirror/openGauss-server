@@ -256,6 +256,17 @@ typedef struct StandbySwitchRequestMessage {
 } StandbySwitchRequestMessage;
 
 /*
+ * switchover request message in the streaming dr (message type '').  This is wrapped within
+ * a CopyData message at the FE/BE protocol level.
+ *
+ * Note that the data length is not specified here.
+ */
+typedef struct {
+    /* The barrier LSN used by the streaming dr switchover this time */
+    XLogRecPtr switchoverBarrierLsn;
+} HadrSwitchoverMessage;
+
+/*
  * Maximum data payload in a WAL data message.	Must be >= XLOG_BLCKSZ.
  *
  * We don't have a good idea of what a good value would be; there's some

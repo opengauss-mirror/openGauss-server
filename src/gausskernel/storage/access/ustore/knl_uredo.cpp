@@ -1655,6 +1655,7 @@ const static bool SUPPORT_HOT_STANDBY = true;
 
 static void UHeapXlogFreeze(XLogReaderState *record)
 {
+    XLogRecPtr lsn = record->EndRecPtr;
     XlUHeapFreeze *xlrec = (XlUHeapFreeze *)XLogRecGetData(record);
     TransactionId cutoffXid = xlrec->cutoff_xid;
     RedoBufferInfo buffer;
@@ -1703,6 +1704,7 @@ static void UHeapXlogFreeze(XLogReaderState *record)
             }
         }
 
+        PageSetLSN(page, lsn);
         MarkBufferDirty(buffer.buf);
     }
     if (BufferIsValid(buffer.buf)) {

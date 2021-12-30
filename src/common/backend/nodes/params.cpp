@@ -70,6 +70,9 @@ ParamListInfo copyParamList(ParamListInfo from)
         }
         get_typlenbyval(nprm->ptype, &typLen, &typByVal);
         nprm->value = datumCopy(nprm->value, typByVal, typLen);
+        nprm->tableOfIndexType = oprm->tableOfIndexType;
+        nprm->tableOfIndex = copyTableOfIndex(oprm->tableOfIndex);
+        nprm->isnestedtable = oprm->isnestedtable;
     }
 
     return retval;

@@ -176,7 +176,7 @@ int AssignPostmasterChildSlot(void)
 
     /* Out of slots ... should never happen, else postmaster.c messed up */
     ereport(WARNING, (errmsg("no free slots in PMChildFlags array")));
-    return -1; /* keep compiler quiet */
+    return -1;
 }
 
 /*

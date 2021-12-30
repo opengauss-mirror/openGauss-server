@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -473,11 +474,19 @@ void ExecEndIndexOnlyScan(IndexOnlyScanState* node)
             Assert(PointerIsValid(node->ss.ss_currentPartition));
             releaseDummyRelation(&(node->ss.ss_currentPartition));
 
-            /* close index partition */
-            releasePartitionList(node->ioss_RelationDesc, &(node->ioss_IndexPartitionList), NoLock);
+            Oid heapOid = node->ioss_RelationDesc->rd_index->indrelid;
+            Relation heapRelation = heap_open(heapOid, AccessShareLock);
+            if (RelationIsSubPartitioned(heapRelation)) {
+                releaseSubPartitionList(node->ioss_RelationDesc, &(node->ioss_IndexPartitionList), NoLock);
+                releaseSubPartitionList(node->ss.ss_currentRelation, &(node->ss.subpartitions), NoLock);
+            } else {
+                /* close index partition */
+                releasePartitionList(node->ioss_RelationDesc, &(node->ioss_IndexPartitionList), NoLock);
 
-            /* close table partition */
-            releasePartitionList(node->ss.ss_currentRelation, &(node->ss.partitions), NoLock);
+                /* close table partition */
+                releasePartitionList(node->ss.ss_currentRelation, &(node->ss.partitions), NoLock);
+            }
+            heap_close(heapRelation, AccessShareLock);
         }
     }
 
@@ -701,8 +710,13 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
                 indexstate->ss.ss_currentPartition =
                     partitionGetRelation(indexstate->ss.ss_currentRelation, currentpartition);
 
+                if (RelationIsSubPartitioned(indexstate->ss.ss_currentRelation)) {
+                    List *currentindexlist = (List *)list_nth(indexstate->ioss_IndexPartitionList, 0);
+                    currentindex = (Partition)list_nth(currentindexlist, 0);
+                } else {
+                    currentindex = (Partition)list_nth(indexstate->ioss_IndexPartitionList, 0);
+                }
                 /* construct a dummy index relation with the first table partition for following scan */
-                currentindex = (Partition)list_nth(indexstate->ioss_IndexPartitionList, 0);
                 indexstate->ioss_CurrentIndexPartition =
                     partitionGetRelation(indexstate->ioss_RelationDesc, currentindex);
 
@@ -801,11 +815,16 @@ static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node)
 {
     Partition currentpartition = NULL;
     Relation currentpartitionrel = NULL;
+    List *subPartList = NIL;
+    Partition currentSubPartition = NULL;
+    Relation currentSubPartitionRel = NULL;
     Partition currentindexpartition = NULL;
     Relation currentindexpartitionrel = NULL;
     IndexOnlyScan* plan = NULL;
     int paramno = -1;
     ParamExecData* param = NULL;
+    int subPartParamno = -1;
+    ParamExecData* subPartParam = NULL;
 
     if (BufferIsValid(node->ioss_VMBuffer)) {
         ReleaseBuffer(node->ioss_VMBuffer);
@@ -818,6 +837,8 @@ static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node)
     paramno = plan->scan.plan.paramno;
     param = &(node->ss.ps.state->es_param_exec_vals[paramno]);
     node->ss.currentSlot = (int)param->value;
+    subPartParamno = plan->scan.plan.subparamno;
+    subPartParam = &(node->ss.ps.state->es_param_exec_vals[subPartParamno]);
 
     /* construct a dummy table relation with the next table partition*/
     currentpartition = (Partition)list_nth(node->ss.partitions, node->ss.currentSlot);
@@ -828,8 +849,23 @@ static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node)
     releaseDummyRelation(&(node->ss.ss_currentPartition));
     node->ss.ss_currentPartition = currentpartitionrel;
 
-    /* construct a dummy index relation with the next index partition*/
-    currentindexpartition = (Partition)list_nth(node->ioss_IndexPartitionList, node->ss.currentSlot);
+    Oid heapOid = node->ioss_RelationDesc->rd_index->indrelid;
+    Relation heapRelation = heap_open(heapOid, AccessShareLock);
+    if (RelationIsSubPartitioned(heapRelation)) {
+        /* construct a dummy table relation with the next table subpartition */
+        subPartList = (List*)list_nth(node->ss.subpartitions, node->ss.currentSlot);
+        currentSubPartition = (Partition)list_nth(subPartList, (int)subPartParam->value);
+        currentSubPartitionRel = partitionGetRelation(currentpartitionrel, currentSubPartition);
+        releaseDummyRelation(&currentpartitionrel);
+        node->ss.ss_currentPartition = currentSubPartitionRel;
+        /* construct a dummy index relation with the next index subpartition */
+        List *subPartIndexList = (List *)list_nth(node->ioss_IndexPartitionList, node->ss.currentSlot);
+        currentindexpartition = (Partition)list_nth(subPartIndexList, (int)subPartParam->value);
+    } else {
+        /* construct a dummy index relation with the next index partition*/
+        currentindexpartition = (Partition)list_nth(node->ioss_IndexPartitionList, node->ss.currentSlot);
+    }
+
     currentindexpartitionrel = partitionGetRelation(node->ioss_RelationDesc, currentindexpartition);
 
     /* update scan-related index partition with the relation construced before */
@@ -850,6 +886,7 @@ static void ExecInitNextIndexPartitionForIndexScanOnly(IndexOnlyScanState* node)
         node->ioss_NumScanKeys,
         node->ioss_OrderByKeys,
         node->ioss_NumOrderByKeys);
+    heap_close(heapRelation, AccessShareLock);
 
 }
 
@@ -916,26 +953,67 @@ void ExecInitPartitionForIndexOnlyScan(IndexOnlyScanState* indexstate, EState* e
             tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq);
             tablepartition = partitionOpen(currentRelation, tablepartitionid, lock);
             indexstate->ss.partitions = lappend(indexstate->ss.partitions, tablepartition);
+            if (RelationIsSubPartitioned(currentRelation)) {
+                ListCell *lc = NULL;
+                SubPartitionPruningResult *subPartPruningResult =
+                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                if (subPartPruningResult == NULL) {
+                    continue;
+                }
+                List *subpartList = subPartPruningResult->ls_selectedSubPartitions;
+                List *subIndexList = NIL;
+                List *subPartList = NIL;
+                Relation tablepartrel = partitionGetRelation(currentRelation, tablepartition);
+                foreach (lc, subpartList) {
+                    int subpartSeq = lfirst_int(lc);
+                    Oid subpartitionid = getPartitionOidFromSequence(tablepartrel, subpartSeq);
+                    Partition subpart = partitionOpen(tablepartrel, subpartitionid, AccessShareLock);
+                    subPartList = lappend(subPartList, subpart);
 
-            /* get index partition and add it to a list for following scan */
-            partitionIndexOidList = PartitionGetPartIndexList(tablepartition);
-            Assert(PointerIsValid(partitionIndexOidList));
-            if (!PointerIsValid(partitionIndexOidList)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                        errmsg("no local indexes found for partition %s", PartitionGetPartitionName(tablepartition))));
-            }
-            indexpartitionid = searchPartitionIndexOid(indexid, partitionIndexOidList);
-            list_free_ext(partitionIndexOidList);
+                    partitionIndexOidList = PartitionGetPartIndexList(subpart);
+                    Assert(PointerIsValid(partitionIndexOidList));
+                    if (!PointerIsValid(partitionIndexOidList)) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("no local indexes found for partition %s",
+                                                                        PartitionGetPartitionName(subpart))));
+                    }
+                    indexpartitionid = searchPartitionIndexOid(indexid, partitionIndexOidList);
+                    indexpartition = partitionOpen(indexstate->ioss_RelationDesc, indexpartitionid, AccessShareLock);
+                    list_free_ext(partitionIndexOidList);
 
-            indexpartition = partitionOpen(indexstate->ioss_RelationDesc, indexpartitionid, lock);
-            if (indexpartition->pd_part->indisusable == false) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INDEX_CORRUPTED),
-                        errmsg("can't initialize index-only scans using unusable local index \"%s\"",
-                            PartitionGetPartitionName(indexpartition))));
+                    if (indexpartition->pd_part->indisusable == false) {
+                        ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                        errmsg("can't initialize index-only scans using unusable local index \"%s\"",
+                                               PartitionGetPartitionName(indexpartition))));
+                    }
+                    subIndexList = lappend(subIndexList, indexpartition);
+                }
+                releaseDummyRelation(&tablepartrel);
+                partitionClose(currentRelation, tablepartition, lock);
+                indexstate->ss.subPartLengthList =
+                    lappend_int(indexstate->ss.subPartLengthList, list_length(subPartList));
+                indexstate->ss.subpartitions = lappend(indexstate->ss.subpartitions, subPartList);
+                indexstate->ioss_IndexPartitionList = lappend(indexstate->ioss_IndexPartitionList, subIndexList);
+            } else {
+                /* get index partition and add it to a list for following scan */
+                partitionIndexOidList = PartitionGetPartIndexList(tablepartition);
+                Assert(PointerIsValid(partitionIndexOidList));
+                if (!PointerIsValid(partitionIndexOidList)) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("no local indexes found for partition %s",
+                                                                        PartitionGetPartitionName(tablepartition))));
+                }
+                indexpartitionid = searchPartitionIndexOid(indexid, partitionIndexOidList);
+                list_free_ext(partitionIndexOidList);
+
+                indexpartition = partitionOpen(indexstate->ioss_RelationDesc, indexpartitionid, lock);
+                if (indexpartition->pd_part->indisusable == false) {
+                    ereport(ERROR, (errcode(ERRCODE_INDEX_CORRUPTED),
+                                    errmsg("can't initialize index-only scans using unusable local index \"%s\"",
+                                           PartitionGetPartitionName(indexpartition))));
+                }
+                indexstate->ioss_IndexPartitionList = lappend(indexstate->ioss_IndexPartitionList, indexpartition);
             }
-            indexstate->ioss_IndexPartitionList = lappend(indexstate->ioss_IndexPartitionList, indexpartition);
         }
     }
 }

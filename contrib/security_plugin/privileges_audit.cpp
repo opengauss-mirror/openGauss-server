@@ -25,6 +25,7 @@
 #include "gs_audit_policy.h"
 #include <memory>
 #include "access_audit.h"
+#include "parser/parse_func.h"
 #include "postgres.h"
 #include "catalog/namespace.h"
 #include "commands/dbcommands.h"
@@ -48,24 +49,41 @@
 #define ACCESS_CONTROL_CHECK_ACL_PRIVILIGE(type) \
     ((check_acl_privilige_hook == NULL) ? true : check_acl_privilige_hook(type))
 
-static Security_LoginHandle_access_hook_type security_LoginHandle_access_hook = NULL;
-
 void add_current_path(int objtype, List *fqdn, gs_stl::gs_string *buffer);
 
-/* function overloading, notice - different implementation */
-void internal_audit_object_str(const policy_set *security_policy_ids, const policy_set *policy_ids,
-    const names_pair names, int priv_type, const char *priv_name, int objtype, bool ignore_db)
+/*
+ * grant/revoke sql audit routine
+ * policy_ids: policy ids after filt by app
+ * rel: ListCell object
+ * priv_type: privilege type, grant or revoke
+ * priv_name: grant or revoke
+ * objtype: object type, table...
+ * ignore_db: whether ignore database
+ */
+void internal_audit_object_str(const policy_set *security_policy_ids, const policy_set *policy_ids, const ListCell *rel,
+    const names_pair names, int priv_type, const char *priv_name, int objtype, bool is_rolegrant, bool ignore_db)
 {
+    /*
+     * Note PolicyLabelItem just support table/function/view/column
+     * so that only "all" label will work for other object type
+     */
+    PolicyLabelItem item;
+    gen_policy_labelitem(item, rel, objtype);
+
+    /* PolicyLabelItem construction will append schema oid by relid */
     policy_simple_set policy_result;
-    PolicyLabelItem item(0, 0, objtype);
     bool security_auditobject_res = (accesscontrol_securityAuditObject_hook != NULL) ?
         accesscontrol_securityAuditObject_hook(security_policy_ids, &item, priv_type, priv_name) :
         true;
-    if (security_auditobject_res && check_audit_policy_privileges(policy_ids, &policy_result, priv_type,&item)) {
+    if (security_auditobject_res && check_audit_policy_privileges(policy_ids, &policy_result, priv_type, &item)) {
         char buff[2048] = {0};
         char user_name[USERNAME_LEN];
         const char *direction = (priv_type == T_GRANT) ? "TO" : "FROM";
         const char *dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
+
+        gs_stl::gs_string obj_value;
+        item.get_fqdn_value(&obj_value);
+
         policy_simple_set::iterator it = policy_result.begin();
         policy_simple_set::iterator eit = policy_result.end();
         int rc;
@@ -78,8 +96,9 @@ void internal_audit_object_str(const policy_set *security_policy_ids, const poli
                     "%s], "
                     "policy id: [%lld]",
                     GetUserName(user_name, sizeof(user_name)), get_session_app_name(), session_ip, priv_name,
-                    get_privilege_object_name(item.m_obj_type), names.first.c_str(), direction, names.second.c_str(),
-                    *it);
+                    get_privilege_object_name(objtype),
+                    (is_rolegrant || obj_value == "") ? names.first.c_str() : obj_value.c_str(), direction,
+                    names.second.c_str(), *it);
                 securec_check_ss(rc, "\0", "\0");
             } else {
                 rc = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
@@ -87,65 +106,14 @@ void internal_audit_object_str(const policy_set *security_policy_ids, const poli
                     "%s], "
                     "policy id: [%lld]",
                     GetUserName(user_name, sizeof(user_name)), get_session_app_name(), session_ip, priv_name,
-                    get_privilege_object_name(item.m_obj_type), dbname, names.first.c_str(), direction,
+                    get_privilege_object_name(objtype), dbname,
+                    (is_rolegrant || obj_value == "") ? names.first.c_str() : obj_value.c_str(), direction,
                     names.second.c_str(), *it);
                 securec_check_ss(rc, "\0", "\0");
             }
 
             save_access_logs(AUDIT_POLICY_EVENT, buff);
         }
-    }
-}
-
-void login_object_audit(const policy_set security_policy_ids, const policy_set policy_ids,
-                        const char *login_str, int priv_type, const char *priv_name, const char *dbname)
-{
-    policy_simple_set policy_result;
-    PolicyLabelItem item(0, 0, T_LOGIN);
-    if (check_audit_policy_privileges(&policy_ids, &policy_result, priv_type, &item, dbname)) {
-        char buff[2048] = {0};
-        policy_simple_set::iterator it = policy_result.begin();
-        policy_simple_set::iterator eit = policy_result.end();
-        for (; it != eit; ++it) {
-            char session_ip[MAX_IP_LEN] = {0};
-            get_session_ip(session_ip, MAX_IP_LEN);
-
-            int rc = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
-                "AUDIT EVENT: app_name: [%s], client_ip: [%s], privilege type: [%s], policy id: [%lld]",
-                get_session_app_name(), session_ip, login_str, *it);
-            securec_check_ss(rc, "\0", "\0");
-            save_access_logs(AUDIT_POLICY_EVENT, buff);
-        }
-    }
-    return;
-}
-
-void login_handle_audit(const char *dbname, const char *username, bool success, bool login)
-{
-    IPV6 ip;
-    get_remote_addr(&ip);
-    FilterData filter_item(u_sess->attr.attr_common.application_name, ip);
-    policy_set audit_policy_ids, security_policy_ids;
-    check_audit_policy_filter(&filter_item, &audit_policy_ids, dbname);
-
-    char tmp[512] = {0};
-    int rc;
-    if (login && success) {
-        rc = snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "LOGIN SUCCESS: [%s] to DATABASE: [%s]", username, dbname);
-        securec_check_ss(rc, "\0", "\0");
-        login_object_audit(security_policy_ids, audit_policy_ids, tmp, T_LOGIN_SUCCESS, "LOGIN SUCCESS", dbname);
-    } else if (login && !success) {
-        rc = snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "LOGIN FAILED: [%s] to DATABASE: [%s]", username, dbname);
-        securec_check_ss(rc, "\0", "\0");
-        login_object_audit(security_policy_ids, audit_policy_ids, tmp, T_LOGIN_FAILURE, "LOGIN FAILED", dbname);
-    } else if (!login && success) {
-        rc = snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "LOGOUT: [%s] to DATABASE: [%s]", username, dbname);
-        securec_check_ss(rc, "\0", "\0");
-        login_object_audit(security_policy_ids, audit_policy_ids, tmp, T_LOGOUT, "LOGOUT", dbname);
-    } else { /* !login && !success */
-        rc = snprintf_s(tmp, sizeof(tmp), sizeof(tmp) - 1, "LOGOUT: [%s] to DATABASE: [%s]", username, dbname);
-        securec_check_ss(rc, "\0", "\0");
-        login_object_audit(security_policy_ids, audit_policy_ids, tmp, T_LOGOUT, "LOGOUT", dbname);
     }
 }
 
@@ -218,33 +186,34 @@ bool internal_audit_object_str(const policy_set* security_policy_ids, const poli
     bool is_found = false;
     policy_simple_set policy_result;
 
-    bool security_auditobject_res = (accesscontrol_securityAuditObject_hook != NULL) ?
-        accesscontrol_securityAuditObject_hook(security_policy_ids, item, priv_type, priv_name) :
-        true;
-    if (security_auditobject_res && check_audit_policy_privileges(policy_ids, &policy_result, priv_type, item)) {
-        gs_stl::gs_string obj_value;
-        switch (item->m_obj_type) {
-            case O_DATABASE:
-            case O_ROLE:
-                obj_value = objname;
-                break;
-            case O_SCHEMA:
-                item->get_fqdn_value(&obj_value);
-                break;
-            default:
-                item->get_fqdn_value(&obj_value);
-                if (!item->m_object && strlen(objname) > 0) {
-                    obj_value.push_back('.');
-                    obj_value.append(objname);
-                }
-                break;
-        }
-        is_found = !policy_result.empty();
-        gen_priv_audit_logs(policy_result, ignore_db, priv_name, item, obj_value.c_str());
+    if (!check_audit_policy_privileges(policy_ids, &policy_result, priv_type, item)) {
+        return is_found;
     }
+    gs_stl::gs_string obj_value;
+    switch (item->m_obj_type) {
+        case O_DATABASE:
+        case O_ROLE:
+            obj_value = objname;
+            break;
+        case O_SCHEMA:
+            item->get_fqdn_value(&obj_value);
+            break;
+        default:
+            item->get_fqdn_value(&obj_value);
+            if (!item->m_object && strlen(objname) > 0) {
+                if (!obj_value.empty()) {
+                    obj_value.push_back('.');
+                }
+                obj_value.append(objname);
+            }
+            break;
+    }
+    is_found = !policy_result.empty();
+    gen_priv_audit_logs(policy_result, ignore_db, priv_name, item, obj_value.c_str());
     return is_found;
 }
 
+/* append audit logs for comment */
 void audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids, const char *relname,
     int priv_type, const char *priv_name, int objtype)
 {
@@ -276,9 +245,6 @@ void audit_object(const policy_set *security_policy_ids, const policy_set *polic
         case OBJECT_COLUMN:
             internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_COLUMN);
             break;
-        case OBJECT_TRIGGER:
-            internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_TRIGGER);
-            break;
         case OBJECT_FUNCTION:
             internal_audit_str(policy_ids, policy_ids, relname, priv_type, priv_name, O_FUNCTION);
             break;
@@ -297,42 +263,43 @@ void audit_object(const policy_set *security_policy_ids, const policy_set *polic
     }
 }
 
-void acl_audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids,
+void acl_audit_object(const policy_set *security_policy_ids, const policy_set *policy_ids, const ListCell *rel,
                       const names_pair names, int priv_type, const char *priv_name, int objtype)
 {
     switch (objtype) {
         case ACL_OBJECT_COLUMN:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_COLUMN);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_COLUMN);
             break;
         case ACL_OBJECT_RELATION:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_RELATION);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_TABLE);
             break;
         case ACL_OBJECT_SEQUENCE:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_SEQUENCE);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_SEQUENCE);
             break;
         case ACL_OBJECT_DATABASE:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_DATABASE, true);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_DATABASE,
+                false, true);
             break;
         case ACL_OBJECT_DOMAIN:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_DOMAIN);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_DOMAIN);
             break;
         case ACL_OBJECT_FOREIGN_SERVER:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_SERVER);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_SERVER);
             break;
         case ACL_OBJECT_FUNCTION:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_FUNCTION);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_FUNCTION);
             break;
         case ACL_OBJECT_LANGUAGE:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_LANGUAGE);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_LANGUAGE);
             break;
         case ACL_OBJECT_NAMESPACE:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_SCHEMA);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_SCHEMA);
             break;
         case ACL_OBJECT_TABLESPACE:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_TABLESPACE);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_TABLESPACE);
             break;
         case ACL_OBJECT_DATA_SOURCE:
-            internal_audit_object_str(security_policy_ids, policy_ids, names, priv_type, priv_name, O_DATA_SOURCE);
+            internal_audit_object_str(security_policy_ids, policy_ids, rel, names, priv_type, priv_name, O_DATA_SOURCE);
             break;
         default:
             break;
@@ -350,7 +317,12 @@ void audit_table(const policy_set *security_policy_ids, const policy_set *policy
 {
     if (rel->relname == NULL)
         return;
-    PolicyLabelItem item(rel->schemaname, rel->relname, "", objtype);
+    PolicyLabelItem item;
+    if (priv_type == T_CREATE) {
+        item = PolicyLabelItem(rel->schemaname, rel->relname, "", objtype);
+    } else {
+        gen_policy_labelitem(item, (const ListCell *)rel, objtype);
+    }
     char buff[2048] = {0};
     if (priv_type == T_DROP) {
         if (check_label_has_object(&item, is_masking_has_object)) {
@@ -360,7 +332,7 @@ void audit_table(const policy_set *security_policy_ids, const policy_set *policy
                 "Table: %s is part of some resource label, can not be dropped.", table_name.c_str());
             securec_check_ss(rc, "\0", "\0");
             gs_audit_issue_syslog_message("PGAUDIT", buff, AUDIT_POLICY_EVENT, AUDIT_FAILED);
-            ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE), errmsg("\"%s\"", buff)));
+            ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST), errmsg("\"%s\"", buff)));
             return;
         }
     }
@@ -400,6 +372,16 @@ void audit_schema(const policy_set security_policy_ids, const policy_set policy_
     policy_simple_set policy_result;
     int check_type = (priv_type == T_RENAME) ? T_ALTER : priv_type;
     PolicyLabelItem item(schemaname, "", "", O_SCHEMA);
+    if (priv_type == T_DROP) {
+        if (check_label_has_object(&item, is_masking_has_object)) {
+            int rc = snprintf_s(buff, sizeof(buff), sizeof(buff) - 1,
+                "Schema: %s is part of some resource label, can not be dropped.", schemaname);
+            securec_check_ss(rc, "\0", "\0");
+            gs_audit_issue_syslog_message("PGAUDIT", buff, AUDIT_POLICY_EVENT, AUDIT_FAILED);
+            ereport(ERROR, (errcode(ERRCODE_DEPENDENT_OBJECTS_STILL_EXIST), errmsg("\"%s\"", buff)));
+            return;
+        }
+    }
     bool security_auditobject_res = (accesscontrol_securityAuditObject_hook != NULL) ?
         accesscontrol_securityAuditObject_hook(&security_policy_ids, &item, check_type, priv_name) :
         true;
@@ -670,10 +652,6 @@ void rename_object(RenameStmt *stmt, const policy_set policy_ids, const policy_s
             item.m_obj_type = O_TRIGGER;
             objectname = stmt->subname;
             break;
-        case OBJECT_FOREIGN_SERVER:
-            objectname = stmt->subname;
-            item.m_obj_type = O_SERVER;
-            break;
         case OBJECT_FUNCTION: {
             item.m_obj_type = O_FUNCTION;
             name_list_to_label(&item, stmt->object);
@@ -810,7 +788,7 @@ void get_cursor_tables(List *rtable, char *buff, size_t buff_size, int _printed_
         int printed_size = _printed_size;
         foreach (lc, rtable) {
             RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
-            if (rte->relname && rte->rtekind == RTE_RELATION) {
+            if (rte != NULL && rte->relname && rte->rtekind == RTE_RELATION) {
                 PolicyLabelItem item;
                 get_fqdn_by_relid(rte, &item);
                 if (cursor_objects) {
@@ -884,37 +862,3 @@ void get_open_cursor_info(PlannedStmt *stmt, char *buff, size_t buff_size)
     }
     get_cursor_tables(stmt->rtable, buff, buff_size, printed_size);
 }
-
-void login_handle(const char *dbname, const char *username, bool success, bool login)
-{
-    /* do nothing when enable_security_policy is off */
-    if (!u_sess->attr.attr_security.Enable_Security_Policy || 
-        !IsConnFromApp() || !OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
-        return;
-    }
-
-    ResourceOwnerData *old_owner = NULL;
-    if (t_thrd.utils_cxt.CurrentResourceOwner == NULL) {
-        old_owner = create_temp_resourceowner();
-    }
-
-    /* dbname is necessary for login hook as u_sess info may not be ok now so that invalid oid */
-    if (!is_database_valid(dbname) || !is_audit_policy_exist(dbname)) {
-        return;
-    }
-
-    /* if access control policy worked, no need to run the audit policy
-     * related audit logs would be recorded in LoginHandle_access
-     */
-    if ((security_LoginHandle_access_hook != NULL) ? 
-        security_LoginHandle_access_hook(dbname, username, success, login) : true) {
-        login_handle_audit(dbname, username, success, login);
-    }
-
-    if (old_owner != NULL) {
-        release_temp_resourceowner(old_owner);
-    }
-
-    flush_access_logs(success ? AUDIT_OK : AUDIT_FAILED);
-}
-

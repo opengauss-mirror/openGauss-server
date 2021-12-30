@@ -516,3 +516,70 @@ fetch next from c1;
 
 rollback;
 drop table t;
+-- test unique index first for ustore table --
+create table t1(c1 int not null, c2 int not null, c3 text, constraint ustore_index primary key (c1)) with (storage_type=USTORE);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "ustore_index" for table "t1"
+insert into t1 values(generate_series(1, 10), generate_series(1, 10));
+analyze t1;
+set enable_seqscan = on;
+set enable_indexscan = on;
+set sql_beta_feature = no_unique_index_first;
+show sql_beta_feature;
+   sql_beta_feature    
+-----------------------
+ no_unique_index_first
+(1 row)
+
+explain SELECT c1 FROM t1 WHERE c1 = 50;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on t1  (cost=0.00..1.12 rows=1 width=4)
+   Filter: (c1 = 50)
+(2 rows)
+
+explain SELECT /*+ tablescan(t1) */c1 FROM t1 WHERE c1 = 50;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on t1  (cost=0.00..1.12 rows=1 width=4)
+   Filter: (c1 = 50)
+(2 rows)
+
+explain SELECT /*+ indexonlyscan(t1) */c1 FROM t1 WHERE c1 = 50;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using ustore_index on t1  (cost=0.00..8.27 rows=1 width=4)
+   Index Cond: (c1 = 50)
+(3 rows)
+
+reset sql_beta_feature;
+show sql_beta_feature;
+ sql_beta_feature 
+------------------
+ none
+(1 row)
+
+explain SELECT c1 FROM t1 WHERE c1 = 50;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using ustore_index on t1  (cost=0.00..8.27 rows=1 width=4)
+   Index Cond: (c1 = 50)
+(3 rows)
+
+explain SELECT /*+ tablescan(t1) */c1 FROM t1 WHERE c1 = 50;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Seq Scan on t1  (cost=0.00..1.12 rows=1 width=4)
+   Filter: (c1 = 50)
+(2 rows)
+
+explain SELECT /*+ indexonlyscan(t1) */c1 FROM t1 WHERE c1 = 50;
+                                 QUERY PLAN                                 
+----------------------------------------------------------------------------
+ [Bypass]
+ Index Only Scan using ustore_index on t1  (cost=0.00..8.27 rows=1 width=4)
+   Index Cond: (c1 = 50)
+(3 rows)
+
+drop table t1;

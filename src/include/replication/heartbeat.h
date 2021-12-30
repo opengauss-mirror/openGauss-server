@@ -39,7 +39,7 @@ typedef struct heartbeat_state {
     ThreadId pid; /* this heartbeat's process id, or 0 */
     int lwpId;
 
-    channel_info channel_array[MAX_REPLNODE_NUM];
+    channel_info channel_array[DOUBLE_MAX_REPLNODE_NUM];
 
     /* Protects shared variables shown above. */
     slock_t mutex;

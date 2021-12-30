@@ -226,6 +226,12 @@ extern ListCell *dlist_tail_cell(DList *l);
          (cell1) != NULL && (cell2) != NULL && (cell3) != NULL;                              \
          (cell1) = lnext(cell1), (cell2) = lnext(cell2), (cell3) = lnext(cell3))
 
+#define forfour(cell1, list1, cell2, list2, cell3, list3,  cell4, list4)                                   \
+    for ((cell1) = list_head(list1), (cell2) = list_head(list2), (cell3) = list_head(list3), (cell4) = list_head(list4); \
+         (cell1) != NULL && (cell2) != NULL && (cell3) != NULL && (cell4) != NULL;                              \
+         (cell1) = lnext(cell1), (cell2) = lnext(cell2), (cell3) = lnext(cell3), (cell4) = lnext(cell4))
+
+
 extern DList* dlappend(DList* dlist, void* datum);
 
 extern List* lappend(List* list, void* datum);

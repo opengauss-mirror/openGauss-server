@@ -342,9 +342,8 @@ static inline void AllocPageCopyMem()
  */
 char* PageDataEncryptIfNeed(Page page, TdeInfo* tde_info, bool need_copy, bool is_segbuf)
 {
-    size_t plainLength;
+    size_t plainLength = 0;
     size_t cipherLength = 0;
-    uint16 headersize;
     errno_t ret = 0;
     int retval = 0;
     TdePageInfo tde_page_info;
@@ -355,11 +354,10 @@ char* PageDataEncryptIfNeed(Page page, TdeInfo* tde_info, bool need_copy, bool i
     }
     Assert(!PageIsEncrypt(page));
 
-    headersize = GetPageHeaderSize(page);
-    plainLength = (size_t)(BLCKSZ - headersize - sizeof(TdePageInfo));
+    plainLength = ((PageHeader)page)->pd_special - ((PageHeader)page)->pd_upper;
     retval = RAND_priv_bytes(tde_info->iv, RANDOM_IV_LEN);
     if (retval != 1) {
-        ereport(WARNING, (errmsg("generate random iv for tde failed, errcode:%d", retval)));
+        ereport(WARNING, (errmodule(MOD_SEC_TDE), errmsg("generate random iv for tde failed, errcode:%d", retval)));
         return (char*)page;
     }
     if (need_copy) {
@@ -372,9 +370,9 @@ char* PageDataEncryptIfNeed(Page page, TdeInfo* tde_info, bool need_copy, bool i
     }
 
     /* at this part, do the real encryption */
-    encryptBlockOrCUData(PageGetContents(dst),
+    encryptBlockOrCUData(dst + ((PageHeader)dst)->pd_upper,
         plainLength,
-        PageGetContents(dst),
+        dst + ((PageHeader)dst)->pd_upper,
         &cipherLength,
         tde_info);
     Assert(plainLength == cipherLength);
@@ -392,19 +390,22 @@ char* PageDataEncryptIfNeed(Page page, TdeInfo* tde_info, bool need_copy, bool i
 
 void PageDataDecryptIfNeed(Page page)
 {
-    TdeInfo tde_info;
+    TdeInfo tde_info = {0};
     TdePageInfo* tde_page_info = NULL;
-    uint16 headersize = 0;
+
     /* whether this page is both TDE page and encrypted  */
     if (PageIsEncrypt(page) && PageIsTDE(page)) {
-        headersize = GetPageHeaderSize(page);
         size_t plainLength = 0;
-        size_t cipherLength = (size_t)(BLCKSZ - headersize - sizeof(TdePageInfo));
-        tde_page_info = (TdePageInfo*)(PageGetContents(page) + cipherLength);
+        size_t cipherLength = ((PageHeader)page)->pd_special - ((PageHeader)page)->pd_upper;
+        tde_page_info = (TdePageInfo*)((char*)(page) + BLCKSZ - sizeof(TdePageInfo));
         transformTdeInfoFromPage(&tde_info, tde_page_info);
 
         /* at this part, do the real decryption */
-        decryptBlockOrCUData(PageGetContents(page), cipherLength, PageGetContents(page), &plainLength, &tde_info);
+        decryptBlockOrCUData(page + ((PageHeader)page)->pd_upper,
+            cipherLength,
+            page + ((PageHeader)page)->pd_upper,
+            &plainLength,
+            &tde_info);
         Assert(cipherLength == plainLength);
 
         /* clear the encryption flag */

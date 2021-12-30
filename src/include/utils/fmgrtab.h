@@ -90,6 +90,8 @@ typedef struct {
      */
     ArrayOid* proargtypesext;       /* [38] parameter types (excludes OUT params), extended proargtypes */
     ArrayInt2* prodefaultargposext; /* [39] extended prodefaultargpos */
+    ArrayOid allargtypes;         /* [40] all parameter types */
+    ArrayOid* allargtypesext;
 } Builtin_func;
 
 /* The function has the same names are put in one group */
@@ -190,6 +192,8 @@ static_assert(sizeof(NULL) == sizeof(void*), "NULL must be a 8 byte-length point
 #define _38(ind_cnt, ...) _SetPointerField(proargtypesext, ind_cnt, MakeArrayOidPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
 #define _39(ind_cnt, ...) \
     _SetPointerField(prodefaultargposext, ind_cnt, MakeArrayInt2Ptr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
+#define _40(cnt, ...) _SetField(allargtypes, MakeArrayOid(cnt, __VA_ARGS__))
+#define _41(ind_cnt, ...) _SetPointerField(allargtypesext, ind_cnt, MakeArrayOidPtr(GET_ARGNUMS(ind_cnt), __VA_ARGS__))
 
 /* Use Marcos _index() to initialize a built-in function, the indices between 0 ~ 20 are necessary,
  * and indices between 21 ~ 32 are optional */

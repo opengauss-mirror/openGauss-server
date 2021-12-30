@@ -30,5 +30,6 @@
 #include "cmkem_comm.h"
 
 extern CmkemErrCode reg_all_cmk_entity_manager();
+extern void exit_all_cmk_entity_manager();
 
 #endif /* REGISTER_HOOK_FUNC_H */

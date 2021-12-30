@@ -5,6 +5,7 @@
  * Routines to support SELinux labels (security context)
  *
  * Copyright (c) 2010-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * -------------------------------------------------------------------------
  */
@@ -680,7 +681,7 @@ static void exec_object_restorecon(struct selabel_handle* sehnd, Oid catalogId)
 
                 if (relForm->relkind == RELKIND_RELATION)
                     objtype = SELABEL_DB_TABLE;
-                else if (relForm->relkind == RELKIND_SEQUENCE)
+                else if (RELKIND_IS_SEQUENCE(relForm->relkind))
                     objtype = SELABEL_DB_SEQUENCE;
                 else if (relForm->relkind == RELKIND_VIEW || (relForm->relkind == RELKIND_CONTQUERY)
                     objtype = SELABEL_DB_VIEW;

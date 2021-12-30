@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -183,6 +184,19 @@ bytea* cstring_to_bytea_with_len(const char* s, int len)
     return result;
 }
 
+BpChar* cstring_to_bpchar_with_len(const char* s, int len)
+{
+    BpChar *result = (BpChar *) palloc0(len + VARHDRSZ);
+
+    SET_VARSIZE(result, len + VARHDRSZ);
+    if (len > 0) {
+        int rc = memcpy_s(VARDATA(result), len, s, len);
+        securec_check(rc, "\0", "\0");
+    }
+
+    return result;
+}
+
 /*
  * text_to_cstring
  *
@@ -349,6 +363,56 @@ Datum byteain(PG_FUNCTION_ARGS)
     PG_RETURN_BYTEA_P(result);
 }
 
+static bytea* sub_blob(bytea* data, int32 amount)
+{
+    int32 len = 0;
+    int32 length = 0;
+    bytea* result = NULL;
+    char* ptr = NULL;
+    int offset = 0;
+    errno_t rc = EOK;
+    const int MAX_BATCH_SIZE = 32767;
+    length = VARSIZE_ANY_EXHDR(data);
+    if (amount < 1 || amount > MAX_BATCH_SIZE) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("argument  is null, invalid, or out of range")));
+    }
+    if (offset > length) {
+        return NULL;
+    }
+    if (length < amount) {
+        len = length + VARHDRSZ;
+    } else {
+        len = amount + VARHDRSZ;
+    }
+    /* Avoid the memcpy exceeding */
+    if (len > ((length - offset) + VARHDRSZ + 1)) {
+        len = (length - offset) + VARHDRSZ + 1;
+    }
+    result = (bytea*)palloc0(len);
+    SET_VARSIZE(result, len);
+    ptr = VARDATA(result);
+    rc = memcpy_s(ptr, (len - VARHDRSZ), VARDATA_ANY(data) + (offset - 1), (len - VARHDRSZ));
+    securec_check(rc, "\0", "\0");
+    return result;
+}
+static text* sub_text(text* t1, int32 amount)
+{
+    int32 len;
+    int32 offset = 0;
+    const int MAX_BATCH_SIZE = 32767;
+    int32 len1 = text_length(PointerGetDatum(t1));
+    if (amount < 1 || amount > MAX_BATCH_SIZE) {
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("argument  is null, invalid, or out of range")));
+    }
+    len = len1 < (amount + offset - 1) ? (len1 - offset + 1) : amount;
+    return text_substring(PointerGetDatum(t1), Int32GetDatum(offset), Int32GetDatum(len), false);
+}
+
+
 /*
  *		byteaout		- converts to printable representation of byte array
  *
@@ -358,6 +422,12 @@ Datum byteain(PG_FUNCTION_ARGS)
 Datum byteaout(PG_FUNCTION_ARGS)
 {
     bytea* vlena = PG_GETARG_BYTEA_PP(0);
+
+    if (u_sess->attr.attr_sql.for_print_tuple && u_sess->attr.attr_common.pset_lob_length != 0) {
+        bytea* tmp = NULL;
+        tmp = sub_blob(vlena, u_sess->attr.attr_common.pset_lob_length);
+        vlena = tmp;
+    }
     char* result = NULL;
     char* rp = NULL;
 
@@ -454,6 +524,12 @@ Datum rawout(PG_FUNCTION_ARGS)
         fcinfo->fncollation = DEFAULT_COLLATION_OID;
 
     bytea* data = PG_GETARG_BYTEA_P(0);
+
+    if (u_sess->attr.attr_sql.for_print_tuple && u_sess->attr.attr_common.pset_lob_length != 0) {
+        bytea* tmp = NULL;
+        tmp = sub_blob(data, u_sess->attr.attr_common.pset_lob_length);
+        data = tmp;
+    }
     text* ans = NULL;
     int datalen = 0;
     int resultlen = 0;
@@ -464,8 +540,8 @@ Datum rawout(PG_FUNCTION_ARGS)
 
     resultlen = datalen << 1;
 
-    if (resultlen < (int)(MaxAllocSize - VARHDRSZ)) {
-        ans = (text*)palloc(VARHDRSZ + resultlen);
+    if (resultlen < (int)(MaxAllocSize - VARHDRSZ) * 2) {
+        ans = (text*)palloc_huge(CurrentMemoryContext, VARHDRSZ + resultlen);
         ans_len = hex_encode(VARDATA(data), datalen, VARDATA(ans));
         /* Make this FATAL 'cause we've trodden on memory ... */
         if (ans_len > resultlen)
@@ -522,11 +598,11 @@ Datum bytearecv(PG_FUNCTION_ARGS)
     /* Because of the hex encoding when output a blob, the output size of blob
        will be twice(as func hex_enc_len). And the max palloc size is 1GB, so
        we only input blobs less than 500M */
-    if ((long)nbytes* 2 + VARHDRSZ > (long)(MaxAllocSize)) {
+    if ((long)nbytes* 2 + VARHDRSZ > (long)(MaxAllocSize) * 2) {
         ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
-                        errmsg("blob/bytea size:%d, only can recevie blob/bytea less than 500M ", nbytes)));
+                        errmsg("blob/bytea size:%d, only can recevie blob/bytea less than 1000M ", nbytes)));
     }
-    result = (bytea*)palloc(nbytes + VARHDRSZ);
+    result = (bytea*)palloc_huge(CurrentMemoryContext, nbytes + VARHDRSZ);
     SET_VARSIZE(result, nbytes + VARHDRSZ);
     pq_copymsgbytes(buf, VARDATA(result), nbytes);
     PG_RETURN_BYTEA_P(result);
@@ -613,6 +689,11 @@ Datum textin(PG_FUNCTION_ARGS)
 Datum textout(PG_FUNCTION_ARGS)
 {
     Datum txt = PG_GETARG_DATUM(0);
+
+    if (u_sess->attr.attr_sql.for_print_tuple && u_sess->attr.attr_common.pset_lob_length != 0) {
+        text* outputText = sub_text((text*)DatumGetPointer(txt), u_sess->attr.attr_common.pset_lob_length);
+        PG_RETURN_CSTRING(text_to_cstring(outputText));
+    }
 
     PG_RETURN_CSTRING(TextDatumGetCString(txt));
 }
@@ -3926,6 +4007,33 @@ Datum rawcat(PG_FUNCTION_ARGS)
 static void appendStringInfoText(StringInfo str, const text* t)
 {
     appendBinaryStringInfo(str, VARDATA_ANY(t), VARSIZE_ANY_EXHDR(t));
+}
+
+/*
+ * replace_text_with_two_args
+ * replace all occurrences of 'old_sub_str' in 'orig_str'
+ * with '' to form 'new_str'
+ *
+ * the effect is equivalent to
+ *
+ * delete all occurrences of 'old_sub_str' in 'orig_str'
+ * to form 'new_str'
+ *
+ * returns 'orig_str' if 'old_sub_str' == '' or 'orig_str' == ''
+ * otherwise returns 'new_str'
+ */
+Datum replace_text_with_two_args(PG_FUNCTION_ARGS)
+{
+    if (PG_ARGISNULL(0))
+        PG_RETURN_NULL();
+
+    if (PG_ARGISNULL(1))
+        PG_RETURN_TEXT_P(PG_GETARG_TEXT_PP(0));
+
+    return DirectFunctionCall3(replace_text,
+        PG_GETARG_DATUM(0),
+        PG_GETARG_DATUM(1),
+        CStringGetTextDatum("\0"));
 }
 
 /*

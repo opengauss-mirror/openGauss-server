@@ -388,6 +388,33 @@ static bool find_minmax_aggs_walker(Node* node, List** context)
     return expression_tree_walker(node, (bool (*)())find_minmax_aggs_walker, (void*)context);
 }
 
+static bool HasNOTNULLConstraint(Query* parse, NullTest* ntest)
+{
+    if (IsA(ntest->arg, Var)) {
+        /* Check whether NOT NULL check can be guaranteed by table defination */
+        RangeTblEntry* rte = rt_fetch(((Var*)ntest->arg)->varno, parse->rtable);
+        Oid reloid = rte->relid;
+        AttrNumber attno = ((Var*)ntest->arg)->varoattno;
+        if (reloid != InvalidOid && attno != InvalidAttrNumber) {
+            HeapTuple atttuple =
+                SearchSysCacheCopy2(ATTNUM, ObjectIdGetDatum(reloid), Int16GetDatum(attno));
+            if (!HeapTupleIsValid(atttuple)) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                        errmsg("cache lookup failed for attribute %u of relation %hd",
+                        attno, reloid)));
+            }
+            Form_pg_attribute attStruct = (Form_pg_attribute)GETSTRUCT(atttuple);
+            if (attStruct->attnotnull) {
+                heap_freetuple_ext(atttuple);
+                return true;
+            }
+            heap_freetuple_ext(atttuple);
+        }
+    }
+    return false;
+}
+
 /*
  * build_minmax_path
  *		Given a MIN/MAX aggregate, try to build an indexscan Path it can be
@@ -456,7 +483,7 @@ static bool build_minmax_path(PlannerInfo* root, MinMaxAggInfo* mminfo, Oid eqop
     ntest->argisrow = false;
 
     /* User might have had that in WHERE already */
-    if (!list_member((List*)parse->jointree->quals, ntest))
+    if (!list_member((List*)parse->jointree->quals, ntest) && !HasNOTNULLConstraint(parse, ntest))
         parse->jointree->quals = (Node*)lcons(ntest, (List*)parse->jointree->quals);
 
     /* Build suitable ORDER BY clause */

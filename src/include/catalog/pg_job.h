@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -62,6 +63,7 @@ CATALOG(pg_job,9022) BKI_SHARED_RELATION BKI_SCHEMA_MACRO
 	timestamp	start_date;             /* Date that this job first started executing */
 	timestamp	next_run_date;          /* Date that this job will next be executed, this is calculated by 
                                                  * pg_job_schedule.RECURRENCE_EXPR */
+                                        /* timestamp when dbe_job, timestamptz when dbe_scheduler */
 	int2		failure_count;          /* Number of times the job has started and failed since its last success, 
                                                  * if more than 16, this job will be terminated */
 #ifdef CATALOG_VARLEN                           /* Null value constrain */
@@ -70,8 +72,12 @@ CATALOG(pg_job,9022) BKI_SHARED_RELATION BKI_SCHEMA_MACRO
 	timestamp	last_end_date;          /* This is when the last execution stoped. */
 	timestamp	last_suc_date;          /* This is when the last successful execution started. */
 	timestamp	this_run_date;          /* Date that this job started executing (usually null if not executing) */
-#endif
 	NameData	nspname;
+    text    	job_name;
+    timestamp	end_date;
+    bool      	enable;
+    text        failure_msg;
+#endif
 } FormData_pg_job;
 
 #undef timestamp
@@ -88,7 +94,7 @@ typedef FormData_pg_job* Form_pg_job;
  *		compiler constants for pg_job
  * -------------------------------------------------------------------------
  */
-#define Natts_pg_job						16
+#define Natts_pg_job						20
 #define Anum_pg_job_job_id					1
 #define Anum_pg_job_current_postgres_pid	2
 #define Anum_pg_job_log_user				3
@@ -105,6 +111,11 @@ typedef FormData_pg_job* Form_pg_job;
 #define Anum_pg_job_last_suc_date			14
 #define Anum_pg_job_this_run_date			15
 #define Anum_pg_job_nspname					16
+#define Anum_pg_job_job_name				17
+#define Anum_pg_job_end_date				18
+#define Anum_pg_job_enable					19
+#define Anum_pg_job_failure_msg				20
+
 
 
 
@@ -146,15 +157,23 @@ typedef enum {
 #define PGJOB_TYPE_ALL      "ALL_NODE"
 #define PGJOB_TYPE_CCN      "CCN"
 
+#define JOBID_MAX_NUMBER  ((uint16)(32767))
+
 extern void update_run_job_to_fail();
-extern void remove_job_by_oid(const char *objname, Delete_Pgjob_Oid oidFlag, bool local, Oid job_id = InvalidOid);
+extern void remove_job_by_oid(Oid oid, Delete_Pgjob_Oid oidFlag, bool local);
 extern void execute_job(int4 job_id);
 extern void	get_job_values(int4 job_id, HeapTuple tup, Relation relation, Datum *values, bool *visnull);
 extern void RemoveJobById(Oid objectId);
 extern void check_job_permission(HeapTuple tuple, bool check_running = true);
-extern int jobid_alloc(uint16* pusJobId);
+extern int jobid_alloc(uint16* pusJobId, int64 job_max_number = JOBID_MAX_NUMBER);
 extern void update_pg_job_dbname(Oid jobid, const char* dbname);
-#define JOBID_MAX_NUMBER  ((uint16)(32767))
+extern char* get_real_search_schema();
+extern void check_interval_valid(int4 job_id, Relation rel, Datum interval);
+extern void check_job_status(Datum job_status);
+extern bool is_scheduler_job_id(Relation relation, int64 job_id);
+
+/* For run_job_internal */
+extern void job_finish(PG_FUNCTION_ARGS);
 
 #define JOBID_ALLOC_OK         0                /* alloc jobid ok */
 #define JOBID_ALLOC_ERROR      1                /* alloc jobid error */

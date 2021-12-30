@@ -113,7 +113,11 @@ DESCR("dbe_pldebugger schema");
 DATA(insert OID = 7813 ( "sqladvisor" PGUID 0 _null_ n f));
 DESCR("sqladvisor schema");
 #define PG_SQLADVISOR_NAMESPACE 7813
-
+#ifndef ENABLE_MULTIPLE_NODES
+DATA(insert OID = 4993 ( "dbe_pldeveloper" PGUID 0 _null_ n f));
+DESCR("dbe_pldeveloper schema");
+#define DBE_PLDEVELOPER_NAMESPACE 4993
+#endif
 /*
  * prototypes for functions in pg_namespace.c
  */

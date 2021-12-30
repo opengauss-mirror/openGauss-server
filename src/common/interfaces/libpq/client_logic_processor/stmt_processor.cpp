@@ -107,29 +107,7 @@ bool Processor::run_pre_update_statement_where(const UpdateStmt * const update_s
     }
 
     /* rewrite WHERE statement clause in the query */
-    for (size_t i = 0; i < statement_data->params.nParams; ++i) {
-        libpq_free(statement_data->params.new_param_values[i]);
-    }
-
-    libpq_free(statement_data->params.new_param_values);
-    libpq_free(statement_data->params.copy_sizes);
-    statement_data->params.new_param_values =
-        (unsigned char **)malloc(statement_data->nParams * sizeof(unsigned char *));
-    if (statement_data->params.new_param_values == NULL) {
-        printfPQExpBuffer(&statement_data->conn->errorMessage,
-            "ERROR(CLIENT): out of memory when malloc new param value.\n");
-        return false;
-    }
-    statement_data->params.copy_sizes = (size_t *)calloc(sizeof(size_t), statement_data->nParams);
-    if (statement_data->params.copy_sizes == NULL) {
-        printfPQExpBuffer(&statement_data->conn->errorMessage,
-            "ERROR(CLIENT): out of memory when calloc copy size.\n");
-        return false;
-    }
     if (!WhereClauseProcessor::process(&cached_columns, &where_expr_parts_list, statement_data)) {
-        return false;
-    }
-    if (!process_clause_value(statement_data)) {
         return false;
     }
     return true;
@@ -257,7 +235,7 @@ bool Processor::run_pre_insert_statement(const InsertStmt * const insert_stmt,
             }
         }
     }
-    
+
     if (cached_columns_temp.is_empty()) {
         return true;
     }
@@ -416,7 +394,7 @@ bool Processor::run_pre_column_setting_statement(PGconn *conn, const char *stmt_
 
     // update query
     params.new_query_size = strlen(query);
-    params.new_query = (char *)malloc(params.new_query_size + 1);
+    params.new_query = (char *)calloc(params.new_query_size + 1, sizeof(char));
     if (params.new_query == NULL) {
         return false;
     }
@@ -817,11 +795,12 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
     if (statement_data->GetCacheManager()->is_cache_empty()) {
         return true;
     }
-    bool select_res = false;
+
+    bool ret = false;
     /* recurse over SELECT's for SET operations such as UNION/INTERSECT/ETC. */
     if (select_stmt->op != SETOP_NONE) {
-        select_res = process_select_set_operation(select_stmt, statement_data, cached_columns);
-        RETURN_IF(!select_res, false);
+        ret = process_select_set_operation(select_stmt, statement_data, cached_columns);
+        RETURN_IF(!ret, false);
     }
 
     /* Handle function calls */
@@ -836,12 +815,12 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
 
     /* handle single WHERE and HAVING statement */
     ExprPartsList where_expr_parts_list;
-    select_res = exprProcessor::expand_expr(select_stmt->whereClause, statement_data, &where_expr_parts_list);
-    RETURN_IF(!select_res, false);
+    ret = exprProcessor::expand_expr(select_stmt->whereClause, statement_data, &where_expr_parts_list);
+    RETURN_IF(!ret, false);
 
     ExprPartsList having_expr_vec;
-    select_res = exprProcessor::expand_expr(select_stmt->havingClause, statement_data, &having_expr_vec);
-    RETURN_IF(!select_res, false);
+    ret = exprProcessor::expand_expr(select_stmt->havingClause, statement_data, &having_expr_vec);
+    RETURN_IF(!ret, false);
     /*
      *  filtered_cached_where get all columns relevant for this query's where clause
      *  filtered_cached_having get all columns relevant for this query's haing clause
@@ -852,10 +831,11 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
     CachedColumns filtered_cached_where(false);
     CachedColumns filtered_cached_having(false);
     CachedColumns cached_columns_from(false, true);
+    bool has_enc_col = false;
     /* get target list */
     CStringsMap target_list;
-    select_res = get_column_names_from_target_list(select_stmt->targetList, &target_list, statement_data);
-    RETURN_IF(!select_res, false);
+    ret = get_column_names_from_target_list(select_stmt->targetList, &target_list, statement_data);
+    RETURN_IF(!ret, false);
 
     /* from (select *) */
     if (select_stmt->withClause) {
@@ -863,9 +843,9 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
             return false;
         }
     }
-    select_res = run_pre_from_list_statement(select_stmt->fromClause, statement_data, &cached_columns_from,
+    ret = run_pre_from_list_statement(select_stmt->fromClause, statement_data, &cached_columns_from,
         cached_columns_parents);
-    RETURN_IF(!select_res, false);
+    RETURN_IF(!ret, false);
     
     statement_data->conn->client_logic->m_cached_column_manager->filter_cached_columns(&cached_columns_from, 
         &where_expr_parts_list, is_operator_forbidden, &filtered_cached_where);
@@ -883,6 +863,7 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
     }
     for (size_t i = 0; i < cached_columns_from.size(); i++) {
         if (find_in_name_map(target_list, cached_columns_from.at(i)->get_col_name())) {
+            has_enc_col = true;
             CachedColumn *target = new (std::nothrow) CachedColumn(cached_columns_from.at(i));
             if (target == NULL) {
                 fprintf(stderr, "failed to new CachedColumn object\n");
@@ -892,9 +873,19 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
         }
     }
 
+    if (select_stmt->intoClause != NULL && has_enc_col) {
+        PreparedStatement *cur_stmt =
+            statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
+        if (cur_stmt == NULL) {
+            return false;
+        }
+        cur_stmt->cacheRefresh |= CacheRefreshType::COLUMN_SETTING;
+    }
+
     if (cached_columns_from.is_empty()) {
         return true; /* nothing to do */
     }
+
     if (is_operator_forbidden) {
         printfPQExpBuffer(&statement_data->conn->errorMessage,
             "ERROR(CLIENT): operator is not allowed on datatype of this column\n");
@@ -902,22 +893,23 @@ bool Processor::run_pre_select_statement(const SelectStmt * const select_stmt, c
     }
 
     /* check if operation is already on all columns (basesd on their data types) only with target list */
-    if (!is_set_operation_allowed(select_stmt, cached_columns, parent_set_operation, parent_all, statement_data)) {
-        return false;
-    }
-    if (!deal_order_by_statement(select_stmt, cached_columns, statement_data)) {
-        return false;
-    }
+    ret = is_set_operation_allowed(select_stmt, cached_columns, parent_set_operation, parent_all, statement_data);
+    RETURN_IF(!ret, false);
+
+    ret = deal_order_by_statement(select_stmt, cached_columns, statement_data);
+    RETURN_IF(!ret, false);
+
     if (!select_stmt->whereClause && !select_stmt->havingClause) {
         return true;
     }
+
     /* rewrite WHERE statement clause and having clause the query */
-    if (!WhereClauseProcessor::process(&cached_columns_from, &where_expr_parts_list, statement_data, &target_list)) {
-        return false;
-    }
-    if (!WhereClauseProcessor::process(&cached_columns_from, &having_expr_vec, statement_data, &target_list)) {
-        return false;
-    }
+    ret = WhereClauseProcessor::process(&cached_columns_from, &where_expr_parts_list, statement_data, &target_list);
+    RETURN_IF(!ret, false);
+
+    ret = WhereClauseProcessor::process(&cached_columns_from, &having_expr_vec, statement_data, &target_list);
+    RETURN_IF(!ret, false);
+
     return true;
 }
 
@@ -970,7 +962,6 @@ bool Processor::process_select_set_operation(const SelectStmt * const select_stm
     }
     return true;
 }
-
 
 bool Processor::run_pre_delete_statement(const DeleteStmt *delete_stmt, StatementData *statement_data,
     ICachedColumns *cached_columns)
@@ -1605,7 +1596,7 @@ bool Processor::run_pre_exec_direct_statement(const ExecDirectStmt *stmt, Statem
         return false;
     }
     statement_data->params.new_query_size = strlen(statement_data->query);
-    statement_data->params.new_query = (char *)malloc(statement_data->params.new_query_size + 1);
+    statement_data->params.new_query = (char *)calloc(statement_data->params.new_query_size + 1, sizeof(char));
     if (statement_data->params.new_query == NULL) {
         return false;
     }
@@ -1642,10 +1633,11 @@ bool Processor::run_pre_exec_direct_statement(const ExecDirectStmt *stmt, Statem
             continue;
         }
         raw_value->m_location += add_length;
-        unsigned char *processed_data = (unsigned char *)malloc(raw_value->m_processed_data_size + strlen("\'\'"));
+        unsigned char *processed_data = 
+            (unsigned char *)calloc(raw_value->m_processed_data_size + strlen("\'\'"), sizeof(unsigned char));
         if (processed_data == NULL) {
             printfPQExpBuffer(&statement_data->conn->errorMessage,
-                libpq_gettext("ERROR(CLIENT): could not malloc buffer for processed_data\n"));
+                libpq_gettext("ERROR(CLIENT): could not calloc buffer for processed_data\n"));
             return false;
         }
 
@@ -1654,8 +1646,7 @@ bool Processor::run_pre_exec_direct_statement(const ExecDirectStmt *stmt, Statem
             raw_value->m_processed_data_size));
         check_memcpy_s(memcpy_s(processed_data + raw_value->m_processed_data_size + 1, 1, "'", 1));
         if (raw_value->m_processed_data != NULL) {
-            free(raw_value->m_processed_data);
-            raw_value->m_processed_data = NULL;
+            libpq_free(raw_value->m_processed_data);
         }
         raw_value->m_processed_data = processed_data;
         raw_value->m_processed_data_size += strlen("\'\'");
@@ -1698,44 +1689,17 @@ bool Processor::run_pre_rlspolicy_using(const Node *stmt, StatementData *stateme
 
     /* rewrite using statement clause in the query */
     statement_data->params.new_param_values =
-        (unsigned char **)malloc(statement_data->nParams * sizeof(unsigned char *));
+        (unsigned char **)calloc(statement_data->nParams, sizeof(unsigned char *));
     if (statement_data->params.new_param_values == NULL) {
         return false;
     }
-    statement_data->params.copy_sizes = (size_t *)calloc(sizeof(size_t), statement_data->nParams);
+    statement_data->params.copy_sizes = (size_t *)calloc(statement_data->nParams, sizeof(size_t));
     if (statement_data->params.copy_sizes == NULL) {
         return false;
     }
     ret = WhereClauseProcessor::process(&cached_columns, &using_expr_parts_list, statement_data);
     if (!ret) {
         return false;
-    }
-    if (!process_clause_value(statement_data)) {
-        return false;
-    }
-    return true;
-}
-
-bool Processor::process_clause_value(StatementData *statement_data)
-{
-    PGClientLogicParams tmp_params(statement_data->params);
-    if (!tmp_params.copy_sizes) {
-        return true;
-    }
-    for (size_t i = 0; i < statement_data->nParams; ++i) {
-        if (tmp_params.new_param_values != NULL && tmp_params.new_param_values[i]) {
-            statement_data->params.new_param_values[i] = (unsigned char *)malloc(tmp_params.copy_sizes[i]);
-            if (statement_data->params.new_param_values[i] == NULL) {
-                return false;
-            }
-            statement_data->params.copy_sizes[i] = tmp_params.copy_sizes[i];
-            check_memcpy_s(memcpy_s(statement_data->params.new_param_values[i], statement_data->params.copy_sizes[i],
-                tmp_params.new_param_values[i], tmp_params.copy_sizes[i]));
-        }
-        if (statement_data->params.copy_sizes[i] > 0) {
-            statement_data->params.adjusted_param_values[i] =
-                (const char *)(statement_data->params.new_param_values[i]);
-        }
     }
     return true;
 }
@@ -1905,6 +1869,7 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
         /* null valued in parser means fe do not care about this value */
         return true;
     }
+    
     PreparedStatement *current_statement =
         statement_data->conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName);
     if (!current_statement) {
@@ -1917,7 +1882,6 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
             return run_pre_delete_statement((DeleteStmt *)stmt, statement_data);
         case T_UpdateStmt:
             return run_pre_update_statement((UpdateStmt *)stmt, statement_data);
-            break;
         case T_SelectStmt:
             return run_pre_select_statement((SelectStmt *)stmt, statement_data);
         case T_PrepareStmt:
@@ -1990,6 +1954,8 @@ bool Processor::run_pre_statement(const Node * const stmt, StatementData *statem
                 current_statement->cacheRefresh |= CacheRefreshType::GLOBAL_SETTING;
             }
             break;
+        case T_CreateTableAsStmt:
+            return run_pre_select_statement((SelectStmt *)((CreateTableAsStmt *)stmt)->query, statement_data);
         default:
             break;
     }
@@ -2109,6 +2075,7 @@ bool Processor::run_pre_query(StatementData *statement_data, bool is_inner_query
 {
     PGconn *conn = statement_data->conn;
     Assert(conn->client_logic && conn->client_logic->enable_client_encryption);
+    Assert(!conn->client_logic->rawValuesForReplace->m_raw_values);
     if (statement_data->query == nullptr) {
         return false;
     }
@@ -2121,8 +2088,8 @@ bool Processor::run_pre_query(StatementData *statement_data, bool is_inner_query
      */
     conn->client_logic->pendingStatements->get_or_create(statement_data->stmtName); 
     /* just create a default one */
-    check_strncat_s(strncat_s(conn->client_logic->lastStmtName, NAMEDATALEN, statement_data->stmtName,
-        strlen(statement_data->stmtName)));
+    check_memcpy_s(memcpy_s(conn->client_logic->lastStmtName, NAMEDATALEN, statement_data->stmtName,
+        strlen(statement_data->stmtName) + 1));
     ListCell *stmt_iter = NULL;
     List *stmts = Parser::Parse(statement_data->conn->client_logic, statement_data->query);
     foreach (stmt_iter, stmts) {
@@ -2151,12 +2118,11 @@ bool Processor::run_pre_query(StatementData *statement_data, bool is_inner_query
 
 bool Processor::run_pre_exec(StatementData *statement_data)
 {
-    errno_t rc;
     Assert(statement_data->conn->client_logic && statement_data->conn->client_logic->enable_client_encryption);
+    Assert(!statement_data->conn->client_logic->rawValuesForReplace->m_raw_values);
     statement_data->copy_params();
-    rc = strncat_s(statement_data->conn->client_logic->lastStmtName, NAMEDATALEN, statement_data->stmtName,
-        strlen(statement_data->stmtName));
-    securec_check_c(rc, "\0", "\0");
+    check_memcpy_s(memcpy_s(statement_data->conn->client_logic->lastStmtName, NAMEDATALEN, statement_data->stmtName,
+        strlen(statement_data->stmtName) + 1));
     PreparedStatement *prepares_statement =
         statement_data->conn->client_logic->preparedStatements->get_or_create(statement_data->stmtName);
     if (!prepares_statement) {
@@ -2168,20 +2134,8 @@ bool Processor::run_pre_exec(StatementData *statement_data)
     }
 
     RawValuesList raw_values_list;
-    raw_values_list.resize(statement_data->nParams);
-    for (size_t param_num = 0; param_num < statement_data->nParams; ++param_num) {
-        RawValue *raw_value = new (std::nothrow) RawValue(statement_data->conn);
-        if (raw_value == NULL) {
-            fprintf(stderr, "failed to new RawValue object\n");
-            return false;
-        }
-        raw_value->m_is_param = true;
-        raw_value->m_location = param_num; /* func : do not reset this variable. it's confusing. */
-        raw_value->set_data((const unsigned char *)statement_data->paramValues[param_num],
-            statement_data->paramLengths ? statement_data->paramLengths[param_num] :
-                                        strlen(statement_data->paramValues[param_num]));
-        raw_value->m_data_value_format = statement_data->paramFormats ? statement_data->paramFormats[param_num] : 0;
-        raw_values_list.set(param_num, raw_value);
+    if (!raw_values_list.gen_values_from_statement(statement_data)) {
+        return false;
     }
 
     if (!ValuesProcessor::process_values(statement_data, prepares_statement->cached_params, 1,
@@ -2232,8 +2186,7 @@ void Processor::remove_dropped_global_settings(PGconn *conn, const bool is_succe
         HooksManager::GlobalSettings::set_deletion_expected(*conn->client_logic, cur_cmk->obj_name, false);
         to_free = cur_cmk;
         cur_cmk = cur_cmk->next;
-        free(to_free);
-        to_free = NULL;
+        libpq_free(to_free);
     }
     conn->client_logic->droppedGlobalSettings = NULL;
 }
@@ -2314,20 +2267,18 @@ bool Processor::run_post_query(PGconn *conn)
         conn->client_logic->rawValuesForReplace->clear();
     }
 
+    conn->client_logic->raw_values_for_post_query.clear();
     char last_stmt_name[NAMEDATALEN];
     errno_t rc = EOK;
     rc = memset_s(last_stmt_name, NAMEDATALEN, 0, NAMEDATALEN);
     securec_check_c(rc, "\0", "\0");
-    char temp_stmt_name[NAMEDATALEN];
-    rc = memset_s(temp_stmt_name, NAMEDATALEN, 0, NAMEDATALEN);
-    securec_check_c(rc, "\0", "\0");
     /* swap local lastStmtName with lastStmtName object on connection */
-    check_strncat_s(strncat_s(temp_stmt_name, NAMEDATALEN, conn->client_logic->lastStmtName,
-        strlen(conn->client_logic->lastStmtName)));
-    check_strncpy_s(strncpy_s(conn->client_logic->lastStmtName, NAMEDATALEN, last_stmt_name, strlen(last_stmt_name)));
-    check_strncat_s(strncat_s(last_stmt_name, NAMEDATALEN, temp_stmt_name, strlen(temp_stmt_name)));
 
-    int last_result = conn->client_logic->m_lastResultStatus;
+    check_memcpy_s(
+        memcpy_s(last_stmt_name, NAMEDATALEN, conn->client_logic->lastStmtName, NAMEDATALEN));
+    check_memset_s(memset_s(conn->client_logic->lastStmtName, NAMEDATALEN,  0, NAMEDATALEN));
+
+        int last_result = conn->client_logic->m_lastResultStatus;
     conn->client_logic->m_lastResultStatus = PGRES_EMPTY_QUERY;
 
     bool is_success = (last_result == PGRES_COMMAND_OK);

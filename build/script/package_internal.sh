@@ -745,7 +745,6 @@ function install_gaussdb()
     echo "Begin make install MPPDB server" >> "$LOG_FILE" 2>&1
     make clean >> "$LOG_FILE" 2>&1
 
-    echo "[makemppdb] $(date +%y-%m-%d' '%T): Begin to make compile."
     export GAUSSHOME=${BUILD_DIR}
     export LD_LIBRARY_PATH=${BUILD_DIR}/lib:${BUILD_DIR}/lib/postgresql:${LD_LIBRARY_PATH}
     make -s -j${MAKE_JOBS} >> "$LOG_FILE" 2>&1
@@ -759,7 +758,6 @@ function install_gaussdb()
             fi
         fi
     fi
-    echo "[makemppdb] $(date +%y-%m-%d' '%T): Make compile successfully."
 
     cd "$ROOT_DIR/contrib/pg_upgrade_support"
     make clean >> "$LOG_FILE" 2>&1

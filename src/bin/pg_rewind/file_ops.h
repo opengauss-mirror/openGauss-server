@@ -41,6 +41,7 @@ extern bool restore_target_dir(const char* datadir_target, bool remove_from);
 extern void delete_target_file(const char* file);
 extern bool isPathInFilemap(const char* path);
 extern bool tablespaceDataIsValid(const char* path);
+extern void copy_file(const char* fromfile, char* tofile);
 extern void CompressedFileTruncate(const char* path, const RewindCompressInfo* rewindCompressInfo);
 void FetchCompressedFile(char* buf, BlockNumber begin, int32 size);
 void OpenCompressedPcaFile(const char* fileName, int32 chunkSize, int32 algorithm, bool rebuild);

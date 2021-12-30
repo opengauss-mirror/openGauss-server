@@ -968,11 +968,11 @@ extern void UBTree2XlogFreezeOperatorPage(RedoBufferInfo* buffer, void* recordda
 
 extern void UBTreeRestoreMetaOperatorPage(RedoBufferInfo* metabuf, void* recorddata, Size datalen);
 extern void UBTreeXlogInsertOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* data, Size datalen);
-extern void UBTreeXlogSplitOperatorRightpage(
-        RedoBufferInfo* rbuf, void* recorddata, BlockNumber leftsib, BlockNumber rnext, void* blkdata, Size datalen);
+extern void UBTreeXlogSplitOperatorRightPage(RedoBufferInfo* rbuf, void* recorddata, BlockNumber leftsib,
+        BlockNumber rnext, void* blkdata, Size datalen, bool hasOpaque = true);
 extern void UBTreeXlogSplitOperatorNextpage(RedoBufferInfo* buffer, BlockNumber rightsib);
-extern void UBTreeXlogSplitOperatorLeftpage(
-        RedoBufferInfo* lbuf, void* recorddata, BlockNumber rightsib, bool onleft, void* blkdata, Size datalen);
+extern void UBTreeXlogSplitOperatorLeftpage(RedoBufferInfo* lbuf, void* recorddata, BlockNumber rightsib,
+    bool onleft, void* blkdata, Size datalen, bool hasOpaque = true);
 extern void UBTreeXlogVacuumOperatorPage(RedoBufferInfo* redobuffer, void* recorddata, void* blkdata, Size len);
 extern void UBTreeXlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, Size recorddatalen);
 extern void UBTreeXlogDeletePageOperatorRightpage(RedoBufferInfo* buffer, void* recorddata);

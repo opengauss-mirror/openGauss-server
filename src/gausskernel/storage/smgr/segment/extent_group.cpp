@@ -730,6 +730,7 @@ void eg_create_if_necessary(SegExtentGroup *seg)
             return;
         }
 
+	TablespaceCreateDbspace(seg->rnode.spcNode, seg->rnode.dbNode, false);
         /* Ensure tablespace limits at first. */
         uint64 requestSize = DF_FILE_EXTEND_STEP_SIZE;
         TableSpaceUsageManager::IsExceedMaxsize(seg->rnode.spcNode, requestSize, true);

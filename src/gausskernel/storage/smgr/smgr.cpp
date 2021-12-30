@@ -123,6 +123,7 @@ static const f_smgr smgrsw[] = {
 };
 
 static const int NSmgr = lengthof(smgrsw);
+static void push_unlink_rel_one_fork_to_hashtbl(RelFileNode node, ForkNumber forkNum);
 
 static inline int ChooseSmgrManager(RelFileNode rnode)
 {
@@ -610,7 +611,7 @@ void smgrdounlinkfork(SMgrRelation reln, ForkNumber forknum, bool isRedo)
      * Get rid of any remaining buffers for the fork.  bufmgr will just drop
      * them without bothering to write the contents.
      */
-    DropRelFileNodeBuffers(rnode, forknum, 0);
+    push_unlink_rel_one_fork_to_hashtbl(rnode.node, forknum);
 
     /*
      * It'd be nice to tell the stats collector to forget it immediately, too.
@@ -919,3 +920,34 @@ ScalarToDatum GetTransferFuncByTypeOid(Oid attTypeOid)
         }
     }
 }
+
+static void push_unlink_rel_one_fork_to_hashtbl(RelFileNode node, ForkNumber forkNum)
+{
+    HTAB *relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_fork_hashtbl;
+    bool found = false;
+    ForkRelFileNode key;
+    DelForkFileTag *entry = NULL;
+    uint del_rel_num = 0;
+
+    key.rnode = node;
+    key.forkNum = forkNum;
+
+    LWLockAcquire(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock, LW_EXCLUSIVE);
+    entry = (DelForkFileTag*)hash_search(relfilenode_hashtbl, &(key), HASH_ENTER, &found);
+    if (!found) {
+        entry->forkrnode.rnode.spcNode = key.rnode.spcNode;
+        entry->forkrnode.rnode.dbNode = key.rnode.dbNode;
+        entry->forkrnode.rnode.relNode = key.rnode.relNode;
+        entry->forkrnode.rnode.bucketNode = key.rnode.bucketNode;
+        entry->forkrnode.forkNum = key.forkNum;
+        entry->maxSegNo = -1;
+        del_rel_num++;
+    }
+    LWLockRelease(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock);
+
+    if (del_rel_num > 0 && g_instance.bgwriter_cxt.invalid_buf_proc_latch != NULL) {
+        SetLatch(g_instance.bgwriter_cxt.invalid_buf_proc_latch);
+    }
+    return;
+}
+

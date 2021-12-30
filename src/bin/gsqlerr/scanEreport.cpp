@@ -1761,7 +1761,8 @@ int compareErrmsg()
                      strlen(pstErrMsgItemOld->stErrmsg.msg)) == 0) &&
                  IS_EQUAL_STR(pstErrMsgItemOld->stErrmsg.action, pstErrMsgItemNew->stErrmsg.action) &&
                  IS_EQUAL_STR(pstErrMsgItemOld->stErrmsg.cause,  pstErrMsgItemNew->stErrmsg.cause))  {
-                /* update location info of old errmsg using new errmsg
+                /*
+                 * update location info of old errmsg using new errmsg.
                  * 1. if pstErrMsgItemOld->mppdb_err_msg_locnum >= pstErrMsgItemNew->mppdb_err_msg_locnum,
                  *    copy all new location to old one, there must be enough slot for copy.
                  * 2. else need to malloc memory for old msg item before copy.
@@ -1777,6 +1778,7 @@ int compareErrmsg()
                         pstErrMsgItemNew->astErrLocate[i], sizeof(mppdb_err_msg_location_t));
                     securec_check_c(rc, "\0", "\0");
                 }
+
                 pstErrMsgItemOld->mppdb_err_msg_locnum = pstErrMsgItemNew->mppdb_err_msg_locnum;
 
                 pstErrMsgItemNew->ucOpFlag = OP_TYPE_EXIST;

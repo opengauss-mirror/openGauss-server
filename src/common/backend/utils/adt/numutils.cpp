@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -352,8 +353,9 @@ void pg_lltoa(int64 value, char* a)
     char* start = a;
     bool neg = false;
 
-    if (a == NULL)
+    if (a == NULL) {
         return;
+    }
 
     /*
      * Avoid problems with the most negative integer not being representable
@@ -373,6 +375,61 @@ void pg_lltoa(int64 value, char* a)
     do {
         int64 remainder;
         int64 oldval = value;
+
+        value /= 10;
+        remainder = oldval - value * 10;
+        *a++ = '0' + remainder;
+    } while (value != 0);
+
+    if (neg) {
+        *a++ = '-';
+    }
+
+    /* Add trailing NUL byte, and back up 'a' to the last character. */
+    *a-- = '\0';
+
+    /* Reverse string. */
+    while (start < a) {
+        char swap = *start;
+
+        *start++ = *a;
+        *a-- = swap;
+    }
+}
+
+/*
+ * pg_lltoa: convert a signed 128-bit integer to its string representation
+ *
+ * Caller must ensure that 'a' points to enough memory to hold the result
+ * (at least MAXINT16LEN+1 bytes, counting a leading sign and trailing NUL).
+ */
+void pg_i128toa(int128 value, char* a, int length)
+{
+    char* start = a;
+    bool neg = false;
+
+    if (a == NULL)
+        return;
+
+    /*
+     * Avoid problems with the most negative integer not being representable
+     * as a positive integer.
+     */
+    if (value == (PG_INT128_MIN)) {
+        const int int128minStrLength = 41;
+        const char* int128minStr = "-170141183460469231731687303715884105728";
+        errno_t ss_rc = memcpy_s(a, length, int128minStr, int128minStrLength);
+        securec_check(ss_rc, "\0", "\0");
+        return;
+    } else if (value < 0) {
+        value = -value;
+        neg = true;
+    }
+
+    /* Compute the result string backwards. */
+    do {
+        int128 remainder;
+        int128 oldval = value;
 
         value /= 10;
         remainder = oldval - value * 10;

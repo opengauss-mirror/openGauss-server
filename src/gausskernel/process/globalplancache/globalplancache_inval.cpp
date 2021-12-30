@@ -53,6 +53,7 @@ bool GlobalPlanCache::MsgCheck(const SharedInvalidationMessage *msg)
 
 bool GlobalPlanCache::NeedDropEntryByLocalMsg(CachedPlanSource* plansource, int tot, const int *idx, const SharedInvalidationMessage *msgs)
 {
+    Oid database_id = plansource->gpc.key->env.plainenv.database_id;
 
     for (int j = 0; j < tot; j++) {
         const SharedInvalidationMessage *msg = &msgs[idx[j]];
@@ -61,7 +62,7 @@ bool GlobalPlanCache::NeedDropEntryByLocalMsg(CachedPlanSource* plansource, int 
 
         if (msg->id >= 0) {
 
-            if (msg->cc.dbId == u_sess->proc_cxt.MyDatabaseId || msg->cc.dbId == InvalidOid) {
+            if (msg->cc.dbId == database_id || msg->cc.dbId == InvalidOid) {
                 if (msg->cc.id == PROCOID) {
                     CheckInvalItemDependency(plansource, msg->cc.id, msg->cc.hashValue);
                 } else if (msg->cc.id == NAMESPACEOID || msg->cc.id == OPEROID || msg->cc.id == AMOPOPID) {
@@ -69,12 +70,12 @@ bool GlobalPlanCache::NeedDropEntryByLocalMsg(CachedPlanSource* plansource, int 
                 }
             }
         } else if (msg->id == SHAREDINVALRELCACHE_ID) {
-            if (msg->rc.dbId == u_sess->proc_cxt.MyDatabaseId || msg->rc.dbId == InvalidOid)
+            if (msg->rc.dbId == database_id || msg->rc.dbId == InvalidOid)
             {
                 CheckRelDependency(plansource, msg->rc.relId);
             }
         } else if (msg->id == SHAREDINVALPARTCACHE_ID) {
-            if (msg->pc.dbId == u_sess->proc_cxt.MyDatabaseId || msg->pc.dbId == InvalidOid) {
+            if (msg->pc.dbId == database_id || msg->pc.dbId == InvalidOid) {
                 CheckRelDependency(plansource, msg->pc.partId);
             }
         }
@@ -129,7 +130,10 @@ void GlobalPlanCache::InvalMsg(const SharedInvalidationMessage *msgs, int n)
 
         while ((entry = (GPCEntry *)hash_seq_search(&hash_seq)) != NULL) {
             Assert (entry->val.plansource != NULL);
-            if (entry->val.plansource->gpc.key->env.plainenv.database_id != u_sess->proc_cxt.MyDatabaseId) {
+            /* for standby mode, Invalid Msg send by xlog thread, but xlog thread didn't set db id into MyDatabaseId.
+               So we need check each plan's db id by gpc'key in NeedDropEntryByLocalMsg latter */
+            if (pmState == PM_RUN &&
+                entry->val.plansource->gpc.key->env.plainenv.database_id != u_sess->proc_cxt.MyDatabaseId) {
                 continue;
             }
 

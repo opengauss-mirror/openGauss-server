@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -27,6 +28,7 @@
 
 #include "access/sysattr.h"
 #include "access/tableam.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_type.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeTidscan.h"
@@ -42,7 +44,7 @@
     ((node) != NULL && IsA((node), Var) && ((Var*)(node))->varattno == SelfItemPointerAttributeNumber && \
         ((Var*)(node))->varlevelsup == 0)
 
-static void TidListCreate(TidScanState* tidstate);
+static void TidListCreate(TidScanState* tidstate, bool isBucket);
 static int ItemptrComparator(const void* a, const void* b);
 static TupleTableSlot* TidNext(TidScanState* node);
 static void ExecInitNextPartitionForTidScan(TidScanState* node);
@@ -54,7 +56,7 @@ static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate);
  *
  * (The result is actually an array, not a list.)
  */
-static void TidListCreate(TidScanState* tidstate)
+static void TidListCreate(TidScanState* tidstate, bool isBucket)
 {
     List* eval_list = tidstate->tss_tidquals;
     ExprContext* econtext = tidstate->ss.ps.ps_ExprContext;
@@ -70,10 +72,14 @@ static void TidListCreate(TidScanState* tidstate)
      * be possible for someone to truncate away the blocks we intend to
      * visit.)
      */
-    if (tidstate->ss.isPartTbl) {
-        nblocks = RelationGetNumberOfBlocks(tidstate->ss.ss_currentPartition);
+    if (isBucket) {
+        nblocks = MaxBlockNumber;
     } else {
-        nblocks = RelationGetNumberOfBlocks(tidstate->ss.ss_currentRelation);
+        if (tidstate->ss.isPartTbl) {
+            nblocks = RelationGetNumberOfBlocks(tidstate->ss.ss_currentPartition);
+        } else {
+            nblocks = RelationGetNumberOfBlocks(tidstate->ss.ss_currentRelation);
+        }
     }
 
     /*
@@ -403,7 +409,7 @@ static TupleTableSlot* TidNext(TidScanState* node)
      * First time through, compute the list of TIDs to be visited
      */
     if (node->tss_TidList == NULL)
-        TidListCreate(node);
+        TidListCreate(node, RELATION_CREATE_BUCKET(heap_relation));
 
     if (node->tss_isCurrentOf && node->ss.isPartTbl) {
         if (PointerIsValid(node->tss_CurrentOf_CurrentPartition)) {
@@ -516,6 +522,7 @@ void ExecEndTidScan(TidScanState* node)
             Assert(node->ss.ss_currentPartition);
             releaseDummyRelation(&(node->ss.ss_currentPartition));
             releasePartitionList(node->ss.ss_currentRelation, &(node->ss.partitions), NoLock);
+            releaseSubPartitionList(node->ss.ss_currentRelation, &(node->ss.subpartitions), NoLock);
         }
     }
 
@@ -630,8 +637,20 @@ TidScanState* ExecInitTidScan(TidScan* node, EState* estate, int eflags)
             /* make dummy table realtion with the first partition for scan */
             partition = (Partition)list_nth(tidstate->ss.partitions, 0);
             partitiontrel = partitionGetRelation(current_relation, partition);
-            tidstate->ss.ss_currentPartition = partitiontrel;
-            tidstate->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(partitiontrel, (ScanState*)tidstate);
+
+            if (RelationIsSubPartitioned(current_relation)) {
+                List *currentSubpartList = (List *)list_nth(tidstate->ss.subpartitions, 0);
+                Partition currentSubPart = (Partition)list_nth(currentSubpartList, 0);
+                Relation currentSubPartitionRel = partitionGetRelation(partitiontrel, currentSubPart);
+
+                releaseDummyRelation(&partitiontrel);
+                tidstate->ss.ss_currentPartition = currentSubPartitionRel;
+                tidstate->ss.ss_currentScanDesc =
+                    scan_handler_tbl_begin_tidscan(currentSubPartitionRel, (ScanState *)tidstate);
+            } else {
+                tidstate->ss.ss_currentPartition = partitiontrel;
+                tidstate->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(partitiontrel, (ScanState *)tidstate);
+            }
         }
     } else {
         tidstate->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(current_relation, (ScanState*)tidstate);
@@ -677,6 +696,8 @@ static void ExecInitNextPartitionForTidScan(TidScanState* node)
     TidScan* plan = NULL;
     int paramno = -1;
     ParamExecData* param = NULL;
+    int subPartParamno = -1;
+    ParamExecData* SubPrtParam = NULL;
 
     plan = (TidScan*)(node->ss.ps.plan);
 
@@ -684,6 +705,9 @@ static void ExecInitNextPartitionForTidScan(TidScanState* node)
     paramno = plan->scan.plan.paramno;
     param = &(node->ss.ps.state->es_param_exec_vals[paramno]);
     node->ss.currentSlot = (int)param->value;
+
+    subPartParamno = plan->scan.plan.subparamno;
+    SubPrtParam = &(node->ss.ps.state->es_param_exec_vals[subPartParamno]);
 
     /* construct a dummy table relation with the next table partition */
     current_partition = (Partition)list_nth(node->ss.partitions, node->ss.currentSlot);
@@ -695,9 +719,22 @@ static void ExecInitNextPartitionForTidScan(TidScanState* node)
      */
     Assert(PointerIsValid(node->ss.ss_currentPartition));
     releaseDummyRelation(&(node->ss.ss_currentPartition));
-    node->ss.ss_currentPartition = current_partitionrel;
+    if (current_partitionrel->partMap != NULL) {
+        Partition currentSubPartition = NULL;
+        List* currentSubPartitionList = NULL;
+        Relation currentSubPartitionRel = NULL;
+        Assert(SubPrtParam != NULL);
+        currentSubPartitionList = (List *)list_nth(node->ss.subpartitions, node->ss.currentSlot);
+        currentSubPartition = (Partition)list_nth(currentSubPartitionList, (int)SubPrtParam->value);
+        currentSubPartitionRel = partitionGetRelation(current_partitionrel, currentSubPartition);
 
-    node->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(current_partitionrel, (ScanState*)node);
+        releaseDummyRelation(&(current_partitionrel));
+        node->ss.ss_currentPartition = currentSubPartitionRel;
+        node->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(currentSubPartitionRel, (ScanState*)node);
+    } else {
+        node->ss.ss_currentPartition = current_partitionrel;
+        node->ss.ss_currentScanDesc = scan_handler_tbl_begin_tidscan(current_partitionrel, (ScanState*)node);
+    }
 }
 
 /*
@@ -740,6 +777,29 @@ static void ExecInitPartitionForTidScan(TidScanState* tidstate, EState* estate)
             table_partitionid = getPartitionOidFromSequence(current_relation, part_seq);
             table_partition = partitionOpen(current_relation, table_partitionid, lock);
             tidstate->ss.partitions = lappend(tidstate->ss.partitions, table_partition);
+            if (plan->scan.pruningInfo->ls_selectedSubPartitions != NIL) {
+                Relation partRelation = partitionGetRelation(current_relation, table_partition);
+                SubPartitionPruningResult* subPartPruningResult =
+                    GetSubPartitionPruningResult(plan->scan.pruningInfo->ls_selectedSubPartitions, part_seq);
+                if (subPartPruningResult == NULL) {
+                    continue;
+                }
+                List *subpartSeqs = subPartPruningResult->ls_selectedSubPartitions;
+                List *subpartition = NIL;
+                ListCell *lc = NULL;
+                foreach (lc, subpartSeqs) {
+                    Oid subpartitionid = InvalidOid;
+                    int subpartSeq = lfirst_int(lc);
+
+                    subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq);
+                    Partition subpart = partitionOpen(partRelation, subpartitionid, lock);
+                    subpartition = lappend(subpartition, subpart);
+                }
+                releaseDummyRelation(&(partRelation));
+                tidstate->ss.subPartLengthList =
+                    lappend_int(tidstate->ss.subPartLengthList, list_length(subpartition));
+                tidstate->ss.subpartitions = lappend(tidstate->ss.subpartitions, subpartition);
+            }
         }
     }
 }

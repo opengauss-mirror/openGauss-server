@@ -209,6 +209,14 @@ void SupportRlsForRel(const Relation relation)
                     RelationGetRelationName(relation))));
     }
 
+    if (reltup->parttype == PARTTYPE_SUBPARTITIONED_RELATION) {
+        ReleaseSysCache(tuple);
+        ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        (errmsg("Un-support feature"),
+                         errdetail("Do not support row level security policy on subpartition table."),
+                         errcause("The function is not implemented."), erraction("Use other actions instead."))));
+    }
+
     /* Do not support dfs table */
     if (RelationIsDfsStore(relation)) {
         ReleaseSysCache(tuple);

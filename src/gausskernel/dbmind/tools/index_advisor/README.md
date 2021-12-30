@@ -5,12 +5,31 @@ First, some candidate indexes are generated based on query syntax and database
 statistics. Then the optimal index set is determined by estimating the cost and
 benefit of it for the workload.
 
-## Dependencies
-
-    python3.x
-
 ## Usage
 
     python index_advisor_workload.py [p PORT] [d DATABASE] [f FILE] [--h HOST] [-U USERNAME] 
     [-W PASSWORD] [--schema SCHEMA] [--max_index_num MAX_INDEX_NUM] [--max_index_storage MAX_INDEX_STORAGE] 
-    [--multi_iter_mode] [--multi_node]
+    [--multi_iter_mode] [--multi_node] [--json] [--driver] [--show_detail]
+
+# Extract_log
+
+**extract_log**  is a tool for extracting business data from pg_log.
+
+## Usage
+
+    python extract_log.py [l LOG_DIRECTORY] [f OUTPUT_FILE] [-d DATABASE] [-U USERNAME] [--start_time]
+    [--sql_amount] [--statement] [--json]
+
+## index_server
+
+**Index_server** is a lightweight tool for deploying regular index recommendations,
+
+and setting related parameters by configuring **database.conf** file.
+
+## Usage
+
+    echo passwd | python index_server.py &
+
+## Dependencies
+
+    python3.x

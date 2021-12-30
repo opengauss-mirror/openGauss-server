@@ -817,6 +817,14 @@ static bool check_ungrouped_columns_walker(Node* node, check_ungrouped_columns_c
 
         /* Found an ungrouped local variable; generate error message */
         attname = get_rte_attribute_name(rte, var->varattno);
+
+        /* Fix attname if the RTE has been rewrited by start with...connect by. */
+        char* orig_attname = attname;
+        if (IsSWCBRewriteRTE(rte)) {
+            attname = strrchr(attname, '@');
+            attname = (attname != NULL) ? (attname + 1) : orig_attname;
+        }
+
         if (context->sublevels_up == 0) {
             ereport(ERROR,
                 (errcode(ERRCODE_GROUPING_ERROR),
@@ -826,6 +834,7 @@ static bool check_ungrouped_columns_walker(Node* node, check_ungrouped_columns_c
                     context->in_agg_direct_args
                         ? errdetail("Direct arguments of an ordered-set aggregate must use only grouped columns.")
                         : 0,
+                    rte->swConverted ? errdetail("Please check your start with rewrite table's column.") : 0,
                     parser_errposition(context->pstate, var->location)));
         } else {
             ereport(ERROR,

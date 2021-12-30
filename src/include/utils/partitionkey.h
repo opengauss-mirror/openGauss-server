@@ -59,4 +59,53 @@ extern List* untransformPartitionBoundary(Datum options);
  * Note			:
  */
 extern void CheckValuePartitionKeyType(Form_pg_attribute* attrs, List* pos);
+
+#define partitonKeyCompareForRouting(value1, value2, len, compare)                                               \
+    do {                                                                                                         \
+        uint32 i = 0;                                                                                            \
+        Const *v1 = NULL;                                                                                        \
+        Const *v2 = NULL;                                                                                        \
+        for (; i < (len); i++) {                                                                                 \
+            v1 = *((value1) + i);                                                                                \
+            v2 = *((value2) + i);                                                                                \
+            if (v1 == NULL || v2 == NULL) {                                                                      \
+                if (v1 == NULL && v2 == NULL) {                                                                  \
+                    ereport(ERROR,                                                                               \
+                            (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("NULL can not be compared with NULL"))); \
+                } else if (v1 == NULL) {                                                                         \
+                    compare = -1;                                                                                \
+                } else {                                                                                         \
+                    compare = 1;                                                                                 \
+                }                                                                                                \
+                break;                                                                                           \
+            }                                                                                                    \
+            if (constIsMaxValue(v1) || constIsMaxValue(v2)) {                                                    \
+                if (constIsMaxValue(v1) && constIsMaxValue(v2)) {                                                \
+                    compare = 0;                                                                                 \
+                    continue;                                                                                    \
+                } else if (constIsMaxValue(v1)) {                                                                \
+                    compare = 1;                                                                                 \
+                } else {                                                                                         \
+                    compare = -1;                                                                                \
+                }                                                                                                \
+                break;                                                                                           \
+            }                                                                                                    \
+            if (v1->constisnull || v2->constisnull) {                                                            \
+                if (v1->constisnull && v2->constisnull) {                                                        \
+                    ereport(ERROR, (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),                                      \
+                                    errmsg("null value can not be compared with null value.")));                 \
+                } else if (v1->constisnull) {                                                                    \
+                    compare = 1;                                                                                 \
+                } else {                                                                                         \
+                    compare = -1;                                                                                \
+                }                                                                                                \
+                break;                                                                                           \
+            }                                                                                                    \
+            constCompare(v1, v2, compare);                                                                       \
+            if ((compare) != 0) {                                                                                \
+                break;                                                                                           \
+            }                                                                                                    \
+        }                                                                                                        \
+    } while (0)
+
 #endif

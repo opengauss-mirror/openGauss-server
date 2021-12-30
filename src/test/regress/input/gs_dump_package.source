@@ -1,0 +1,117 @@
+drop database if exists dump_package_db;
+drop database if exists restore_package_db;
+
+create database dump_package_db;
+create database restore_package_db;
+
+\c dump_package_db
+
+drop package if exists pck1;
+drop table if exists tb1;
+
+create table tb1(c1 int,c2 varchar2);
+
+create or replace package pck1 as
+type t1 is record(c1 int,c2 varchar2);
+type t2 is varray(10) of int;
+type t3 is table of varchar2;
+type t4 is ref cursor;
+v1 t1 :=(1,'1');
+v2 t2 :=t2(1,1,1);
+v3 t3 :=t3('1','1','1');
+v4 tb1%rowtype :=(1,'1');
+procedure proc1(var1 out v1.c2%type, var2 v2%type, var3 v3%type, var4 tb1%rowtype,var5 t4);
+end pck1;
+/
+
+create or replace package body pck1 as
+type t5 is record(c1 int,c2 varchar2);
+type t6 is varray(10) of int;
+type t7 is table of varchar2;
+type t8 is ref cursor;
+v5 t5 :=(2,'2');
+v6 t6 :=t2(2,2,2);
+v7 t7 :=t3('2','2','2');
+v8 tb1%rowtype :=(2,'2');
+procedure proc1(var1 out v1.c2%type, var2 v2%type, var3 v3%type, var4 tb1%rowtype, var5 t4) as
+begin
+  var1 := v5.c2;
+  v6(1) := var2(1);
+  v7(1) := var3(1);
+  v5 := var4;
+  open var5 for select * from tb1;
+  raise info 'var1 is %',var1;
+  raise info 'v6(1) is %',v6(1);
+  raise info 'v7(1) is %',v7(1);
+  raise info 'v5 is %',v5;
+end;
+end pck1;
+/
+
+drop table if exists rowtype_tb;
+create table rowtype_tb(c1 int,c2 varchar2);
+insert into rowtype_tb values(1,'a'),(2,'b');
+
+create or replace package rowtype_pckg as
+function rowtype_func() return setof rowtype_tb;
+end rowtype_pckg;
+/
+
+create or replace package body rowtype_pckg as
+function rowtype_func() return setof rowtype_tb as
+r rowtype_tb%ROWTYPE;
+begin
+return query select * from rowtype_tb;
+end;
+end rowtype_pckg;
+/
+
+call rowtype_pckg.rowtype_func();
+
+-- ROOT package
+create or replace package pck9 is
+type r1 is record (a int, b int);
+type r2 is varray(10) of int;
+type r3 is table of int;
+type r4 is record (a r2);
+va r1;
+vb r2;
+vc r3;
+vd int;
+vf r4;
+end pck9;
+/
+
+create or replace package body pck9 is
+end pck9;
+/
+
+-- reference package var in spec
+create or replace package pck8 is
+ve int := pck9.vd;
+procedure p8;
+end pck8;
+/
+
+-- reference package var type
+create or replace package pck7 is
+ve pck9.vd%type;
+end pck7;
+/
+
+-- reference package type
+create or replace package pck6 is
+va pck9.r1;
+end pck6;
+/
+
+\! @abs_bindir@/gs_dump dump_package_db -p @portstring@ -f @abs_bindir@/dump_package.tar -F t >/dev/null 2>&1; echo $?
+\! @abs_bindir@/gs_restore -d restore_package_db -p @portstring@ @abs_bindir@/dump_package.tar >/dev/null 2>&1; echo $?
+
+\c restore_package_db
+call rowtype_pckg.rowtype_func();
+
+\c regression
+drop database if exists restore_subpartition_db;
+drop database if exists dump_subpartition_db;
+

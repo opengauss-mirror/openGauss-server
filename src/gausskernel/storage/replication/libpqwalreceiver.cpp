@@ -47,13 +47,12 @@
 /* Prototypes for private functions */
 static bool libpq_select(int timeout_ms);
 static PGresult *libpqrcv_PQexec(const char *query);
-
-static void ha_set_rebuild_reason(HaRebuildReason reason);
 static void ha_set_conn_channel(void);
 static void ha_add_disconnect_count(void);
-static void ha_set_rebuild_connerror(HaRebuildReason reason, WalRcvConnError connerror);
+
 static void ha_set_port_to_remote(PGconn *dummy_conn, int ha_port);
 static char *stringlist_to_identifierstr(PGconn *conn, List *strings);
+
 extern void SetDataRcvDummyStandbySyncPercent(int percent);
 
 #define AmWalReceiverForDummyStandby() \
@@ -193,6 +192,42 @@ bool libpqrcv_connect_for_TLI(TimeLineID *timeLineID, char *conninfo)
 
     libpqrcv_disconnect();
 
+    return true;
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+#define IS_PRIMARY_NORMAL(servermode) (servermode == PRIMARY_MODE)
+#else
+#define IS_PRIMARY_NORMAL(servermode) ((servermode == PRIMARY_MODE) || (servermode == NORMAL_MODE))
+#endif
+
+static bool CheckRemoteServerSharedStorage(ServerMode remoteMode, PGresult* res)
+{
+    if (IS_SHARED_STORAGE_PRIMARY_CLUSTER_STANDBY_MODE && !IS_SHARED_STORAGE_CASCADE_STANDBY_MODE) {
+        if (!IS_PRIMARY_NORMAL(remoteMode)) {
+            PQclear(res);
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("for standby the mode of the remote server must be primary, current is %s",
+                            wal_get_role_string(remoteMode, true))));
+            return false;
+        }
+    } else if (IS_SHARED_STORAGE_CASCADE_STANDBY_MODE) {
+        if (remoteMode != MAIN_STANDBY_MODE) {
+            PQclear(res);
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("for main-standby cluster standby the mode of the remote server must be "
+                            "main standby, current is %s", wal_get_role_string(remoteMode, true))));
+            return false;
+        }
+    } else if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+        if (!IS_PRIMARY_NORMAL(remoteMode) && remoteMode != MAIN_STANDBY_MODE) {
+            PQclear(res);
+            ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
+                            errmsg("for standby cluster standby the mode of the remote server must be "
+                            "primary or main standby, current is %s", wal_get_role_string(remoteMode, true))));
+            return false;
+        }
+    }
     return true;
 }
 
@@ -407,9 +442,9 @@ static ServerMode IdentifyRemoteMode()
                                   num_fields)));
     }
     remoteMode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
-    if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && remoteMode != PRIMARY_MODE &&
+    if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && (!IS_PRIMARY_NORMAL(remoteMode)) &&
         /* remoteMode of cascade standby is a standby */
-        !t_thrd.xlog_cxt.is_cascade_standby) {
+        !t_thrd.xlog_cxt.is_cascade_standby && !IS_SHARED_STORAGE_MODE) {
         PQclear(res);
 
         if (dummyStandbyMode) {
@@ -421,7 +456,8 @@ static ServerMode IdentifyRemoteMode()
                                wal_get_role_string(remoteMode))));
     }
 
-    if (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby && remoteMode != STANDBY_MODE) {
+    if (t_thrd.postmaster_cxt.HaShmData->is_cascade_standby && remoteMode != STANDBY_MODE &&
+        !IS_SHARED_STORAGE_MODE) {
         PQclear(res);
 
         SpinLockAcquire(&walrcv->mutex);
@@ -429,8 +465,15 @@ static ServerMode IdentifyRemoteMode()
         SpinLockRelease(&walrcv->mutex);
 
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-                        errmsg("the mode of the remote server must be standby, current is %s",
+                        errmsg("for cascade standby the mode of the remote server must be standby, current is %s",
                         wal_get_role_string(remoteMode, true))));
+    }
+
+    if (IS_SHARED_STORAGE_MODE) {
+        if (!CheckRemoteServerSharedStorage(remoteMode, res)) {
+            PQclear(res);
+            return UNKNOWN_MODE;
+        }
     }
 
     PQclear(res);
@@ -482,12 +525,14 @@ static int32 IdentifyRemoteVersion()
                 (errcode(ERRCODE_INVALID_STATUS),
                  errmsg("could not get the local protocal version, make sure the PG_PROTOCOL_VERSION is defined")));
     }
-    if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm)) {
-        PQclear(res);
-        ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
-                        errmsg("invalid local term or remote term smaller than local. remote term[%u], local term[%u]",
-                               remoteTerm, localTerm)));
-        return false;
+    if (!IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+        if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm) &&
+            !AM_HADR_WAL_RECEIVER) {
+            PQclear(res);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                errmsg("invalid local term or remote term smaller than local. remote term[%u], local term[%u]",
+                    remoteTerm, localTerm)));
+        }
     }
 
     /*
@@ -550,17 +595,40 @@ bool libpqrcv_connect(char *conninfo, XLogRecPtr *startpoint, char *slotname, in
      * database name is ignored by the server in replication mode, but specify
      * "replication" for .pgpass lookup.
      */
-    if (dummyStandbyMode)
+    if (dummyStandbyMode) {
         nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
                           "%s dbname=replication replication=true "
                           "fallback_application_name=dummystandby "
                           "connect_timeout=%d",
                           conninfo, u_sess->attr.attr_storage.wal_receiver_connect_timeout);
-    else {
-        char hostname[255];
-
-        (void)gethostname(hostname, 255);
-
+    } else if (AM_HADR_WAL_RECEIVER) {
+        char passwd[MAXPGPATH] = {'\0'};
+        char username[MAXPGPATH] = {'\0'};
+        GetPasswordForHadrStreamingReplication(username, passwd);
+        nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
+                          "%s dbname=postgres replication=hadr_main_standby "
+                          "fallback_application_name=hadr_%s "
+                          "connect_timeout=%d user=%s password=%s",
+                          conninfo,
+                          (u_sess->attr.attr_common.application_name &&
+                           strlen(u_sess->attr.attr_common.application_name) > 0)
+                                ? u_sess->attr.attr_common.application_name
+                                : "walreceiver",
+                          u_sess->attr.attr_storage.wal_receiver_connect_timeout, username, passwd);
+        rc = memset_s(passwd, MAXPGPATH, 0, MAXPGPATH);
+        securec_check(rc, "\0", "\0");
+    } else if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+        nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
+                          "%s dbname=postgres replication=standby_cluster "
+                          "fallback_application_name=%s_hass "
+                          "connect_timeout=%d",
+                          conninfo,
+                          (u_sess->attr.attr_common.application_name &&
+                           strlen(u_sess->attr.attr_common.application_name) > 0)
+                                ? u_sess->attr.attr_common.application_name
+                                : "walreceiver",
+                          u_sess->attr.attr_storage.wal_receiver_connect_timeout);
+    } else {
         nRet = snprintf_s(conninfoRepl, sizeof(conninfoRepl), sizeof(conninfoRepl) - 1,
                           "%s dbname=replication replication=true "
                           "fallback_application_name=%s "
@@ -574,9 +642,39 @@ bool libpqrcv_connect(char *conninfo, XLogRecPtr *startpoint, char *slotname, in
     }
 
     securec_check_ss(nRet, "", "");
-
-    ereport(LOG, (errmsg("Connecting to remote server :%s", conninfoRepl)));
-
+    if (AM_HADR_WAL_RECEIVER) {
+        char *tmp = NULL;
+        char *tok = NULL;
+        char printConnInfo[MAXCONNINFO] = {0};
+        char* copyConnInfo = NULL;
+        copyConnInfo = pstrdup(conninfoRepl);
+        if (copyConnInfo == NULL) {
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("could not get walreceiver conncetion info.")));
+        }
+        tok = strtok_s(copyConnInfo, " ", &tmp);
+        if (tok == NULL) {
+            if (copyConnInfo != NULL) {
+                pfree_ext(copyConnInfo);
+            }
+            ereport(ERROR,
+                (errcode(ERRCODE_INVALID_STATUS), errmsg("could not parse walreceiver conncetion info string.")));
+        }
+        while (strncmp(tok, "password=", strlen("password=")) != 0) {
+            nRet = strcat_s(printConnInfo, MAXCONNINFO - 1, tok);
+            securec_check_ss(nRet, "", "");
+            nRet = strcat_s(printConnInfo, MAXCONNINFO - 1, " ");
+            securec_check_ss(nRet, "", "");
+            tok = strtok_s(NULL, " ", &tmp);
+        }
+        ereport(LOG, (errmsg("Connecting to remote server :%s", printConnInfo)));
+        if (copyConnInfo != NULL) {
+            pfree(copyConnInfo);
+            copyConnInfo = NULL;
+        }
+    } else {
+        ereport(LOG, (errmsg("Connecting to remote server :%s", conninfoRepl)));
+    }
 retry:
     /* 1. try to connect to primary */
     t_thrd.libwalreceiver_cxt.streamConn = PQconnectdb(conninfoRepl);
@@ -598,12 +696,19 @@ retry:
             SpinLockRelease(&walrcv->mutex);
         }
         ha_add_disconnect_count();
+        ereport(WARNING, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
+            errmsg("walreceiver could not connect to the remote server,the connection info :%s : %s",
+            conninfo, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+        libpqrcv_disconnect();
         ereport(ERROR, (errcode(ERRCODE_CONNECTION_TIMED_OUT),
-                        errmsg("walreceiver could not connect to the remote server,the connection info :%s : %s",
-                               conninfo, PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+                        errmsg("walreceiver could not connect and shutting down")));
     }
 
     ereport(LOG, (errmsg("Connected to remote server :%s success.", conninfo)));
+    if (AM_HADR_WAL_RECEIVER) {
+        rc = memset_s(conninfoRepl, MAXCONNINFO + 75, 0, MAXCONNINFO + 75);
+        securec_check(rc, "\0", "\0");
+    }
 
     /* 2. identify version */
     remoteTerm = IdentifyRemoteVersion();
@@ -619,10 +724,21 @@ retry:
     }
 
 #ifndef ENABLE_MULTIPLE_NODES
-    if (t_thrd.xlog_cxt.is_cascade_standby) {
+    if (t_thrd.xlog_cxt.is_cascade_standby && !t_thrd.postmaster_cxt.HaShmData->is_cross_region) {
         IdentifyRemoteAvailableZone();
     }
 #endif
+
+    if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE) {
+        if (walrcv->conn_target != REPCONNTARGET_DUMMYSTANDBY && (localTerm == 0 || localTerm > remoteTerm)) {
+            PQclear(res);
+            ha_set_rebuild_connerror(WALSEGMENT_REBUILD, REPL_INFO_ERROR);
+            ereport(ERROR, (errcode(ERRCODE_INVALID_STATUS),
+                errmsg("shared storage: invalid local term or remote term smaller than local."
+                       "remote term[%u], local term[%u]", remoteTerm, localTerm)));
+            return false;
+        }
+    }
 
     /*
      * Get the system identifier and timeline ID as a DataRow message from the
@@ -752,7 +868,8 @@ retry:
                 /* standby connect to standby */
                 bool crcvalid = false;
                 /* local xlog must be more than(or equal to) remote, and last crc must be matched */
-                if (XLByteLE(remoteMaxLsn, localRec) && remoteMaxLsnCrc == GetXlogRecordCrc(remoteMaxLsn, crcvalid)) {
+                if (XLByteLE(remoteMaxLsn, localRec) && 
+                    remoteMaxLsnCrc == GetXlogRecordCrc(remoteMaxLsn, crcvalid, XLogPageRead, 0)) {
                     ereport(LOG, (errmsg("crc check on remote standby success, local standby "
                                          "will promote to primary")));
                     SetWalRcvDummyStandbySyncPercent(SYNC_DUMMY_STANDBY_END);
@@ -797,7 +914,7 @@ retry:
                      */
                     if (XLByteEQ(remoteMaxLsn, InvalidXLogRecPtr) ||
                         (XLByteLT(remoteMaxLsn, localRec) &&
-                         remoteMaxLsnCrc == GetXlogRecordCrc(remoteMaxLsn, crcvalid))) {
+                         remoteMaxLsnCrc == GetXlogRecordCrc(remoteMaxLsn, crcvalid, XLogPageRead, 0))) {
                         ereport(LOG, (errmsg("invalid crc on secondary standby, no xlog, standby "
                                              "will promote primary")));
                         SetWalRcvDummyStandbySyncPercent(SYNC_DUMMY_STANDBY_END);
@@ -877,6 +994,14 @@ retry:
     }
 
     /* Create replication slot if need */
+    if (AM_HADR_WAL_RECEIVER && slotname != NULL) {
+        rc = strcat_s(slotname, NAMEDATALEN - 1, "_hadr");
+        securec_check(rc, "", "");
+    } else if (IS_SHARED_STORAGE_STANBY_CLUSTER_MODE && slotname != NULL) {
+        rc = strcat_s(slotname, NAMEDATALEN - 1, "_hass");
+        securec_check(rc, "", "");
+    }
+
     if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && slotname != NULL) {
         CreateRemoteReplicationSlot(*startpoint, slotname, false);
     }
@@ -1162,6 +1287,10 @@ bool libpqrcv_receive(int timeout, unsigned char *type, char **buffer, int *len)
 
     /* Return received messages to caller */
     *type = *((unsigned char *)t_thrd.libwalreceiver_cxt.recvBuf);
+    if (IS_SHARED_STORAGE_MODE && !AM_HADR_WAL_RECEIVER && *type == 'w') {
+        *len = 0;
+        return false;
+    }
     *buffer = t_thrd.libwalreceiver_cxt.recvBuf + sizeof(*type);
     *len = rawlen - sizeof(*type);
 
@@ -1210,19 +1339,6 @@ void HaSetRebuildRepInfoError(HaRebuildReason reason)
 void SetObsRebuildReason(HaRebuildReason reason)
 {
     ha_set_rebuild_connerror(reason, REPL_INFO_ERROR);
-}
-
-/*
- * Set the specified rebuild reason in HaShmData. when set the rebuild reason,
- * the hashmdata->current_repl implys the current replconnlist.
- * Then set the reason in the corresponding variable.
- */
-static void ha_set_rebuild_reason(HaRebuildReason reason)
-{
-    volatile HaShmemData *hashmdata = t_thrd.postmaster_cxt.HaShmData;
-    SpinLockAcquire(&hashmdata->mutex);
-    hashmdata->repl_reason[hashmdata->current_repl] = reason;
-    SpinLockRelease(&hashmdata->mutex);
 }
 
 /*
@@ -1290,22 +1406,6 @@ static void ha_add_disconnect_count()
     SpinLockAcquire(&hashmdata->mutex);
     hashmdata->disconnect_count[hashmdata->current_repl] += 1;
     SpinLockRelease(&hashmdata->mutex);
-}
-
-/* set the rebuild reason and walreceiver connerror. */
-static void ha_set_rebuild_connerror(HaRebuildReason reason, WalRcvConnError connerror)
-{
-    volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
-
-    ha_set_rebuild_reason(reason);
-    SpinLockAcquire(&walrcv->mutex);
-    walrcv->conn_errno = connerror;
-    if (reason == NONE_REBUILD && connerror == NONE_ERROR)
-        walrcv->node_state = NODESTATE_NORMAL;
-    SpinLockRelease(&walrcv->mutex);
-
-    /* Only postmaster can update gaussdb.state file */
-    SendPostmasterSignal(PMSIGNAL_UPDATE_HAREBUILD_REASON);
 }
 
 static void ha_set_port_to_remote(PGconn *dummy_conn, int ha_port)

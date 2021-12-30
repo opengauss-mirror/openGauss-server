@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/common/backend/catalog/toasting.cpp
@@ -26,6 +27,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_type.h"
 #include "catalog/toasting.h"
 #include "catalog/pg_hashbucket.h"
@@ -410,6 +412,55 @@ bool createToastTableForPartition(Oid relOid, Oid partOid, Datum reloptions, LOC
     return result;
 }
 
+bool CreateToastTableForSubPartition(Relation partRel, Oid subPartOid, Datum reloptions, LOCKMODE partLockMode)
+{
+    Partition partition = NULL;
+    Relation subPartRel = NULL;
+    bool result = false;
+
+    /* already toasted? */
+    if (partitionHasToast(subPartOid)) {
+        return false;
+    }
+
+    partition = partitionOpen(partRel, subPartOid, partLockMode);
+
+    /*
+     * create toast table for the special table subpartition
+     * fake a relation and then invoke create_toast_table to
+     * create the toast table
+     */
+    subPartRel = partitionGetRelation(partRel, partition);
+
+    Assert(PointerIsValid(subPartRel));
+    result =
+        create_toast_table(subPartRel, InvalidOid, InvalidOid, reloptions, true, (partLockMode == AccessShareLock));
+
+    releaseDummyRelation(&subPartRel);
+    partitionClose(partRel, partition, partLockMode);
+
+    return result;
+}
+
+bool CreateToastTableForPartitioneOfSubpartTable(Relation rel, Oid partOid, Datum reloptions, LOCKMODE partLockMode)
+{
+    bool result = false;
+    ListCell *cell = NULL;
+    Partition part = partitionOpen(rel, partOid, partLockMode);
+    Relation partRel = partitionGetRelation(rel, part);
+
+    List *partitionList = relationGetPartitionOidList(partRel);
+    foreach (cell, partitionList) {
+        Oid subPartOid = DatumGetObjectId(lfirst(cell));
+        result = CreateToastTableForSubPartition(partRel, subPartOid, reloptions, partLockMode);
+    }
+
+    releaseDummyRelation(&partRel);
+    partitionClose(rel, part, partLockMode);
+
+    return result;
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -423,7 +474,7 @@ bool createToastTableForPartition(Oid relOid, Oid partOid, Datum reloptions, LOC
  */
 static bool createToastTableForPartitionedTable(Relation rel, Datum reloptions, LOCKMODE partLockMode)
 {
-    Oid partition = InvalidOid;
+    Oid partitionOid = InvalidOid;
     List* partitionList = NIL;
     ListCell* cell = NULL;
     bool result = false;
@@ -444,8 +495,12 @@ static bool createToastTableForPartitionedTable(Relation rel, Datum reloptions, 
     partitionList = relationGetPartitionOidList(rel);
 
     foreach (cell, partitionList) {
-        partition = DatumGetObjectId(lfirst(cell));
-        result = createToastTableForPartition(rel->rd_id, partition, reloptions, partLockMode);
+        partitionOid = DatumGetObjectId(lfirst(cell));
+        if (RelationIsSubPartitioned(rel)) {
+            result = CreateToastTableForPartitioneOfSubpartTable(rel, partitionOid, reloptions, partLockMode);
+        } else {
+            result = createToastTableForPartition(rel->rd_id, partitionOid, reloptions, partLockMode);
+        }
     }
 
     if (partitionList != NIL) {

@@ -7,6 +7,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -40,6 +41,8 @@
 #include "storage/proc.h"
 #include "storage/smgr/smgr.h"
 #include "storage/tcap.h"
+#include "utils/int8.h"
+#include "utils/int16.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -63,85 +66,46 @@
 
 #endif
 
-/*
- * We don't want to log each fetching of a value from a sequence,
- * so we pre-log a few fetches in advance. In the event of
- * crash we can lose (skip over) as many values as we pre-logged.
- */
-#define SEQ_LOG_VALS 32
-#define GS_NUM_OF_BUCKETS 1024
-
-/*
- * The "special area" of a old version sequence's buffer page looks like this.
- */
-
-/*
- * We store a SeqTable item for every sequence we have touched in the current
- * session.  This is needed to hold onto nextval/currval state.  (We can't
- * rely on the relcache, since it's only, well, a cache, and may decide to
- * discard entries.)
- *
- * XXX We use linear search to find pre-existing SeqTable entries.	This is
- * good when only a small number of sequences are touched in a session, but
- * would suck with many different sequences.  Perhaps use a hashtable someday.
- */
-typedef struct SeqTableData {
-    struct SeqTableData* next; /* link to next SeqTable object */
-    Oid relid;                 /* pg_class OID of this sequence */
-    Oid filenode;              /* last seen relfilenode of this sequence */
-    LocalTransactionId lxid;   /* xact in which we last did a seq op */
-    bool last_valid;           /* do we have a valid "last" value? */
-    bool is_cycled;
-    int64 last;   /* value last returned by nextval */
-    int64 cached; /* last value already cached for nextval */
-    /* if last != cached, we have not used up all the cached values */
-    int64 increment; /* copy of sequence's increment field */
-    /* note that increment is zero until we first do read_seq_tuple() */
-    int64 minval;
-    int64 maxval;
-    int64 startval;
-    int64 uuid;
-} SeqTableData;
-
-typedef SeqTableData* SeqTable;
-
-static void fill_seq_with_data(Relation rel, HeapTuple tuple);
-static int64 nextval_internal(Oid relid);
-static Relation lock_and_open_seq(SeqTable seq);
-static void init_sequence(Oid relid, SeqTable* p_elm, Relation* p_rel);
-static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple seqtuple, GTM_UUID* uuid);
+static int128 nextval_internal(Oid relid);
+template<typename T_Form>
+static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple seqtuple, GTM_UUID* uuid);
+template<typename T_FormData, typename T_Int, bool large>
+static void DefineSequence(CreateSeqStmt* seq);
+template<typename T_Form, typename T_Int, bool large>
+static void AlterSequence(const AlterSeqStmt* stmt);
 #ifdef PGXC
-static void init_params(List* options, bool isInit, bool isUseLocalSeq, Form_pg_sequence newm, List** owned_by,
+template<typename T_Form, typename T_Int, bool large>
+static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
     bool* is_restart, bool* need_seq_rewrite);
 #else
-static void init_params(
-    List* options, bool isInit, bool isUseLocalSeq, Form_pg_sequence newm, List** owned_by, bool* need_seq_rewrite);
+static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
+    bool* need_seq_rewrite);
 #endif
-static void do_setval(Oid relid, int64 next, bool iscalled);
+template<typename T_Form, typename T_Int, bool large>
+static void do_setval(Oid relid, int128 next, bool iscalled);
 static void process_owned_by(const Relation seqrel, List* owned_by);
-static GTM_UUID get_uuid_from_tuple(const Form_pg_sequence seq, const Relation rel, const HeapTuple seqtuple);
+template<typename T_Form>
+static GTM_UUID get_uuid_from_tuple(const void* seq_p, const Relation rel, const HeapTuple seqtuple);
 extern Oid searchSeqidFromExpr(Node* cooked_default);
 extern bool check_contains_tbllike_in_multi_nodegroup(CreateStmt* stmt);
 static int64 get_uuid_from_uuids(List** uuids);
-static uint32 RelidGetHash(Oid seq_relid);
-static SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket);
 static SeqTable InitGlobalSeqElm(Oid relid);
-static SeqTable GetSessSeqElm(Oid relid);
 static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel);
-static int64 GetNextvalLocal(SeqTable elm, Relation seqrel);
-static void ResetvalGlobal(Oid relid);
-static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, int64 minv, int64 fetch,
-    int64 log, int64 incby, int64 rescnt, bool is_cycled, int64 cache, Relation seqrel);
+template<typename T_Int, typename T_Form, bool large>
+static int128 GetNextvalLocal(SeqTable elm, Relation seqrel);
+template<typename T_Int, bool large>
+static T_Int FetchLogLocal(T_Int* next, T_Int* result, T_Int* last, T_Int maxv, T_Int minv, T_Int fetch,
+    T_Int log, T_Int incby, T_Int rescnt, bool is_cycled, T_Int cache, Relation seqrel);
 #ifdef ENABLE_MULTIPLE_NODES
-static void sendUpdateSequenceMsgToDn(char* dbname, char* schemaname, char* seqname, int64 last_value);
+static void sendUpdateSequenceMsgToDn(List* dbname, List* schemaname, List* seqname, List* last_value);
 static void CheckUpdateSequenceMsgStatus(PGXCNodeHandle* exec_handle, const char* seqname, const int64 last_value);
 #endif
-static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel, 
+static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel,
                                     int64 result);
-static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequence seq, HeapTupleData seqtuple, 
+static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequence seq, HeapTupleData seqtuple,
     Buffer buf, int64* rangemax, SeqTable elm, GTM_UUID uuid);
-static char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname);
-
+template<typename T_Int, bool large>
+static char* Int8or16Out(T_Int num);
 /*
  * Sequence concurrent improvements
  *
@@ -152,7 +116,7 @@ static char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** sc
  *		Intro: GaussDB proc share variable that indicates that only current DN is allowed
  *		to connect to GTM.
  */
-#define SEQUENCE_GTM_RETRY_SLEEPING_TIME 10000L
+const long SEQUENCE_GTM_RETRY_SLEEPING_TIME = 10000L;
 static pthread_mutex_t gtm_conn_lock;
 
 /*
@@ -275,7 +239,8 @@ char* gen_hybirdmsg_for_CreateSeqStmt(CreateSeqStmt* stmt, const char* queryStri
 static bool TypenameIsSerial(const char* typname)
 {
     if (strcmp(typname, "smallserial") == 0 || strcmp(typname, "serial2") == 0 || strcmp(typname, "serial") == 0 ||
-        strcmp(typname, "serial4") == 0 || strcmp(typname, "bigserial") == 0 || strcmp(typname, "serial8") == 0)
+        strcmp(typname, "serial4") == 0 || strcmp(typname, "bigserial") == 0 || strcmp(typname, "serial8") == 0 ||
+        strcmp(typname, "largeserial") == 0 || strcmp(typname, "serial16") == 0)
         return true;
 
     return false;
@@ -414,51 +379,29 @@ void InitGlobalSeq()
     }
 }
 
-static uint32 RelidGetHash(Oid seq_relid)
-{
-    return ((uint32)seq_relid % GS_NUM_OF_BUCKETS);
-}
-
-/*
- * Get sequence elem from bucket
- */
-static SeqTable GetGlobalSeqElm(Oid relid, GlobalSeqInfoHashBucket* bucket)
-{
-    DListCell* elem = NULL;
-    SeqTable currseq = NULL;
-    
-    /* Search sequence from bucket . */
-    dlist_foreach_cell(elem, bucket->shb_list)
-    {
-        currseq = (SeqTable)lfirst(elem);
-        if (currseq->relid == relid) {
-            break;
-        }
-    }
-
-    if (elem == NULL) {
-        return NULL;
-    } 
-
-    return currseq;
-}
-
 static SeqTable InitGlobalSeqElm(Oid relid)
 {
     SeqTable elm = NULL;
     elm = (SeqTable)MemoryContextAlloc(
         INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(SeqTableData));
+    errno_t rc = EOK;
+    rc = memset_s(elm, sizeof(SeqTableData), 0, sizeof(SeqTableData));
+    securec_check(rc, "\0", "\0");
     elm->relid = relid;
-    elm->filenode = InvalidOid;
-    elm->lxid = InvalidLocalTransactionId;
-    elm->last_valid = false;
-    elm->last = elm->cached = elm->increment = 0;
-    elm->minval = 0;
-    elm->maxval = 0;
-    elm->startval = 0;
-    elm->uuid = INVALIDSEQUUID;
-
     return elm;
+}
+
+template<typename T_Int, bool large>
+static void AssignInt(T_Int* elem, int128 value)
+{
+    if (large) {
+        int128 holder = (int128)value;
+        errno_t rc = memcpy_s(elem, sizeof(int128), &holder, sizeof(int128));
+        securec_check(rc, "\0", "\0");
+    } else {
+        /* known that it is safe to truncate */
+        *elem = (int64)value;
+    }
 }
 
 static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
@@ -475,7 +418,7 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     int64 fetch;
     int64 last = 0;
     int64 result;
-    int64 sesscache; 
+    int64 sesscache;
     int64 range;
     int64 rangemax;
     uint32 hash = 0;
@@ -485,7 +428,7 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     bucket = &g_instance.global_seq[hash];
 
     (void)LWLockAcquire(GetMainLWLockByIndex(bucket->lock_id), LW_EXCLUSIVE);
-    
+
     elm = GetGlobalSeqElm(sess_elm->relid, bucket);
 
     if (elm == NULL) {
@@ -499,30 +442,30 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     /* If sequence relation is changed */
     if (seqrel->rd_rel->relfilenode != elm->filenode) {
         elm->filenode = seqrel->rd_rel->relfilenode;
-        elm->cached = elm->last;
+        AssignInt<int128, true>(&(elm->cached), elm->last);
     }
-
     /* If sess_elm first apply from global sequence,
      * should update sess_elm infomation
      */
     if (!sess_elm->last_valid) {
-        sess_elm->increment = elm->increment;
-        sess_elm->minval = elm->minval;
-        sess_elm->maxval = elm->maxval;
-        sess_elm->startval = elm->startval;
+        AssignInt<int128, true>(&(sess_elm->increment), (int128)elm->increment);
+        AssignInt<int128, true>(&(sess_elm->minval), (int128)elm->minval);
+        AssignInt<int128, true>(&(sess_elm->maxval), (int128)elm->maxval);
+        AssignInt<int128, true>(&(sess_elm->startval), (int128)elm->startval);
         sess_elm->is_cycled = elm->is_cycled;
         sess_elm->uuid = elm->uuid;
     }
 
     if (elm->last != elm->cached) {
         result = elm->last + elm->increment;
-        sess_elm->last = result;
+        AssignInt<int128, true>(&(sess_elm->last), (int128)result);
         /* if session cache value <= current cached value */
         if (elm->last + sesscache * elm->increment <= elm->cached) {
-            elm->last += sesscache * elm->increment;
-            sess_elm->cached = elm->last;
+            AssignInt<int128, true>(&(elm->last), (int128)(elm->last + sesscache * elm->increment));
+            AssignInt<int128, true>(&(sess_elm->cached), elm->last);
         } else {
-            sess_elm->cached = elm->last = elm->cached;
+            AssignInt<int128, true>(&(elm->last), (int128)elm->cached);
+            AssignInt<int128, true>(&(sess_elm->cached), (int128)elm->last);
         }
         sess_elm->last_valid = true;
         LWLockRelease(GetMainLWLockByIndex(bucket->lock_id)); 
@@ -530,17 +473,17 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     }
 
     /* lock page' buffer and read tuple */
-    seq = read_seq_tuple(elm, seqrel, &buf, &seqtuple, &uuid);
+    seq = read_seq_tuple<Form_pg_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
     /* update session sequcence info */
-    sess_elm->increment = elm->increment;
-    sess_elm->minval = elm->minval;
-    sess_elm->maxval = elm->maxval;
-    sess_elm->startval = elm->startval;
+    AssignInt<int128, true>(&(sess_elm->increment), (int128)elm->increment);
+    AssignInt<int128, true>(&(sess_elm->minval), (int128)elm->minval);
+    AssignInt<int128, true>(&(sess_elm->maxval), (int128)elm->maxval);
+    AssignInt<int128, true>(&(sess_elm->startval), (int128)elm->startval);
     sess_elm->is_cycled = elm->is_cycled;
     sess_elm->uuid = elm->uuid;
 
     page = BufferGetPage(buf);
-    
+
     /*
      * Above, we still use the page as a locking mechanism to handle
      * concurrency
@@ -554,24 +497,26 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     /* Update the on-disk data */
     seq->last_value = result; /* disable the unreliable last_value */
     seq->is_called = true;
-    
+
     if (sesscache < range) {
         int64 tmpcached;
         /* save info in session cache */
-        sess_elm->last = result;
+        AssignInt<int128, true>(&(sess_elm->last), (int128)result);
         tmpcached = result + (sesscache - 1) * sess_elm->increment;
-        sess_elm->cached = (tmpcached <= rangemax) ? tmpcached : rangemax;
+        tmpcached = (tmpcached <= rangemax) ? tmpcached : rangemax;
+        AssignInt<int128, true>(&(sess_elm->cached), (int128)tmpcached);
         sess_elm->last_valid = true; 
         /* save info in global cache */
-        elm->last = sess_elm->cached; 
-        elm->cached = rangemax; /* last fetched number */
+        AssignInt<int128, true>(&(elm->last), (int128)sess_elm->cached);
+        AssignInt<int128, true>(&(elm->cached), (int128)rangemax); /* last fetched number */
     } else {
-        /* save info in session cache */ 
-        sess_elm->last = result;     /* last returned number */
-        sess_elm->cached = rangemax; /* last fetched number */
+        /* save info in session cache */
+        AssignInt<int128, true>(&(sess_elm->last), (int128)result);      /* last returned number */
+        AssignInt<int128, true>(&(sess_elm->cached), (int128)rangemax);  /* last fetched number */
         sess_elm->last_valid = true;
         /* save info in global cache */
-        elm->last = elm->cached = sess_elm->cached;
+        AssignInt<int128, true>(&(elm->cached), (int128)sess_elm->cached);
+        AssignInt<int128, true>(&(elm->last), (int128)elm->cached);
     }
     elm->last_valid = true;
 
@@ -612,37 +557,39 @@ static int64 GetNextvalGlobal(SeqTable sess_elm, Relation seqrel)
     return result;
 }
 
-
-static int64 GetNextvalLocal(SeqTable elm, Relation seqrel)
+template<typename T_Int, typename T_Form, bool large>
+static int128 GetNextvalLocal(SeqTable elm, Relation seqrel)
 {
     Buffer buf;
     Page page;
     HeapTupleData seqtuple;
-    Form_pg_sequence seq;
+    T_Form seq;
     GTM_UUID uuid;
-    int64 incby = 0;
-    int64 maxv = 0;
-    int64 minv = 0;
-    int64 cache;
-    int64 log;
-    int64 fetch;
-    int64 last = 0;
-    int64 result;
-    int64 next = 0;
-    int64 rescnt = 0;
+    T_Int incby = 0;
+    T_Int maxv = 0;
+    T_Int minv = 0;
+    T_Int cache = 0;
+    T_Int log = 0;
+    T_Int fetch = 0;
+    T_Int last = 0;
+    T_Int result;
+    T_Int next = 0;
+    T_Int rescnt = 0;
     bool logit = false;
 
     /* lock page' buffer and read tuple */
-    seq = read_seq_tuple(elm, seqrel, &buf, &seqtuple, &uuid);
+    seq = read_seq_tuple<T_Form>(elm, seqrel, &buf, &seqtuple, &uuid);
     page = BufferGetPage(buf);
 
-    last = next = result = seq->last_value;
-    incby = seq->increment_by;
-    maxv = seq->max_value;
-    minv = seq->min_value;
-
-    fetch = cache = seq->cache_value;
-    log = seq->log_cnt;
+    AssignInt<T_Int, large>(&last, (int128)seq->last_value);
+    AssignInt<T_Int, large>(&next, (int128)seq->last_value);
+    AssignInt<T_Int, large>(&result, (int128)seq->last_value);
+    AssignInt<T_Int, large>(&incby, (int128)seq->increment_by);
+    AssignInt<T_Int, large>(&maxv, (int128)seq->max_value);
+    AssignInt<T_Int, large>(&minv, (int128)seq->min_value);
+    AssignInt<T_Int, large>(&fetch, (int128)seq->cache_value);
+    AssignInt<T_Int, large>(&cache, (int128)seq->cache_value);
+    AssignInt<T_Int, large>(&log, (int128)seq->log_cnt);
 
     if (!seq->is_called) {
         rescnt++; /* return last_value if not is_called */
@@ -663,11 +610,11 @@ static int64 GetNextvalLocal(SeqTable elm, Relation seqrel)
         }
     }
 
-    log = FetchLogLocal(&next, &result, &last, maxv, minv, fetch, log, incby,
+    log = FetchLogLocal<T_Int, large>(&next, &result, &last, maxv, minv, fetch, log, incby,
         rescnt, seq->is_cycled, cache, seqrel);
     /* Save info in local cache for temporary sequences */
-    elm->last = result; /* last returned number */
-    elm->cached = last; /* last fetched number */
+    AssignInt<int128, true>(&(elm->last), (int128)result); /* last returned number */
+    AssignInt<int128, true>(&(elm->cached), (int128)last); /* last fetched number */
     elm->last_valid = true;
 
     /* ready to change the on-disk (or really, in-buffer) tuple */
@@ -687,7 +634,7 @@ static int64 GetNextvalLocal(SeqTable elm, Relation seqrel)
          * sequence values if we crash.
          */
         /* set values that will be saved in xlog */
-        seq->last_value = next;
+        AssignInt<T_Int, large>(&(seq->last_value), (int128)next);
         seq->is_called = true;
         seq->log_cnt = 0;
 
@@ -704,7 +651,7 @@ static int64 GetNextvalLocal(SeqTable elm, Relation seqrel)
     }
 
     /* Now update sequence tuple to the intended final state */
-    seq->last_value = last; /* last fetched number */
+    AssignInt<T_Int, large>(&(seq->last_value), (int128)last); /* last fetched number */
     seq->is_called = true;
     seq->log_cnt = log; /* how much is logged */
 
@@ -715,24 +662,35 @@ static int64 GetNextvalLocal(SeqTable elm, Relation seqrel)
     return result;
 }
 
+template<typename T_Int>
+static bool FetchNOverMaxBound(T_Int maxv, T_Int next, T_Int incby)
+{
+    return (maxv >= 0 && next > maxv - incby) || (maxv < 0 && next + incby > maxv);
+}
+
+template<typename T_Int>
+static bool FetchNOverMinBound(T_Int minv, T_Int next, T_Int incby)
+{
+    return (minv < 0 && next < minv - incby) || (minv >= 0 && next + incby < minv);
+}
+
 /*
  * Try to fetch cache [+ log ] numbers
  */
-static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, int64 minv, int64 fetch,
-    int64 log, int64 incby, int64 rescnt, bool is_cycled, int64 cache, Relation seqrel)
+template<typename T_Int, bool large>
+static T_Int FetchLogLocal(T_Int* next, T_Int* result, T_Int* last, T_Int maxv, T_Int minv, T_Int fetch,
+    T_Int log, T_Int incby, T_Int rescnt, bool is_cycled, T_Int cache, Relation seqrel)
 {
     while (fetch) {
         /* Result has been checked and received from GTM */
         if (incby > 0) {
             /* ascending sequence */
-            if ((maxv >= 0 && *next > maxv - incby) || (maxv < 0 && *next + incby > maxv)) {
-                if (rescnt > 0)
+            if (FetchNOverMaxBound(maxv, *next, incby)) {
+                if (rescnt > 0) {
                     break; /* stop fetching */
+                }
                 if (!is_cycled) {
-                    char tmp_buf[100];
-
-                    errno_t rc = snprintf_s(tmp_buf, sizeof(tmp_buf), sizeof(tmp_buf) - 1, INT64_FORMAT, maxv);
-                    securec_check_ss(rc, "", "");
+                    char* tmp_buf = Int8or16Out<T_Int, large>(maxv);
                     ereport(ERROR,
                         (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("nextval: reached maximum value of sequence \"%s\" (%s)",
@@ -745,14 +703,13 @@ static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, 
             }
         } else {
             /* descending sequence */
-            if ((minv < 0 && *next < minv - incby) || (minv >= 0 && *next + incby < minv)) {
-                if (rescnt > 0)
+            if (FetchNOverMinBound(minv, *next, incby)) {
+                if (rescnt > 0) {
                     break; /* stop fetching */
+                }
                 if (!is_cycled) {
-                    char tmp_buf[100];
-
-                    int iRet = snprintf_s(tmp_buf, sizeof(tmp_buf), sizeof(tmp_buf) - 1, INT64_FORMAT, minv);
-                    securec_check_ss(iRet, "\0", "\0");
+                    char* tmp_buf = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(minv))) :
+                        DatumGetCString(DirectFunctionCall1(int8out, minv));
                     ereport(ERROR,
                         (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
                             errmsg("nextval: reached minimum value of sequence \"%s\" (%s)",
@@ -764,7 +721,7 @@ static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, 
                 *next += incby;
             }
         }
-    
+
         fetch--;
         if (rescnt < cache) {
             log--;
@@ -778,6 +735,13 @@ static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, 
                 *result = *next; /* it's what to return */
             }
         }
+        /*
+         * If cache is set to a large value, it will cycle here for a long time.
+         * So provide a way to break this loop.
+         */
+        if (t_thrd.int_cxt.ProcDiePending || t_thrd.int_cxt.QueryCancelPending) {
+            break;
+        }
     }
     log -= fetch; /* adjust for any unfetched numbers */
     Assert(log >= 0);
@@ -785,13 +749,60 @@ static int64 FetchLogLocal(int64* next, int64* result, int64* last, int64 maxv, 
     return log;
 }
 
+template<typename T, bool large>
+static Datum GetIntDefVal(TypeName* name, T value)
+{
+    if (large) {
+        *name = makeTypeNameFromOid(INT16OID, -1);
+        return Int128GetDatum(value);
+    } else {
+        *name = makeTypeNameFromOid(INT8OID, -1);
+        return Int64GetDatumFast(value);
+    }
+}
+
+void DefineSequenceWrapper(CreateSeqStmt* seq)
+{
+    if (seq->is_large) {
+        DefineSequence<FormData_pg_large_sequence, int128, true>(seq);
+    } else {
+        DefineSequence<FormData_pg_sequence, int64, false>(seq);
+    }
+}
+
+template<typename T_Int, bool large>
+static Datum Int8or16GetDatum(T_Int value)
+{
+    if (large) {
+        return Int128GetDatum(value);
+    } else {
+        return Int64GetDatumFast(value);
+    }
+}
+
+template<typename T_FormData>
+static int CreateSequenceWithUUIDGTMWrapper(T_FormData newm, int64 uuid);
+
+template<>
+int CreateSequenceWithUUIDGTMWrapper(FormData_pg_sequence newm, int64 uuid)
+{
+    return CreateSequenceWithUUIDGTM(newm, uuid);
+}
+
+template<>
+int CreateSequenceWithUUIDGTMWrapper(FormData_pg_large_sequence newm, int64 uuid)
+{
+    return 0; /* large sequence is ignored by distribution logic */
+}
+
 /*
  * DefineSequence
  *				Creates a new sequence relation
  */
-void DefineSequence(CreateSeqStmt* seq)
+template<typename T_FormData, typename T_Int, bool large>
+static void DefineSequence(CreateSeqStmt* seq)
 {
-    FormData_pg_sequence newm;
+    T_FormData newm;
     List* owned_by = NIL;
     CreateStmt* stmt = makeNode(CreateStmt);
     Oid seqoid;
@@ -847,17 +858,29 @@ void DefineSequence(CreateSeqStmt* seq)
         ereport(ERROR,
             (errcode(ERRCODE_DATA_CORRUPTED), errmsg("Invaild UUID for CREATE SEQUENCE %s.", seq->sequence->relname)));
 
-        /* Check and set all option values */
+    /* Check and set all option values */
 #ifdef PGXC
-    init_params(seq->options, true, isUseLocalSeq, &newm, &owned_by, &is_restart, &need_seq_rewrite);
+    if (large) {
+        init_params<Form_pg_large_sequence, int128, true>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
+            &is_restart, &need_seq_rewrite);
+    } else {
+        init_params<Form_pg_sequence, int64, false>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
+            &is_restart, &need_seq_rewrite);
+    }
 #else
-    init_params(seq->options, true, isUseLocalSeq, &newm, &owned_by, &need_seq_rewrite);
+    if (large) {
+        init_params<Form_pg_large_sequence, int128, true>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
+            &need_seq_rewrite);
+    } else {
+        init_params<Form_pg_sequence, int64, false>(seq->options, true, isUseLocalSeq, &newm, &owned_by,
+            &need_seq_rewrite);
+    }
 #endif
-
     /*
      * Create relation (and fill value[] and null[] for the tuple)
      */
     stmt->tableElts = NIL;
+    Oid intTypeOid = large ? INT16OID : INT8OID;
     for (i = SEQ_COL_FIRSTCOL; i <= SEQ_COL_LASTCOL; i++) {
         ColumnDef* coldef = makeNode(ColumnDef);
 
@@ -884,46 +907,46 @@ void DefineSequence(CreateSeqStmt* seq)
                 value[i - 1] = NameGetDatum(&name);
                 break;
             case SEQ_COL_LASTVAL:
-                coldef->typname = makeTypeNameFromOid(INT8OID, -1);
+                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
                 coldef->colname = "last_value";
-                value[i - 1] = Int64GetDatumFast(newm.last_value);
+                value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.last_value);
                 break;
             case SEQ_COL_STARTVAL:
-                coldef->typname = makeTypeNameFromOid(INT8OID, -1);
+                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
                 coldef->colname = "start_value";
-                value[i - 1] = Int64GetDatumFast(newm.start_value);
+                value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.start_value);
 #ifdef PGXC /* PGXC_COORD */
                 start_value = newm.start_value;
 #endif
                 break;
             case SEQ_COL_INCBY:
-                coldef->typname = makeTypeNameFromOid(INT8OID, -1);
+                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
                 coldef->colname = "increment_by";
-                value[i - 1] = Int64GetDatumFast(newm.increment_by);
+                value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.increment_by);
 #ifdef PGXC /* PGXC_COORD */
                 increment = newm.increment_by;
 #endif
                 break;
             case SEQ_COL_MAXVALUE:
-                coldef->typname = makeTypeNameFromOid(INT8OID, -1);
+                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
                 coldef->colname = "max_value";
-                value[i - 1] = Int64GetDatumFast(newm.max_value);
+                value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.max_value);
 #ifdef PGXC /* PGXC_COORD */
                 max_value = newm.max_value;
 #endif
                 break;
             case SEQ_COL_MINVALUE:
-                coldef->typname = makeTypeNameFromOid(INT8OID, -1);
+                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
                 coldef->colname = "min_value";
-                value[i - 1] = Int64GetDatumFast(newm.min_value);
+                value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.min_value);
 #ifdef PGXC /* PGXC_COORD */
                 min_value = newm.min_value;
 #endif
                 break;
             case SEQ_COL_CACHE:
-                coldef->typname = makeTypeNameFromOid(INT8OID, -1);
+                coldef->typname = makeTypeNameFromOid(intTypeOid, -1);
                 coldef->colname = "cache_value";
-                value[i - 1] = Int64GetDatumFast(newm.cache_value);
+                value[i - 1] = Int8or16GetDatum<T_Int, large>(newm.cache_value);
                 break;
             case SEQ_COL_LOG:
                 coldef->typname = makeTypeNameFromOid(INT8OID, -1);
@@ -964,15 +987,15 @@ void DefineSequence(CreateSeqStmt* seq)
     stmt->oncommit = ONCOMMIT_NOOP;
     stmt->tablespacename = NULL;
     stmt->if_not_exists = false;
-
-    seqoid = DefineRelation(stmt, RELKIND_SEQUENCE, seq->ownerId);
+    char rel_kind = large ? RELKIND_LARGE_SEQUENCE : RELKIND_SEQUENCE;
+    seqoid = DefineRelation(stmt, rel_kind, seq->ownerId);
     Assert(seqoid != InvalidOid);
 
     rel = heap_open(seqoid, AccessExclusiveLock);
     tupDesc = RelationGetDescr(rel);
 
     /* now initialize the sequence's data */
-	tuple = (HeapTuple)heap_form_tuple(tupDesc, value, null);
+    tuple = (HeapTuple)heap_form_tuple(tupDesc, value, null);
     fill_seq_with_data(rel, tuple);
 
     /* process OWNED BY if given */
@@ -993,12 +1016,11 @@ void DefineSequence(CreateSeqStmt* seq)
         int seqerrcode = ERRCODE_SQL_STATEMENT_NOT_YET_COMPLETE;
 
         /* We also need to create it on the GTM */
-        if ((status = CreateSequenceWithUUIDGTM(newm, seq->uuid)) < 0) {
+        if ((status = CreateSequenceWithUUIDGTMWrapper<T_FormData>(newm, seq->uuid)) < 0) {
             if (status == GTM_RESULT_COMM_ERROR)
                 seqerrcode = ERRCODE_CONNECTION_FAILURE;
             ereport(ERROR, (errcode(seqerrcode), errmsg("GTM error, could not create sequence")));
         }
-
         /* Define a callback to drop sequence on GTM in case transaction fails  */
         register_sequence_cb(seq->uuid, GTM_CREATE_SEQ);
     }
@@ -1036,7 +1058,7 @@ void ResetSequence(Oid seq_relid)
      */
     init_sequence(seq_relid, &elm, &seq_rel);
     GTM_UUID uuid;
-    (void)read_seq_tuple(elm, seq_rel, &buf, &seqtuple, &uuid);
+    (void)read_seq_tuple<Form_pg_sequence>(elm, seq_rel, &buf, &seqtuple, &uuid);
 
     /*
      * Copy the existing sequence tuple.
@@ -1068,106 +1090,18 @@ void ResetSequence(Oid seq_relid)
 
     /* Clear local cache so that we don't think we have cached numbers */
     /* Note that we do not change the currval() state */
-    elm->cached = elm->last;
+    AssignInt<int128, true>(&(elm->cached), elm->last);
 
     relation_close(seq_rel, NoLock);
 }
 
-/*
- * Initialize a sequence's relation with the specified tuple as content
- */
-static void fill_seq_with_data(Relation rel, HeapTuple tuple)
+void AlterSequenceWrapper(AlterSeqStmt* stmt)
 {
-    Buffer buf;
-    Page page;
-    sequence_magic* sm = NULL;
-    HeapPageHeader phdr;
-
-    /* Initialize first page of relation with special magic number */
-    buf = ReadBuffer(rel, P_NEW);
-    Assert(BufferGetBlockNumber(buf) == 0);
-
-    page = BufferGetPage(buf);
-
-    PageInit(page, BufferGetPageSize(buf), sizeof(sequence_magic), true);
-    sm = (sequence_magic*)PageGetSpecialPointer(page);
-    sm->magic = SEQ_MAGIC;
-
-    phdr = (HeapPageHeader)page;
-    phdr->pd_xid_base = u_sess->utils_cxt.RecentXmin - FirstNormalTransactionId;
-    phdr->pd_multi_base = 0;
-
-    /* hack: ensure heap_insert will insert on the just-created page */
-    RelationSetTargetBlock(rel, 0);
-
-    /* Now insert sequence tuple */
-    (void)simple_heap_insert(rel, tuple);
-
-    Assert(ItemPointerGetOffsetNumber(&(tuple->t_self)) == FirstOffsetNumber);
-
-    /*
-     * Two special hacks here:
-     *
-     * 1. Since VACUUM does not process sequences, we have to force the tuple
-     * to have xmin = FrozenTransactionId now.	Otherwise it would become
-     * invisible to SELECTs after 2G transactions.	It is okay to do this
-     * because if the current transaction aborts, no other xact will ever
-     * examine the sequence tuple anyway.
-     *
-     * 2. Even though heap_insert emitted a WAL log record, we have to emit an
-     * XLOG_SEQ_LOG record too, since (a) the heap_insert record will not have
-     * the right xmin, and (b) REDO of the heap_insert record would re-init
-     * page and sequence magic number would be lost.  This means two log
-     * records instead of one :-(
-     */
-    LockBuffer(buf, BUFFER_LOCK_EXCLUSIVE);
-
-    START_CRIT_SECTION();
-
-    {
-        /*
-         * Note that the "tuple" structure is still just a local tuple record
-         * created by heap_form_tuple; its t_data pointer doesn't point at the
-         * disk buffer.  To scribble on the disk buffer we need to fetch the
-         * item pointer.  But do the same to the local tuple, since that will
-         * be the source for the WAL log record, below.
-         */
-        ItemId itemId;
-        Item item;
-
-        itemId = PageGetItemId((Page)page, FirstOffsetNumber);
-        item = PageGetItem((Page)page, itemId);
-
-        HeapTupleHeaderSetXmin(page, (HeapTupleHeader)item, FrozenTransactionId);
-        HeapTupleHeaderSetXminFrozen((HeapTupleHeader)item);
-
-        HeapTupleHeaderSetXmin(page, tuple->t_data, FrozenTransactionId);
-        HeapTupleHeaderSetXminFrozen(tuple->t_data);
+    if (stmt->is_large) {
+        AlterSequence<Form_pg_large_sequence, int128, true>(stmt);
+    } else {
+        AlterSequence<Form_pg_sequence, int64, false>(stmt);
     }
-
-    MarkBufferDirty(buf);
-
-    /* XLOG stuff */
-    if (RelationNeedsWAL(rel)) {
-        xl_seq_rec xlrec;
-        XLogRecPtr recptr;
-        tuple->t_data->t_ctid = tuple->t_self;
-        RelFileNodeRelCopy(xlrec.node, rel->rd_node);
-
-        XLogBeginInsert();
-        XLogRegisterBuffer(0, buf, REGBUF_WILL_INIT);
-
-        XLogRegisterData((char*)&xlrec, sizeof(xl_seq_rec));
-        XLogRegisterData((char*)tuple->t_data, tuple->t_len);
-
-        recptr = XLogInsert(RM_SEQ_ID, XLOG_SEQ_LOG, false, rel->rd_node.bucketNode);
-
-        PageSetLSN(page, recptr);
-    }
-
-    END_CRIT_SECTION();
-
-    UnlockReleaseBuffer(buf);
 }
 
 /*
@@ -1177,7 +1111,8 @@ static void fill_seq_with_data(Relation rel, HeapTuple tuple)
  * For now we only support alter sequence owned_by, owner and maxvalue.
  * Alter sequence maxvalue needs update info in GTM.
  */
-void AlterSequence(AlterSeqStmt* stmt)
+template<typename T_Form, typename T_Int, bool large>
+static void AlterSequence(const AlterSeqStmt* stmt)
 {
     Oid relid;
     SeqTable elm = NULL;
@@ -1185,14 +1120,14 @@ void AlterSequence(AlterSeqStmt* stmt)
     Buffer buf;
     HeapTupleData seqtuple;
     HeapTuple tuple = NULL;
-    Form_pg_sequence newm = NULL;
+    T_Form newm = NULL;
     List* owned_by = NIL;
     bool isUseLocalSeq = false;
 #ifdef PGXC
     bool is_restart = false;
 #endif
     bool need_seq_rewrite = false;
-    
+
     /* Open and lock sequence. */
     relid = RangeVarGetRelid(stmt->sequence, ShareRowExclusiveLock, stmt->missing_ok);
     if (relid == InvalidOid) {
@@ -1203,6 +1138,16 @@ void AlterSequence(AlterSeqStmt* stmt)
     TrForbidAccessRbObject(RelationRelationId, relid, stmt->sequence->relname);
 
     init_sequence(relid, &elm, &seqrel);
+    char relkind = RelationGetRelkind(seqrel);
+    if (large && relkind == RELKIND_SEQUENCE) {
+        ereport(ERROR, (
+            errcode(ERRCODE_WRONG_OBJECT_TYPE),
+            errmsg("%s is not a large sequence, please use ALTER SEQUENCE instead.", stmt->sequence->relname)));
+    } else if (!large && relkind == RELKIND_LARGE_SEQUENCE) {
+        ereport(ERROR, (
+            errcode(ERRCODE_WRONG_OBJECT_TYPE),
+            errmsg("%s is not a sequence, please use ALTER LARGE SEQUENCE instead.", stmt->sequence->relname)));
+    }
 
     /* Must be owner or have alter privilege of the sequence. */
     AclResult aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_ALTER);
@@ -1215,21 +1160,22 @@ void AlterSequence(AlterSeqStmt* stmt)
 
     /* lock page' buffer and read tuple into new sequence structure */
     GTM_UUID uuid;
-    (void)read_seq_tuple(elm, seqrel, &buf, &seqtuple, &uuid);
+    (void)read_seq_tuple<T_Form>(elm, seqrel, &buf, &seqtuple, &uuid);
 
     /* Copy the existing sequence tuple. */
     tuple = (HeapTuple)tableam_tops_copy_tuple(&seqtuple);
     UnlockReleaseBuffer(buf);
 
-    newm = (Form_pg_sequence)GETSTRUCT(tuple);
+    newm = (T_Form)GETSTRUCT(tuple);
 
     /* Check and set new values */
 #ifdef PGXC
-    init_params(stmt->options, false, isUseLocalSeq, newm, &owned_by, &is_restart, &need_seq_rewrite);
+    init_params<T_Form, T_Int, large>(stmt->options, false, isUseLocalSeq, newm, &owned_by,
+        &is_restart, &need_seq_rewrite);
 #else
-    init_params(stmt->options, false, isUseLocalSeq, newm, &owned_by, &need_seq_rewrite);
+    init_params<T_Form, T_Int, large>(stmt->options, false, isUseLocalSeq, newm, &owned_by,
+        &need_seq_rewrite);
 #endif
-
 #ifdef PGXC /* PGXC_COORD */
     /*
      * Remote Coordinator is in charge of alter sequence in GTM.
@@ -1243,14 +1189,14 @@ void AlterSequence(AlterSeqStmt* stmt)
         int seqerrcode = ERRCODE_SQL_STATEMENT_NOT_YET_COMPLETE;
 
         /* We also need to alter sequence on the GTM */
-        if ((status = AlterSequenceGTM(newm->uuid,
-                 newm->increment_by,
-                 newm->min_value,
-                 newm->max_value,
-                 newm->start_value,
-                 newm->last_value,
-                 newm->is_cycled,
-                 is_restart)) < 0) {
+        if ((status = AlterSequenceGTM((int64)newm->uuid,
+                                       (int64)newm->increment_by,
+                                       (int64)newm->min_value,
+                                       (int64)newm->max_value,
+                                       (int64)newm->start_value,
+                                       (int64)newm->last_value,
+                                       newm->is_cycled,
+                                       is_restart)) < 0) {
             if (status == GTM_RESULT_COMM_ERROR) {
                 seqerrcode = ERRCODE_CONNECTION_FAILURE;
             }
@@ -1261,12 +1207,12 @@ void AlterSequence(AlterSeqStmt* stmt)
 
     /* Clear local cache so that we don't think we have cached numbers */
     /* Note that we do not change the currval() state */
-    elm->cached = elm->last;
+    AssignInt<int128, true>(&(elm->cached), (int128)elm->last);
 
     if (!isUseLocalSeq) {
         ResetvalGlobal(relid);
     }
-    
+
     /* If needed, rewrite the sequence relation itself */
     if (need_seq_rewrite) {
         /*
@@ -1342,22 +1288,25 @@ Datum nextval_oid(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
 
-    PG_RETURN_INT64(nextval_internal(relid));
+    int128 result = nextval_internal(relid);
+
+    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
 }
 
-static int64 nextval_internal(Oid relid)
+static int128 nextval_internal(Oid relid)
 {
     SeqTable elm = NULL;
-    Relation seqrel;   
-    int64 result;
+    Relation seqrel;
+    int128 result;
     bool is_use_local_seq = false;
-	
+
     if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
         ereport(ERROR, (errmsg("Standby do not support nextval, please do it in primary!")));
     }
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
+    char relkind = RelationGetRelkind(seqrel);
 
     TrForbidAccessRbObject(RelationRelationId, relid, RelationGetRelationName(seqrel));
 
@@ -1377,14 +1326,19 @@ static int64 nextval_internal(Oid relid)
         Assert(elm->last_valid);
         Assert(elm->increment != 0);
         elm->last += elm->increment;
+        char* buf_last = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(elm->last)));
+        char* buf_cached = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(elm->cached)));
 
         ereport(DEBUG2,
             (errmodule(MOD_SEQ),
-                (errmsg("Sequence %s retrun ID %ld from cache, the cached is %ld, ",
+                (errmsg("Sequence %s retrun ID %s from cache, the cached is %s, ",
                     RelationGetRelationName(seqrel),
-                    elm->last,
-                    elm->cached))));
-        
+                    buf_last,
+                    buf_cached))));
+
+        pfree_ext(buf_last);
+        pfree_ext(buf_cached);
+
         relation_close(seqrel, NoLock);
         u_sess->cmd_cxt.last_used_seq = elm;
         return elm->last;
@@ -1394,14 +1348,20 @@ static int64 nextval_internal(Oid relid)
     if (!is_use_local_seq) {
         result = GetNextvalGlobal(elm, seqrel);
     } else {
-        result = GetNextvalLocal(elm, seqrel);
+        if (relkind == RELKIND_SEQUENCE) {
+            result = GetNextvalLocal<int64, Form_pg_sequence, false>(elm, seqrel);
+        } else { /* can only be large sequence. init_sequence rules out other cases */
+            result = GetNextvalLocal<int128, Form_pg_large_sequence, true>(elm, seqrel);
+        }
     }
 
     u_sess->cmd_cxt.last_used_seq = elm;
+    char* buf = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(result)));
     ereport(DEBUG2,
         (errmodule(MOD_SEQ),
-            (errmsg("Sequence %s retrun ID from nextval %ld, ", RelationGetRelationName(seqrel), result))));
-    
+            (errmsg("Sequence %s retrun ID from nextval %s, ", RelationGetRelationName(seqrel), buf))));
+    pfree_ext(buf);
+
     relation_close(seqrel, NoLock);
 
     return result;
@@ -1410,7 +1370,7 @@ static int64 nextval_internal(Oid relid)
 Datum currval_oid(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
-    int64 result;
+    int128 result;
     SeqTable elm = NULL;
     Relation seqrel;
 
@@ -1438,15 +1398,15 @@ Datum currval_oid(PG_FUNCTION_ARGS)
     result = elm->last;
     relation_close(seqrel, NoLock);
 
-    PG_RETURN_INT64(result);
+    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
 }
 
 Datum lastval(PG_FUNCTION_ARGS)
 {
     Relation seqrel;
-    int64 result;
+    int128 result;
 
-    if (!IS_SINGLE_NODE && !g_instance.attr.attr_common.lastval_supported && 
+    if (!IS_SINGLE_NODE && !g_instance.attr.attr_common.lastval_supported &&
         !u_sess->attr.attr_common.enable_beta_features) {
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("lastval function is not supported")));
     }
@@ -1474,7 +1434,7 @@ Datum lastval(PG_FUNCTION_ARGS)
     result = u_sess->cmd_cxt.last_used_seq->last;
     relation_close(seqrel, NoLock);
 
-    PG_RETURN_INT64(result);
+    PG_RETURN_NUMERIC(convert_int128_to_numeric(result, 0));
 }
 
 /*
@@ -1490,14 +1450,14 @@ Datum lastval(PG_FUNCTION_ARGS)
  * it is the only way to clear the is_called flag in an existing
  * sequence.
  */
-static void do_setval(Oid relid, int64 next, bool iscalled)
+template<typename T_Form, typename T_Int, bool large>
+static void do_setval(Oid relid, int128 next, bool iscalled)
 {
     SeqTable elm = NULL;
     Relation seqrel;
     Buffer buf;
     HeapTupleData seqtuple;
-    Form_pg_sequence seq;
-    int rc = 0;
+    T_Form seq;
     bool isUseLocalSeq = false;
 #ifdef PGXC
     bool is_temp = false;
@@ -1528,17 +1488,12 @@ static void do_setval(Oid relid, int64 next, bool iscalled)
 
     /* lock page' buffer and read tuple */
     GTM_UUID uuid;
-    seq = read_seq_tuple(elm, seqrel, &buf, &seqtuple, &uuid);
+    seq = read_seq_tuple<T_Form>(elm, seqrel, &buf, &seqtuple, &uuid);
 
     if ((next < seq->min_value) || (next > seq->max_value)) {
-        char bufv[100], bufm[100], bufx[100];
-
-        rc = snprintf_s(bufv, sizeof(bufv), sizeof(bufv) - 1, INT64_FORMAT, next);
-        securec_check_ss(rc, "\0", "\0");
-        rc = snprintf_s(bufm, sizeof(bufm), sizeof(bufm) - 1, INT64_FORMAT, seq->min_value);
-        securec_check_ss(rc, "\0", "\0");
-        rc = snprintf_s(bufx, sizeof(bufx), sizeof(bufx) - 1, INT64_FORMAT, seq->max_value);
-        securec_check_ss(rc, "\0", "\0");
+        char* bufv = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(next)));
+        char* bufm = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(seq->min_value)));
+        char* bufx = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(seq->max_value)));
         ereport(ERROR,
             (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                 errmsg("setval: value %s is out of bounds for sequence \"%s\" (%s..%s)",
@@ -1546,6 +1501,9 @@ static void do_setval(Oid relid, int64 next, bool iscalled)
                     RelationGetRelationName(seqrel),
                     bufm,
                     bufx)));
+        pfree_ext(bufv);
+        pfree_ext(bufm);
+        pfree_ext(bufx);
     }
 
 #ifdef PGXC
@@ -1565,7 +1523,7 @@ static void do_setval(Oid relid, int64 next, bool iscalled)
         seq->is_called = iscalled;
         seq->log_cnt = (iscalled) ? 0 : 1;
 
-        /* Update the global sequence info */  
+        /* Update the global sequence info */
         ResetvalGlobal(relid);
 
         if (iscalled) {
@@ -1573,27 +1531,28 @@ static void do_setval(Oid relid, int64 next, bool iscalled)
             elm->last_valid = true;
         }
 
-        elm->cached = elm->last;
+        AssignInt<int128, true>(&(elm->cached), elm->last);
     } else {
 #endif
 
         /* Set the currval() state only if iscalled = true */
         if (iscalled) {
-            elm->last = next; /* last returned number */
+            AssignInt<int128, true>(&(elm->last), (int128)next); /* last returned number */
             elm->last_valid = true;
         }
 
         /* In any case, forget any future cached numbers */
-        elm->cached = elm->last;
+        AssignInt<int128, true>(&(elm->cached), elm->last);
 
         /* ready to change the on-disk (or really, in-buffer) tuple */
         START_CRIT_SECTION();
 
         /* keep the last value if isUseLocalSeq */
-        if (isUseLocalSeq)
-            seq->last_value = next; /* last fetched number */
-        else
-            seq->last_value = -1; /* disable the unreliable last_value */
+        if (isUseLocalSeq) {
+            AssignInt<T_Int, large>(&(seq->last_value), (T_Int)next); /* last fetched number */
+        } else {
+            AssignInt<T_Int, large>(&(seq->last_value), (T_Int)-1); /* disable the unreliable last_value */
+        }
         seq->is_called = iscalled;
         seq->log_cnt = 0;
 
@@ -1628,38 +1587,26 @@ static void do_setval(Oid relid, int64 next, bool iscalled)
 }
 
 /*
- * If call setval, in any case ,we shoule forget all catched values.
- */ 
-static void ResetvalGlobal(Oid relid)
-{
-    SeqTable elm = NULL;
-    GlobalSeqInfoHashBucket* bucket = NULL;
-    uint32 hash = RelidGetHash(relid);
-
-    bucket = &g_instance.global_seq[hash];
-
-    (void)LWLockAcquire(GetMainLWLockByIndex(bucket->lock_id), LW_EXCLUSIVE);
-
-    elm = GetGlobalSeqElm(relid, bucket);
-    if (elm != NULL) {
-        elm->last = elm->cached;
-    }
-
-    LWLockRelease(GetMainLWLockByIndex(bucket->lock_id));
-}
-
-/*
  * Implement the 2 arg setval procedure.
  * See do_setval for discussion.
  */
 Datum setval_oid(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
-    int64 next = PG_GETARG_INT64(1);
+    Numeric nextArg = PG_GETARG_NUMERIC(1);
+    int128 next = numeric_int16_internal(nextArg);
 
-    do_setval(relid, next, true);
+    Relation rel = relation_open(relid, NoLock);
+    char relkind = RelationGetRelkind(rel);
+    relation_close(rel, NoLock);
 
-    PG_RETURN_INT64(next);
+    if (relkind == RELKIND_SEQUENCE) {
+        do_setval<Form_pg_sequence, int64, false>(relid, next, true);
+    } else if (relkind == RELKIND_LARGE_SEQUENCE) {
+        do_setval<Form_pg_large_sequence, int128, true>(relid, next, true);
+    }
+
+    PG_RETURN_NUMERIC(nextArg);
 }
 
 /*
@@ -1669,137 +1616,21 @@ Datum setval_oid(PG_FUNCTION_ARGS)
 Datum setval3_oid(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
-    int64 next = PG_GETARG_INT64(1);
+    Numeric nextArg = PG_GETARG_NUMERIC(1);
+    int128 next = numeric_int16_internal(nextArg);
     bool iscalled = PG_GETARG_BOOL(2);
 
-    do_setval(relid, next, iscalled);
+    Relation rel = relation_open(relid, NoLock);
+    char relkind = RelationGetRelkind(rel);
+    relation_close(rel, NoLock);
 
-    PG_RETURN_INT64(next);
-}
-
-/*
- * Open the sequence and acquire RowExclusiveLock if needed
- *
- * If we haven't touched the sequence already in this transaction,
- * we need to acquire a lock.	We arrange for the lock to
- * be owned by the top transaction, so that we don't need to do it
- * more than once per xact.
- */
-static Relation lock_and_open_seq(SeqTable seq)
-{
-    LocalTransactionId thislxid = t_thrd.proc->lxid;
-
-    /* Get the lock if not already held in this xact */
-    if (seq->lxid != thislxid) {
-        ResourceOwner currentOwner;
-
-        currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
-        PG_TRY();
-        {
-            t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
-            LockRelationOid(seq->relid, RowExclusiveLock);
-        }
-        PG_CATCH();
-        {
-            /* Ensure CurrentResourceOwner is restored on error */
-            t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
-            PG_RE_THROW();
-        }
-        PG_END_TRY();
-        t_thrd.utils_cxt.CurrentResourceOwner = currentOwner;
-
-        /* Flag that we have a lock in the current xact */
-        seq->lxid = thislxid;
+    if (relkind == RELKIND_SEQUENCE) {
+        do_setval<Form_pg_sequence, int64, false>(relid, next, iscalled);
+    } else if (relkind == RELKIND_LARGE_SEQUENCE) {
+        do_setval<Form_pg_large_sequence, int128, true>(relid, next, iscalled);
     }
 
-    /* We now know we have the lock, and can safely open the rel */
-    return relation_open(seq->relid, NoLock);
-}
-
-/*
- * Given a relation OID, open and lock the sequence.  p_elm and p_rel are
- * output parameters.
- */
-static void init_sequence(Oid relid, SeqTable* p_elm, Relation* p_rel)
-{
-    SeqTable elm = NULL;
-    Relation seqrel;
-
-    elm = GetSessSeqElm(relid);
-
-    /*
-     * Open the sequence relation.
-     */
-    seqrel = lock_and_open_seq(elm);
-
-    if (seqrel->rd_rel->relkind != RELKIND_SEQUENCE) {
-        Oid nspoid = RelationGetNamespace(seqrel);
-
-        if (seqrel->rd_rel->relpersistence == RELPERSISTENCE_TEMP) {
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("\"%s.%s\" is not a sequence", get_namespace_name(nspoid), RelationGetRelationName(seqrel)),
-                    errdetail("Please make sure using the correct schema")));
-        } else {
-            ereport(ERROR,
-                (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg(
-                        "\"%s.%s\" is not a sequence", get_namespace_name(nspoid), RelationGetRelationName(seqrel))));
-        }
-    }
-    /*
-     * If the sequence has been transactionally replaced since we last saw it,
-     * discard any cached-but-unissued values.	We do not touch the currval()
-     * state, however.
-     */
-    if (seqrel->rd_rel->relfilenode != elm->filenode) {
-        elm->filenode = seqrel->rd_rel->relfilenode;
-        elm->cached = elm->last;
-    }
-
-    /* Return results */
-    *p_elm = elm;
-    *p_rel = seqrel;
-}
-
-static SeqTable GetSessSeqElm(Oid relid)
-{
-    SeqTable elm = NULL;
-    /* Look to see if we already have a seqtable entry for relation */
-    for (elm = u_sess->cmd_cxt.seqtab; elm != NULL; elm = elm->next) {
-        if (elm->relid == relid)
-            break;
-    }
-
-    /*
-    * Allocate new seqtable entry if we didn't find one.
-    *
-    * NOTE: seqtable entries remain in the list for the life of a backend. If
-    * the sequence itself is deleted then the entry becomes wasted memory,
-    * but it's small enough that this should not matter.
-    */
-    if (elm == NULL) {
-        /*
-        * Time to make a new seqtable entry.  These entries live as long as
-        * the backend does, so we use plain malloc for them.
-        */
-        elm = (SeqTable)MemoryContextAlloc(
-            SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(SeqTableData));
-        elm->relid = relid;
-        elm->filenode = InvalidOid;
-        elm->lxid = InvalidLocalTransactionId;
-        elm->last_valid = false;
-        elm->last = elm->cached = elm->increment = 0;
-        elm->minval = 0;
-        elm->maxval = 0;
-        elm->startval = 0;
-        elm->uuid = INVALIDSEQUUID;
-        
-        elm->next = u_sess->cmd_cxt.seqtab;
-        u_sess->cmd_cxt.seqtab = elm;
-    }
-
-    return elm;
+    PG_RETURN_NUMERIC(nextArg);
 }
 
 /* lock sequence on cn when "select nextval" */
@@ -1826,7 +1657,7 @@ GTM_UUID get_uuid_from_rel(Relation rel)
     SeqTableData elm;
     HeapTupleData seqtuple;
     GTM_UUID uuid;
-    (void)read_seq_tuple(&elm, rel, &buf, &seqtuple, &uuid);
+    (void)read_seq_tuple<Form_pg_sequence>(&elm, rel, &buf, &seqtuple, &uuid);
 
     /* Now we're done with the old page */
     UnlockReleaseBuffer(buf);
@@ -1834,8 +1665,10 @@ GTM_UUID get_uuid_from_rel(Relation rel)
     return uuid;
 }
 
-static GTM_UUID get_uuid_from_tuple(const Form_pg_sequence seq, const Relation rel, const HeapTuple seqtuple)
+template<typename T_Form>
+static GTM_UUID get_uuid_from_tuple(const void* seq_p, const Relation rel, const HeapTuple seqtuple)
 {
+    T_Form seq = (T_Form)seq_p;
     bool isnull = true;
     GTM_UUID uuid;
     unsigned int natts = rel->rd_att->natts;
@@ -1868,11 +1701,12 @@ static GTM_UUID get_uuid_from_tuple(const Form_pg_sequence seq, const Relation r
  *
  * Function's return value points to the data payload of the tuple
  */
-static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple seqtuple, GTM_UUID* uuid)
+template<typename T_Form>
+static T_Form read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, HeapTuple seqtuple, GTM_UUID* uuid)
 {
     Page page;
     ItemId lp;
-    Form_pg_sequence seq;
+    T_Form seq;
     sequence_magic* sm = NULL;
 
     *buf = ReadBuffer(rel, 0);
@@ -1904,7 +1738,6 @@ static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, 
      * bit update, ie, don't bother to WAL-log it, since we can certainly do
      * this again if the update gets lost.
      */
-    Assert(!(seqtuple->t_data->t_infomask & HEAP_XMAX_IS_MULTI));
     if (HeapTupleGetRawXmax(seqtuple) != InvalidTransactionId) {
         HeapTupleSetXmax(seqtuple, InvalidTransactionId);
         seqtuple->t_data->t_infomask &= ~HEAP_XMAX_COMMITTED;
@@ -1912,45 +1745,273 @@ static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, 
         MarkBufferDirtyHint(*buf, true);
     }
 
-    seq = (Form_pg_sequence)GETSTRUCT(seqtuple);
+    seq = (T_Form)GETSTRUCT(seqtuple);
 
     /* this is a handy place to update our copy of the increment */
-    elm->increment = seq->increment_by;
-    elm->minval = seq->min_value;
-    elm->maxval = seq->max_value;
-    elm->startval = seq->start_value;
+    AssignInt<int128, true>(&(elm->increment), (int128)seq->increment_by);
+    AssignInt<int128, true>(&(elm->minval), (int128)seq->min_value);
+    AssignInt<int128, true>(&(elm->maxval), (int128)seq->max_value);
+    AssignInt<int128, true>(&(elm->startval), (int128)seq->start_value);
     elm->is_cycled = seq->is_cycled;
-
-    elm->uuid = *uuid = get_uuid_from_tuple(seq, rel, seqtuple);
+    elm->uuid = *uuid = get_uuid_from_tuple<T_Form>((void*)seq, rel, seqtuple);
 
     return seq;
 }
 
-static void check_value_min_max(int64 value, int64 min_value, int64 max_value)
+template<typename T_Int, bool large>
+static void check_value_min_max(T_Int value, T_Int min_value, T_Int max_value)
 {
-    int err_rc = 0;
+    char* bufs = NULL;
+    char* bufm = NULL;
     /* crosscheck RESTART (or current value, if changing MIN/MAX) */
     if (value < min_value) {
-        char bufs[100], bufm[100];
-
-        err_rc = snprintf_s(bufs, sizeof(bufs), sizeof(bufs) - 1, INT64_FORMAT, value);
-        securec_check_ss(err_rc, "\0", "\0");
-        err_rc = snprintf_s(bufm, sizeof(bufm), sizeof(bufm) - 1, INT64_FORMAT, min_value);
-        securec_check_ss(err_rc, "\0", "\0");
+        bufs = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(value))) :
+            DatumGetCString(DirectFunctionCall1(int8out, value));
+        bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(min_value))) :
+            DatumGetCString(DirectFunctionCall1(int8out, min_value));
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("RESTART value (%s) cannot be less than MINVALUE (%s)", bufs, bufm)));
     }
     if (value > max_value) {
-        char bufs[100], bufm[100];
-
-        err_rc = snprintf_s(bufs, sizeof(bufs), sizeof(bufs) - 1, INT64_FORMAT, value);
-        securec_check_ss(err_rc, "\0", "\0");
-        err_rc = snprintf_s(bufm, sizeof(bufm), sizeof(bufm) - 1, INT64_FORMAT, max_value);
-        securec_check_ss(err_rc, "\0", "\0");
+        bufs = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(value))) :
+            DatumGetCString(DirectFunctionCall1(int8out, value));
+        bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(max_value))) :
+            DatumGetCString(DirectFunctionCall1(int8out, max_value));
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("RESTART value (%s) cannot be greater than MAXVALUE (%s)", bufs, bufm)));
+    }
+}
+
+template<typename T_Int, bool large>
+static T_Int defGetInt(DefElem* def)
+{
+    if (def->arg == NULL)
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s requires a numeric value", def->defname)));
+    switch (nodeTag(def->arg)) {
+        case T_Integer:
+            return (T_Int)intVal(def->arg);
+        case T_Float:
+            /*
+             * Values too large for int4 will be represented as Float
+             * constants by the lexer.	Accept these if they are valid int8 or int16
+             * strings.
+             */
+            if (large) {
+                return DatumGetInt128(DirectFunctionCall1(int16in, CStringGetDatum(strVal(def->arg))));
+            } else {
+                return DatumGetInt64(DirectFunctionCall1(int8in, CStringGetDatum(strVal(def->arg))));
+            }
+        default:
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s requires a numeric value", def->defname)));
+    }
+    return 0; /* keep compiler quiet */
+}
+
+enum {
+    DEF_IDX_START_VALUE,
+    DEF_IDX_RESTART_VALUE,
+    DEF_IDX_INCREMENT_BY,
+    DEF_IDX_MAX_VALUE,
+    DEF_IDX_MIN_VALUE,
+    DEF_IDX_CACHE_VALUE,
+    DEF_IDX_IS_CYCLED,
+    DEF_IDX_NUM
+};
+
+static void CheckDuplicateDef(const void* elm)
+{
+    if (elm != NULL) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+    }
+}
+
+static void PreProcessSequenceOptions(
+    List* options, DefElem* elms[DEF_IDX_NUM], List** owned_by, bool* need_seq_rewrite, bool isInit)
+{
+    ListCell* option = NULL;
+
+    foreach (option, options) {
+        DefElem* defel = (DefElem*)lfirst(option);
+
+        /* Now we only support ALTER SEQUENCE OWNED BY and MAXVALUE to support upgrade. */
+        if (!isInit) {
+            /* isInit is true for DefineSequence, false for AlterSequence, we use it
+             * to differentiate them
+             */
+            bool isDefOwnedAndMaxValue =
+                strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0;
+#ifndef ENABLE_MULTIPLE_NODES
+            isDefOwnedAndMaxValue = isDefOwnedAndMaxValue && strcmp(defel->defname, "cache") != 0;
+#endif
+            if (isDefOwnedAndMaxValue) {
+                ereport(
+                    ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ALTER SEQUENCE is not yet supported.")));
+            }
+        }
+
+        if (strcmp(defel->defname, "increment") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_INCREMENT_BY]);
+            elms[DEF_IDX_INCREMENT_BY] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "start") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_START_VALUE]);
+            elms[DEF_IDX_START_VALUE] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "restart") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_RESTART_VALUE]);
+            elms[DEF_IDX_RESTART_VALUE] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "maxvalue") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_MAX_VALUE]);
+            elms[DEF_IDX_MAX_VALUE] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "minvalue") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_MIN_VALUE]);
+            elms[DEF_IDX_MIN_VALUE] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "cache") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_CACHE_VALUE]);
+            elms[DEF_IDX_CACHE_VALUE] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "cycle") == 0) {
+            CheckDuplicateDef(elms[DEF_IDX_IS_CYCLED]);
+            elms[DEF_IDX_IS_CYCLED] = defel;
+            *need_seq_rewrite = true;
+        } else if (strcmp(defel->defname, "owned_by") == 0) {
+            CheckDuplicateDef(*owned_by);
+            *owned_by = defGetQualifiedName(defel);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
+        }
+    }
+}
+
+template<typename T_Form, typename T_Int, bool large>
+static void ProcessSequenceOptIncrementBy(DefElem* elm, T_Form newm, bool isInit)
+{
+    if (elm != NULL) {
+        AssignInt<T_Int, large>(&(newm->increment_by), defGetInt<T_Int, large>(elm));
+        if (newm->increment_by == 0) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("INCREMENT must not be zero")));
+        }
+        newm->log_cnt = 0;
+    } else if (isInit) {
+        AssignInt<T_Int, large>(&(newm->increment_by), (int128)1);
+    }
+}
+
+template<typename T_Form>
+static void ProcessSequenceOptCycle(DefElem* elm, T_Form newm, bool isInit)
+{
+    if (elm != NULL) {
+        newm->is_cycled = intVal(elm->arg);
+        Assert(BoolIsValid(newm->is_cycled));
+        newm->log_cnt = 0;
+    } else if (isInit) {
+        newm->is_cycled = false;
+    }
+}
+
+template<typename T_Form, typename T_Int, bool large>
+static void ProcessSequenceOptMax(DefElem* elm, T_Form newm, bool isInit)
+{
+    if (elm != NULL && elm->arg) {
+        AssignInt<T_Int, large>(&(newm->max_value), defGetInt<T_Int, large>(elm));
+        newm->log_cnt = 0;
+    } else if (isInit || elm != NULL) {
+        if (newm->increment_by > 0) {
+            /* ascending seq */
+            AssignInt<T_Int, large>(&(newm->max_value), large ? LARGE_SEQ_MAXVALUE : SEQ_MAXVALUE);
+        } else {
+            /* descending seq */
+            AssignInt<T_Int, large>(&(newm->max_value), (int128)-1);
+        }
+        newm->log_cnt = 0;
+    }
+}
+
+template<typename T_Form, typename T_Int, bool large>
+static void ProcessSequenceOptMin(DefElem* elm, T_Form newm, bool isInit)
+{
+    if (elm != NULL && elm->arg) {
+        AssignInt<T_Int, large>(&(newm->min_value), defGetInt<T_Int, large>(elm));
+        newm->log_cnt = 0;
+    } else if (isInit || elm != NULL) {
+        if (newm->increment_by > 0) {
+            /* ascending seq */
+            AssignInt<T_Int, large>(&(newm->min_value), (int128)1);
+        } else {
+            /* descending seq */
+            AssignInt<T_Int, large>(&(newm->min_value), large ? LARGE_SEQ_MINVALUE : SEQ_MINVALUE);
+        }
+        newm->log_cnt = 0;
+    }
+}
+
+template<typename T_Form, typename T_Int, bool large>
+static void ProcessSequenceOptStartWith(DefElem* elm, T_Form newm, bool isInit)
+{
+    if (elm != NULL)
+        AssignInt<T_Int, large>(&(newm->start_value), defGetInt<T_Int, large>(elm));
+    else if (isInit) {
+        AssignInt<T_Int, large>(&(newm->start_value), (newm->increment_by > 0) ? newm->min_value : newm->max_value);
+    }
+}
+
+template<typename T_Form, typename T_Int, bool large>
+static void ProcessSequenceOptReStartWith(DefElem* elm, T_Form newm, bool isInit, bool* is_restart, bool isUseLocalSeq)
+{
+    if (elm != NULL) {
+        AssignInt<T_Int, large>(&(newm->last_value),
+                                (elm->arg != NULL) ? defGetInt<T_Int, large>(elm) : newm->start_value);
+#ifdef PGXC
+        *is_restart = true;
+#endif
+        newm->is_called = false;
+        newm->log_cnt = 0;
+    } else if (isInit) {
+        AssignInt<T_Int, large>(&(newm->last_value), (isUseLocalSeq) ? newm->start_value : (int128)-1);
+        newm->is_called = false;
+    }
+}
+
+template<typename T_Form, typename T_Int, bool large>
+static void ProcessSequenceOptCache(DefElem* elmCache, DefElem* elmMax, DefElem* elmMin, T_Form newm, bool isInit)
+{
+    if (elmCache != NULL) {
+        AssignInt<T_Int, large>(&(newm->cache_value), defGetInt<T_Int, large>(elmCache));
+        if (newm->cache_value <= 0) {
+            char* buf = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(newm->cache_value))) :
+                DatumGetCString(DirectFunctionCall1(int8out, newm->cache_value));
+            ereport(
+                ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("CACHE (%s) must be greater than zero", buf)));
+        } else if (newm->cache_value > 1) {
+            if ((newm->increment_by > 0 && elmMax != NULL && elmMax->arg != NULL) ||
+                (newm->increment_by < 0 && elmMin != NULL && elmMin->arg != NULL))
+                ereport(NOTICE,
+                    (errmsg("Not advised to use MAXVALUE or MINVALUE together with CACHE."),
+                        errdetail("If CACHE is defined, some sequence values may be wasted, causing available sequence "
+                                  "numbers to be less than expected.")));
+        }
+        newm->log_cnt = 0;
+    } else if (isInit) {
+        AssignInt<T_Int, large>(&(newm->cache_value), (int128)1);
+    }
+}
+
+template<typename T_Int, bool large>
+static void CrossCheckMinMax(T_Int min, T_Int max)
+{
+    if (min >= max) {
+        char* bufm = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(min))) :
+            DatumGetCString(DirectFunctionCall1(int8out, min));
+        char* bufx = large ? DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(max))) :
+            DatumGetCString(DirectFunctionCall1(int8out, max));
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("MINVALUE (%s) must be less than MAXVALUE (%s)", bufm, bufx)));
     }
 }
 
@@ -1969,23 +2030,19 @@ static void check_value_min_max(int64 value, int64 min_value, int64 max_value)
  * ALTER SEQUENCE OWNED BY to not rewrite the sequence, because that would
  * break pg_upgrade by causing unwanted changes in the sequence's relfilenode.
  */
+
 #ifdef PGXC
-    static void init_params(List* options, bool isInit, bool isUseLocalSeq, Form_pg_sequence newm, List** owned_by,
-        bool* is_restart, bool* need_seq_rewrite)
+template<typename T_Form, typename T_Int, bool large>
+static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
+    bool* is_restart, bool* need_seq_rewrite)
 #else
-    static void init_params(
-        List* options, bool isInit, bool isUseLocalSeq, Form_pg_sequence newm, List** owned_by, bool* need_seq_rewrite)
+template<typename T_Form, typename T_Int, bool large>
+static void init_params(List* options, bool isInit, bool isUseLocalSeq, void* newm_p, List** owned_by,
+    bool* need_seq_rewrite)
 #endif
 {
-    DefElem* start_value = NULL;
-    DefElem* restart_value = NULL;
-    DefElem* increment_by = NULL;
-    DefElem* max_value = NULL;
-    DefElem* min_value = NULL;
-    DefElem* cache_value = NULL;
-    DefElem* is_cycled = NULL;
-    ListCell* option = NULL;
-    int err_rc = 0;
+    T_Form newm = (T_Form)newm_p;
+    DefElem* elms[DEF_IDX_NUM] = {0};
 
 #ifdef PGXC
     *is_restart = false;
@@ -1993,282 +2050,40 @@ static void check_value_min_max(int64 value, int64 min_value, int64 max_value)
 
     *owned_by = NIL;
 
-    foreach (option, options) {
-        DefElem* defel = (DefElem*)lfirst(option);
-
-        /* Now we only support ALTER SEQUENCE OWNED BY and MAXVALUE to support upgrade. */
-        if (!isInit) {
-            /* isInit is true for DefineSequence, false for AlterSequence, we use it
-             * to differentiate them
-             */
-            bool isDefOwnedAndMaxValue =
-                strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0
-#ifndef ENABLE_MULTIPLE_NODES
-                && strcmp(defel->defname, "cache") != 0;
-#else
-                ;
-#endif
-            if (isDefOwnedAndMaxValue) {
-                ereport(
-                    ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ALTER SEQUENCE is not yet supported.")));
-            }
-        }
-
-        if (strcmp(defel->defname, "increment") == 0) {
-            if (increment_by != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            increment_by = defel;
-            *need_seq_rewrite = true;
-        } else if (strcmp(defel->defname, "start") == 0) {
-            if (start_value != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            start_value = defel;
-            *need_seq_rewrite = true;
-        } else if (strcmp(defel->defname, "restart") == 0) {
-            if (restart_value != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            restart_value = defel;
-            *need_seq_rewrite = true;
-        } else if (strcmp(defel->defname, "maxvalue") == 0) {
-            if (max_value != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            max_value = defel;
-            *need_seq_rewrite = true;
-        } else if (strcmp(defel->defname, "minvalue") == 0) {
-            if (min_value != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            min_value = defel;
-            *need_seq_rewrite = true;
-        } else if (strcmp(defel->defname, "cache") == 0) {
-            if (cache_value != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            cache_value = defel;
-            *need_seq_rewrite = true;
-        } else if (strcmp(defel->defname, "cycle") == 0) {
-            if (is_cycled != NULL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            is_cycled = defel;
-            *need_seq_rewrite = true;
-        } else if (strcmp(defel->defname, "owned_by") == 0) {
-            if (*owned_by != NIL)
-                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
-            *owned_by = defGetQualifiedName(defel);
-        } else {
-            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", defel->defname)));
-        }
-    }
+    PreProcessSequenceOptions(options, elms, owned_by, need_seq_rewrite, isInit);
 
     /*
      * We must reset log_cnt when isInit or when changing any parameters
      * that would affect future nextval allocations.
      */
-    if (isInit)
-        newm->log_cnt = 0;
-
-    /* INCREMENT BY */
-    if (increment_by != NULL) {
-        newm->increment_by = defGetInt64(increment_by);
-        if (newm->increment_by == 0)
-            ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("INCREMENT must not be zero")));
-        newm->log_cnt = 0;
-    } else if (isInit)
-        newm->increment_by = 1;
-
-    /* CYCLE */
-    if (is_cycled != NULL) {
-        newm->is_cycled = intVal(is_cycled->arg);
-        Assert(BoolIsValid(newm->is_cycled));
-        newm->log_cnt = 0;
-    } else if (isInit)
-        newm->is_cycled = false;
-
-    /* MAXVALUE (null arg means NO MAXVALUE) */
-    if (max_value != NULL && max_value->arg) {
-        newm->max_value = defGetInt64(max_value);
-        newm->log_cnt = 0;
-    } else if (isInit || max_value != NULL) {
-        if (newm->increment_by > 0)
-            newm->max_value = SEQ_MAXVALUE; /* ascending seq */
-        else
-            newm->max_value = -1; /* descending seq */
+    if (isInit) {
         newm->log_cnt = 0;
     }
 
-    /* MINVALUE (null arg means NO MINVALUE) */
-    if (min_value != NULL && min_value->arg) {
-        newm->min_value = defGetInt64(min_value);
-        newm->log_cnt = 0;
-    } else if (isInit || min_value != NULL) {
-        if (newm->increment_by > 0)
-            newm->min_value = 1; /* ascending seq */
-        else
-            newm->min_value = SEQ_MINVALUE; /* descending seq */
-        newm->log_cnt = 0;
-    }
+    ProcessSequenceOptIncrementBy<T_Form, T_Int, large>(elms[DEF_IDX_INCREMENT_BY], newm, isInit);
+    ProcessSequenceOptCycle<T_Form>(elms[DEF_IDX_IS_CYCLED], newm, isInit);
+    ProcessSequenceOptMax<T_Form, T_Int, large>(elms[DEF_IDX_MAX_VALUE], newm, isInit);
+    ProcessSequenceOptMin<T_Form, T_Int, large>(elms[DEF_IDX_MIN_VALUE], newm, isInit);
 
     /* crosscheck min/max */
-    if (newm->min_value >= newm->max_value) {
-        char bufm[100], bufx[100];
-        err_rc = snprintf_s(bufm, sizeof(bufm), sizeof(bufm) - 1, INT64_FORMAT, newm->min_value);
-        securec_check_ss(err_rc, "\0", "\0");
-        err_rc = snprintf_s(bufx, sizeof(bufx), sizeof(bufx) - 1, INT64_FORMAT, newm->max_value);
-        securec_check_ss(err_rc, "\0", "\0");
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("MINVALUE (%s) must be less than MAXVALUE (%s)", bufm, bufx)));
-    }
+    CrossCheckMinMax<T_Int, large>(newm->min_value, newm->max_value);
 
-    /* START WITH */
-    if (start_value != NULL)
-        newm->start_value = defGetInt64(start_value);
-    else if (isInit) {
-        newm->start_value = (newm->increment_by > 0) ? newm->min_value : newm->max_value;
-    }
+    ProcessSequenceOptStartWith<T_Form, T_Int, large>(elms[DEF_IDX_START_VALUE], newm, isInit);
 
     /* crosscheck START */
-    check_value_min_max(newm->start_value, newm->min_value, newm->max_value);
+    check_value_min_max<T_Int, large>(newm->start_value, newm->min_value, newm->max_value);
 
-    /* RESTART [WITH] */
-    if (restart_value != NULL) {
-        newm->last_value = (restart_value->arg != NULL) ? defGetInt64(restart_value)
-                                                        : newm->start_value;
-#ifdef PGXC
-        *is_restart = true;
-#endif
-        newm->is_called = false;
-        newm->log_cnt = 0;
-    } else if (isInit) {
-        newm->last_value = (isUseLocalSeq) ? newm->start_value : -1;
-        newm->is_called = false;
-    }
+    ProcessSequenceOptReStartWith<T_Form, T_Int, large>(
+        elms[DEF_IDX_RESTART_VALUE], newm, isInit, is_restart, isUseLocalSeq);
 
     if (isUseLocalSeq) {
         /* crosscheck RESTART (or current value, if changing MIN/MAX) */
-        check_value_min_max(newm->last_value, newm->min_value, newm->max_value);
+        check_value_min_max<T_Int, large>(newm->last_value, newm->min_value, newm->max_value);
     }
 
-    /* CACHE */
-    if (cache_value != NULL) {
-        newm->cache_value = defGetInt64(cache_value);
-        if (newm->cache_value <= 0) {
-            char buf[100];
-
-            err_rc = snprintf_s(buf, sizeof(buf), sizeof(buf) - 1, INT64_FORMAT, newm->cache_value);
-            securec_check_ss(err_rc, "\0", "\0");
-            ereport(
-                ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("CACHE (%s) must be greater than zero", buf)));
-        } else if (newm->cache_value > 1) {
-            if ((newm->increment_by > 0 && max_value != NULL && max_value->arg != NULL) ||
-                (newm->increment_by < 0 && min_value != NULL && min_value->arg != NULL))
-                ereport(NOTICE,
-                    (errmsg("Not advised to use MAXVALUE or MINVALUE together with CACHE."),
-                        errdetail("If CACHE is defined, some sequence values may be wasted, causing available sequence "
-                                  "numbers to be less than expected.")));
-        }
-
-        newm->log_cnt = 0;
-    } else if (isInit)
-        newm->cache_value = 1;
+    ProcessSequenceOptCache<T_Form, T_Int, large>(
+        elms[DEF_IDX_CACHE_VALUE], elms[DEF_IDX_MAX_VALUE], elms[DEF_IDX_MIN_VALUE], newm, isInit);
 }
-
-#ifdef PGXC
-/*
- * GetGlobalSeqName
- *
- * Returns a global sequence name adapted to GTM
- * Name format is dbname.schemaname.seqname
- * so as to identify in a unique way in the whole cluster each sequence
- */
-char* GetGlobalSeqName(Relation seqrel, const char* new_seqname, const char* new_schemaname)
-{
-    char* seqname = NULL;
-    char* dbname = NULL;
-    char* schemaname = NULL;
-    char* relname = NULL;
-    int charlen;
-
-    /* Get all the necessary relation names */
-    dbname = get_database_name(seqrel->rd_node.dbNode);
-    
-    if (dbname == NULL) {
-        ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                        errmsg("cache lookup failed for database %u", seqrel->rd_node.dbNode)));
-    }
-
-    if (new_seqname != NULL)
-        relname = (char*)new_seqname;
-    else
-        relname = RelationGetRelationName(seqrel);
-
-    if (new_schemaname != NULL)
-        schemaname = (char*)new_schemaname;
-    else
-        schemaname = get_namespace_name(RelationGetNamespace(seqrel));
-    
-    if (schemaname == NULL) {
-        ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                        errmsg("cache lookup failed for schema %u", RelationGetNamespace(seqrel))));
-    }
-
-    /* Calculate the global name size including the dots and \0 */
-    charlen = strlen(dbname) + strlen(schemaname) + strlen(relname) + 3;
-    seqname = (char*)palloc(charlen);
-
-    /* Form a unique sequence name with schema and database name for GTM */
-    int ret = snprintf_s(seqname, charlen, charlen - 1, "%s.%s.%s", dbname, schemaname, relname);
-    securec_check_ss(ret, "\0", "\0");
-    pfree_ext(dbname);
-    pfree_ext(schemaname);
-
-    return seqname;
-}
-
-static char* GetGlobalSeqNameForUpdate(Relation seqrel, char** dbname, char** schemaname)
-{
-    char* relname = NULL;
-
-    *dbname = get_database_name(seqrel->rd_node.dbNode);
-    
-    if (*dbname == NULL) {
-        ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                        errmsg("cache lookup failed for database %u", seqrel->rd_node.dbNode)));
-    }
-
-    *schemaname = get_namespace_name(RelationGetNamespace(seqrel));
-    
-    if (*schemaname == NULL) {
-        ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
-                        errmsg("cache lookup failed for schema %u", RelationGetNamespace(seqrel))));
-    }
-
-    relname = RelationGetRelationName(seqrel);
-
-    return relname;
-}
-
-/*
- * IsTempSequence
- *
- * Determine if given sequence is temporary or not.
- */
-bool IsTempSequence(Oid relid)
-{
-    Relation seqrel;
-    bool res = false;
-    SeqTable elm = NULL;
-
-    /* open and lock sequence */
-    init_sequence(relid, &elm, &seqrel);
-
-    res = RelationIsLocalTemp(seqrel);
-    relation_close(seqrel, NoLock);
-    return res;
-}
-#endif
 
 /*
  * Process an OWNED BY option for CREATE/ALTER SEQUENCE
@@ -2374,7 +2189,7 @@ void get_sequence_params(Relation rel, int64* uuid, int64* start, int64* increme
     HeapTupleData seqtuple;
     Form_pg_sequence seq;
 
-    seq = read_seq_tuple(&elm, rel, &buf, &seqtuple, uuid);
+    seq = read_seq_tuple<Form_pg_sequence>(&elm, rel, &buf, &seqtuple, uuid);
 
     *start = seq->start_value;
     *increment = seq->increment_by;
@@ -2393,6 +2208,10 @@ void get_sequence_params(Relation rel, int64* uuid, int64* start, int64* increme
 Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
+    Relation rel = relation_open(relid, NoLock);
+    char relkind = RelationGetRelkind(rel);
+    bool large = relkind == 'L';
+    relation_close(rel, NoLock);
     TupleDesc tupdesc;
     Datum values[5];
     bool isnull[5];
@@ -2400,7 +2219,6 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
     Relation seqrel;
     Buffer buf;
     HeapTupleData seqtuple;
-    Form_pg_sequence seq;
 
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
@@ -2411,10 +2229,10 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
                 errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
 
     tupdesc = CreateTemplateTupleDesc(5, false, TAM_HEAP);
-    TupleDescInitEntry(tupdesc, (AttrNumber)1, "start_value", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)2, "minimum_value", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)3, "maximum_value", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)4, "increment", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "start_value", INT16OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "minimum_value", INT16OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)3, "maximum_value", INT16OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)4, "increment", INT16OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)5, "cycle_option", BOOLOID, -1, 0);
 
     BlessTupleDesc(tupdesc);
@@ -2423,13 +2241,22 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
     securec_check(rc, "\0", "\0");
 
     GTM_UUID uuid;
-    seq = read_seq_tuple(elm, seqrel, &buf, &seqtuple, &uuid);
-
-    values[0] = Int64GetDatum(seq->start_value);
-    values[1] = Int64GetDatum(seq->min_value);
-    values[2] = Int64GetDatum(seq->max_value);
-    values[3] = Int64GetDatum(seq->increment_by);
-    values[4] = BoolGetDatum(seq->is_cycled);
+    int i = 0;
+    if (large) {
+        Form_pg_large_sequence seq = read_seq_tuple<Form_pg_large_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
+        values[i++] = Int128GetDatum(seq->start_value);
+        values[i++] = Int128GetDatum(seq->min_value);
+        values[i++] = Int128GetDatum(seq->max_value);
+        values[i++] = Int128GetDatum(seq->increment_by);
+        values[i++] = BoolGetDatum(seq->is_cycled);
+    } else {
+        Form_pg_sequence seq = read_seq_tuple<Form_pg_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
+        values[i++] = Int128GetDatum((int128)seq->start_value);
+        values[i++] = Int128GetDatum((int128)seq->min_value);
+        values[i++] = Int128GetDatum((int128)seq->max_value);
+        values[i++] = Int128GetDatum((int128)seq->increment_by);
+        values[i++] = BoolGetDatum(seq->is_cycled);
+    }
 
     UnlockReleaseBuffer(buf);
     relation_close(seqrel, NoLock);
@@ -2437,45 +2264,61 @@ Datum pg_sequence_parameters(PG_FUNCTION_ARGS)
     return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, isnull));
 }
 
-void seq_redo(XLogReaderState* record)
+Datum pg_sequence_last_value(PG_FUNCTION_ARGS)
 {
-    uint8 info = XLogRecGetInfo(record) & ~XLR_INFO_MASK;
-    RedoBufferInfo buffer;
-    char* item = NULL;
-    Size itemsz;
-    xl_seq_rec* xlrec = (xl_seq_rec*)XLogRecGetData(record);
+    Oid relid = PG_GETARG_OID(0);
+    Relation rel = relation_open(relid, NoLock);
+    char relkind = RelationGetRelkind(rel);
+    bool large = relkind == 'L';
+    relation_close(rel, NoLock);
+    TupleDesc tupdesc;
+    Datum values[2];
+    bool isnull[2];
+    SeqTable elm = NULL;
+    Relation seqrel;
+    Buffer buf;
+    HeapTupleData seqtuple;
 
-    if (info != XLOG_SEQ_LOG) {
-        elog(PANIC, "seq_redo: unknown op code %u", (uint)info);
+    /* open and lock sequence */
+    init_sequence(relid, &elm, &seqrel);
+
+    if (pg_class_aclcheck(relid, GetUserId(), ACL_SELECT | ACL_UPDATE | ACL_USAGE) != ACLCHECK_OK)
+        ereport(ERROR,
+            (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+                errmsg("permission denied for sequence %s", RelationGetRelationName(seqrel))));
+
+    tupdesc = CreateTemplateTupleDesc(2, false, TAM_HEAP);
+    TupleDescInitEntry(tupdesc, (AttrNumber)1, "cache_value", INT16OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)2, "last_value", INT16OID, -1, 0);
+
+    BlessTupleDesc(tupdesc);
+
+    errno_t rc = memset_s(isnull, sizeof(isnull), 0, sizeof(isnull));
+    securec_check(rc, "\0", "\0");
+
+    GTM_UUID uuid;
+    int i = 0;
+    if (large) {
+        Form_pg_large_sequence seq = read_seq_tuple<Form_pg_large_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
+        values[i++] = Int128GetDatum(seq->cache_value);
+        values[i++] = Int128GetDatum(seq->last_value);
+    } else {
+        Form_pg_sequence seq = read_seq_tuple<Form_pg_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
+        values[i++] = Int128GetDatum((int128)seq->cache_value);
+        values[i++] = Int128GetDatum((int128)seq->last_value);
     }
 
-    XLogInitBufferForRedo(record, 0, &buffer);
+    UnlockReleaseBuffer(buf);
+    relation_close(seqrel, NoLock);
 
-    /*
-     * We must always reinit the page and reinstall the magic number (see
-     * comments in fill_seq_with_data).  However, since this WAL record type
-     * is also used for updating sequences, it's possible that a hot-standby
-     * backend is examining the page concurrently; so we mustn't transiently
-     * trash the buffer.  The solution is to build the correct new page
-     * contents in local workspace and then memcpy into the buffer.  Then only
-     * bytes that are supposed to change will change, even transiently. We
-     * must palloc the local page for alignment reasons.
-     */
-    item = (char*)xlrec + sizeof(xl_seq_rec);
-    itemsz = XLogRecGetDataLen(record) - sizeof(xl_seq_rec);
-
-    seqRedoOperatorPage(&buffer, item, itemsz);
-
-    MarkBufferDirty(buffer.buf);
-    UnlockReleaseBuffer(buffer.buf);
-
+    return HeapTupleGetDatum(heap_form_tuple(tupdesc, values, isnull));
 }
 
 #ifdef PGXC
 
 /*
  * Delete sequence from global hash bucket
- */ 
+ */
 void delete_global_seq(Oid relid, Relation seqrel)
 {
     SeqTable currseq = NULL;
@@ -2486,7 +2329,7 @@ void delete_global_seq(Oid relid, Relation seqrel)
     bucket = &g_instance.global_seq[hash];
 
     (void)LWLockAcquire(GetMainLWLockByIndex(bucket->lock_id), LW_EXCLUSIVE);
-    
+
     dlist_foreach_cell(elem, bucket->shb_list)
     {
         currseq = (SeqTable)lfirst(elem);
@@ -2503,90 +2346,6 @@ void delete_global_seq(Oid relid, Relation seqrel)
             (errmsg("Delete sequence %s .",
                     RelationGetRelationName(seqrel)))));
 }
-
-/*
- * Register a callback for a sequence rename drop on GTM
- * If need to implement rename sequence, this also need to
- * change to hte t_thrd.top_mem_cxt
- */
-void register_sequence_rename_cb(const char* oldseqname, const char* newseqname)
-{
-    rename_sequence_callback_arg* args = NULL;
-    char* oldseqnamearg = NULL;
-    char* newseqnamearg = NULL;
-
-    /* We change the memory from u_sess->top_transaction_mem_cxt to t_thrd.top_mem_cxt,
-     * because we postpone the CallSequenceCallback after CN/DN commit.
-     * not same as CallGTMCallback which is called in PreparedTranscaton phase.
-     * The u_sess->top_transaction_mem_cxt is released, after Prepared finished.
-     * If CallSequenceCallback is called in Prepared Phase, it will be
-     * difficult to rollback if the transaction is abort after prepared.
-     */
-    args = (rename_sequence_callback_arg*)MemoryContextAlloc(
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), sizeof(rename_sequence_callback_arg));
-
-    oldseqnamearg = (char*)MemoryContextAlloc(
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), strlen(oldseqname) + 1);
-    newseqnamearg = (char*)MemoryContextAlloc(
-        THREAD_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER), strlen(newseqname) + 1);
-
-    errno_t errorno = sprintf_s(oldseqnamearg, strlen(oldseqname) + 1, "%s", oldseqname);
-    securec_check_ss(errorno, "\0", "\0");
-    errorno = sprintf_s(newseqnamearg, strlen(newseqname) + 1, "%s", newseqname);
-    securec_check_ss(errorno, "\0", "\0");
-
-    args->oldseqname = oldseqnamearg;
-    args->newseqname = newseqnamearg;
-
-    RegisterSequenceCallback(rename_sequence_cb, (void*)args);
-}
-
-/*
- * Callback a sequence rename
- */
-#ifndef ENABLE_MULTIPLE_NODES
-void rename_sequence_cb(GTMEvent event, void* args)
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-}
-#else
-void rename_sequence_cb(GTMEvent event, void* args)
-{
-    rename_sequence_callback_arg* cbargs = (rename_sequence_callback_arg*)args;
-    char* newseqname = cbargs->newseqname;
-    char* oldseqname = cbargs->oldseqname;
-    int err = 0;
-    int seqerrcode = ERRCODE_SQL_STATEMENT_NOT_YET_COMPLETE;
-
-    /*
-     * A sequence is here renamed to its former name only when a transaction
-     * that involved a sequence rename was dropped.
-     */
-    switch (event) {
-        case GTM_EVENT_ABORT:
-            /*
-             * Here sequence is renamed to its former name
-             * so what was new becomes old.
-             */
-            err = RenameSequenceGTM(newseqname, oldseqname);
-            break;
-        case GTM_EVENT_COMMIT:
-        case GTM_EVENT_PREPARE:
-            /* Nothing to do */
-            break;
-        default:
-            Assert(0);
-    }
-
-    if (err == GTM_RESULT_COMM_ERROR)
-        seqerrcode = ERRCODE_CONNECTION_FAILURE;
-
-    /* Report error if necessary */
-    if (err < 0 && event != GTM_EVENT_ABORT)
-        ereport(ERROR, (errcode(seqerrcode), errmsg("GTM error, could not rename sequence")));
-}
-
-#endif
 
 /*
  * Register a callback for a sequence drop on GTM
@@ -2611,72 +2370,15 @@ void register_sequence_cb(GTM_UUID seq_uuid, GTM_SequenceDropType type)
     RegisterSequenceCallback(drop_sequence_cb, (void*)args);
 }
 
-/*
- * Callback of sequence drop
- */
-#ifndef ENABLE_MULTIPLE_NODES
-void drop_sequence_cb(GTMEvent event, void* args)
-{
-    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
-}
-#else
-void drop_sequence_cb(GTMEvent event, void* args)
-{
-    drop_sequence_callback_arg* cbargs = (drop_sequence_callback_arg*)args;
-    GTM_UUID seq_uuid = cbargs->seq_uuid;
-    GTM_SequenceDropType type = cbargs->type;
-    int err = 0;
-    int seqerrcode = ERRCODE_SQL_STATEMENT_NOT_YET_COMPLETE;
-
-    /*
-     * A sequence is dropped on GTM if the transaction that created sequence
-     * aborts or if the transaction that dropped the sequence commits. This mechanism
-     * insures that sequence information is consistent on all the cluster nodes including
-     * GTM. This callback is done before transaction really commits so it can still fail
-     * if an error occurs.
-     */
-    switch (event) {
-        case GTM_EVENT_COMMIT:
-        case GTM_EVENT_PREPARE:
-            if (type == GTM_DROP_SEQ)
-                err = DropSequenceGTM(seq_uuid);
-            break;
-        case GTM_EVENT_ABORT:
-            if (type == GTM_CREATE_SEQ)
-                err = DropSequenceGTM(seq_uuid);
-            break;
-        default:
-            /* Should not come here */
-            Assert(0);
-            break;
-    }
-
-    ereport(DEBUG2,
-        (errmodule(MOD_SEQ),
-            (errmsg("Call drop_sequence_cb: in state %d for sequence uuid %ld with type %d", event, seq_uuid, type))));
-
-    if (err == GTM_RESULT_COMM_ERROR)
-        seqerrcode = ERRCODE_CONNECTION_FAILURE;
-
-    if (err < 0 && event != GTM_EVENT_ABORT) {
-        ereport(WARNING,
-            (errcode(seqerrcode),
-                errmsg(
-                    "Deletion of sequences uuid %ld from gtm may be not completed, please check gtm log", seq_uuid)));
-    }
-}
-
-#endif
-
 #endif
 
 #ifdef ENABLE_MULTIPLE_NODES
-static void sendUpdateSequenceMsgToDn(char* dbname, char* schemaname, char* seqname, int64 last_value)
+static void sendUpdateSequenceMsgToDn(List* dbname, List* schemaname, List* seqname, List* last_value)
 {
     List* dataNodeList = NULL;
     PGXCNodeAllHandles* conn_handles = NULL;
     int msglen;
-    int low = 0; 
+    int low = 0;
     int high = 0;
     errno_t rc = 0;
     GlobalTransactionId gxid =  GetCurrentTransactionId();
@@ -2688,19 +2390,20 @@ static void sendUpdateSequenceMsgToDn(char* dbname, char* schemaname, char* seqn
         conn_handles = get_handles(dataNodeList, NULL, false);
         list_free_ext(dataNodeList);
         if (conn_handles->dn_conn_count != 1) {
-            ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION), 
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION),
                             errmsg("Could not get handle  on datanode for sequence")));
         }
         exec_handle = conn_handles->datanode_handles[0];
     }
     uint64 u_last_value;
     ereport(DEBUG1,
-        (errmsg("sendUpdateSequenceMsgToDn %s %ld", seqname, last_value)));
+        (errmsg("sendUpdateSequenceMsgToDn %s %ld", (char*)lfirst(list_head(seqname)),
+        *(int64*)lfirst(list_head(last_value)))));
     if (pgxc_node_begin(1, &exec_handle, gxid, true, false, PGXC_NODE_DATANODE)) {
-        ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION), 
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_EXCEPTION),
                 errmsg("Could not begin transaction on datanode for sequence")));
     }
-    
+
     PGXCNodeHandle* handle = NULL;
 
     handle = exec_handle;
@@ -2711,12 +2414,29 @@ static void sendUpdateSequenceMsgToDn(char* dbname, char* schemaname, char* seqn
             (errcode(ERRCODE_OPERATE_FAILED),
                 errmsg("Failed to send sendUpdateSequenceMsgToDn request "
                        "to the node")));
-    int dbname_len = strlen(dbname) + 1;
-    int schemaname_len = strlen(schemaname) + 1;
-    int seqname_len = strlen(seqname) + 1;
+    
+    ListCell* v = NULL;
+    int dbname_len = 0;
+    int schemaname_len = 0;
+    int seqname_len = 0;
+
+    foreach(v, dbname) {
+        dbname_len += strlen((char*)lfirst(v)) + 1;
+    }
+    v = NULL;
+    foreach(v, schemaname) {
+        schemaname_len += strlen((char*)lfirst(v)) + 1;
+    }
+    v = NULL;
+    foreach(v, seqname) {
+        seqname_len += strlen((char*)lfirst(v)) + 1;
+    }
+
+    int number1 = dbname->length;
     msglen = 4; /* for the length itself */
-    msglen +=  1; /* for signed */
-    msglen += sizeof(int64);
+    msglen += sizeof(int); /* for the number of sequences */
+    msglen +=  1 * dbname->length; /* for signed */
+    msglen += sizeof(int64) * dbname->length;
     msglen += dbname_len + schemaname_len + seqname_len;
 
     /* msgType + msgLen */
@@ -2728,50 +2448,70 @@ static void sendUpdateSequenceMsgToDn(char* dbname, char* schemaname, char* seqn
     rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &msglen, sizeof(int));
     securec_check(rc, "\0", "\0");
     handle->outEnd += 4;
-    if (last_value < 0) {
-        handle->outBuffer[handle->outEnd++] = '-';
-        u_last_value = (uint64)(last_value * -1);
-    } else {
-        handle->outBuffer[handle->outEnd++] = '+';
-        u_last_value = (uint64)(last_value);
-    }
-    low = u_last_value & 0xFFFFFFFF;
-    high   = (u_last_value >> 32) & 0xFFFFFFFF;
-    low = htonl(low);
-    high = htonl(high);
-
-    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &high, sizeof(high));
-    securec_check(rc, "\0", "\0");
-    handle->outEnd += sizeof(high);
-
-    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &low, sizeof(low));
-    securec_check(rc, "\0", "\0");
-    handle->outEnd += sizeof(low);
     
-    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
-        dbname, dbname_len);
+    number1 = htonl(number1);
+    rc = memcpy_s(handle->outBuffer + handle->outEnd, sizeof(int), &number1, sizeof(int));
     securec_check(rc, "\0", "\0");
-    handle->outEnd += dbname_len;
-    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
-        schemaname, schemaname_len);
-    securec_check(rc, "\0", "\0");
-    handle->outEnd += schemaname_len;
+    handle->outEnd += sizeof(int);
+    
+    ListCell* cell1 = NULL;
+    ListCell* cell2 = NULL;
+    ListCell* cell3 = NULL;
+    ListCell* cell4 = NULL;
+    forfour(cell1, last_value, cell2, dbname, cell3, schemaname, cell4, seqname) {
+        if (*(int64*)lfirst(cell1) < 0) {
+            handle->outBuffer[handle->outEnd++] = '-';
+            u_last_value = (uint64)(*(int64*)lfirst(cell1) * -1);
+        } else {
+            handle->outBuffer[handle->outEnd++] = '+';
+            u_last_value = (uint64)(*(int64*)lfirst(cell1));
+        }
+        low = u_last_value & 0xFFFFFFFF;
+        high   = (u_last_value >> 32) & 0xFFFFFFFF;
+        low = htonl(low);
+        high = htonl(high);
 
-    rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
-        seqname, seqname_len);
-    securec_check(rc, "\0", "\0");
-    handle->outEnd += seqname_len;
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &high, sizeof(high));
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += sizeof(high);
+
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, &low, sizeof(low));
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += sizeof(low);
+
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
+            (char*)lfirst(cell2), strlen((char*)lfirst(cell2)) + 1);
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += strlen((char*)lfirst(cell2)) + 1;
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
+            (char*)lfirst(cell3), strlen((char*)lfirst(cell3)) + 1);
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += strlen((char*)lfirst(cell3)) + 1;
+
+        rc = memcpy_s(handle->outBuffer + handle->outEnd, handle->outSize - handle->outEnd, 
+            (char*)lfirst(cell4), strlen((char*)lfirst(cell4)) + 1);
+        securec_check(rc, "\0", "\0");
+        handle->outEnd += strlen((char*)lfirst(cell4)) + 1;
+    }
 
     handle->state = DN_CONNECTION_STATE_QUERY;
     pgxc_node_flush(handle);
-    CheckUpdateSequenceMsgStatus(exec_handle, seqname, last_value);
+    CheckUpdateSequenceMsgStatus(exec_handle, (char*)lfirst(list_head(seqname)),
+        *(int64*)lfirst(list_head(last_value)));
     pfree_pgxc_all_handles(conn_handles);
 }
 #endif // ENABLE_MULTIPLE_NODES
 
-void  processUpdateSequenceMsg(List* nameList, int64 lastvalue)
+void flushSequenceMsg()
 {
     StringInfoData retbuf;
+    pq_beginmessage(&retbuf, 'y');
+    pq_endmessage(&retbuf);
+    pq_flush();
+}
+
+void  processUpdateSequenceMsg(List* nameList, int64 lastvalue)
+{
     RangeVar* sequence = NULL;
     Oid relid;
     Form_pg_sequence seq;
@@ -2794,18 +2534,14 @@ void  processUpdateSequenceMsg(List* nameList, int64 lastvalue)
     if (!OidIsValid(relid)) {
         ereport(
             WARNING, (errcode(ERRCODE_OPERATE_FAILED), errmsg("Failed to find relation %s for sequence update", sequence->relname)));
-        goto SEND_SUCCESS_MSG;
+        return;
     }
     /* open and lock sequence */
     init_sequence(relid, &elm, &seqrel);
     /* lock page' buffer and read tuple */
-    seq = read_seq_tuple(elm, seqrel, &buf, &seqtuple, &uuid);
+    seq = read_seq_tuple<Form_pg_sequence>(elm, seqrel, &buf, &seqtuple, &uuid);
     updateNextValForSequence(buf, seq, seqtuple, seqrel, lastvalue);
     relation_close(seqrel, NoLock);
-SEND_SUCCESS_MSG:
-    pq_beginmessage(&retbuf, 'y');
-    pq_endmessage(&retbuf);
-    pq_flush();
 }
 
 #ifdef ENABLE_MULTIPLE_NODES
@@ -2831,7 +2567,7 @@ static void CheckUpdateSequenceMsgStatus(PGXCNodeHandle* exec_handle, const char
 }
 #endif // ENABLE_MULTIPLE_NODES
 
-static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel, 
+static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTupleData seqtuple, Relation seqrel,
             int64 result)
 {
     Page page;
@@ -2839,7 +2575,7 @@ static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTuple
     char *seqname = NULL;
     page = BufferGetPage(buf);
     /* ready to change the on-disk (or really, in-buffer) tuple */
-    
+
     need_wal = RelationNeedsWAL(seqrel);
     if (IS_PGXC_DATANODE) {
         START_CRIT_SECTION();
@@ -2882,7 +2618,7 @@ static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTuple
         END_CRIT_SECTION();
     }
     UnlockReleaseBuffer(buf);
-    /* 1 nextval execute on dn, will record in xlog above 
+    /* 1 nextval execute on dn, will record in xlog above
      * 2 nextval execute on cn, will notify to dn for record
      * 3 nextval execute direct on another cn, will ignore it for execute direct on is against with write transaction
     */
@@ -2893,10 +2629,12 @@ static void updateNextValForSequence(Buffer buf, Form_pg_sequence seq, HeapTuple
             MemoryContext curr;
             seqname = GetGlobalSeqNameForUpdate(seqrel, &dbname, &schemaname);
             curr = MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-            u_sess->xact_cxt.sendSeqDbName = pstrdup(dbname);
-            u_sess->xact_cxt.sendSeqSchmaName = pstrdup(schemaname);
-            u_sess->xact_cxt.sendSeqName = pstrdup(seqname);
-            u_sess->xact_cxt.send_result = result;
+            int64* res = (int64*)palloc(sizeof(int64));
+            *res = result;
+            u_sess->xact_cxt.sendSeqDbName = lappend(u_sess->xact_cxt.sendSeqDbName, pstrdup(dbname));
+            u_sess->xact_cxt.sendSeqSchmaName = lappend(u_sess->xact_cxt.sendSeqSchmaName, pstrdup(schemaname));
+            u_sess->xact_cxt.sendSeqName = lappend(u_sess->xact_cxt.sendSeqName, pstrdup(seqname));
+            u_sess->xact_cxt.send_result = lappend(u_sess->xact_cxt.send_result, res);
             MemoryContextSwitchTo(curr);
         } else {
             /* nexval execute direct on cn will not notify dn */
@@ -2985,12 +2723,29 @@ static int64 GetNextvalResult(SeqTable sess_elm, Relation seqrel, Form_pg_sequen
 void checkAndDoUpdateSequence()
 {
 #ifdef ENABLE_MULTIPLE_NODES
-    if(u_sess->xact_cxt.sendSeqName != NULL) {
-        sendUpdateSequenceMsgToDn(u_sess->xact_cxt.sendSeqDbName, u_sess->xact_cxt.sendSeqSchmaName, 
+    if (u_sess->xact_cxt.sendSeqName != NULL) {
+        sendUpdateSequenceMsgToDn(u_sess->xact_cxt.sendSeqDbName, u_sess->xact_cxt.sendSeqSchmaName,
             u_sess->xact_cxt.sendSeqName, u_sess->xact_cxt.send_result);
-        pfree_ext(u_sess->xact_cxt.sendSeqDbName);
-        pfree_ext(u_sess->xact_cxt.sendSeqSchmaName);
-        pfree_ext(u_sess->xact_cxt.sendSeqName);
+        list_free_deep(u_sess->xact_cxt.sendSeqDbName);
+        list_free_deep(u_sess->xact_cxt.sendSeqSchmaName);
+        list_free_deep(u_sess->xact_cxt.sendSeqName);
+        list_free_deep(u_sess->xact_cxt.send_result);
+        u_sess->xact_cxt.sendSeqDbName = NULL;
+        u_sess->xact_cxt.sendSeqSchmaName = NULL;
+        u_sess->xact_cxt.sendSeqName = NULL;
+        u_sess->xact_cxt.send_result = NULL;
     }
-#endif 
+#endif
+}
+
+template<typename T_Int, bool large>
+static char* Int8or16Out(T_Int num)
+{
+    char* ret = NULL;
+    if (large) {
+        ret = DatumGetCString(DirectFunctionCall1(int16out, Int128GetDatum(num)));
+    } else {
+        ret = DatumGetCString(DirectFunctionCall1(int8out, num));
+    }
+    return ret;
 }

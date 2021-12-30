@@ -33,6 +33,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/backend/utils/time/snapmgr.c
@@ -101,6 +102,9 @@ THR_LOCAL SnapshotData SnapshotNowData = {SNAPSHOT_NOW};
 THR_LOCAL SnapshotData SnapshotSelfData = {SNAPSHOT_SELF};
 THR_LOCAL SnapshotData SnapshotAnyData = {SNAPSHOT_ANY};
 THR_LOCAL SnapshotData SnapshotToastData = {SNAPSHOT_TOAST};
+#ifdef ENABLE_MULTIPLE_NODES
+THR_LOCAL SnapshotData SnapshotNowNoSyncData = {SNAPSHOT_NOW_NO_SYNC};
+#endif
 
 /* local functions */
 static Snapshot CopySnapshot(Snapshot snapshot);
@@ -923,14 +927,14 @@ void UnregisterSnapshotFromOwner(Snapshot snapshot, ResourceOwner owner)
     if (snapshot == NULL)
         return;
 
-    Assert(snapshot->regd_count > 0);
-    Assert(u_sess->utils_cxt.RegisteredSnapshots > 0);
-
-    ResourceOwnerForgetSnapshot(owner, snapshot);
-    u_sess->utils_cxt.RegisteredSnapshots--;
-    if (--snapshot->regd_count == 0 && snapshot->active_count == 0) {
-        FreeSnapshot(snapshot);
-        SnapshotResetXmin();
+    if (ResourceOwnerForgetSnapshot(owner, snapshot, true)) {
+        Assert(u_sess->utils_cxt.RegisteredSnapshots > 0);
+        Assert(snapshot->regd_count > 0);
+        u_sess->utils_cxt.RegisteredSnapshots--;
+        if (--snapshot->regd_count == 0 && snapshot->active_count == 0) {
+            FreeSnapshot(snapshot);
+            SnapshotResetXmin();
+        }
     }
 }
 

@@ -1,3 +1,5 @@
+create database pl_test_pkg_func DBCOMPATIBILITY 'pg';
+\c pl_test_pkg_func;
 create schema package_schema;
 set current_schema= package_schema;
 
@@ -618,3 +620,4 @@ end;
 
 drop schema package_schema cascade;
 drop schema package_nps cascade;
+\c regression;

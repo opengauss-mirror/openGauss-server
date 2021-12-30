@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/nodes/plannodes.h
  *
@@ -293,6 +294,7 @@ typedef struct Plan {
 
     bool ispwj;  /* is it special for partitionwisejoin? */
     int paramno; /* the partition'sn that it is scaning */
+    int subparamno; /* the subpartition'sn that it is scaning */
 
     List* initPlan;    /* Init Plan nodes (un-correlated expr
                         * subselects) */
@@ -418,7 +420,6 @@ typedef struct ModifyTable {
     List* updateTlist;			/* List of UPDATE target */
     List* exclRelTlist;		   /* target list of the EXECLUDED pseudo relation */
     Index exclRelRTIndex;			 /* RTI of the EXCLUDED pseudo relation */
-    bool partKeyUpsert;
 
     OpMemInfo mem_info;    /*  Memory info for modify node */
 } ModifyTable;
@@ -474,7 +475,58 @@ typedef struct RecursiveUnion {
     bool is_correlated;    /* indicate if the recursive union contains correlated term,
                             * in case of correlated term involved, we need broadcast data
                             * to one datanode to execute the recursive CTE in one-DN mode */
+
+    /*
+     * StartWith Support containt the pseudo target entry, also not-null indicates
+     * a start-with converted recursive union
+     *  1. RUITR
+     *  2. array_key
+     *  3. array_col_nn
+     *  4. array_col_nn
+     *   ...
+     */
+    List *internalEntryList;
 } RecursiveUnion;
+
+/* ----------------
+ *	 StartWithOp node -
+ *		Generate the start with connect by operator
+ *
+ * xxxxxxxxxxxx
+ * ----------------
+ */
+
+struct CteScan;
+typedef struct StartWithOp
+{
+    Plan plan;
+    
+    /* other ref attributes */
+    CteScan        *cteplan;
+    RecursiveUnion *ruplan;
+
+    List *keyEntryList;
+    List *colEntryList;
+    List *internalEntryList;    /* RUITR, array_key, array_col */
+    List *fullEntryList;        /* level, isleaf, iscycle, RUITR, array_key, array_col */
+
+    /*
+     * swoptions, normally store some static information that derived from SQL parsing
+     * stage, e.g. nocycle, connect_by_type, sibling clause
+     */
+    StartWithOptions  *swoptions;
+
+    /*
+     * swExecOptions, exeuction options for StartWithOp operator
+     *
+     * store some hint-bit level information supports SWCB runing efficiently, currently
+     * we only use last 4-bits to indicate if we need skip some pseudo return column
+     * computation
+     */
+    uint16      swExecOptions;
+
+    List *prcTargetEntryList;
+} StartWithOp;
 
 /* ----------------
  *	 BitmapAnd node -
@@ -826,6 +878,32 @@ typedef struct CteScan {
     int ctePlanId;           /* ID of init SubPlan for CTE */
     int cteParam;            /* ID of Param representing CTE output */
     RecursiveUnion* subplan; /* subplan of CteScan, must be RecursiveUnion */
+
+    CommonTableExpr *cteRef; /* Reference of curernt CteScan node's expr */
+
+    /* These fields are only valid for Hierarchical Query(start with) only */
+
+    /*
+     * - pseudoReturnTargetEntryList
+     *
+     * Hold the TargetEntry reference for PRC a.w.k. "pseudo return columns"
+     * [1]. level
+     * [2]. connect_by_isleaf
+     * [3]. connect_by_iscycle
+     * [4]. rownum
+     */
+    List *prcTargetEntryList;
+
+    /*
+     * - internalEntryList
+     *
+     * Hold the internal TargetEntry for Hierarchical Query execution (not visible)
+     *  1. RUITR
+     *  2. array_column1
+     *  3. array_column2
+     *   ...
+     */
+    List *internalEntryList;
 } CteScan;
 
 /* ----------------
@@ -835,6 +913,9 @@ typedef struct CteScan {
 typedef struct WorkTableScan {
     Scan scan;
     int wtParam; /* ID of Param representing work table */
+
+    /* indicate it is workable from start-with */
+    bool forStartWith;
 } WorkTableScan;
 
 /* ----------------
@@ -1324,6 +1405,7 @@ typedef struct PlanInvalItem {
 typedef struct PartIteratorParam {
     NodeTag type;
     int paramno;
+    int subPartParamno;
 } PartIteratorParam;
 
 typedef struct PartIterator {

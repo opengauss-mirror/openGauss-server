@@ -130,6 +130,12 @@ List* transformTargetList(ParseState* pstate, List* targetlist)
         if (IsA(res->val, ColumnRef)) {
             ColumnRef* cref = (ColumnRef*)res->val;
 
+            if (cref->prior) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                         errmsg("Not Support prior column in TargetList in case swcb.")));
+            }
+
             if (IsA(llast(cref->fields), A_Star)) {
                 /* It is something.*, expand into multiple items */
                 p_target = list_concat(p_target, ExpandColumnRefStar(pstate, cref, true));

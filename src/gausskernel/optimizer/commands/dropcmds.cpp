@@ -157,6 +157,12 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             HeapTuple tup;
             bool isnull = false;
             tup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcOid));
+            if (tup == NULL) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                        errmsg("function not found by oid:%u", address.objectId),
+                        errhint("system error")));
+            }
             Datum packageOidDatum = SysCacheGetAttr(PROCOID, tup, Anum_pg_proc_packageid, &isnull);
             if (!isnull) {
                 Oid pkgFuncOid = DatumGetObjectId(packageOidDatum);
@@ -177,7 +183,7 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
                         errmsg("\"%s\" is an aggregate function", NameListToString(objname)),
                         errhint("Use DROP AGGREGATE to drop aggregate functions.")));
 
-            CacheInvalidateFunction(funcOid);
+            CacheInvalidateFunction(funcOid, InvalidOid);
             /* send invalid message for for relation holding replaced function as trigger */
             InvalidRelcacheForTriggerFunction(funcOid, ((Form_pg_proc)GETSTRUCT(tup))->prorettype);
             ReleaseSysCache(tup);
@@ -214,7 +220,6 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
                             errmodule(MOD_PLSQL),
                             errmsg("cache lookup failed for relid %u", funcOid)));
                 }
-                CacheInvalidateFunction(funcOid);
                 heap_freetuple(proctup);
             }
             systable_endscan(scan);
@@ -224,6 +229,7 @@ void RemoveObjects(DropStmt* stmt, bool missing_ok, bool is_securityadmin)
             if (!HeapTupleIsValid(tup)) /* should not happen */
                 ereport(ERROR,
                     (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for package %u", pkgOid)));
+            CacheInvalidateFunction(InvalidOid, pkgOid);
             ReleaseSysCache(tup);
         }
         // @Temp Table. myTempNamespace and myTempToastNamespace's owner is

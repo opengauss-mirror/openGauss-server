@@ -393,7 +393,7 @@ void redo_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra
     ReplicationSlotsComputeRequiredLSN(NULL);
     ReplicationSlotSave();
     if (extra_content != NULL && strlen(extra_content) != 0) {
-        markObsSlotOperate();
+        MarkArchiveSlotOperate();
         add_archive_slot_to_instance(t_thrd.slot_cxt.MyReplicationSlot);
     }
     ReplicationSlotRelease();
@@ -1051,7 +1051,7 @@ XLogRecPtr create_physical_replication_slot_for_archive(const char* slot_name, b
     ReplicationSlotCreate(slot_name, RS_PERSISTENT, is_dummy, InvalidOid, InvalidXLogRecPtr, extra_content);
     /* log slot creation */
     log_slot_create(&t_thrd.slot_cxt.MyReplicationSlot->data, t_thrd.slot_cxt.MyReplicationSlot->extra_content);
-    markObsSlotOperate();
+    MarkArchiveSlotOperate();
     add_archive_slot_to_instance(t_thrd.slot_cxt.MyReplicationSlot);
 
     /* To make sure slot log lsn is less newest checkpoint.redo */
@@ -1126,26 +1126,26 @@ void init_instance_slot_thread()
     MemoryContext curr;
     curr = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
 
-    g_instance.archive_obs_thread_info.obsArchPID = (ThreadId*)palloc0(
+    g_instance.archive_thread_info.obsArchPID = (ThreadId*)palloc0(
         sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
-    rc = memset_s(g_instance.archive_obs_thread_info.obsArchPID, 
+    rc = memset_s(g_instance.archive_thread_info.obsArchPID, 
         sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots, 0, 
         sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
     securec_check(rc, "", "");
     
-    g_instance.archive_obs_thread_info.obsBarrierArchPID = (ThreadId*)palloc0(
+    g_instance.archive_thread_info.obsBarrierArchPID = (ThreadId*)palloc0(
         sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
-    rc = memset_s(g_instance.archive_obs_thread_info.obsBarrierArchPID, 
+    rc = memset_s(g_instance.archive_thread_info.obsBarrierArchPID, 
         sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots, 0, 
         sizeof(ThreadId) * g_instance.attr.attr_storage.max_replication_slots);
     securec_check(rc, "", "");
 
-    g_instance.archive_obs_thread_info.slotName = (char **)palloc0(sizeof(char *) * 
+    g_instance.archive_thread_info.slotName = (char **)palloc0(sizeof(char *) * 
         g_instance.attr.attr_storage.max_replication_slots);
 
     for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
-        g_instance.archive_obs_thread_info.slotName[i] = (char *)palloc0(sizeof(char) * NAMEDATALEN);
-        rc = memset_s(g_instance.archive_obs_thread_info.slotName[i], sizeof(char) * NAMEDATALEN, 0, 
+        g_instance.archive_thread_info.slotName[i] = (char *)palloc0(sizeof(char) * NAMEDATALEN);
+        rc = memset_s(g_instance.archive_thread_info.slotName[i], sizeof(char) * NAMEDATALEN, 0, 
             sizeof(char) * NAMEDATALEN);
         securec_check(rc, "", "");
     }
@@ -1185,13 +1185,17 @@ void add_archive_slot_to_instance(ReplicationSlot *slot)
             rc = memcpy_s(archive_config->slotname, NAMEDATALEN, slot->data.name.data, NAMEDATALEN);
             securec_check(rc, "\0", "\0");
             archive_config->slot_tline = g_instance.archive_obs_cxt.slot_tline;
-            if (slot->archive_obs != NULL) {
-                archive_config->archive_obs.obs_address = pstrdup(slot->archive_obs->obs_address);
-                archive_config->archive_obs.obs_ak = pstrdup(slot->archive_obs->obs_ak);
-                archive_config->archive_obs.obs_bucket = pstrdup(slot->archive_obs->obs_bucket);
-                archive_config->archive_obs.obs_prefix = pstrdup(slot->archive_obs->obs_prefix);
-                archive_config->archive_obs.obs_sk = pstrdup(slot->archive_obs->obs_sk);
-                archive_config->archive_obs.is_recovery = slot->archive_obs->is_recovery;
+            if (slot->archive_config != NULL) {
+                archive_config->archive_config.media_type = slot->archive_config->media_type;
+                if (slot->archive_config->conn_config != NULL) {
+                    archive_config->archive_config.conn_config =
+                        (ArchiveConnConfig *)palloc0(sizeof(ArchiveConnConfig));
+                    rc = memcpy_s(archive_config->archive_config.conn_config, sizeof(ArchiveConnConfig),
+                        slot->archive_config->conn_config, sizeof(ArchiveConnConfig));
+                    securec_check(rc, "\0", "\0");
+                }
+                archive_config->archive_config.archive_prefix = pstrdup(slot->archive_config->archive_prefix);
+                archive_config->archive_config.is_recovery = slot->archive_config->is_recovery;
             }
             SpinLockRelease(&archive_config->mutex);
             break;
@@ -1220,11 +1224,14 @@ void remove_archive_slot_from_instance_list(const char *slot_name)
         SpinLockAcquire(&archive_config->mutex);
         if (archive_config->in_use == true && strcmp(archive_config->slotname, slot_name) == 0) {
             archive_config->slot_tline = 0;
-            pfree_ext(archive_config->archive_obs.obs_address);
-            pfree_ext(archive_config->archive_obs.obs_ak);
-            pfree_ext(archive_config->archive_obs.obs_bucket);
-            pfree_ext(archive_config->archive_obs.obs_prefix);
-            pfree_ext(archive_config->archive_obs.obs_sk);
+            if (archive_config->archive_config.conn_config != NULL) {
+                pfree_ext(archive_config->archive_config.conn_config->obs_address);
+                pfree_ext(archive_config->archive_config.conn_config->obs_bucket);
+                pfree_ext(archive_config->archive_config.conn_config->obs_ak);
+                pfree_ext(archive_config->archive_config.conn_config->obs_sk);
+                pfree_ext(archive_config->archive_config.conn_config);
+            }
+            pfree_ext(archive_config->archive_config.archive_prefix);
 
             archive_config->in_use = false;
             SpinLockRelease(&archive_config->mutex);
@@ -1255,11 +1262,14 @@ void release_archive_slot(ArchiveSlotConfig** archive_conf)
     if (archive_conf == NULL || (*archive_conf) == NULL) {
         return;
     }
-    pfree_ext((*archive_conf)->archive_obs.obs_address);
-    pfree_ext((*archive_conf)->archive_obs.obs_ak);
-    pfree_ext((*archive_conf)->archive_obs.obs_bucket);
-    pfree_ext((*archive_conf)->archive_obs.obs_prefix);
-    pfree_ext((*archive_conf)->archive_obs.obs_sk);
+    if ((*archive_conf)->archive_config.conn_config != NULL) {
+        pfree_ext((*archive_conf)->archive_config.conn_config->obs_address);
+        pfree_ext((*archive_conf)->archive_config.conn_config->obs_bucket);
+        pfree_ext((*archive_conf)->archive_config.conn_config->obs_ak);
+        pfree_ext((*archive_conf)->archive_config.conn_config->obs_sk);
+        pfree_ext((*archive_conf)->archive_config.conn_config);
+    }
+    pfree_ext((*archive_conf)->archive_config.archive_prefix);
     pfree_ext((*archive_conf));
 }
 
@@ -1272,17 +1282,20 @@ ArchiveSlotConfig* copy_archive_slot(ArchiveSlotConfig* archive_conf_origin)
     ArchiveSlotConfig* archive_conf_copy = (ArchiveSlotConfig*)palloc0(sizeof(ArchiveSlotConfig));
     int rc = memcpy_s(archive_conf_copy->slotname, NAMEDATALEN, archive_conf_origin->slotname, NAMEDATALEN);
     securec_check(rc, "\0", "\0");
-    archive_conf_copy->archive_obs.obs_address = pstrdup(archive_conf_origin->archive_obs.obs_address);
-    archive_conf_copy->archive_obs.obs_ak = pstrdup(archive_conf_origin->archive_obs.obs_ak);
-    archive_conf_copy->archive_obs.obs_bucket = pstrdup(archive_conf_origin->archive_obs.obs_bucket);
-    archive_conf_copy->archive_obs.obs_prefix = pstrdup(archive_conf_origin->archive_obs.obs_prefix);
-    archive_conf_copy->archive_obs.obs_sk = pstrdup(archive_conf_origin->archive_obs.obs_sk);
+    archive_conf_copy->archive_config.media_type = archive_conf_origin->archive_config.media_type;
+    if (archive_conf_origin->archive_config.conn_config != NULL) {
+        archive_conf_copy->archive_config.conn_config = (ArchiveConnConfig *)palloc0(sizeof(ArchiveConnConfig));
+        rc = memcpy_s(archive_conf_copy->archive_config.conn_config, sizeof(ArchiveConnConfig),
+                        archive_conf_origin->archive_config.conn_config, sizeof(ArchiveConnConfig));
+        securec_check(rc, "\0", "\0");
+    }
+    archive_conf_copy->archive_config.archive_prefix = pstrdup(archive_conf_origin->archive_config.archive_prefix);
     return archive_conf_copy;
 }
 
 ArchiveTaskStatus* find_archive_task_status(const char* name)
 {
-    if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
+    if (g_instance.archive_obs_cxt.archive_slot_num == 0) {
         return NULL;
     }
     for (int i = 0; i < g_instance.attr.attr_storage.max_replication_slots; i++) {
@@ -1297,7 +1310,7 @@ ArchiveTaskStatus* find_archive_task_status(const char* name)
 ArchiveTaskStatus* find_archive_task_status(int *idx)
 {
     Assert(t_thrd.role == ARCH);
-    if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
+    if (g_instance.archive_obs_cxt.archive_slot_num == 0) {
         return NULL;
     }
 
@@ -1325,7 +1338,7 @@ ArchiveTaskStatus* find_archive_task_status(int *idx)
 
 ArchiveTaskStatus* walreceiver_find_archive_task_status(unsigned int expected_pitr_task_status)
 {
-    if (g_instance.archive_obs_cxt.obs_slot_num == 0) {
+    if (g_instance.archive_obs_cxt.archive_slot_num == 0) {
         return NULL;
     }
 

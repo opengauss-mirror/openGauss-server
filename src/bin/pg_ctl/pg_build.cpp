@@ -42,6 +42,16 @@ static const char* config_para_build[MAX_REPLNODE_NUM] = {"",
     "replconninfo5",
     "replconninfo6",
     "replconninfo7"};
+static const char* config_para_cross_cluster_build[MAX_REPLNODE_NUM] = {
+    "",
+    "cross_cluster_replconninfo1",
+    "cross_cluster_replconninfo2",
+    "cross_cluster_replconninfo3",
+    "cross_cluster_replconninfo4",
+    "cross_cluster_replconninfo5",
+    "cross_cluster_replconninfo6",
+    "cross_cluster_replconninfo7"
+};
 
 /* Node name */
 char pgxcnodename[MAX_VALUE_LEN] = {0};
@@ -350,10 +360,8 @@ int GetLengthAndCheckReplConn(const char* ConnInfoList)
  * Description        :
  * Notes            :
  */
-ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength)
+bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* repl)
 {
-    ReplConnInfo* repl = NULL;
-
     int repl_length = 0;
     char* iter = NULL;
     char* pNext = NULL;
@@ -363,18 +371,22 @@ ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength)
     int parsed = 0;
     int iplen = 0;
     char tmp_localhost[IP_LEN] = {0};
+    char cascadeToken[IP_LEN] = {0};
+    char crossRegionToken[IP_LEN] = {0};
     int tmp_localport = 0;
     char tmp_remotehost[IP_LEN] = {0};
     int tmp_remoteport = 0;
+    int cascadeLen = strlen("iscascade");
+    int corssRegionLen = strlen("isCrossRegion");
     errno_t rc = EOK;
     char* p = NULL;
 
     if (ConnInfoList == NULL) {
-        return NULL;
+        return false;
     } else {
         ReplStr = strdup(ConnInfoList);
         if (ReplStr == NULL) {
-            return NULL;
+            return false;
         }
 
         ptr = ReplStr;
@@ -387,22 +399,16 @@ ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength)
         if (*ptr == '\0') {
             free(ReplStr);
             ReplStr = NULL;
-            return NULL;
+            return false;
         }
 
         repl_length = GetLengthAndCheckReplConn(ReplStr);
         if (repl_length == 0) {
             free(ReplStr);
             ReplStr = NULL;
-            return NULL;
+            return false;
         }
 
-        repl = (ReplConnInfo*)malloc(sizeof(ReplConnInfo));
-        if (repl == NULL) {
-            free(ReplStr);
-            ReplStr = NULL;
-            return NULL;
-        }
         rc = memset_s(repl, sizeof(ReplConnInfo), 0, sizeof(ReplConnInfo));
         securec_check_c(rc, "", "");
 
@@ -497,6 +503,34 @@ ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength)
             }
             tmp_remoteport = atoi(iter);
 
+            /* is cascade? */
+            iter = strstr(token, "iscascade");
+            if (iter != NULL) {
+                iter += cascadeLen;
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+                rc = strncpy_s(cascadeToken, IP_LEN, iter, strlen("true"));
+                securec_check_c(rc, "", "");
+                if (strcmp(cascadeToken, "true") == 0) {
+                    repl->isCascade = true;
+                }
+            }
+
+            /* is cross region? */
+            iter = strstr(token, "iscrossregion");
+            if (iter != NULL) {
+                iter += corssRegionLen;
+                while (*iter == ' ' || *iter == '=') {
+                    iter++;
+                }
+                rc = strncpy_s(crossRegionToken, IP_LEN, iter, strlen("true"));
+                securec_check_c(rc, "", "");
+                if (strcmp(crossRegionToken, "true") == 0) {
+                    repl->isCrossRegion = true;
+                }
+            }
+
             /* copy the valus from tmp */
             rc = strncpy_s(repl->localhost, IP_LEN, tmp_localhost, IP_LEN - 1);
             securec_check_c(rc, "", "");
@@ -519,7 +553,7 @@ ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength)
     ReplStr = NULL;
     *InfoLength = repl_length;
 
-    return repl;
+    return true;
 }
 
 /*
@@ -530,6 +564,7 @@ ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength)
 void get_conninfo(const char* filename)
 {
     char** optlines;
+    const char **conninfo_para = NULL;
     int lines_index = 0;
     int optvalue_off;
     int optvalue_len;
@@ -541,6 +576,17 @@ void get_conninfo(const char* filename)
         exit(1);
     }
 
+    if (IS_CROSS_CLUSTER_BUILD) {
+        conninfo_para = config_para_cross_cluster_build;
+    } else {
+        conninfo_para = config_para_build;
+    }
+
+    /* cleaning global conninfo list */
+    for (int i = 0; i < MAX_REPLNODE_NUM; i++) {
+        rc = memset_s(conninfo_global[i], MAX_VALUE_LEN, 0, MAX_VALUE_LEN);
+        securec_check_ss_c(rc, "", "");
+    }
     /**********************************************************
     Try to read the config file
     ************************************************************/
@@ -559,7 +605,7 @@ void get_conninfo(const char* filename)
             /* read repconninfo[...] */
             for (i = 1; i < MAX_REPLNODE_NUM; i++) {
                 lines_index = find_gucoption((const char**)optlines,
-                    (const char*)config_para_build[i],
+                    (const char*)conninfo_para[i],
                     NULL,
                     NULL,
                     &optvalue_off,
@@ -772,7 +818,13 @@ static PGconn* check_and_get_primary_conn(const char* repl_conninfo, uint32 term
 
     /* 1. Connect server */
     conn_get = PQconnectdb(repl_conninfo);
-    if ((conn_get == NULL) || PQstatus(conn_get) != CONNECTION_OK) {
+    if (conn_get == NULL) {
+        pg_log(PG_WARNING, _("build connection failed cause get connection is null.\n"));
+        disconnect_and_return_null(conn_get);
+    }
+    if (PQstatus(conn_get) != CONNECTION_OK) {
+        pg_log(PG_WARNING, _("build connection to %s failed cause %s.\n"),
+            (conn_get->pghost != NULL) ? conn_get->pghost : conn_get->pghostaddr, PQerrorMessage(conn_get));
         disconnect_and_return_null(conn_get);
     }
 
@@ -782,9 +834,11 @@ static PGconn* check_and_get_primary_conn(const char* repl_conninfo, uint32 term
     }
 
     /* 3. IDENTIFY_MODE */
-    remote_mode = get_remote_mode(conn_get);
-    if (remote_mode != NORMAL_MODE && remote_mode != PRIMARY_MODE) {
-        disconnect_and_return_null(conn_get);
+    if (!need_copy_upgrade_file) {
+        remote_mode = get_remote_mode(conn_get);
+        if (remote_mode != NORMAL_MODE && remote_mode != PRIMARY_MODE) {
+            disconnect_and_return_null(conn_get);
+        }
     }
 
     /* here we get the right primary connect */
@@ -799,38 +853,62 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
     int repl_arr_length;
     int i = 0;
     int parse_failed_num = 0;
+    ReplConnInfo repl_conn_info;
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* repl_conn_info = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length);
-        if (repl_conn_info == NULL) {
+        bool parseOk = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length, &repl_conn_info);
+        if (!parseOk) {
             parse_failed_num++;
             continue;
         }
 
         tnRet = memset_s(repl_conninfo_str, MAXPGPATH, 0, MAXPGPATH);
         securec_check_ss_c(tnRet, "", "");
-
-        tnRet = snprintf_s(repl_conninfo_str,
-            sizeof(repl_conninfo_str),
-            sizeof(repl_conninfo_str) - 1,
-            "localhost=%s localport=%d host=%s port=%d "
-            "dbname=replication replication=true "
-            "fallback_application_name=gs_ctl "
-            "connect_timeout=%d rw_timeout=%d "
-            "options='-c remotetype=application'",
-            repl_conn_info->localhost,
-            repl_conn_info->localport,
-            repl_conn_info->remotehost,
-            repl_conn_info->remoteport,
-            conn_timeout,
-            recv_timeout);
+        if (register_username != NULL && register_password != NULL) {
+            if (*register_username == '.') {
+                    register_username += 2;
+                }
+            tnRet = snprintf_s(repl_conninfo_str,
+                sizeof(repl_conninfo_str),
+                sizeof(repl_conninfo_str) - 1,
+                "localhost=%s localport=%d host=%s port=%d "
+                "dbname=postgres replication=hadr_main_standby "
+                "fallback_application_name=gs_ctl "
+                "connect_timeout=%d rw_timeout=%d "
+                "options='-c remotetype=application' user=%s password=%s",
+                repl_conn_info.localhost,
+                repl_conn_info.localport,
+                repl_conn_info.remotehost,
+                repl_conn_info.remoteport,
+                conn_timeout,
+                recv_timeout, register_username, register_password);
+        } else {
+            tnRet = snprintf_s(repl_conninfo_str,
+                sizeof(repl_conninfo_str),
+                sizeof(repl_conninfo_str) - 1,
+                "localhost=%s localport=%d host=%s port=%d "
+                "dbname=replication replication=true "
+                "fallback_application_name=gs_ctl "
+                "connect_timeout=%d rw_timeout=%d "
+                "options='-c remotetype=application'",
+                repl_conn_info.localhost,
+                repl_conn_info.localport,
+                repl_conn_info.remotehost,
+                repl_conn_info.remoteport,
+                conn_timeout,
+                recv_timeout);
+        }
         securec_check_ss_c(tnRet, "", "");
-
-        free(repl_conn_info);
-        repl_conn_info = NULL;
         con_get = check_and_get_primary_conn(repl_conninfo_str, term);
-        if (con_get != NULL)
+        tnRet = memset_s(repl_conninfo_str, MAXPGPATH, 0, MAXPGPATH);
+        securec_check_ss_c(tnRet, "", "");
+        if (con_get != NULL) {
+            pg_log(PG_WARNING, "build try host(%s) port(%d) success\n", repl_conn_info.remotehost,
+                repl_conn_info.remoteport);
             break;
+        }
+        pg_log(PG_WARNING, "build try host(%s) port(%d) failed\n", repl_conn_info.remotehost,
+            repl_conn_info.remoteport);
     }
 
     if (parse_failed_num == MAX_REPLNODE_NUM - 1) {
@@ -838,7 +916,7 @@ PGconn* check_and_conn(int conn_timeout, int recv_timeout, uint32 term)
         if (con_get != NULL)
             PQfinish(con_get);
 
-        exit(1);
+        return NULL;
     }
 
     return con_get;
@@ -854,10 +932,11 @@ PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 te
     int repl_arr_length;
     int i = 0;
     int parse_failed_num = 0;
+    ReplConnInfo repl_conn_info;
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* repl_conn_info = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length);
-        if (repl_conn_info == NULL) {
+        bool parseOk = ParseReplConnInfo(conninfo_global[i - 1], &repl_arr_length, &repl_conn_info);
+        if (!parseOk || repl_conn_info.isCrossRegion) {
             parse_failed_num++;
             continue;
         }
@@ -873,32 +952,37 @@ PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, uint32 te
             "fallback_application_name=gs_ctl "
             "connect_timeout=%d rw_timeout=%d "
             "options='-c remotetype=application'",
-            repl_conn_info->localhost,
-            repl_conn_info->localport,
-            repl_conn_info->remotehost,
-            repl_conn_info->remoteport,
+            repl_conn_info.localhost,
+            repl_conn_info.localport,
+            repl_conn_info.remotehost,
+            repl_conn_info.remoteport,
             conn_timeout,
             recv_timeout);
         securec_check_ss_c(tnRet, "", "");
 
-        free(repl_conn_info);
-        repl_conn_info = NULL;
+
         con_get = PQconnectdb(repl_conninfo_str);
         if (con_get != NULL && PQstatus(con_get) == CONNECTION_OK && check_remote_version(con_get, term)) {
             remote_mode = get_remote_mode(con_get);
-            if (remote_mode == STANDBY_MODE && (g_replconn_idx == -1 || i == g_replconn_idx)) {
+            if ((remote_mode == STANDBY_MODE || remote_mode == MAIN_STANDBY_MODE) &&
+                (g_replconn_idx == -1 || i == g_replconn_idx)) {
                 g_replconn_idx = i;
+                pg_log(PG_WARNING, "standby build try host(%s) port(%d) success\n", repl_conn_info.remotehost,
+                    repl_conn_info.remoteport);
                 break;
             }
         } else {
+            if (con_get != NULL) {
+                PQfinish(con_get);
+                con_get = NULL;
+            }
             if (conn_str != NULL) {
                 pg_log(PG_WARNING, "The given address can not been access.\n");
-                if (con_get != NULL) {
-                    PQfinish(con_get);
-                }
                 exit(1);
             }
         }
+        pg_log(PG_WARNING, "standby build try host(%s) port(%d) failed\n", repl_conn_info.remotehost,
+            repl_conn_info.remoteport);
     }
 
     if (parse_failed_num == MAX_REPLNODE_NUM - 1) {
@@ -1193,15 +1277,18 @@ static void DeleteSubDataDir(const char* dirname)
                     strcmp(de->d_name, "gs_gazelle.conf") == 0 ||
                     (g_is_obsmode && strcmp(de->d_name, "base.tar.gz") == 0) ||
                     (g_is_obsmode && strcmp(de->d_name, "pg_hba.conf") == 0)||
-                    (g_is_obsmode && strcmp(de->d_name, "pg_ident.conf") == 0))
+                    (g_is_obsmode && strcmp(de->d_name, "pg_ident.conf") == 0) ||
+                    (IS_CROSS_CLUSTER_BUILD && strcmp(de->d_name, "pg_hba.conf") == 0) ||
+                    strcmp(de->d_name, "pg_hba.conf.old") == 0)
                     continue;
                 /* Skip paxos index files for building process will write them */
                 if (enableDCF && ((strcmp(de->d_name, "paxosindex") == 0) ||
                     (strcmp(de->d_name, "paxosindex.backup") == 0)))
                     continue;
-                /* build from cn reserve this file,om will modify it */
-                if ((conn_str != NULL) && 0 == strncmp(de->d_name, "pg_hba.conf", strlen("pg_hba.conf")))
+                /* build from cn reserve this file,om will modify it. */
+                if ((conn_str != NULL) && strncmp(de->d_name, "pg_hba.conf", strlen("pg_hba.conf")) == 0) {
                     continue;
+                }
                 if (unlink(fullpath)) {
                     pg_log(PG_WARNING, _("failed to remove file %s.\n"), fullpath);
                     (void)closedir(dir);
@@ -1388,9 +1475,15 @@ int get_replconn_number(const char* filename)
         int optvalue_len = 0;
         int lines_index = 0;
         int i;
-        for (i = 1; i < MAX_REPLNODE_NUM; i++) {
+        for (i = 1; i < DOUBLE_MAX_REPLNODE_NUM; i++) {
+            const char *para = NULL;
+            if (i > MAX_REPLNODE_NUM) {
+                para = config_para_cross_cluster_build[i - MAX_REPLNODE_NUM];
+            } else if (i < MAX_REPLNODE_NUM) {
+                para = config_para_build[i];
+            }
             lines_index = find_gucoption(
-                (const char**)optlines, (const char*)config_para_build[i], NULL, NULL, &optvalue_off, &optvalue_len);
+                (const char**)optlines, (const char*)para, NULL, NULL, &optvalue_off, &optvalue_len);
 
             if (lines_index != INVALID_LINES_IDX) {
                 repl_num++;
@@ -1413,150 +1506,6 @@ int get_replconn_number(const char* filename)
     return repl_num;
 }
 
-/*
- * Brief            : @@GaussDB@@
- * Description    : to connect the server,and return conn if success
- * Notes            :
- */
-static PGconn* get_conn(const char* repl_conninfo)
-{
-    PGconn* conn_get = NULL;
-    PGresult* res = NULL;
-    int primary_sversion = 0;
-    int standby_sversion = 0;
-    char* primary_pversion = NULL;
-    char* standby_pversion = NULL;
-    ServerMode primary_mode;
-
-    /*  to connect server */
-    conn_get = PQconnectdb(repl_conninfo);
-    if ((!conn_get) || (PQstatus(conn_get) != CONNECTION_OK)) {
-        disconnect_and_return_null(conn_get);
-    }
-
-    /* IDENTIFY_VERSION */
-    res = PQexec(conn_get, "IDENTIFY_VERSION");
-    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        PQclear(res);
-        disconnect_and_return_null(conn_get);
-    }
-    if (PQnfields(res) != 3 || PQntuples(res) != 1) {
-        PQclear(res);
-        disconnect_and_return_null(conn_get);
-    }
-    primary_sversion = pg_atoi((const char*)PQgetvalue(res, 0, 0), 4, 0);
-    standby_sversion = PG_VERSION_NUM;
-    primary_pversion = PQgetvalue(res, 0, 1);
-    standby_pversion = strdup(PG_PROTOCOL_VERSION);
-    if (standby_pversion == NULL) {
-        PQclear(res);
-        disconnect_and_return_null(conn_get);
-    }
-
-    if (primary_sversion != standby_sversion ||
-        strncmp(primary_pversion, standby_pversion, strlen(PG_PROTOCOL_VERSION)) != 0) {
-        PQclear(res);
-
-        if (primary_sversion != standby_sversion) {
-            pg_log(PG_PRINT,
-                "%s: database system version is different between the primary and standby "
-                "The primary's system version is %d, the standby's system version is %d.\n",
-                progname,
-                primary_sversion,
-                standby_sversion);
-            free(standby_pversion);
-            standby_pversion = NULL;
-            disconnect_and_return_null(conn_get);
-        } else {
-            pg_log(PG_PRINT,
-                "%s: the primary protocal version %s is not the same as the standby protocal version %s.\n",
-                progname,
-                primary_pversion,
-                standby_pversion);
-            free(standby_pversion);
-            standby_pversion = NULL;
-            disconnect_and_return_null(conn_get);
-        }
-    }
-    PQclear(res);
-
-    /* free immediately once not used. Can't be NULL. */
-    free(standby_pversion);
-    standby_pversion = NULL;
-    /* IDENTIFY_MODE */
-    res = PQexec(conn_get, "IDENTIFY_MODE");
-    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
-        PQclear(res);
-        disconnect_and_return_null(conn_get);
-    }
-    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
-        PQclear(res);
-        disconnect_and_return_null(conn_get);
-    }
-    primary_mode = (ServerMode)pg_atoi((const char*)PQgetvalue(res, 0, 0), 4, 0);
-    if (!((primary_mode == PRIMARY_MODE && cascade_standby == false) ||
-            (primary_mode == STANDBY_MODE && cascade_standby == true) || (primary_mode == NORMAL_MODE))) {
-        PQclear(res);
-        disconnect_and_return_null(conn_get);
-    }
-    PQclear(res);
-    return conn_get;
-}
-
-bool check_conn(int conn_timeout, int recv_timeout)
-{
-
-    ReplConnInfo* repl_conn_info = NULL;
-
-    PGconn* con_get = NULL;
-    char repl_conninfo[MAXPGPATH];
-    int repl_array_length = 0;
-    int i = 0;
-    bool ret = false;
-
-    /* parse conninfo */
-    repl_conn_info = ParseReplConnInfo(conninfo_global[0], &repl_array_length);
-    if (repl_conn_info == NULL) {
-        pg_log(PG_PRINT, "%s: invalid value for parameter \"replconninfo1\" in postgresql.conf.\n", progname);
-        return ret;
-    }
-
-    /* check if we can get the connection. */
-    for (i = 0; i < repl_array_length; i++) {
-        if (repl_conn_info != NULL) {
-            int nRet = snprintf_s(repl_conninfo,
-                sizeof(repl_conninfo),
-                sizeof(repl_conninfo) - 1,
-                "localhost=%s localport=%d host=%s port=%d "
-                "dbname=replication replication=true "
-                "fallback_application_name=gs_ctl "
-                "connect_timeout=%d rw_timeout=%d ",
-                repl_conn_info[i].localhost,
-                repl_conn_info[i].localport,
-                repl_conn_info[i].remotehost,
-                repl_conn_info[i].remoteport,
-                conn_timeout,
-                recv_timeout);
-            securec_check_ss_c(nRet, "", "");
-
-            con_get = get_conn(repl_conninfo);
-            if (con_get != NULL) {
-                PQfinish(con_get);
-                con_get = NULL;
-                ret = true;
-                break;
-            }
-        }
-    }
-
-    if (repl_conn_info != NULL) {
-        free(repl_conn_info);
-        repl_conn_info = NULL;
-    }
-
-    return ret;
-}
-
 void get_slot_name(char* slotname, size_t len)
 {
     int errorno = memset_s(slotname, len, 0, len);
@@ -1573,19 +1522,17 @@ void get_slot_name(char* slotname, size_t len)
                 slotname, len, len - 1, "%s", pgxcnodename);
                 securec_check_ss_c(errorno, "", "");
         } else if(g_replconn_idx != -1) {
-            ReplConnInfo* repl_conn_info = NULL;
+            ReplConnInfo repl_conn_info;
             int repl_arr_length = 0;
-            repl_conn_info = ParseReplConnInfo(conninfo_global[g_replconn_idx], &repl_arr_length);
-            if (repl_conn_info != NULL) {
-                errorno = snprintf_s(slotname, len, len - 1, "%s_%s_%d", pgxcnodename, repl_conn_info->localhost, 
-                    repl_conn_info->localport);
+            bool parseOk = ParseReplConnInfo(conninfo_global[g_replconn_idx], &repl_arr_length, &repl_conn_info);
+            if (parseOk) {
+                errorno = snprintf_s(slotname, len, len - 1, "%s_%s_%d", pgxcnodename, repl_conn_info.localhost, 
+                    repl_conn_info.localport);
                 securec_check_ss_c(errorno, "", "");
-                free(repl_conn_info);
-                repl_conn_info = NULL;
             }
         }
     }
-    return;
+
 }
 
 /*

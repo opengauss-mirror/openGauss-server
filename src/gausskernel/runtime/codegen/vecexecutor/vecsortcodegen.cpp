@@ -1718,7 +1718,6 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     tmpval = builder.CreateICmpSGT(parm3, int32_7);
     builder.CreateCondBr(tmpval, bb_loop_len_a1, bb_prehead_a2);
 
-    /* while (len1 >= 8) {....} */
     builder.SetInsertPoint(bb_loop_len_a1);
     llvm::Value* loopIdx = builder.CreateSExt(parm3, int64Type);
     builder.CreateBr(bb_loopBody_a1);
@@ -1793,7 +1792,6 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     tmpval = builder.CreateICmpSGT(parm3, int32_7);
     builder.CreateCondBr(tmpval, bb_loop_len_b1, bb_prehead_b2);
 
-    /* while (len2 >= 8) {....} */
     builder.SetInsertPoint(bb_loop_len_b1);
     loopIdx = builder.CreateSExt(parm3, int64Type);
     builder.CreateBr(bb_loopBody_b1);
@@ -1850,7 +1848,6 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_long()
     len_less1 = builder.CreateSub(Phi_len_b, int32_1);
     Phi_len_b->addIncoming(len_less1, bb_loopEnd_b2);
     Vals2[1] = remaining;
-    /* if (s[i] == ' ') */
     tmpval = builder.CreateInBoundsGEP(Phi_data2, Vals2);
     tmpval = builder.CreateLoad(int8Type, tmpval, "b_i");
     tmpval = builder.CreateICmpEQ(tmpval, int8_32);
@@ -2183,7 +2180,6 @@ llvm::Function* VecSortCodeGen::bpcharcmpCodeGen_short()
     len_less1 = builder.CreateSub(Phi_len_b, int32_1);
     Phi_len_b->addIncoming(len_less1, bb_loopEnd_b);
     Vals2[1] = remaining;
-    /* if (s[i] == ' ') */
     tmpval = builder.CreateInBoundsGEP(Phi_data2, Vals2);
     tmpval = builder.CreateLoad(int8Type, tmpval, "b_i");
     tmpval = builder.CreateICmpEQ(tmpval, int8_32);

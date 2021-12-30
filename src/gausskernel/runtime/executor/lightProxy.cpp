@@ -44,6 +44,7 @@
 #include "tcop/tcopprot.h"
 #include "optimizer/streamplan.h"
 #include "gs_ledger/blockchain.h"
+#include "parser/parse_hint.h"
 
 const int MAX_COMMAND = 51;
 typedef struct commandType {
@@ -186,7 +187,8 @@ static void report_unsupport_light(LightUnSupportType type)
         "not support others cmd type except I/D/U/S",
         "not support table entry relkind is foreign",
         "not support query has a statement trigger",
-        "not support user-defined type "};
+        "not support user-defined type",
+        "not support query with node_name hint"};
 
     ereport(DEBUG2, (errmodule(MOD_LIGHTPROXY),
                     errmsg("[LIGHT PROXY]  check failed with type: %s.", unsupport_msg[type])));
@@ -230,6 +232,12 @@ static bool isSupportLightQuery(Query* query)
         query->commandType != CMD_DELETE && !(HAS_ROUTER && query->commandType == CMD_MERGE)) {
         report_unsupport_light(CMD_UNSUPPORT);
 
+        return false;
+    }
+
+    /* do not support node_name hint due to agg function's different behavior */
+    if (CheckNodeNameHint(query->hintState)) {
+        report_unsupport_light(NODE_NAME_UNSUPPORT);
         return false;
     }
 
@@ -494,7 +502,7 @@ void lightProxy::sendParseIfNecessary()
     /* see if statement already active on the node */
     for (int i = 0; i < m_entry->current_nodes_number; i++) {
         if (m_entry->dns_node_indices[i] == m_nodeIdx) {
-            if (ENABLE_CN_GPC) {
+            if (ENABLE_CN_GPC || IN_GPC_GRAYRELEASE_CHANGE) {
                 need_send_again = true;
             } else {
                 return;
@@ -725,6 +733,7 @@ ExecNodes* lightProxy::checkLightQuery(Query* query)
     (void)ExecCheckRTPerms(query->rtable, true);
 
     exec_nodes = pgxc_is_query_shippable(query, 0, true);
+
     return exec_nodes;
 }
 

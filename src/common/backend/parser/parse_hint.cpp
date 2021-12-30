@@ -134,6 +134,8 @@ extern Const* makeConst(Oid consttype, int32 consttypmod, Oid constcollid, int c
     bool constisnull, bool constbyval, Cursor_Data* vars = NULL);
 extern Numeric int64_to_numeric(int64 v);
 
+static bool IsScanUseDesthint(void* val1, void* val2);
+
 /* Expression kind codes for preprocess_expression */
 #define EXPRKIND_QUAL 0
 #define EXPRKIND_TARGET 1
@@ -3658,6 +3660,49 @@ bool has_no_gpc_hint(HintState* hintState)
         NoGPCHint* hint = (NoGPCHint*)linitial(hintState->no_gpc_hint);
         hint->base.state = HINT_STATE_USED;
         return true;
+    }
+    return false;
+}
+
+/*
+ * check if is dest hinttype, it's used by function list_cell_clear
+ * val1: ScanMethodHint
+ * val2: HintKeyword
+ */
+static bool IsScanUseDesthint(void* val1, void* val2)
+{
+    ScanMethodHint *scanmethod = (ScanMethodHint*)lfirst((ListCell*)val1);
+    HintKeyword* desthint = (HintKeyword*)val2;
+
+    if (scanmethod == NULL) {
+        return false;
+    }
+
+    if (scanmethod->base.hint_keyword == *desthint) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void RemoveQueryHintByType(Query *query, HintKeyword hint)
+{
+    if (query->hintState && query->hintState->scan_hint) {
+        query->hintState->scan_hint = list_cell_clear(query->hintState->scan_hint, &hint, IsScanUseDesthint);
+    }
+}
+
+bool CheckNodeNameHint(HintState* hintstate)
+{
+    if (hintstate == NULL) {
+        return false;
+    }
+    ListCell* lc = NULL;
+    foreach (lc, hintstate->set_hint) {
+        SetHint* hint = (SetHint*)lfirst(lc);
+        if (unlikely(strcmp(hint->name, "node_name") == 0)) {
+            return true;
+        }
     }
     return false;
 }

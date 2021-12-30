@@ -1228,7 +1228,6 @@ RunXLogThreads(const char *archivedir, time_t target_time,
 
     if (!XLogRecPtrIsInvalid(endpoint))
     {
-        //  if (XRecOffIsNull(endpoint) && !inclusive_endpoint)
         if (XRecOffIsNull(endpoint))
         {
             GetXLogSegNo(endpoint, endSegNo, segment_size);

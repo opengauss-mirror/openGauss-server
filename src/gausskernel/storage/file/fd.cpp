@@ -3963,7 +3963,7 @@ void SetupPageCompressMemoryMap(File file, RelFileNode node, const RelFileNodeFo
         }
     }
 
-    if (RecoveryInProgress()) {
+    if (t_thrd.xlog_cxt.InRecovery) {
         CheckAndRepairCompressAddress(map, chunk_size, map->algorithm, vfdP->fileName);
     }
 

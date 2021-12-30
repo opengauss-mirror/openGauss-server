@@ -36,6 +36,8 @@
 
 using namespace std;
 
+#define IPRANGE_IS_IPV4(ip) ((ip).ip_32.b == 0x0000FFFF)
+
 std::vector<uint32_t> MASK_FROM_LUT {
     (uint32_t)0xFFFFFFFF,
     (uint32_t)0xFFFFFFFF << 31,
@@ -105,7 +107,7 @@ std::vector<uint32_t> MASK_TO_LUT {
     ~((uint32_t)0xFFFFFFFF << 3),
     ~((uint32_t)0xFFFFFFFF << 2),
     ~((uint32_t)0xFFFFFFFF << 1),
-    0
+    (uint32_t)0xFFFFFFFF
 };
 
 const IPV6 localhost_ipv6 ({0x0000000000000001, 0x0000000000000000});
@@ -149,6 +151,10 @@ bool IPRange::str_to_ip(const char* ip_str, IPV6 *ip)
     } else if (inet_pton(AF_INET, ip_str, &addr) > 0) {
         net_ipv4_to_host_order(ip, &addr);
     } else {
+        /* 
+         * Note that even the format keep the same as ipv6 or ipv4
+         * still recognize it as invalid ip if ip exceed the valid range
+         */ 
         m_err_str = "invalid ip: " + std::string(ip_str);
         return false;
     }
@@ -157,7 +163,7 @@ bool IPRange::str_to_ip(const char* ip_str, IPV6 *ip)
 
 bool IPRange::mask_range(Range *range, unsigned short cidr)
 {
-    if (range->from.ip_32.b == 0x0000FFFF) { /* ipv4 */
+    if (IPRANGE_IS_IPV4(range->from)) { /* ipv4 */
         if (cidr < 1 || cidr > 32) {
             m_err_str = "invalid cidr for ipv4: " + cidr;
             return false;
@@ -201,6 +207,10 @@ bool IPRange::mask_range(Range *range, unsigned short cidr)
     return true;
 }
 
+/* 
+ * parse the ip with mask into range sturst , format is as below:
+ * x.x.x.x|x, ptr is the postion of "|"
+ */
 bool IPRange::parse_mask(const char* range, size_t range_len, const char *ptr, Range *new_range)
 {
     if (range_len > 100) {
@@ -356,6 +366,13 @@ bool IPRange::handle_add_intersection(Range *new_range, const Range *exist_range
     return true;
 }
 
+/* 
+ *  parse the ip range support below format
+ *  single ip: 127.0.0.1
+ *  range ip: 127.0.0.1 ~ 127.0.0.2
+ *  cidr ip : 192.168.10.1/21
+ *  mask ip : 192.168.10.1/255.255.255.2
+ */
 bool IPRange::parse_range(const char *range, size_t range_len, Range *new_range)
 {
     /* handle format of "ip/cidr" */
@@ -499,7 +516,7 @@ std::string IPRange::ip_to_str(const IPV6 *ip) const
 {
     char ip_str[INET6_ADDRSTRLEN];
     /* now get it back and print it */
-    if (ip->ip_32.b == 0x0000FFFF) {
+    if (IPRANGE_IS_IPV4(*ip)) {
         uint32_t tmp = htonl(ip->ip_32.a);
         (void)inet_ntop(AF_INET, &tmp, ip_str, INET_ADDRSTRLEN);
     } else {

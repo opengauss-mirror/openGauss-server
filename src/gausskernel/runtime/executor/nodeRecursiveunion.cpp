@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -19,6 +20,7 @@
 #include "access/xact.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeAgg.h"
+#include "executor/node/nodeCtescan.h"
 #include "executor/node/nodeHashjoin.h"
 #include "executor/node/nodeMaterial.h"
 #include "executor/node/nodeRecursiveunion.h"
@@ -67,6 +69,11 @@ static void FindSyncUpStream(RecursiveUnionController* controller, PlanState* st
 static void StartNextRecursiveIteration(RecursiveUnionController* controller, int step);
 static void ExecInitRecursiveResultTupleSlot(EState* estate, PlanState* planstate);
 #endif
+
+static inline bool IsUnderStartWith(RecursiveUnion *ruplan)
+{
+    return (ruplan->internalEntryList != NIL);
+}
 
 /*
  * To implement UNION (without ALL), we need a hashtable that stores tuples
@@ -178,6 +185,15 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
                     continue;
                 }
             }
+
+            /*
+             * Add RUITR and nessary internal pseudo columns before store into worktable,
+             * only processed in start-with case
+             */
+            if (IsUnderStartWith((RecursiveUnion *)node->ps.plan)) {
+                slot = ConvertRuScanOutputSlot(node, slot, false);
+            }
+
             /* Each non-duplicate tuple goes to the working table ... */
             tuplestore_puttupleslot(node->working_table, slot);
 
@@ -205,8 +221,11 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
             /* Kick-Off next step */
             StartNextRecursiveIteration(node->rucontroller, WITH_RECURSIVE_SYNC_NONERQ);
         }
-        node->iteration = 1;
 #endif
+        node->iteration = 1;
+
+        /* Need reset sw_tuple_idx to 1 when non-recursive term finish */
+        node->sw_tuple_idx = 1;
     }
 
     /* 2. Execute recursive term */
@@ -217,6 +236,14 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
     for (;;) {
         slot = ExecProcNode(inner_plan);
         if (TupIsNull(slot)) {
+            /* debug information for SWCBcase */
+            if (IsUnderStartWith((RecursiveUnion *)node->ps.plan)) {
+                ereport(DEBUG1, (errmodule(MOD_EXECUTOR),
+                        errmsg("[SWCB DEBUG] current iteration is done: level:%d rownum_current:%d rownum_total:%lu",
+                        node->iteration + 1,
+                        node->swstate->sw_numtuples,
+                        node->swstate->sw_rownum)));
+            }
 #ifdef ENABLE_MULTIPLE_NODES
             /*
              * Check the recursive union is run out of max allowed iterations
@@ -249,6 +276,8 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
                 break;
             }
 #endif
+            /* Need reset sw_tuple_idx to 1 when current iteration finish */
+            node->sw_tuple_idx = 1;
 
             /* done with old working table ... */
             tuplestore_end(node->working_table);
@@ -292,6 +321,7 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
                 StartNextRecursiveIteration(node->rucontroller, WITH_RECURSIVE_SYNC_RQSTEP);
             }
 #else
+            node->iteration++;
             node->intermediate_table = tuplestore_begin_heap(false, false, u_sess->attr.attr_memory.work_mem);
             /* reset the recursive term */
             inner_plan->chgParam = bms_add_member(inner_plan->chgParam, plan->wtParam);
@@ -315,6 +345,49 @@ TupleTableSlot* ExecRecursiveUnion(RecursiveUnionState* node)
 
         /* Else, tuple is good; stash it in intermediate table ... */
         node->intermediate_empty = false;
+
+
+        /* For start-with, reason ditto */
+        if (IsUnderStartWith((RecursiveUnion *)node->ps.plan)) {
+            int max_times = u_sess->attr.attr_sql.max_recursive_times;
+            StartWithOp *swplan = (StartWithOp *)node->swstate->ps.plan;
+
+            /*
+             * Cannot exceed max_recursive_times
+             * The reason we also keep iteration check here is
+             * avoid order siblings by exist.
+             * */
+            if (node->iteration > max_times) {
+                ereport(ERROR,
+                        (errcode(ERRCODE_CONFIGURATION_LIMIT_EXCEEDED),
+                        errmsg("Current Start With...Connect by has exceeded max iteration times %d", max_times),
+                        errhint("Please check your connect by clause carefully")));
+            }
+
+            slot = ConvertRuScanOutputSlot(node, slot, true);
+
+            /*
+             * In ORDER SIBLINGS case, as we add SORT-Operator(material) on top of
+             * RecursiveUnion, so we have to do nocycle check here
+             */
+            if (swplan->swoptions->siblings_orderby_clause) {
+                StartWithOpState *swstate = (StartWithOpState *)node->swstate;
+                if (swstate->sw_nocycleStopOrderSiblings) {
+                    return (TupleTableSlot *)NULL;
+                }
+
+                if (CheckCycleExeception(swstate, slot)) {
+                    /*
+                     * Mark execution stop for order siblings, note we let the cycle-causing
+                     * tuple return to upper node and stop next one
+                     */
+                    swstate->sw_nocycleStopOrderSiblings = true;
+                    elog(DEBUG1, "nocycle option take effect on RecursiveUnion for Order Siblings! %s",
+                            swstate->sw_curKeyArrayStr);
+                }
+            }
+        }
+
         tuplestore_puttupleslot(node->intermediate_table, slot);
 
         /* ... and return it */
@@ -530,6 +603,16 @@ RecursiveUnionState* ExecInitRecursiveUnion(RecursiveUnion* node, EState* estate
             memset_s(&((rustate->ps.instrument)->recursiveInfo), sizeof(RecursiveInfo), 0, sizeof(RecursiveInfo));
         securec_check(rc, "\0", "\0");
     }
+
+    /* Init start with related variables */
+    rustate->swstate = NULL;
+    rustate->sw_tuple_idx = 1;
+    rustate->convertContext = AllocSetContextCreate(CurrentMemoryContext,
+        "RecursiveUnion Start With",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+
     return rustate;
 }
 
@@ -558,6 +641,9 @@ void ExecEndRecursiveUnion(RecursiveUnionState* node)
         MemoryContextDelete(node->tempContext);
     if (node->tableContext)
         MemoryContextDelete(node->tableContext);
+    if (node->convertContext) {
+        MemoryContextDelete(node->convertContext);
+    }
 
     /*
      * clean out the upper tuple table
@@ -608,6 +694,7 @@ void ExecReScanRecursiveUnion(RecursiveUnionState* node)
     /* reset processing state */
     node->recursing = false;
     node->intermediate_empty = true;
+    node->iteration = 0;
     tuplestore_clear(node->working_table);
     tuplestore_clear(node->intermediate_table);
 }

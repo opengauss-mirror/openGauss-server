@@ -27,6 +27,7 @@
 #include "miscadmin.h"
 #include "postmaster/startup.h"
 #include "postmaster/postmaster.h"
+#include "replication/shared_storage_walreceiver.h"
 #include "storage/ipc.h"
 #include "storage/latch.h"
 #include "storage/pmsignal.h"
@@ -137,6 +138,9 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         t_thrd.startup_cxt.primary_triggered = true;
     } else if (CheckNotifySignal(NOTIFY_STANDBY)) {
         t_thrd.startup_cxt.standby_triggered = true;
+        if (t_thrd.startup_cxt.failover_triggered && t_thrd.postmaster_cxt.HaShmData->is_hadr_main_standby) {
+            t_thrd.startup_cxt.failover_triggered = false;
+        }
     } else if (CheckNotifySignal(NOTIFY_FAILOVER)) {
         t_thrd.startup_cxt.failover_triggered = true;
 #ifndef ENABLE_MULTIPLE_NODES
@@ -226,6 +230,27 @@ static void StartupReleaseAllLocks(int code, Datum arg)
     LockReleaseAll(USER_LOCKMETHOD, true);
 }
 
+void DeleteDisConnFileInClusterStandby()
+{
+    if (!IS_SHARED_STORAGE_MODE) {
+        return;
+    }
+
+    struct stat st;
+    if (stat(disable_conn_file, &st) < 0) {
+        return;
+    }
+
+    int ret = unlink(disable_conn_file);
+    if (ret < 0) {
+        ereport(WARNING, (errcode_for_file_access(), errmsg("cluster standby mode, could not remove file \"%s\": %m", 
+                                                            disable_conn_file)));
+    } else {
+        ereport(LOG, (errcode_for_file_access(), errmsg("removed file \"%s\" success.", disable_conn_file)));
+    }
+}
+
+
 /* ----------------------------------
  *	Startup Process main entry point
  * ----------------------------------
@@ -296,6 +321,7 @@ void StartupProcessMain(void)
          * MOT recovery is part of StartupXlog
          */
 #endif
+        DeleteDisConnFileInClusterStandby();
         StartupXLOG();
     }
 
@@ -457,7 +483,8 @@ static void SetStaticConnNum(void)
 
     for (i = 1; i < MAX_REPLNODE_NUM; i++) {
         repl_list_num = (t_thrd.postmaster_cxt.ReplConnArray[i] != NULL) ? (repl_list_num + 1) : repl_list_num;
-
+        repl_list_num = 
+            (t_thrd.postmaster_cxt.CrossClusterReplConnArray[i] != NULL) ? (repl_list_num + 1) : repl_list_num;
         SpinLockAcquire(&hashmdata->mutex);
         hashmdata->repl_list_num = repl_list_num;
         SpinLockRelease(&hashmdata->mutex);

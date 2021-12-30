@@ -33,6 +33,7 @@
 #include "replication/datasender.h"
 #include "replication/datasender_private.h"
 #include "replication/walsender_private.h"
+#include "replication/shared_storage_walreceiver.h"
 #include "replication/syncrep.h"
 #include "storage/cu.h"
 #include "storage/pmsignal.h"
@@ -184,7 +185,7 @@ void WaitForDataSync(void)
         /*
          * if we  modify the syncmode dynamically, we'll stop wait
          */
-        if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone ||
+        if ((t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE) ||
             synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
             ereport(WARNING,
                     (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),

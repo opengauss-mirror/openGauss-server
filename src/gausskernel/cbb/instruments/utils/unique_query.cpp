@@ -360,8 +360,12 @@ void UniqueSql::JumbleRangeTable(pgssJumbleState* jstate, List* rtable)
         APP_JUMB(rte->rtekind);
         switch (rte->rtekind) {
             case RTE_RELATION:
-                if (rte->ispartrel && rte->isContainPartition && OidIsValid(rte->partitionOid)) {
-                    APP_JUMB(rte->partitionOid);
+                if (rte->ispartrel) {
+                    if (rte->isContainPartition && OidIsValid(rte->partitionOid)) {
+                        APP_JUMB(rte->partitionOid);
+                    } else if (rte->isContainSubPartition && OidIsValid(rte->subpartitionOid)) {
+                        APP_JUMB(rte->subpartitionOid);
+                    }
                 } else {
                     APP_JUMB(rte->relid);
                 }

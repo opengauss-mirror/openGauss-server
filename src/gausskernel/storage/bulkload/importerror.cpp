@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -510,6 +511,57 @@ void CopyErrorLogger::FormError(CopyState cstate, Datum begintime, CopyError *ie
         securec_check_c(rc, "\0", "\0");
     } else
         ierror->m_isNull[CopyError::DetailIdx] = true;
+
+    pfree(relname);
+}
+
+void CopyErrorLogger::FormWhenLog(CopyState cstate, Datum begintime, CopyError *ierror)
+{
+    const char *detail = NULL;
+    char *relname = NULL;
+    errno_t rc;
+    char *source = NULL;
+
+    Assert(ierror != NULL);
+    detail = "COPY_WHEN_ROWS";
+    ierror->Reset();
+
+    ierror->m_desc = m_errDesc;
+
+    relname = (char *)palloc(MAX_NAME_LEN);
+    rc = snprintf_s(relname, MAX_NAME_LEN, MAX_NAME_LEN - 1, "%s.%s", cstate->logger->m_namespace,
+                    RelationGetRelationName(cstate->rel));
+    securec_check_ss(rc, "\0", "\0");
+
+    ierror->m_values[CopyError::RelNameIdx] = PointerGetDatum(cstring_to_text_with_len(relname, strlen(relname)));
+    ierror->m_values[CopyError::StartTimeIdx] = begintime;
+
+    if (cstate->filename)
+        source = cstate->filename;
+    else {
+        Assert(cstate->copy_dest == COPY_NEW_FE);
+        source = "STDIN";
+    }
+
+    ierror->m_values[CopyError::FileNameIdx] = PointerGetDatum(cstring_to_text_with_len(source, strlen(source)));
+    ierror->m_values[CopyError::LineNOIdx] = cstate->cur_lineno;
+
+    /* save the raw data here  */
+    if (cstate->line_buf.len > 0 && cstate->logErrorsData) {
+        char *rawDataVal = NULL;
+        rawDataVal = limit_printout_length(cstate->line_buf.data);
+        ierror->m_values[CopyError::RawDataIdx] =
+            PointerGetDatum(cstring_to_text_with_len(rawDataVal, strlen(rawDataVal)));
+        pfree(rawDataVal);
+    } else {
+        ierror->m_isNull[CopyError::RawDataIdx] = true;
+    }
+
+    if (detail != NULL) {
+        ierror->m_values[CopyError::DetailIdx] = PointerGetDatum(cstring_to_text_with_len(detail, strlen(detail)));
+    } else {
+        ierror->m_isNull[CopyError::DetailIdx] = true;
+    }
 
     pfree(relname);
 }

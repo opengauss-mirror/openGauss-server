@@ -159,10 +159,12 @@ static KMeans *create_kmeans_node(AlgorithmML const algorithm, List *hyperparame
     int32_t num_features = 0;
     int32_t external_seed = 0;
     int32_t verbosity = 0;
+
     auto kmeans_model = reinterpret_cast<ModelKMeans *>(dest->model);
     HyperparameterValidation validation;
-    memset_s(&validation, sizeof(HyperparameterValidation), 0, sizeof(HyperparameterValidation));
-
+    errno_t rc = memset_s(&validation, sizeof(HyperparameterValidation), 0, sizeof(HyperparameterValidation));
+    securec_check(rc, "\0", "\0");
+    
     kmeans_node->algorithm = algorithm;
     kmeans_node->plan.type = T_KMeans;
     kmeans_model->model.return_type = INT4OID;
@@ -346,9 +348,9 @@ void configure_dest_receiver_train_model(DestReceiverTrainModel *dest, Algorithm
 }
 
 
-// /*
-// * ExecCreateTableAs -- execute a CREATE TABLE AS command
-// */
+/*
+* ExecCreateTableAs -- execute a CREATE TABLE AS command
+*/
 void exec_create_model(CreateModelStmt *stmt, const char *queryString, ParamListInfo params, char *completionTag)
 {
 #ifdef ENABLE_MULTIPLE_NODES

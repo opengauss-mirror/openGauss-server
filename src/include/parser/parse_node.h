@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/parser/parse_node.h
  *
@@ -174,6 +175,18 @@ struct ParseState {
     bool p_hasSynonyms;
     Relation p_target_relation;
     RangeTblEntry* p_target_rangetblentry;
+    bool p_is_case_when;
+
+    /*
+     * used for start with...connect by rewrite
+     */
+    bool p_addStartInfo;
+    List *p_start_info;
+    int sw_subquery_idx; /* given unname-subquery unique name when sw rewrite */
+    SelectStmt *p_sw_selectstmt;
+    List *sw_fromClause;
+    WithClause *origin_with;
+    bool p_hasStartWith;
 
     /*
      * Optional hook functions for parser callbacks.  These are null unless
@@ -181,6 +194,7 @@ struct ParseState {
      */
     PreParseColumnRefHook p_pre_columnref_hook;
     PostParseColumnRefHook p_post_columnref_hook;
+    PreParseColumnRefHook p_bind_variable_columnref_hook;
     ParseParamRefHook p_paramref_hook;
     CoerceParamHook p_coerce_param_hook;
     CreateProcOperatorHook p_create_proc_operator_hook;

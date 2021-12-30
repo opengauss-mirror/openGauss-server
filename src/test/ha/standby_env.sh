@@ -2,7 +2,7 @@
 #some enviroment vars
 
 export g_base_port=8888
-
+#export prefix=${PREFIX_HOME}
 export g_pooler_base_port=`expr $g_base_port \+ 410`
 export g_base_standby_port=`expr $g_base_port \+ 400`
 export install_path="$prefix"
@@ -146,6 +146,22 @@ do
 	fi
 done
 echo "$failed_keyword when check_standby_startup"
+exit 1
+}
+
+function check_standby2_startup()
+{
+echo checking standby2 startup
+for i in $(seq 1 30)
+do
+        if [ $(query_standby2 | grep -E $startup_keyword | wc -l) -eq 0 -o $(query_standby2 | grep $startup_keyword1 | wc -l) -gt 0 ]; then
+                sleep 2
+        else
+                sleep 5
+                return 0
+        fi
+done
+echo "$failed_keyword when check_standby2_startup"
 exit 1
 }
 
@@ -338,14 +354,14 @@ done
 function kill_primary()
 {
 echo "kill primary $primary_data_dir"
-ps -ef | grep $USER | grep -w $primary_data_dir | grep -v grep | awk '{print $2}' | xargs kill -9
+ps -ef | grep -w $primary_data_dir | grep -v grep | awk '{print $2}' | xargs kill -9
 sleep 3
 }
 
 function kill_standby()
 {
 echo "kill standby $standby_data_dir"
-ps -ef | grep $USER | grep -w $standby_data_dir | grep -v grep | awk '{print $2}' | xargs kill -9
+ps -ef | grep -w $standby_data_dir | grep -v grep | awk '{print $2}' | xargs kill -9
 sleep 3
 }
 
@@ -505,6 +521,13 @@ function start_standby4()
   sleep 10
 }
 
+function start_primary_as_primary()
+{
+echo "start primary $primary_data_dir as primary"
+$bin_dir/gaussdb --single_node  -M primary -p $dn1_primary_port -D $primary_data_dir > ./results/gaussdb.log 2>&1 &
+check_primary_startup
+}
+
 function start_primary_as_standby()
 {
 echo "start primary $primary_data_dir as standby"
@@ -517,6 +540,13 @@ function start_standby_as_primary()
 echo "start standby $standby_data_dir as primary"
 $bin_dir/gaussdb --single_node  -M primary -p $dn1_standby_port -D $standby_data_dir > ./results/gaussdb.log 2>&1 &
 check_standby_startup
+}
+
+function start_standby2_as_primary()
+{
+echo "start standby $standby2_data_dir as primary"
+$bin_dir/gaussdb --single_node  -M primary -p $standby2_port -D $standby2_data_dir > ./results/gaussdb.log 2>&1 &
+check_standby2_startup
 }
 
 function start_primary_as_pending()
@@ -583,4 +613,92 @@ check_primary_setup_for_multi_standby
 
 echo query datanode1_standby
 check_replication_setup
+}
+
+#################################################################################
+#cascade standby
+#hacheck
+#cascade_data_dir=$standby2_data_dir
+function query_cascade_standby()
+{
+ echo query cascade standby
+ gs_ctl query -D  $data_dir/datanode2_standby
+}
+function check_cascade_standby_startup()
+{
+echo checking cascade standby startup
+for i in $(seq 1 30)
+do
+        if [ $(query_cascade_standby | grep -E $startup_keyword | wc -l) -eq 0 -o $(query_cascade_standby | grep $startup_keyword1 | wc -l) -gt 0 ]; then
+                sleep 2
+        else
+                sleep 5
+                return 0
+        fi
+done
+echo "$failed_keyword when check_cascade_standby_startup"
+exit 1
+}
+function check_cascade_primary_setup()
+{
+echo checking primary setup for cascade
+for i in $(seq 1 30)
+do
+        if [ $(query_primary | grep -E $setup_keyword | wc -l) -eq 1 ]; then
+                return 0
+        else
+                sleep 2
+        fi
+done
+echo "$failed_keyword when check_cascade_primary_setup"
+exit 1
+}
+function check_cascade_replication_setup()
+{
+echo checking replication setup for cascade
+for i in $(seq 1 30)
+do
+        if [ $(query_standby | grep -E $setup_keyword | wc -l) -eq 2 ]; then
+                return 0
+        else
+                sleep 2
+        fi
+done
+echo "$failed_keyword when check_cascade_replication_setup"
+exit 1
+}
+function kill_cascade_standby()
+{
+  echo "kill cascade standby $standby2_data_dir"
+  ps -ef | grep -w $standby2_data_dir | grep -v grep | awk '{print $2}' | xargs kill -9
+  sleep 3
+}
+function stop_cascade_standby()
+{
+echo "stop cascade_standby $standby2_data_dir"
+$bin_dir/gs_ctl stop -D $standby2_data_dir -m fast > ./results/gs_ctl.log 2>&1
+sleep 3
+}
+function start_cascade_standby()
+{
+echo "start cascade standby $standby2_data_dir"
+$bin_dir/gaussdb --single_node  -M cascade_standby -p $standby2_port -D $standby2_data_dir > ./results/gaussdb.log 2>&1 &
+check_cascade_standby_startup
+}
+function start_primary_as_cascade_standby()
+{
+echo "start primary $primary_data_dir as cascade standby"
+$bin_dir/gaussdb --single_node  -M cascade_standby -p $dn1_primary_port -D $primary_data_dir > ./results/gaussdb.log 2>&1 &
+check_primary_startup
+}
+function check_instance_cascade_standby()
+{
+sleep 2
+date
+#can grep datanode1 datanode1_standby datanode1_dummystandby gtm
+ps -ef | grep $data_dir | grep -v grep
+echo query datanode1
+check_cascade_primary_setup
+echo query datanode1_standby
+check_cascade_replication_setup
 }

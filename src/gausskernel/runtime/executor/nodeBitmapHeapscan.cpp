@@ -19,6 +19,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -39,6 +40,7 @@
 #include "access/relscan.h"
 #include "access/tableam.h"
 #include "access/transam.h"
+#include "catalog/pg_partition_fn.h"
 #include "commands/cluster.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeBitmapHeapscan.h"
@@ -704,6 +706,7 @@ void ExecEndBitmapHeapScan(BitmapHeapScanState* node)
         Assert(node->ss.ss_currentPartition);
         releaseDummyRelation(&(node->ss.ss_currentPartition));
 
+        releaseSubPartitionList(node->ss.ss_currentRelation, &(node->ss.subpartitions), NoLock);
         releasePartitionList(node->ss.ss_currentRelation, &(node->ss.partitions), NoLock);
     }
 
@@ -926,6 +929,8 @@ static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node)
     BitmapHeapScan* plan = NULL;
     int paramno = -1;
     ParamExecData* param = NULL;
+    int subPartParamno = -1;
+    ParamExecData* SubPrtParam = NULL;
 
     plan = (BitmapHeapScan*)(node->ss.ps.plan);
 
@@ -934,6 +939,9 @@ static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node)
     param = &(node->ss.ps.state->es_param_exec_vals[paramno]);
     node->ss.currentSlot = (int)param->value;
 
+    subPartParamno = plan->scan.plan.subparamno;
+    SubPrtParam = &(node->ss.ps.state->es_param_exec_vals[subPartParamno]);
+
     /* construct a dummy relation with the nextl table partition */
     currentpartition = (Partition)list_nth(node->ss.partitions, node->ss.currentSlot);
     currentpartitionrel = partitionGetRelation(node->ss.ss_currentRelation, currentpartition);
@@ -941,11 +949,30 @@ static void ExecInitNextPartitionForBitmapHeapScan(BitmapHeapScanState* node)
     /* switch the partition that needs to be scanned */
     Assert(PointerIsValid(node->ss.ss_currentPartition));
     releaseDummyRelation(&(node->ss.ss_currentPartition));
-    node->ss.ss_currentPartition = currentpartitionrel;
 
-    /* Initialize scan descriptor. */
-    node->ss.ss_currentScanDesc =
-        scan_handler_tbl_beginscan_bm(currentpartitionrel, node->ss.ps.state->es_snapshot, 0, NULL, &node->ss);
+    if (currentpartitionrel->partMap != NULL) {
+        Partition currentSubPartition = NULL;
+        List* currentSubPartitionList = NULL;
+        Relation currentSubPartitionRel = NULL;
+        Assert(SubPrtParam != NULL);
+        currentSubPartitionList = (List *)list_nth(node->ss.subpartitions, node->ss.currentSlot);
+        currentSubPartition = (Partition)list_nth(currentSubPartitionList, (int)SubPrtParam->value);
+        currentSubPartitionRel = partitionGetRelation(currentpartitionrel, currentSubPartition);
+        releaseDummyRelation(&(currentpartitionrel));
+
+        node->ss.ss_currentPartition = currentSubPartitionRel;
+        node->gpi_scan->parentRelation = currentpartitionrel;
+
+        /* Initialize scan descriptor. */
+        node->ss.ss_currentScanDesc =
+            scan_handler_tbl_beginscan_bm(currentSubPartitionRel, node->ss.ps.state->es_snapshot, 0, NULL, &node->ss);
+    } else {
+        node->ss.ss_currentPartition = currentpartitionrel;
+
+        /* Initialize scan descriptor. */
+        node->ss.ss_currentScanDesc =
+            scan_handler_tbl_beginscan_bm(currentpartitionrel, node->ss.ps.state->es_snapshot, 0, NULL, &node->ss);
+    }
 }
 
 /*
@@ -985,6 +1012,7 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
         } else {
             resultPlan = plan->scan.pruningInfo;
         }
+
         if (resultPlan->ls_rangeSelectedPartitions != NULL) {
             scanstate->ss.part_id = resultPlan->ls_rangeSelectedPartitions->length;
         } else {
@@ -1004,6 +1032,30 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
             tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq);
             tablepartition = partitionOpen(currentRelation, tablepartitionid, lock);
             scanstate->ss.partitions = lappend(scanstate->ss.partitions, tablepartition);
+
+            if (resultPlan->ls_selectedSubPartitions != NIL) {
+                Relation partRelation = partitionGetRelation(currentRelation, tablepartition);
+                SubPartitionPruningResult* subPartPruningResult =
+                    GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                if (subPartPruningResult == NULL) {
+                    continue;
+                }
+                List *subpart_seqs = subPartPruningResult->ls_selectedSubPartitions;
+                List *subpartition = NULL;
+                ListCell *lc = NULL;
+                foreach (lc, subpart_seqs) {
+                    Oid subpartitionid = InvalidOid;
+                    int subpartSeq = lfirst_int(lc);
+
+                    subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq);
+                    Partition subpart = partitionOpen(partRelation, subpartitionid, lock);
+                    subpartition = lappend(subpartition, subpart);
+                }
+                releaseDummyRelation(&(partRelation));
+                scanstate->ss.subPartLengthList =
+                    lappend_int(scanstate->ss.subPartLengthList, list_length(subpartition));
+                scanstate->ss.subpartitions = lappend(scanstate->ss.subpartitions, subpartition);
+            }
         }
     }
 }

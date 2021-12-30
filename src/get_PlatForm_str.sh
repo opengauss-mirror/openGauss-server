@@ -130,20 +130,13 @@ fi
 # kylin platform
 # the result form like this: kylin_aarch64
 ##################################################################################
-if [ "$kernel"x = "kylin"x ]
-then
-    plat_form_str=kylin_"$cpu_bit"
+if [ "$kernel"x = "kylin"x ];then
+    if [ "$cpu_bit"x = "aarch64"x ];then
+        plat_form_str=kylinv10_sp1_"$cpu_bit"
+    else
+        plat_form_str=kylinv10_sp1_"$cpu_bit"_intel
+    fi
 fi
-
-##################################################################################
-# ubuntu platform
-# the result form like this: ubuntu_x86_64
-##################################################################################
-if [ "$kernel"x = "ubuntu"x ]
-then
-    plat_form_str=ubuntu18.04_"$cpu_bit"
-fi
-
 
 ##################################################################################
 #

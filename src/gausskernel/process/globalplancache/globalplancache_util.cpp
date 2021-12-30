@@ -683,6 +683,11 @@ void set_func_expr_unique_id(PLpgSQL_function* func)
             case PLPGSQL_DTYPE_ARRAYELEM:
                 set_id_expr(((PLpgSQL_arrayelem*)d)->subscript, &unique_id);
                 break;
+            case PLPGSQL_DTYPE_ROW:
+            case PLPGSQL_DTYPE_RECORD: {
+                PLpgSQL_row* row = (PLpgSQL_row*)d;
+                set_id_expr(row->default_val, &unique_id);
+            } break;
             default:
                 break;
         }

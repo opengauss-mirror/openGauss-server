@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -35,6 +36,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/plpgsql.h"
 #include "commands/sqladvisor.h"
 #include "nodes/makefuncs.h"
 #include "utils/typcache.h"
@@ -43,14 +45,8 @@ static bool checkGlobalAdvMemSize();
 static void copyAdviseSearchPathFromSess(AdviseSearchPath* sp);
 static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate);
 static PLpgSQL_expr* copyPLpgsqlExpr(PLpgSQL_expr* srcExpr);
-static PLpgSQL_row* copyPLpgsqlRow(PLpgSQL_row* src);
-static PLpgSQL_var* copyPlpgsqlVar(PLpgSQL_var* src);
-static PLpgSQL_type* copyPLpgsqlType(PLpgSQL_type* src);
-static PLpgSQL_datum* copypPlpgsqlDatum(PLpgSQL_datum* datum);
 static PLpgSQL_nsitem* copyPLpgNsitem(PLpgSQL_nsitem* srcNs);
 static PLpgSQL_function* copyPLpgsqlFunc(PLpgSQL_function* srcFunc);
-static PLpgSQL_rec* copyPLpgsqlRec(PLpgSQL_rec* src);
-static PLpgSQL_recfield* copyPLpgsqlRecfield(PLpgSQL_recfield* src);
 static bool equalParam(ParamListInfo bpA, ParamListInfo bpB);
 static bool equalParamExternData(ParamExternData* prmA, ParamExternData* prmB);
 static bool equalPLpgNsitem(PLpgSQL_nsitem* nsA, PLpgSQL_nsitem* nsB);
@@ -183,7 +179,9 @@ ParamListInfo copyDynParam(ParamListInfo srcParamLI)
             get_typlenbyval(srcPrm->ptype, &typLen, &typByVal);
             destPrm->value = datumCopy(srcPrm->value, typByVal, typLen);
         }
-
+        destPrm->tableOfIndexType = srcPrm->tableOfIndexType;
+        destPrm->tableOfIndex = copyTableOfIndex(srcPrm->tableOfIndex);
+        destPrm->isnestedtable = srcPrm->isnestedtable;
         CopyCursorInfoData(&destPrm->cursor_data, &srcPrm->cursor_data);
     }
 
@@ -370,11 +368,11 @@ static PLpgSQL_function* copyPLpgsqlFunc(PLpgSQL_function* srcFunc)
     destFunc->tg_nargs_varno = srcFunc->tg_nargs_varno;
     destFunc->tg_argv_varno = srcFunc->tg_argv_varno;
     destFunc->resolve_option = srcFunc->resolve_option;
-
+    destFunc->invalItems = (List*)copyObject(srcFunc->invalItems);
     destFunc->ndatums = srcFunc->ndatums;
     destFunc->datums =(PLpgSQL_datum**)palloc(sizeof(PLpgSQL_datum*) * srcFunc->ndatums);
     for (int i = 0; i < srcFunc->ndatums; i++) {
-        destFunc->datums[i] = copypPlpgsqlDatum(srcFunc->datums[i]);
+        destFunc->datums[i] = deepCopyPlpgsqlDatum(srcFunc->datums[i]);
     }
     destFunc->action = NULL;
     destFunc->goto_labels = NIL;
@@ -415,6 +413,7 @@ static PLpgSQL_nsitem* copyPLpgNsitem(PLpgSQL_nsitem* srcNs)
     destNs->itemno = srcNs->itemno;
     destNs->itemtype = srcNs->itemtype;
     destNs->pkgname = pstrdup(srcNs->pkgname);
+    destNs->schemaName = pstrdup(srcNs->schemaName);
     destNs->prev = copyPLpgNsitem(srcNs->prev);
     errno_t rc = strncpy_s(destNs->name, strlen(srcNs->name) + 1, srcNs->name, strlen(srcNs->name));
     securec_check_c(rc, "\0", "\0");
@@ -455,7 +454,7 @@ static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate)
     destEstate->ndatums = srcEstate->ndatums;
     destEstate->datums =(PLpgSQL_datum**)palloc(sizeof(PLpgSQL_datum*) * srcEstate->ndatums);
     for (int i = 0; i < srcEstate->ndatums; i++) {
-        destEstate->datums[i] = copypPlpgsqlDatum(srcEstate->datums[i]);
+        destEstate->datums[i] = deepCopyPlpgsqlDatum(srcEstate->datums[i]);
     }
 
     destEstate->eval_tuptable = NULL;
@@ -471,6 +470,8 @@ static PLpgSQL_execstate* copyPLpgEstate(PLpgSQL_execstate* srcEstate)
     destEstate->goto_target_stmt = NULL; 
     destEstate->block_level = srcEstate->block_level;
     destEstate->cursor_return_data = NULL;
+    destEstate->stack_entry_start = srcEstate->stack_entry_start;
+    destEstate->curr_nested_table_type = 0;
 
     return destEstate;
 }
@@ -653,180 +654,4 @@ bool checkAdivsorState()
         return checkGlobalAdvMemSize();
     }
     return false;
-}
-
-/* The copy parameters are all references from exec_get_datum_type() */
-static PLpgSQL_datum* copypPlpgsqlDatum(PLpgSQL_datum* datum)
-{
-    PLpgSQL_datum* result = NULL;
-    errno_t errorno = EOK;
-
-    switch (datum->dtype) {
-        case PLPGSQL_DTYPE_VAR: {
-            PLpgSQL_var* newm =  copyPlpgsqlVar((PLpgSQL_var*)datum);
-            result = (PLpgSQL_datum*)newm;
-        } break;
-
-        case PLPGSQL_DTYPE_REC: {
-            PLpgSQL_rec* newm = copyPLpgsqlRec((PLpgSQL_rec*)datum);
-            result = (PLpgSQL_datum*)newm;
-        } break;
-
-        case PLPGSQL_DTYPE_RECFIELD: {
-            PLpgSQL_recfield* newm = copyPLpgsqlRecfield((PLpgSQL_recfield*)datum);
-            result = (PLpgSQL_datum*)newm;
-        } break;
-
-        case PLPGSQL_DTYPE_EXPR: {
-            PLpgSQL_expr* newm = (PLpgSQL_expr*)palloc(sizeof(PLpgSQL_expr));
-            errorno = memcpy_s(newm, sizeof(PLpgSQL_expr), datum, sizeof(PLpgSQL_expr));
-            securec_check(errorno, "\0", "\0");
-            newm->query = NULL;
-            newm->plan = NULL;
-            newm->paramnos = NULL;
-            newm->func = NULL;
-            newm->ns = NULL;
-            newm->expr_simple_expr = NULL;
-            newm->expr_simple_state = NULL;
-            result = (PLpgSQL_datum*)newm;
-        } break;
-
-        case PLPGSQL_DTYPE_ROW: 
-        case PLPGSQL_DTYPE_RECORD: {
-            PLpgSQL_row* newm = copyPLpgsqlRow((PLpgSQL_row*)datum);
-            result = (PLpgSQL_datum*)newm;
-        } break;
-
-        case PLPGSQL_DTYPE_ARRAYELEM:{
-            PLpgSQL_arrayelem* newm = (PLpgSQL_arrayelem*)palloc(sizeof(PLpgSQL_arrayelem));
-            errorno = memcpy_s(newm, sizeof(PLpgSQL_arrayelem), datum, sizeof(PLpgSQL_arrayelem));
-            securec_check(errorno, "\0", "\0");
-            newm->subscript = NULL;
-            result = (PLpgSQL_datum*)newm;
-        } break;
-
-        case PLPGSQL_NSTYPE_PROC:
-        case PLPGSQL_NSTYPE_UNKNOWN:
-            break;
-
-        default:
-            ereport(ERROR,
-                (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                    errmodule(MOD_PLSQL),
-                    errmsg("unrecognized dtype: %d when copy plsql datum.", datum->dtype)));
-            result = NULL; /* keep compiler quiet */
-            break;
-    }
-
-    return result;
-}
-
-static PLpgSQL_var* copyPlpgsqlVar(PLpgSQL_var* src)
-{
-    if (src == NULL) {
-        return NULL;
-    }
-    PLpgSQL_var* dest = (PLpgSQL_var*)palloc(sizeof(PLpgSQL_var));
-    dest->dtype = src->dtype;
-    dest->dno = src->dno;
-    dest->ispkg = src->ispkg;
-    dest->refname = pstrdup(src->refname);
-    dest->lineno = src->lineno;
-    dest->datatype = copyPLpgsqlType(src->datatype);
-    dest->isconst = src->isconst;
-    dest->notnull = src->notnull;
-    dest->default_val = NULL;
-    dest->cursor_explicit_expr = NULL;
-    dest->value = datumCopy(src->value, dest->datatype->typbyval, dest->datatype->typlen);
-    dest->isnull = src->isnull;
-    dest->freeval = src->freeval;
-    dest->is_cursor_var = src->is_cursor_var;
-    dest->is_cursor_open = src->is_cursor_open;
-    dest->pkg_name = NIL;
-    dest->pkg = NULL;
-    return dest;
-}
-
-static PLpgSQL_type* copyPLpgsqlType(PLpgSQL_type* src)
-{
-    if (src == NULL) {
-        return NULL;
-    }
-    PLpgSQL_type* dest = (PLpgSQL_type*)palloc(sizeof(PLpgSQL_type));
-    dest->dtype = src->dtype;
-    dest->dno = src->dno;
-    dest->ispkg = src->ispkg;
-    dest->typname = pstrdup(src->typname);
-    dest->typoid = src->typoid;
-    dest->ttype = src->ttype;
-    dest->typlen = src->typlen;
-    dest->typbyval = src->typbyval;
-    dest->typrelid = src->typrelid;
-    dest->typioparam = src->typioparam;
-    dest->collation = src->collation;
-    FmgrInfo* info = &dest->typinput;
-    info = NULL;
-    dest->atttypmod = src->atttypmod;
-
-    return dest;
-}
-
-static PLpgSQL_row* copyPLpgsqlRow(PLpgSQL_row* src)
-{
-    PLpgSQL_row* dest =  (PLpgSQL_row*)palloc(sizeof(PLpgSQL_row));
-    if (src->rowtupdesc == NULL) {
-        dest->rowtupdesc = NULL;
-    } else {
-        dest->rowtupdesc = CreateTupleDescCopy(src->rowtupdesc);
-    }
-    dest->dtype = src->dtype;
-    dest->dno = src->dno;
-    dest->ispkg = src->ispkg;
-    dest->intodatums = NULL;
-    dest->refname = pstrdup(src->refname);
-    dest->nfields = src->nfields;
-    dest->fieldnames = (char**)palloc(sizeof(char*) * dest->nfields);
-    for (int i = 0; i < dest->nfields ; i++) {
-        dest->fieldnames[i] = pstrdup(src->fieldnames[i]);
-    }
-    dest->varnos = (int*)palloc(sizeof(int) * dest->nfields);
-    for (int i = 0; i < dest->nfields ; i++) {
-        dest->varnos[i] = src->varnos[i];
-    }
-
-    return dest;
-}
-
-/* !!! Constraints tup is not copied !!! */
-static PLpgSQL_rec* copyPLpgsqlRec(PLpgSQL_rec* src)
-{
-    PLpgSQL_rec* dest = (PLpgSQL_rec*)palloc(sizeof(PLpgSQL_rec));
-    dest->dtype = src->dtype;
-    dest->dno = src->dno;
-    dest->ispkg = src->ispkg;
-    dest->refname = pstrdup(src->refname);
-    dest->tup = NULL;
-    dest->lineno = src->lineno;
-    if (src->tupdesc == NULL) {
-        dest->tupdesc = NULL;
-    } else {
-        dest->tupdesc = CreateTupleDescCopy(src->tupdesc);
-    }
-    
-    dest->freetup = src->freetup;
-    dest->freetupdesc = src->freetupdesc;
-
-    return dest;
-}
-
-static PLpgSQL_recfield* copyPLpgsqlRecfield(PLpgSQL_recfield* src)
-{
-    PLpgSQL_recfield* dest = (PLpgSQL_recfield*)palloc(sizeof(PLpgSQL_recfield));
-    dest->dtype = src->dtype;
-    dest->dno = src->dno;
-    dest->ispkg = src->ispkg;
-    dest->fieldname = pstrdup(src->fieldname);
-    dest->recparentno = src->recparentno;
-
-    return dest;
 }

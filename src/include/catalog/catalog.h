@@ -76,4 +76,9 @@ extern Oid	GetNewOid(Relation relation);
 extern Oid GetNewOidWithIndex(Relation relation, Oid indexId, AttrNumber oidcolumn);
 extern Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence);
 
+extern bool IsPackageSchemaOid(Oid relnamespace);
+extern bool IsPackageSchemaName(const char* schemaName);
+
+
+
 #endif   /* CATALOG_H */

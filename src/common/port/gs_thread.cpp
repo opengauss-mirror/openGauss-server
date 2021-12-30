@@ -455,7 +455,9 @@ void gs_thread_exit(int code)
 
     CloseGTM();
 
-    CloseClientSocket(u_sess, true);
+    if (exitCode != STATUS_ERROR) {
+        CloseClientSocket(u_sess, true);
+    }
 
     gs_poll_close();
 

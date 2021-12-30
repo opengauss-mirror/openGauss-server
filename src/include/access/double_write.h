@@ -49,6 +49,12 @@ typedef struct st_dw_batch_nohbkt {
     BufferTagFirstVer buf_tag[0]; /* to locate the data pages in batch */
 } dw_batch_first_ver;
 
+typedef struct dw_single_first_flush_item {
+    uint16 dwn;             /* double write number, updated when file header changed */
+    BufferTag buf_tag;
+}dw_first_flush_item;
+
+
 typedef struct dw_single_flush_item {
     uint16 data_page_idx;     /* from zero start, indicates the slot of the data page. */
     uint16 dwn;             /* double write number, updated when file header changed */
@@ -117,14 +123,25 @@ const uint16 SINGLE_BLOCK_TAG_NUM = BLCKSZ / sizeof(dw_single_flush_item);
 
 static const uint32 DW_BOOTSTRAP_VERSION = 91261;
 const uint32 DW_SUPPORT_SINGLE_FLUSH_VERSION = 92266;
+const uint32 DW_SUPPORT_NEW_SINGLE_FLUSH = 92433;
 
-/* dw single flush file information */
+/* dw single flush file information, version is DW_SUPPORT_SINGLE_FLUSH_VERSION */
 /* file head + storage buffer tag page + data page */
 const int DW_SINGLE_FILE_SIZE = (1 + 161 + 32768) * BLCKSZ;
 
 /* Reserve 8 bytes for bufferTag upgrade. now usepage num is 32768 * sizeof(dw_single_flush_item) / 8192 */
 const int DW_SINGLE_BUFTAG_PAGE_NUM = 161;
 const int DW_SINGLE_DIRTY_PAGE_NUM = 32768;
+
+
+/* new dw single flush file, version is DW_SUPPORT_NEW_SINGLE_FLUSH */
+/* file head + first version data page + file head + storage buffer tag page + second version data page */
+const uint32 DW_NEW_SINGLE_FILE_SIZE = (32768 * BLCKSZ);
+const uint16 DW_SECOND_BUFTAG_PAGE_NUM = 4;
+const uint16 DW_SECOND_DATA_PAGE_NUM = (SINGLE_BLOCK_TAG_NUM * DW_SECOND_BUFTAG_PAGE_NUM);
+const uint16 DW_FIRST_DATA_PAGE_NUM = (32768 - DW_SECOND_DATA_PAGE_NUM - DW_SECOND_BUFTAG_PAGE_NUM - 2);
+const uint16 DW_SECOND_BUFTAG_START_IDX = 1 + DW_FIRST_DATA_PAGE_NUM + 1; /* two head */
+const uint16 DW_SECOND_DATA_START_IDX = DW_SECOND_BUFTAG_START_IDX + DW_SECOND_BUFTAG_PAGE_NUM;
 
 inline bool dw_buf_valid_dirty(uint32 buf_state)
 {
@@ -237,8 +254,7 @@ void dw_init(bool shutdown);
  */
 inline bool dw_enabled()
 {
-    return (
-        g_instance.attr.attr_storage.enableIncrementalCheckpoint && g_instance.attr.attr_storage.enable_double_write);
+    return (ENABLE_INCRE_CKPT && g_instance.attr.attr_storage.enable_double_write);
 }
 
 /**
@@ -273,12 +289,28 @@ inline bool dw_page_writer_running()
     return (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0);
 }
 
-extern uint16 dw_single_flush(BufferDesc *buf_desc);
-extern uint16 dw_single_flush_without_buffer(BufferTag tag, Block block);
-extern bool dw_single_file_recycle(bool trunc_file);
+extern bool free_space_enough(int buf_id);
+
+extern uint16 first_version_dw_single_flush(BufferDesc *buf_desc);
+extern void dw_single_file_recycle(bool is_first);
 extern bool backend_can_flush_dirty_page();
 extern void dw_force_reset_single_file();
 extern void reset_dw_pos_flag();
 extern void clean_proc_dw_buf();
 extern void init_proc_dw_buf();
+extern void dw_generate_new_single_file();
+extern void dw_prepare_file_head(char *file_head, uint16 start, uint16 dwn, int32 dw_version = -1);
+extern void dw_set_pg_checksum(char *page, BlockNumber blockNum);
+
+extern void dw_transfer_phybuffer_addr(const BufferDesc *buf_desc, BufferTag *buf_tag);
+uint16 second_version_dw_single_flush(BufferTag tag, Block block, XLogRecPtr page_lsn,
+    bool encrypt, BufferTag phy_tag);
+
+extern uint16 seg_dw_single_flush_without_buffer(BufferTag tag, Block block, bool* flush_old_file);
+extern uint16 seg_dw_single_flush(BufferDesc *buf_desc, bool* flush_old_file);
+extern void wait_all_single_dw_finish_flush_old();
+extern uint16 dw_single_flush_internal_old(BufferTag tag, Block block, XLogRecPtr page_lsn,
+    BufferTag phy_tag, bool *dw_flush);
+extern void dw_single_old_file_truncate();
+
 #endif /* DOUBLE_WRITE_H */

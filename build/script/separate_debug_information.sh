@@ -109,7 +109,7 @@ separate_symbol()
 			if [ -x "$x" ]; then
 				if [ "$x" != "install-sh"  ]; then
 					objcopy --only-keep-debug "$x" "$INSTALL_DIR/${symbol_name}.symbol" > /dev/null 2>&1
-					objcopy --strip-all "$x" "$x"_release
+					objcopy --strip-debug "$x" "$x"_release
 					rm  "$x"
 					mv "$x"_release "$x"
 					objcopy --add-gnu-debuglink="$INSTALL_DIR/${symbol_name}.symbol" "$x"
@@ -127,7 +127,7 @@ separate_symbol()
 				    fi
 				fi			
 				objcopy --only-keep-debug "$x" "$INSTALL_DIR/${symbol_name}.symbol" > /dev/null 2>&1
-				objcopy --strip-all "$x" "$x"_release
+				objcopy --strip-debug "$x" "$x"_release
 				rm  "$x"
 				mv "$x"_release "$x"
 				objcopy --add-gnu-debuglink="$INSTALL_DIR/${symbol_name}.symbol" "$x"
@@ -136,14 +136,6 @@ separate_symbol()
 			elif [[ "$x" = *".a" ]]; then
 				objcopy --only-keep-debug "$x" "$INSTALL_DIR/${symbol_name}.symbol" > /dev/null 2>&1
 				objcopy --strip-debug "$x" "$x"_release
-				rm  "$x"
-				mv "$x"_release "$x"
-				objcopy --add-gnu-debuglink="$INSTALL_DIR/${symbol_name}.symbol" "$x"
-				chmod 755 "$INSTALL_DIR/${symbol_name}.symbol"
-				mv $INSTALL_DIR/${symbol_name}.symbol $CPTODEST
-			elif [[ "$x" =~ [0-9]$ ]]; then
-				objcopy --only-keep-debug "$x" "$INSTALL_DIR/${symbol_name}.symbol" > /dev/null 2>&1
-				objcopy --strip-all "$x" "$x"_release
 				rm  "$x"
 				mv "$x"_release "$x"
 				objcopy --add-gnu-debuglink="$INSTALL_DIR/${symbol_name}.symbol" "$x"

@@ -57,7 +57,18 @@ CREATE FOREIGN TABLE tbl (a int) SERVER file_server OPTIONS (format 'csv', delim
 CREATE FOREIGN TABLE tbl (a int) SERVER file_server OPTIONS (format 'csv', null '
 ');       -- ERROR
 CREATE FOREIGN TABLE tbl (a int) SERVER file_server;  -- ERROR
-
+CREATE FOREIGN TABLE tbl (a int2,b float4) SERVER file_server OPTIONS (format 'text', filename '', delimiter ' ', null '\n');  -- SUCCESS
+DROP FOREIGN TABLE tbl;
+CREATE FOREIGN TABLE tbl (id int) SERVER file_server OPTIONS (filename '', format 'text');  -- SUCCESS
+DROP FOREIGN TABLE tbl;
+CREATE FOREIGN TABLE tbl (id int) SERVER file_server OPTIONS (filename '', format 'binary');  -- SUCCESS
+DROP FOREIGN TABLE tbl;
+CREATE FOREIGN TABLE tbl (id int) SERVER file_server OPTIONS (filename '', format 'csv');  -- SUCCESS
+DROP FOREIGN TABLE tbl;
+CREATE FOREIGN TABLE tbl (id int) SERVER file_server OPTIONS (filename '',format 'text', header 'false');  -- SUCCESS
+DROP FOREIGN TABLE tbl;
+CREATE FOREIGN TABLE tbl (id int) SERVER file_server OPTIONS (filename '',format 'binary', header 'off');  -- SUCCESS
+DROP FOREIGN TABLE tbl;
 CREATE FOREIGN TABLE agg_text (
 	a	int2,
 	b	float4

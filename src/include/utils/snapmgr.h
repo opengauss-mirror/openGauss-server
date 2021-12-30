@@ -22,8 +22,14 @@ extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotNowData;
 extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotSelfData;
 extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotAnyData;
 extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotToastData;
+#ifdef ENABLE_MULTIPLE_NODES
+extern THR_LOCAL PGDLLIMPORT SnapshotData SnapshotNowNoSyncData;
+#endif
 
 #define SnapshotNow (&SnapshotNowData)
+#ifdef ENABLE_MULTIPLE_NODES
+#define SnapshotNowNoSync (&SnapshotNowNoSyncData)
+#endif
 #define SnapshotSelf (&SnapshotSelfData)
 #define SnapshotAny (&SnapshotAnyData)
 #define SnapshotToast (&SnapshotToastData)

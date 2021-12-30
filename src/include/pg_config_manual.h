@@ -8,6 +8,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/pg_config_manual.h
  * ------------------------------------------------------------------------
@@ -56,6 +57,9 @@
  */
 #define SEQ_MAXVALUE INT64CONST(0x7FFFFFFFFFFFFFFF)
 #define SEQ_MINVALUE (-SEQ_MAXVALUE)
+
+#define LARGE_SEQ_MAXVALUE (int128)(((uint128)1 << 127) - 1)
+#define LARGE_SEQ_MINVALUE (-INT128_MAX - 1)
 
 /*
  * Number of spare LWLocks to allocate for user-defined add-on code.

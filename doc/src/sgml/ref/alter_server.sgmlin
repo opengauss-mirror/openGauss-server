@@ -12,10 +12,10 @@
 <synopsis>
 ALTER SERVER server_name [ VERSION 'new_version' ]
     [ OPTIONS ( {[ ADD | SET | DROP ] option ['value']} [, ... ] ) ];
-ALTER SERVER server_name 
+ALTER SERVER server_name
     OWNER TO new_owner;
 ALTER SERVER server_name
-     RENAME TO new_name;
+    RENAME TO new_name;
 </synopsis>
 </refsynopsisdiv>
 </refentry>

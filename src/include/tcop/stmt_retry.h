@@ -396,7 +396,7 @@ extern bool IsStmtNeedRetryByErrCode(const char* ecode_str, int errlevel);
  */
 inline bool IsStmtNeedRetryByErrCode(int ecode, int errlevel)
 {
-    char* ecode_str = unpack_sql_state(ecode);
+    char* ecode_str = plpgsql_get_sqlstate(ecode);
     return IsStmtNeedRetryByErrCode(ecode_str, errlevel);
 }
 

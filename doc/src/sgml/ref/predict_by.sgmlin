@@ -1,0 +1,20 @@
+<refentry id="SQL-PREDICT_BY">
+<refmeta>
+<refentrytitle>PREDICT BY</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>PREDICT BY</refname>
+<refpurpose>Use a trained model to perform inference tasks</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+
+PREDICT BY model_name [ (FEATURES attribute [, attribute] +]) ];
+
+Use the model in catalog 'gs_modelwarehouse' to perform inference tasks.
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

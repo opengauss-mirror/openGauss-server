@@ -46,9 +46,9 @@ set query_band='wmpdb_test';
 
 --output
 \! @abs_bindir@/gsql -r -p @portstring@ -d wmpdb -c "select * from pg_resource_pool where respool_name = 'rp_t';"
- respool_name | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign 
---------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------
- rp_t         |          20 |           -1 | DefaultClass:Medium |                 3 |       1 | 8GB          |        0 |         0 | None        | installation | f
+ respool_name | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign | max_worker 
+--------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------+------------
+ rp_t         |          20 |           -1 | DefaultClass:Medium |                 3 |       1 | 8GB          |        0 |         0 | None        | installation | f          |          1
 (1 row)
 
 --output

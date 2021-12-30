@@ -27,11 +27,11 @@ SELECT * FROM t_group WHERE b = cast((1,'Simon1') as compfoo);
 CREATE FUNCTION compositetype_func1(compfoo) RETURNS compfoo
 AS 'select b from t_group where b = $1;'
 LANGUAGE SQL;
-call compositetype_func1(cast((1,'syr1') as compfoo));
+select compositetype_func1(cast((1,'syr1') as compfoo));
 CREATE FUNCTION compositetype_func2() RETURNS compfoo
 AS 'select b from t_group where a = 3;'
 LANGUAGE SQL;
-call compositetype_func2();
+select compositetype_func2();
 create table t_func1 (c int, b compfoo);
 create function compositetype_func3(c int, v compfoo) returns void as $$
 insert into t_func1 values (c, v);
@@ -300,7 +300,36 @@ drop type compfoo_nesting cascade;
 drop table if exists fullname;
 
 --row表达式
+--
+-- IS [NOT] NULL should not recurse into nested composites (bug #14235)
+--
+explain (verbose, costs off)
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+
+select r, r is null as isnull, r is not null as isnotnull
+from (values (1,row(1,2)), (1,row(null,null)), (1,null),
+             (null,row(1,2)), (null,row(null,null)), (null,null) ) r(a,b);
+
+explain (verbose, costs off)
 with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+
+with r(a,b) as
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+
+explain (verbose, costs off)
+with r(a,b) as materialized
+  (values (1,row(1,2)), (1,row(null,null)), (1,null),
+          (null,row(1,2)), (null,row(null,null)), (null,null) )
+select r, r is null as isnull, r is not null as isnotnull from r;
+
+with r(a,b) as materialized
   (values (1,row(1,2)), (1,row(null,null)), (1,null),
           (null,row(1,2)), (null,row(null,null)), (null,null) )
 select r, r is null as isnull, r is not null as isnotnull from r;

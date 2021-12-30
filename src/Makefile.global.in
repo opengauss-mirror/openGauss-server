@@ -236,18 +236,22 @@ endif
 
 SUPPORT_HOTPATCH = @SUPPORT_HOTPATCH@
 
-ifeq ($(PLAT_FORM_STR), suse11_sp1_x86_64)
-    SUPPORT_HOTPATCH = yes
-else
-    ifneq ($(findstring $(PLAT_FORM_STR), euleros2.0_sp8_aarch64 euleros2.0_sp9_aarch64 euleros2.0_sp2_x86_64 euleros2.0_sp5_x86_64 kylin_aarch64),)
-        ifeq ($(CC_VERSION), 7.3.0)
-            SUPPORT_HOTPATCH = yes
+ifneq ($(enable_multiple_nodes)_$(enable_privategauss), no_no)
+    ifeq ($(PLAT_FORM_STR), suse11_sp1_x86_64)
+        SUPPORT_HOTPATCH = yes
+    else
+        ifneq ($(findstring $(PLAT_FORM_STR), euleros2.0_sp8_aarch64 euleros2.0_sp9_aarch64 euleros2.0_sp2_x86_64 euleros2.0_sp5_x86_64 kylinv10_sp1_aarch64 kylinv10_sp1_x86_64_intel),)
+            ifeq ($(CC_VERSION), 7.3.0)
+                SUPPORT_HOTPATCH = yes
+            else
+                SUPPORT_HOTPATCH = no
+            endif
         else
             SUPPORT_HOTPATCH = no
         endif
-    else
-        SUPPORT_HOTPATCH = no
     endif
+else
+    SUPPORT_HOTPATCH = no
 endif
 #############################################################################
 #############################################################################
@@ -269,6 +273,7 @@ ifeq ($(with_3rd), NONE)
   PLATFORMPATH = binarylibs/platform/$(PLAT_FORM_STR)
   BUILD_TOOLS_PATH = binarylibs/buildtools/$(PLAT_FORM_STR)
   INSTALL_TOOLS_PATH = dependency/$(PLAT_FORM_STR)
+  COMPONENTPATH = binarylibs/component/$(PLAT_FORM_STR)
 
   JEMALLOC_HOME = $(top_builddir)/$(BINARYPATH)/jemalloc/$(JEMALLOC_BUILD_TYPE)
   MEMCHECK_HOME = $(top_builddir)/$(BINARYPATH)/memcheck/$(MEMCHECK_BUILD_TYPE)
@@ -306,11 +311,10 @@ ifeq ($(with_3rd), NONE)
   ZSTD_HOME = $(top_builddir)/$(BINARYPATH)/zstd
   LIBNANOMSG_HOME = $(top_builddir)/$(BINARYPATH)/nanomsg/comm
   PLJAVA_HOME = $(top_builddir)/$(BINARYPATH)/pljava/$(LIB_SUPPORT_LLT)
-  JAVA_HOME = $(top_builddir)/$(PLATFORMPATH)/openjdk8/jdk1.8.0_222
   MASSTREE_HOME = $(top_builddir)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME    = $(top_builddir)/dependency/mysql_fdw
   ORCFDW_HOME   = $(top_builddir)/dependency/oracle_fdw
-  DCF_HOME = $(top_builddir)/$(BINARYPATH)/dcf
+  DCF_HOME = $(top_builddir)/$(COMPONENTPATH)/dcf
 else
   BINARYPATH = dependency/$(PLAT_FORM_STR)
   PLATFORMPATH = platform/$(PLAT_FORM_STR)
@@ -355,7 +359,7 @@ endif
   MASSTREE_HOME = $(with_3rd)/$(BINARYPATH)/masstree/comm
   MYFDW_HOME = $(with_3rd)/dependency/mysql_fdw
   ORCFDW_HOME = $(with_3rd)/dependency/oracle_fdw
-  DCF_HOME = $(with_3rd)/$(BINARYPATH)/dcf
+  DCF_HOME = $(with_3rd)/component/$(PLAT_FORM_STR)/dcf
 endif
 
 LIBCARBONDATA_HOME = $(top_builddir)/../contrib/carbondata

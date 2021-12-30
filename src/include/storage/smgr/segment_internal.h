@@ -386,11 +386,13 @@ typedef struct SegSpace {
 extern void InitSegSpcCache(void);
 void InitSpaceNode(SegSpace *spc, Oid spcNode, Oid dbNode, bool is_redo);
 
-SegSpace *spc_open(Oid tablespace_id, Oid database_id, bool create);
+SegSpace *spc_open(Oid tablespace_id, Oid database_id, bool create, bool isRedo = false);
 SegSpace *spc_init_space_node(Oid spcNode, Oid dbNode);
 SpaceDataFileStatus spc_status(SegSpace *spc);
+SegSpace *spc_drop(Oid tablespace_id, Oid database_id, bool redo);
+void spc_lock(SegSpace *spc);
+void spc_unlock(SegSpace *spc);
 
-bool spc_drop(Oid tablespace_id, Oid database_id, bool redo);
 BlockNumber spc_alloc_extent(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNumber designate_block,
                              ExtentInversePointer iptr);
 void spc_free_extent(SegSpace *spc, int extent_size, ForkNumber forknum, BlockNumber blocknum);

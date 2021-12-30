@@ -2939,11 +2939,8 @@ pgxc_node_send_parse(PGXCNodeHandle * handle, const char* statement,
 	/* message length */
 	int			msgLen;
 	int			cnt_params;
-#if 0
-	size_t		old_outEnd = handle->outEnd;
-#else
+
 #define old_outEnd handle->outEnd
-#endif	
 
     if(ENABLE_CN_GPC) {
         GPC_LOG("send parse", 0, statement);

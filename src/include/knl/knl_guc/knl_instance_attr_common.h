@@ -97,6 +97,7 @@ typedef struct knl_instance_attr_common {
     int sync_config_strategy;
     bool enable_auto_clean_unique_sql;
 #endif
+    int cluster_run_mode;
 } knl_instance_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_COMMON_H_ */

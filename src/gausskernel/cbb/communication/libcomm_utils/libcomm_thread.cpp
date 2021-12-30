@@ -1803,7 +1803,7 @@ static int CommReceiverAcceptNewConnect(const struct sock_id *fdId, int selfid)
             *libcomm_data_port = (*libcomm_data_port)->next;
             pfree(tmp);
         } else {
-            LIBCOMM_ELOG(LOG, "(r|recv loop)\tSuccess to open server data port ssl:%p.", (*libcomm_data_port)->node.ssl);
+            LIBCOMM_ELOG(LOG, "(r|recv loop)\tSuccess to open server data port ssl.");
         }
     }
 #endif
@@ -2010,6 +2010,8 @@ void commSenderFlowMain()
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
 
+        t_thrd.log_cxt.call_stack = NULL;
+
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
 
@@ -2113,6 +2115,8 @@ void commReceiverFlowMain()
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
 
+        t_thrd.log_cxt.call_stack = NULL;
+
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
 
@@ -2193,6 +2197,9 @@ void commAuxiliaryMain()
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+    
+        t_thrd.log_cxt.call_stack = NULL;
+    
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -2284,6 +2291,8 @@ void commReceiverMain(void* tid_callback)
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();

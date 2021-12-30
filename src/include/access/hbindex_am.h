@@ -39,7 +39,7 @@ static inline bool hbkt_idx_need_switch_bkt(IndexScanDesc scan, int targetSlot)
 {
     if (RELATION_OWN_BUCKET(scan->indexRelation)) {
         HBktIdxScanDesc hbScan = (HBktIdxScanDesc)scan;
-        return targetSlot < list_length(hbScan->hBktList) && targetSlot != hbScan->curr_slot;
+        return targetSlot < hbScan->hBktList->dim1 && targetSlot != hbScan->curr_slot;
     } else {
         return false;
     }

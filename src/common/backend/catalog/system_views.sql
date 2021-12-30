@@ -2,6 +2,7 @@
  * PostgreSQL System Views
  *
  * Copyright (c) 1996-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/backend/catalog/system_views.sql
  */
@@ -344,7 +345,7 @@ CREATE VIEW pg_catalog.pg_gtt_attached_pids WITH (security_barrier) AS
  FROM
      pg_class c
      LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
- WHERE c.relpersistence='g' AND c.relkind in('r','S');
+ WHERE c.relpersistence='g' AND c.relkind in('r', 'S', 'L');
 
 CREATE VIEW pg_catalog.pg_gtt_stats WITH (security_barrier) AS
 SELECT s.nspname AS schemaname,
@@ -583,6 +584,7 @@ SELECT
 		 WHEN rel.relkind = 'v' THEN 'view'::text
 		 WHEN rel.relkind = 'm' THEN 'materialized view'::text
 		 WHEN rel.relkind = 'S' THEN 'sequence'::text
+         WHEN rel.relkind = 'L' THEN 'large sequence'::text
 		 WHEN rel.relkind = 'f' THEN 'foreign table'::text END AS objtype,
 	rel.relnamespace AS objnamespace,
 	CASE WHEN pg_table_is_visible(rel.oid)
@@ -909,7 +911,7 @@ CREATE VIEW pg_statio_all_sequences AS
             pg_stat_get_blocks_hit(C.oid) AS blks_hit
     FROM pg_class C
             LEFT JOIN pg_namespace N ON (N.oid = C.relnamespace)
-    WHERE C.relkind = 'S';
+    WHERE C.relkind = 'S' or C.relkind = 'L';
 
 CREATE VIEW pg_statio_sys_sequences AS
     SELECT * FROM pg_statio_all_sequences
@@ -1848,10 +1850,6 @@ CREATE VIEW pg_user_mappings AS
         pg_foreign_server S ON (U.umserver = S.oid);
 
 REVOKE ALL on pg_user_mapping FROM public;
-
---some function will use the new column that use
-CREATE OR REPLACE VIEW PG_CATALOG.SYS_DUMMY AS (SELECT 'X'::TEXT AS DUMMY);
-GRANT SELECT ON TABLE SYS_DUMMY TO PUBLIC;
 
 -- these functions are added for supporting default format transformation
 CREATE OR REPLACE FUNCTION to_char(NUMERIC)
@@ -3117,6 +3115,21 @@ LANGUAGE 'plpgsql' NOT FENCED;
 
 REVOKE ALL on FUNCTION pg_catalog.copy_error_log_create() FROM public;
 
+CREATE OR REPLACE FUNCTION pg_catalog.copy_summary_create()
+RETURNS bool
+AS $$
+DECLARE
+	BEGIN
+        EXECUTE 'CREATE TABLE public.gs_copy_summary
+                (relname varchar, begintime timestamptz, endtime timestamptz, 
+                id bigint, pid bigint, readrows bigint, skiprows bigint, loadrows bigint, errorrows bigint, whenrows bigint, allnullrows bigint, detail text);';
+
+        EXECUTE 'CREATE INDEX gs_copy_summary_idx on public.gs_copy_summary (id);';
+
+		return true;
+	END; $$
+LANGUAGE 'plpgsql' NOT FENCED;
+
 -- Get all control group information including installation group and logic cluster group.
 CREATE OR REPLACE FUNCTION pg_catalog.gs_get_control_group_info()
 RETURNS setof record
@@ -3458,8 +3471,38 @@ CREATE unlogged table statement_history(
 REVOKE ALL on table pg_catalog.statement_history FROM public;
 create index statement_history_time_idx on pg_catalog.statement_history USING btree (start_time, is_slow_sql);
 
+CREATE TABLE DBE_PLDEVELOPER.gs_source
+(
+    id oid,
+    owner bigint,
+    nspid oid,
+    name name,
+    type text,
+    status boolean,
+    src text
+);
+CREATE INDEX DBE_PLDEVELOPER.gs_source_id_idx ON DBE_PLDEVELOPER.gs_source USING btree(id);
+CREATE INDEX DBE_PLDEVELOPER.gs_source_idx ON DBE_PLDEVELOPER.gs_source USING btree(owner, nspid, name, type);
+GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE DBE_PLDEVELOPER.gs_source TO PUBLIC;
+
+CREATE TABLE DBE_PLDEVELOPER.gs_errors
+(
+    id oid,
+    owner bigint,
+    nspid oid,
+    name name,
+    type text,
+    line int,
+    src text
+);
+CREATE INDEX DBE_PLDEVELOPER.gs_errors_id_idx ON DBE_PLDEVELOPER.gs_source USING btree(id);
+CREATE INDEX DBE_PLDEVELOPER.gs_errors_idx ON DBE_PLDEVELOPER.gs_errors USING btree(owner, nspid, name);
+GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE DBE_PLDEVELOPER.gs_errors TO PUBLIC;
+
 CREATE OR REPLACE VIEW PG_CATALOG.SYS_DUMMY AS (SELECT 'X'::TEXT AS DUMMY);
 GRANT SELECT ON TABLE SYS_DUMMY TO PUBLIC;
+
+CREATE TYPE pg_catalog.bulk_exception as (error_index integer, error_code integer, error_message text);
 
 CREATE VIEW pg_publication_tables AS
     SELECT

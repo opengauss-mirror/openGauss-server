@@ -2730,11 +2730,13 @@ extern TableDistributionInfo* getTableStat(
 extern TableDistributionInfo* get_remote_stat_pagewriter(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_ckpt(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_bgwriter(TupleDesc tuple_desc);
+extern TableDistributionInfo* get_remote_stat_candidate(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_single_flush_dw_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_double_write(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_stat_redo(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_rto_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_recovery_stat(TupleDesc tuple_desc);
+extern TableDistributionInfo* streaming_hadr_get_recovery_stat(TupleDesc tuple_desc);
 extern TableDistributionInfo* get_remote_node_xid_csn(TupleDesc tuple_desc);
 
 #define SessionMemoryArraySize (BackendStatusArray_size)

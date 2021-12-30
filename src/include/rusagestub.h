@@ -20,15 +20,23 @@
 #endif
 #include <limits.h> /* for CLK_TCK */
 
+#ifndef RUSAGE_SELF
 #define RUSAGE_SELF 0
+#endif
+
+#ifndef RUSAGE_CHILDREN
 #define RUSAGE_CHILDREN (-1)
+#endif
 
-struct rusage {
-    struct timeval ru_utime; /* user time used */
-    struct timeval ru_stime; /* system time used */
-};
+namespace rusagestub {
+    struct rusage {
+        struct timeval ru_utime; /* user time used */
+        struct timeval ru_stime; /* system time used */
+    };
+}
+using namespace rusagestub;
 
-extern int getrusage(int who, struct rusage* rusage);
+extern int getrusage(int who, struct rusagestub::rusage* rusage);
 
 #ifndef WIN32
 extern List* get_operator_name(Oid operid, Oid arg1, Oid arg2);

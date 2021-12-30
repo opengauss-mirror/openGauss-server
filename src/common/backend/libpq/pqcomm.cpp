@@ -1027,8 +1027,8 @@ int StreamConnection(pgsocket server_fd, Port* port)
 #ifdef WIN32
 
         /*
-         * This is a Win32 socket optimization.  The ideal size is 32k.
-         * http://support.microsoft.com/kb/823764/EN-US/
+         * This is a Win32 socket optimization.
+         * The ideal buffer size is 32k for a Win32 socket at most efficiency.
          */
         on = PQ_SEND_BUFFER_SIZE * 4;
 

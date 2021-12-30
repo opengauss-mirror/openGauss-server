@@ -29,6 +29,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -438,6 +439,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     int instrument_option = 0;
     bool has_track_operator = false;
     char* old_stmt_name = u_sess->pcache_cxt.cur_stmt_name;
+    u_sess->statement_cxt.executer_run_level++;
     if (u_sess->SPI_cxt._connected >= 0) {
         u_sess->pcache_cxt.cur_stmt_name = NULL;
     }
@@ -517,6 +519,7 @@ void ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
     }
 
     u_sess->pcache_cxt.cur_stmt_name = old_stmt_name;
+    u_sess->statement_cxt.executer_run_level--;
 }
 
 void standard_ExecutorRun(QueryDesc *queryDesc, ScanDirection direction, long count)
@@ -1534,8 +1537,9 @@ void CheckValidResultRel(Relation resultRel, CmdType operation)
             CheckCmdReplicaIdentity(resultRel, operation);
             break;
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("cannot change sequence \"%s\"", RelationGetRelationName(resultRel))));
+                errmsg("cannot change (large) sequence \"%s\"", RelationGetRelationName(resultRel))));
             break;
         case RELKIND_TOASTVALUE:
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -1641,9 +1645,10 @@ static void CheckValidRowMarkRel(Relation rel, RowMarkType markType)
             /* OK */
             break;
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
             /* Must disallow this because we don't vacuum sequences */
             ereport(ERROR, (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                errmsg("cannot lock rows in sequence \"%s\"", RelationGetRelationName(rel))));
+                errmsg("cannot lock rows in (large) sequence \"%s\"", RelationGetRelationName(rel))));
             break;
         case RELKIND_TOASTVALUE:
             /* We could allow this, but there seems no good reason to */

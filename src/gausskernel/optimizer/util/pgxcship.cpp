@@ -6,6 +6,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012, Postgres-XC Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -245,7 +246,7 @@ static void pgxc_set_exprtype_shippability(Oid exprtype, Shippability_context* s
     if (relid != InvalidOid)
         typerelkind = get_rel_relkind(relid);
 
-    if (typerelkind == RELKIND_SEQUENCE ||
+    if (RELKIND_IS_SEQUENCE(typerelkind) ||
         typerelkind == RELKIND_VIEW || 
         typerelkind == RELKIND_CONTQUERY)
         pgxc_set_shippability_reason(sc_context, SS_UNSHIPPABLE_TYPE);
@@ -709,7 +710,7 @@ static ExecNodes* pgxc_FQS_find_datanodes(Shippability_context* sc_context)
          * chance because common nodes are left out.
          */
         if (IsExecNodesReplicated(exec_nodes) &&
-            (exec_nodes->accesstype == RELATION_ACCESS_READ_FOR_UPDATE ||
+            ((exec_nodes->accesstype == RELATION_ACCESS_READ_FOR_UPDATE && exec_nodes->nodeList->length > 1) ||
             exec_nodes->accesstype == RELATION_ACCESS_READ) &&
             sc_context->sc_query_level == 0 && !sc_context->sc_inselect) {
             List* tmp_list = exec_nodes->nodeList;

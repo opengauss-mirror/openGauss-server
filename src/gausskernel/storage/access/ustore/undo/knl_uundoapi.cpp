@@ -350,7 +350,10 @@ void CheckPointUndoSystemMeta(XLogRecPtr checkPointRedo)
 #ifndef ENABLE_MULTIPLE_NODES
     /* Open undo meta file. */
     if (t_thrd.role == CHECKPOINT_THREAD) {
-        ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT("undo metadata checkPointRedo = %lu."), checkPointRedo)));
+        TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+        ereport(LOG, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
+            "undo metadata checkPointRedo = %lu, oldestXidInUndo = %lu."),
+            checkPointRedo, oldestXidInUndo)));
         int fd = BasicOpenFile(UNDO_META_FILE, O_RDWR | PG_BINARY, S_IRUSR | S_IWUSR);
         if (fd < 0) {
             ereport(ERROR, (errcode(ERRCODE_DATA_EXCEPTION), errmsg("could not open file \%s", UNDO_META_FILE)));
@@ -615,13 +618,20 @@ void UpdateRollbackFinish(UndoSlotPtr slotPtr)
     undo::TransactionSlot *slot = buf.FetchTransactionSlot(slotPtr);
     Assert(slot->XactId() != InvalidTransactionId);
     Assert(slot->DbId() != InvalidOid);
+    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+
+    if (TransactionIdPrecedes(slot->XactId(), oldestXidInUndo)) {
+        ereport(WARNING, (errmsg(UNDOFORMAT("curr xid having undo %lu < oldestXidInUndo %lu."),
+            slot->XactId(), oldestXidInUndo)));
+    }
 
     /* only persist level space need update transaction slot. */
     START_CRIT_SECTION();
     slot->UpdateRollbackProgress();
     ereport(LOG, (errmsg(UNDOFORMAT(
-        "update zone %d slot %lu xid %lu dbid %u rollback progress from start %lu to end %lu."), 
-        zid, slotPtr, slot->XactId(), slot->DbId(), slot->StartUndoPtr(), slot->EndUndoPtr())));
+        "update zone %d slot %lu xid %lu dbid %u rollback progress from start %lu to end %lu, oldestXidInUndo %lu."),
+        zid, slotPtr, slot->XactId(), slot->DbId(), slot->StartUndoPtr(), slot->EndUndoPtr(),
+        oldestXidInUndo)));
 
     XLogRecPtr lsn;
     /* WAL log the rollback progress so it can be replayed */

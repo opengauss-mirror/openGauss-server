@@ -2,6 +2,8 @@
 ----- test the mixed use of implicit and explicit cursor attributes -------------
 ----- test the effect of the explicit cursor use to implicit cursor attributes --
 ---------------------------------------------------------------------------------
+create database pl_test_cursor_part3 DBCOMPATIBILITY 'pg';
+\c pl_test_cursor_part3;
 CREATE schema hw_cursor_part3;
 set current_schema = hw_cursor_part3; 
 
@@ -158,7 +160,9 @@ begin
     close cur;
 end;
 /
+\set VERBOSITY terse
 call sp_testsp_delete();
+\set VERBOSITY default
 
 create table JOINT_DEBUG_CURSOR_FUNC_TABLE_012(C_INT integer,C_CHAR char(10))  ;
 
@@ -329,3 +333,5 @@ call i_refcursor10_7();
 select * from cursor_vl_tb10;
 
 DROP SCHEMA hw_cursor_part3 CASCADE;
+\c regression;
+drop database IF EXISTS pl_test_cursor_part3;

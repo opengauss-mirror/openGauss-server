@@ -113,8 +113,6 @@ typedef void (*Reset_security_privilige_hook_type)();
 typedef bool (*CheckSecurityPolicyFilter_hook_type)(const FilterData arg, policy_set *policy_ids);
 typedef bool (*Security_isRoleInUse_hook_type)(Oid roleid);
 typedef bool (*Security_Check_acl_privilige_hook_type)(int privilige);
-typedef bool (*Security_LoginHandle_access_hook_type)(const char *dbname, const char *username,
-                                                      bool success, bool login);
 typedef bool (*Reload_security_policy_hook_type)();
 
 #endif

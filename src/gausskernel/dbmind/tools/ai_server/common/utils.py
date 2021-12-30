@@ -185,6 +185,8 @@ class Common:
         collect_info = {"data_type": "", "ip": "", "port": ""}
         value = Common.parser_config_file("agent", "collection_item")
         # value is: '[data_type, host, port]'
+        if len(json.loads(value)) != 3:
+            raise ValueError("can not parse format of '{value}'".format(value=value))
         collect_info["data_type"] = json.loads(value)[0]
         collect_info["ip"] = json.loads(value)[1]
         collect_info["port"] = json.loads(value)[2]

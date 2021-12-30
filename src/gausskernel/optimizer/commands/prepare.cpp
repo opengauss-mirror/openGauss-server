@@ -54,6 +54,15 @@ static Datum build_regtype_array(const Oid* param_types, int num_params);
 
 extern void destroy_handles();
 
+static void CopyPlanForGPCIfNecessary(CachedPlanSource* psrc, Portal portal)
+{
+    MemoryContext tmpCxt = NULL;
+    bool needCopy = ENABLE_GPC && psrc->gplan;
+    if (needCopy) {
+        portal->stmts = CopyLocalStmt(portal->cplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
+    }
+}
+
 /*
  * Implements the 'PREPARE' utility statement.
  */
@@ -163,6 +172,7 @@ void PrepareQuery(PrepareStmt* stmt, const char* queryString)
         query_list,
         NULL,
         argtypes,
+        NULL,
         nargs,
         NULL,
         NULL,
@@ -195,7 +205,6 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
 {
     PreparedStatement *entry = NULL;
     CachedPlan* cplan = NULL;
-    MemoryContext tmpCxt = NULL;
     List* plan_list = NIL;
     ParamListInfo paramLI = NULL;
     EState* estate = NULL;
@@ -228,6 +237,11 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     }
 
     OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
+
+    if (psrc->opFusionObj != NULL) {
+        Assert(psrc->cplan == NULL);
+        (void)RevalidateCachedQuery(psrc);
+    }
 
     if (psrc->opFusionObj != NULL) {
         OpFusion *opFusionObj = (OpFusion *)(psrc->opFusionObj);
@@ -273,11 +287,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
     PortalDefineQuery(portal, NULL, query_string, entry->plansource->commandTag, plan_list, cplan);
 
     /* incase change shared plan in execute stage */
-    bool needCopy = ENABLE_GPC && entry->plansource->gplan;
-    if (needCopy) {
-        plan_list = CopyLocalStmt(portal->cplan->stmt_list, u_sess->temp_mem_cxt, &tmpCxt);
-        portal->stmts = plan_list;
-    }
+    CopyPlanForGPCIfNecessary(entry->plansource, portal);
 
     /*
      * For CREATE TABLE ... AS EXECUTE, we must verify that the prepared
@@ -450,6 +460,9 @@ static ParamListInfo EvaluateParams(CachedPlanSource* psrc, List* params, const 
         prm->ptype = param_types[i];
         prm->pflags = PARAM_FLAG_CONST;
         prm->value = ExecEvalExprSwitchContext(n, GetPerTupleExprContext(estate), &prm->isnull, NULL);
+        prm->tableOfIndexType = InvalidOid;
+        prm->tableOfIndex = NULL;
+        prm->isnestedtable = false;
 
         i++;
     }

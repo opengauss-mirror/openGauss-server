@@ -57,9 +57,17 @@ static inline pthread_mutex_t *MmapPartitionLock(size_t hashCode)
 
 static inline PageCompressHeader *MmapSharedMapFile(Vfd *vfdP, int chunkSize, bool readonly)
 {
+    PageCompressHeader *map = NULL;
     size_t pcMapSize = SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize);
-    PageCompressHeader *map = pc_mmap_real_size(vfdP->fd, pcMapSize, false);
-    if (map == MAP_FAILED) {
+    bool status = compressed_mem_reserve(pcMapSize, false);
+    if (status) {
+        map = pc_mmap_real_size(vfdP->fd, pcMapSize, false);
+        if (map == MAP_FAILED) {
+            compressed_mem_release(pcMapSize);
+            ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
+                            errmsg("Failed to mmap page compression address file %s: %m", vfdP->fileName)));
+        }
+    } else {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_RESOURCES),
                         errmsg("Failed to mmap page compression address file %s: %m", vfdP->fileName)));
     }
@@ -129,10 +137,12 @@ void UnReferenceAddrFile(void *vfd)
     }
     --mmapEntry->reference;
     if (mmapEntry->reference == 0) {
+        size_t chunkSize = mmapEntry->pcmap->chunk_size;
         if (pc_munmap(mmapEntry->pcmap) != 0) {
             ereport(ERROR,
                     (errcode_for_file_access(), errmsg("could not munmap file \"%s\": %m", currentVfd->fileName)));
         }
+        compressed_mem_release(SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunkSize));
         if (hash_search_with_hash_value(g_instance.mmapCache, (void *)&relFileNodeForkNum, hashCode, HASH_REMOVE,
                                         NULL) == NULL) {
             ereport(ERROR,

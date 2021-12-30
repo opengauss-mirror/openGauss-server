@@ -123,12 +123,9 @@ class GSqlExecute(ExecuteFactory):
                 if len(hypo_index_info) == 4:
                     table_name = re.search(r'btree_(.*%s)' % hypo_index_info[2],
                                            hypo_index_info[0]).group(1)
-                    schema_table_name = '.'.join(table_name.split('_', 1))
-                    if schema_table_name in query_index_dict.keys():
-                        table_name = schema_table_name
-                    elif 'public.' + table_name in query_index_dict.keys():
-                        table_name = 'public.' + table_name
-                    else:
+                    match_flag, table_name = ExecuteFactory.match_table_name(table_name,
+                                                                             query_index_dict)
+                    if not match_flag:
                         return valid_indexes
                     hypoid_table_column[hypo_index_info[1]] = \
                         table_name + ':' + hypo_index_info[3].strip('"()')
@@ -249,7 +246,7 @@ class GSqlExecute(ExecuteFactory):
         return total_cost
 
     def check_useless_index(self, tables, history_indexes, history_invalid_indexes):
-        schemas = list(filter(None, self.schema.split(',')))
+        schemas = [elem.lower() for elem in filter(None, self.schema.split(','))]
         whole_indexes = list()
         redundant_indexes = list()
         matched_table_name = set()
@@ -264,12 +261,11 @@ class GSqlExecute(ExecuteFactory):
                   "pg_get_indexdef(i.oid) AS indexdef, p.contype AS pkey from " \
                   "pg_index x JOIN pg_class c ON c.oid = x.indrelid JOIN " \
                   "pg_class i ON i.oid = x.indexrelid LEFT JOIN pg_namespace n " \
-                  "ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON i.oid = p.conindid " \
-                  "WHERE (c.relkind = ANY (ARRAY['r'::\"char\", 'm'::\"char\"])) AND " \
-                  "(i.relkind = ANY (ARRAY['i'::\"char\", 'I'::\"char\"])) AND " \
-                  "n.nspname = '%s' AND c.relname in (%s) order by c.relname;" % \
+                  "ON n.oid = c.relnamespace LEFT JOIN pg_constraint p ON (i.oid = p.conindid " \
+                  "AND p.contype = 'p') WHERE (c.relkind = ANY (ARRAY['r'::\"char\", " \
+                  "'m'::\"char\"])) AND (i.relkind = ANY (ARRAY['i'::\"char\", 'I'::\"char\"])) " \
+                  "AND n.nspname = '%s' AND c.relname in (%s) order by c.relname;" % \
                   (schema, tables_string)
-
             res = self.run_shell_cmd([sql]).split('\n')
             if not res:
                 continue

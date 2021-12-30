@@ -162,13 +162,13 @@ select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
 	order by relname;
 
-ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p32767;
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p1048575;
 insert into interval_normal_date values ('2040-06-22');
 select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
 	order by relname;
 
-ALTER TABLE interval_normal_date RENAME PARTITION sys_p1 To sys_p32780;
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p1048580;
 insert into interval_normal_date values ('2040-06-24');
 select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')

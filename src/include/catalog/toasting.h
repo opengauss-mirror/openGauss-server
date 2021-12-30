@@ -25,6 +25,7 @@ extern bool createToastTableForPartition(Oid relOid,
                                          Oid partOid,
                                          Datum reloptions,
                                          LOCKMODE partLockMode);
+extern bool CreateToastTableForSubPartition(Relation partRel, Oid subPartOid, Datum reloptions, LOCKMODE partLockMode);
 
 /*
  * This macro is just to keep the C compiler from spitting up on the

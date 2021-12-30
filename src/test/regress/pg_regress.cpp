@@ -1958,12 +1958,6 @@ static void config_cn()
         (void)snprintf(buf, sizeof(buf), "port = %d\n", myinfo.co_port[i]);
         fputs(buf, pg_conf);
 
-        (void)snprintf(buf, sizeof(buf), "comm_control_port = %d\n", myinfo.co_ctl_port[i]);
-        fputs(buf, pg_conf);
-
-        (void)snprintf(buf, sizeof(buf), "comm_sctp_port = %d\n", myinfo.co_sctp_port[i]);
-        fputs(buf, pg_conf);
-
         /*
          * Cluster uses 2PC for write transactions involving multiple nodes
          * This has to be set at least to a value corresponding to the maximum
@@ -2068,12 +2062,6 @@ static void config_dn(bool standby)
 
         if (!test_single_node) {
             (void)snprintf(buf, sizeof(buf), "pooler_port = %d\n", myinfo.dn_pool_port[i]);
-            fputs(buf, pg_conf);
-
-            (void)snprintf(buf, sizeof(buf), "comm_control_port = %d\n", myinfo.dn_ctl_port[i]);
-            fputs(buf, pg_conf);
-
-            (void)snprintf(buf, sizeof(buf), "comm_sctp_port = %d\n", myinfo.dn_sctp_port[i]);
             fputs(buf, pg_conf);
 
             if (comm_tcp_mode == false)
@@ -2183,12 +2171,6 @@ static void config_standby()
         fputs("\n# Configuration added by pg_regress\n\n", pg_conf);
 
         (void)snprintf(buf, sizeof(buf), "port = %d\n", myinfo.dns_port[i]);
-        fputs(buf, pg_conf);
-
-        (void)snprintf(buf, sizeof(buf), "comm_control_port = %d\n", myinfo.dns_ctl_port[i]);
-        fputs(buf, pg_conf);
-
-        (void)snprintf(buf, sizeof(buf), "comm_sctp_port = %d\n", myinfo.dns_sctp_port[i]);
         fputs(buf, pg_conf);
 
         (void)snprintf(buf, sizeof(buf),
@@ -5129,7 +5111,7 @@ static void CheckCleanCodeWarningInfo(const int baseNum, const int currentNum,
     return;
 }
 
-#define BASE_GLOBAL_VARIABLE_NUM 221
+#define BASE_GLOBAL_VARIABLE_NUM 222
 
 #define CMAKE_CMD_BUF_LEN 1000
 

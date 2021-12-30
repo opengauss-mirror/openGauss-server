@@ -58,6 +58,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *    src/gausskernel/storage/access/nbtree/nbtsort.cpp
@@ -71,6 +72,7 @@
 #include "access/tableam.h"
 #include "access/xlog.h"
 #include "access/xloginsert.h"
+#include "catalog/pg_partition_fn.h"
 #include "miscadmin.h"
 #include "storage/smgr/smgr.h"
 #include "storage/proc.h"
@@ -1059,7 +1061,11 @@ static BTShared* _bt_parallel_initshared(BTSpool *btspool, int *workmem, int sca
     uint32 nparts = 0;
 
     if (RelationIsGlobalIndex(btspool->index)) {
-        nparts = getPartitionNumber(btspool->heap->partMap);
+        if (RelationIsSubPartitioned(btspool->heap)) {
+            nparts = GetSubPartitionNumber(btspool->heap);
+        } else {
+            nparts = getPartitionNumber(btspool->heap->partMap);
+        }
     }
 
     /* Store shared build state, for which we reserved space */
@@ -1148,9 +1154,8 @@ static void _bt_begin_parallel(BTBuildState *buildstate, int request, int *workm
     btshared = _bt_parallel_initshared(buildstate->spool, workmem, request, isplain);
 
     /* Launch workers, saving status for leader/caller */
-    LaunchBackgroundWorkers(request, btshared, _bt_parallel_build_main, _bt_parallel_cleanup);
-
-    btleader->nparticipanttuplesorts = request;
+    btleader->nparticipanttuplesorts =
+            LaunchBackgroundWorkers(request, btshared, _bt_parallel_build_main, _bt_parallel_cleanup);
     btleader->btshared = btshared;
 
     /* Save leader state now that it's clear build will be parallel */
@@ -1175,6 +1180,16 @@ static inline void release_target_relation(Relation *targetheap_ptr, Relation *t
     }
     if (targetindex_ptr != NULL && *targetindex_ptr != NULL) {
         releaseDummyRelation(targetindex_ptr);
+    }
+}
+
+static inline void ReleaseTargetPartitionList(Relation heap, Relation index, List *heapparts, List *indexparts)
+{
+    if (heapparts != NULL) {
+        releasePartitionList(heap, &heapparts, NoLock);
+    }
+    if (indexparts != NULL) {
+        releasePartitionList(index, &indexparts, NoLock);
     }
 }
 
@@ -1204,7 +1219,8 @@ static double _bt_parallel_scan_cross_level(Relation heap, Relation index, Index
     Assert(index != NULL);
 
     if (RelationIsPartitioned(heap)) {
-        heapparts = relationGetPartitionList(heap, NoLock);
+        heapparts = (RelationIsSubPartitioned(heap) ? RelationGetSubPartitionList(heap, NoLock)
+                                                    : relationGetPartitionList(heap, NoLock));
         indexparts = (!RelationIsGlobalIndex(index) ? indexGetPartitionList(index, NoLock) : indexparts);
         nparts = list_length(heapparts);
     }
@@ -1239,7 +1255,8 @@ static double _bt_parallel_scan_cross_level(Relation heap, Relation index, Index
             targetheap = bucketGetRelation(heap, heappart, bucketid);
             targetindex = ((indexpart != NULL) ? bucketGetRelation(index, indexpart, bucketid) : targetindex);
         } else if (heappart != NULL) {
-            targetheap = partitionGetRelation(heap, heappart);
+            targetheap = (RelationIsSubPartitioned(heap) ? SubPartitionGetRelation(heap, heappart, NoLock)
+                                                         : partitionGetRelation(heap, heappart));
             targetindex = ((indexpart != NULL) ? partitionGetRelation(index, indexpart) : targetindex);
         } else {
             /* should not be here */
@@ -1257,12 +1274,7 @@ static double _bt_parallel_scan_cross_level(Relation heap, Relation index, Index
         release_target_relation(&targetheap, &targetindex);
     }
 
-    if (heapparts != NULL) {
-        releasePartitionList(heap, &heapparts, NoLock);
-    }
-    if (indexparts != NULL) {
-        releasePartitionList(index, &indexparts, NoLock);
-    }
+    ReleaseTargetPartitionList(heap, index, heapparts, indexparts);
 
     return result;
 }

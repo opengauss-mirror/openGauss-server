@@ -907,8 +907,8 @@ template<bool calCharLength> int MbCharClipLen(const char* mbstr, int len, int l
  */
 int pg_mbcharcliplen(const char* mbstr, int len, int limit)
 {
-    bool calCharLength = DB_IS_CMPT(PG_FORMAT | B_FORMAT);
-    if (calCharLength) {
+    bool pgFormat = DB_IS_CMPT(PG_FORMAT);
+    if (pgFormat) {
         return MbCharClipLen<true>(mbstr, len, limit);
     } else {
         return MbCharClipLen<false>(mbstr, len, limit);

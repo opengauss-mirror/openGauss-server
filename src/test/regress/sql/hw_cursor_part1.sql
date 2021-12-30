@@ -1,3 +1,6 @@
+create database pl_test_cursor_part1 DBCOMPATIBILITY 'pg';
+\c pl_test_cursor_part1;
+
 create schema hw_cursor_part1;
 set current_schema = hw_cursor_part1;
 
@@ -798,3 +801,5 @@ END;
 
  -- clean up
 DROP SCHEMA hw_cursor_part1 CASCADE;
+\c regression;
+drop database IF EXISTS pl_test_cursor_part1;

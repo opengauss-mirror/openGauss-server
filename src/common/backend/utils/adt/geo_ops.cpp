@@ -158,7 +158,7 @@ static int single_encode(float8 x, char* str)
 static int pair_decode(char* str, float8* x, float8* y, char** s)
 {
     int has_delim;
-    char* cp = NULL;
+    bool hasError = FALSE;
 
     if (!PointerIsValid(str))
         return FALSE;
@@ -172,33 +172,36 @@ static int pair_decode(char* str, float8* x, float8* y, char** s)
     while (isspace((unsigned char)*str)) {
         str++;
     }
-    *x = strtod(str, &cp);
-    if (cp <= str)
+
+    *x = float8in_internal(str, &str, &hasError);
+
+    if (hasError) {
         return FALSE;
-    while (isspace((unsigned char)*cp)) {
-        cp++;
     }
-    if (*cp++ != DELIM)
+
+    if (*str++ != DELIM)
         return FALSE;
-    while (isspace((unsigned char)*cp)) {
-        cp++;
-    }
-    *y = strtod(cp, &str);
-    if (str <= cp)
+
+    *y = float8in_internal(str, &str, &hasError);
+
+    if (hasError) {
         return FALSE;
-    while (isspace((unsigned char)*str)) {
-        str++;
     }
-    if (has_delim) {
-        if (*str != RDELIM)
+
+    if (has_delim)
+    {
+        if (*str++ != RDELIM)
             return FALSE;
-        str++;
         while (isspace((unsigned char)*str)) {
             str++;
         }
     }
-    if (s != NULL)
+
+    if (s) {
         *s = str;
+    } else if (*str != '\0') {
+        return FALSE;
+    }
 
     return TRUE;
 }

@@ -285,8 +285,10 @@ select * from test_debug2();
 (1 row)
 
 -- test for implicit variables
-CREATE OR REPLACE PROCEDURE test_debug3(a in integer, b out integer)
+CREATE OR REPLACE function test_debug3(a in integer) return integer
 AS
+declare
+b int;
 BEGIN
     CASE a
         WHEN 1 THEN
@@ -295,8 +297,10 @@ BEGIN
             b := 999;
     END CASE;
     raise info 'pi_return : %',pi_return ;
+    return b;
     EXCEPTION WHEN others THEN
         b := 101;
+    return b;
 END;
 /
 truncate debug_info;
@@ -327,14 +331,16 @@ select dbe_pldebugger.turn_off(oid) from pg_proc where proname = 'test_debug2';
 
 -- start debug
 select * from test_debug3(1);
-  b  
------
- 101
+ test_debug3 
+-------------
+         101
 (1 row)
 
 -- test for step into
-CREATE OR REPLACE PROCEDURE test_debug4(a in integer, b out integer)
+CREATE OR REPLACE FUNCTION test_debug4(a in integer) return integer
 AS
+declare
+b int;
 BEGIN
     CASE a
         WHEN 1 THEN
@@ -343,9 +349,11 @@ BEGIN
         ELSE
             b := 999;
     END CASE;
+    return b;
     raise info 'pi_return : %',pi_return ;
     EXCEPTION WHEN others THEN
         b := 101;
+    return b;
 END;
 /
 truncate debug_info;
@@ -371,20 +379,42 @@ select * from debug_info;
 select * from test_debug4(1);
 INFO:  cnt is 3
 CONTEXT:  SQL statement "call test_debug(a)"
-PL/pgSQL function test_debug4(integer) line 6 at SQL statement
-  b  
------
- 101
+PL/pgSQL function test_debug4(integer) line 8 at SQL statement
+ test_debug4 
+-------------
+         101
 (1 row)
 
+-- test with client error in exception
+select * from test_debug4(1);
+ERROR:  receive abort message
+CONTEXT:  PL/pgSQL function test_debug4(integer) line 15 at assignment
 -- test with breakpoint
 select * from test_debug4(1);
 INFO:  cnt is 3
 CONTEXT:  SQL statement "call test_debug(a)"
-PL/pgSQL function test_debug4(integer) line 6 at SQL statement
-  b  
------
- 101
+PL/pgSQL function test_debug4(integer) line 8 at SQL statement
+ test_debug4 
+-------------
+         101
+(1 row)
+
+-- test with finish without encountered breakpoint
+select * from test_debug4(1);
+INFO:  cnt is 3
+CONTEXT:  SQL statement "call test_debug(a)"
+PL/pgSQL function test_debug4(integer) line 8 at SQL statement
+ test_debug4 
+-------------
+         101
+(1 row)
+
+-- test with finish with encountered breakpoint and inner error
+insert into test values(generate_series(1,10)); -- this will make test_debug() raise more-than-one-row exception
+select * from test_debug4(1);
+ test_debug4 
+-------------
+         101
 (1 row)
 
 select dbe_pldebugger.turn_off(oid) from pg_proc where proname = 'test_debug3';
@@ -426,8 +456,171 @@ select * from test_debug_recursive (1, 1);
        5 |     120
 (5 rows)
 
+-- test set_var
+CREATE OR REPLACE PROCEDURE test_setvar(x int) AS
+DECLARE
+    vint int8;
+    vnum NUMERIC(24,6);
+    vfloat float;
+    vtext text;
+    vvarchar VARCHAR2(500);
+    vrow test%rowtype;
+    vrec record;
+    vrefcursor refcursor;
+    vconst constant smallint;
+    vpoint point;
+BEGIN
+    RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+        vint, vnum, vfloat, vtext, vvarchar, vrow, vrefcursor;
+    COMMIT;
+    SELECT * FROM test ORDER BY 1 LIMIT 1 INTO vrow; -- do set var here
+    RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+        vint, vnum, vfloat, vtext, vvarchar, vrow, vrefcursor;
+    ROLLBACK;
+    RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+        vint, vnum, vfloat, vtext, vvarchar, vrow, vrefcursor;
+END
+/
+truncate debug_info;
+select * from turn_on_debugger('test_setvar');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from dbe_pldebugger.local_debug_server_info();
+--?.*
+--?.*
+--? datanode1 |    .* |   .*
+--? datanode1 |    .* |   .*
+(2 rows)
+
+select * from debug_info;
+--?.*
+--?.*
+--? datanode1 |    .*
+(1 row)
+
+call test_setvar(0);
+INFO:  vint:<NULL>
+vnum:<NULL>
+vfloat:<NULL>
+vtext:<NULL>
+vvarchar:<NULL>
+vrow:(,,)
+vrefcursor:<NULL>
+INFO:  vint:2
+vnum:1.000000
+vfloat:1
+vtext:Why oh why didnt I take the blue pill?
+vvarchar:there is no spoon
+vrow:(0,"Happy Children's Day!","Tue Jun 01 00:00:00 2021")
+vrefcursor:<NULL>
+INFO:  vint:2
+vnum:1.000000
+vfloat:1
+vtext:Why oh why didnt I take the blue pill?
+vvarchar:there is no spoon
+vrow:(0,"Happy Children's Day!","Tue Jun 01 00:00:00 2021")
+vrefcursor:<NULL>
+ test_setvar 
+-------------
+ 
+(1 row)
+
+-- test package
+create or replace PACKAGE z_pk2
+AS
+ a int := 10;
+ type t1 is record(c1 varchar2, c2 int);
+ type t2 is table of t1;
+ type t3 is varray(10) of int; 
+END z_pk2;
+/
+create or replace PACKAGE z_pk
+AS
+  function pro1(p1 int,p2 int ,p3 VARCHAR2(5)) return int;
+  PROCEDURE pro2(p1 int,p2 out int,p3 inout varchar(20));
+  b int := 2;
+  type t1 is record(c1 varchar2, c2 int);
+  type t2 is table of t1;
+  type t3 is varray(10) of int; 
+END z_pk;
+/
+create or replace PACKAGE BODY z_pk
+AS
+  
+  function pro1(p1 int,p2 int ,p3 VARCHAR2(5)) return int
+  as
+  aa t1;
+  bb z_pk2.t1;
+  cc z_pk2.t2;
+  dd z_pk2.t3;
+  p4 int;
+  BEGIN
+      select 'aa',2 into aa;
+      select 'bb',2 into bb;
+      cc(1) = ('aa',1);
+      dd(1) = 10; 
+      p4 := 0;
+      if p3 = '+' then 
+          p4 := p1 + p2 + z_pk2.a;
+       end if;
+       
+       if p3 = '-' then 
+          p4 := p1 - p2;
+       end if;
+       
+       if p3 = '*' then 
+          p4 := p1 * p2;
+       end if;
+       
+       if p3 = '/' then 
+          p4 := p1 / p2;
+       end if;    
+  return p4;
+  END;
+
+  PROCEDURE pro2(p1 int,p2 out int,p3 inout varchar(20))
+  AS
+  BEGIN
+      p2 := p1;
+      p3 := p1 ||'___a';
+      --select dsuser.test_func_p1(1,5);
+  END;
+  
+END z_pk; 
+
+/
+truncate debug_info;
+select * from turn_on_debugger('pro1');
+ turn_on_debugger 
+------------------
+                0
+(1 row)
+
+select * from dbe_pldebugger.local_debug_server_info();
+--?.*
+--?.*
+--? datanode1 |    .* |   .*
+--? datanode1 |    .* |   .*
+--? datanode1 |    .* |   .*
+(3 rows)
+
+select * from debug_info;
+--?.*
+--?.*
+--? datanode1 |    .*
+(1 row)
+
+select z_pk.pro1(1,2,'+');
+ pro1 
+------
+   13
+(1 row)
+
 drop schema pl_debugger cascade;
-NOTICE:  drop cascades to 12 other objects
+NOTICE:  drop cascades to 17 other objects
 DETAIL:  drop cascades to table test
 drop cascades to function test_debug(integer)
 drop cascades to table show_code_table
@@ -440,3 +633,8 @@ drop cascades to function test_debug2()
 drop cascades to function test_debug3(integer)
 drop cascades to function test_debug4(integer)
 drop cascades to function test_debug_recursive(integer,integer)
+drop cascades to function test_setvar(integer)
+--?drop cascades to package .*
+--?drop cascades to package .*
+drop cascades to function pl_debugger.pro1(integer,integer,character varying)
+drop cascades to function pl_debugger.pro2(integer,character varying)

@@ -168,7 +168,7 @@ static void FindNextFreeSlot(const UHeapBufferPage *bufpage, Page input_page, Of
                     }
 
                     if (TransactionIdIsValid(xactinfo.xid) &&
-                        !TransactionIdDidCommit(xactinfo.xid)) {
+                        !UHeapTransactionIdDidCommit(xactinfo.xid)) {
                         hasPendingXact = true;
                         continue;
                     }

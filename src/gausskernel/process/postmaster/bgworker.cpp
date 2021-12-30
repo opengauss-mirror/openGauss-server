@@ -40,6 +40,60 @@ bool IsBgWorkerProcess(void)
     return t_thrd.role == BGWORKER;
 }
 
+static inline void BgworkerPutBackToFreeList(BackgroundWorker* bgworker)
+{
+    BGW_HDR* bgworker_base = (BGW_HDR *)g_instance.bgw_base;
+    errno_t rc = memset_s(bgworker, sizeof(BackgroundWorker), 0, sizeof(BackgroundWorker));
+    securec_check(rc, "", "");
+    bgworker->links.next = (SHM_QUEUE *)bgworker_base->free_bgws;
+    bgworker_base->free_bgws = bgworker;
+}
+
+static inline BackgroundWorker* GetFreeBgworker()
+{
+    BGW_HDR* bgworker_base = (BGW_HDR *)g_instance.bgw_base;
+    if (!bgworker_base->free_bgws) {
+        return NULL;
+    }
+    BackgroundWorker* bgworker = bgworker_base->free_bgws;
+    bgworker_base->free_bgws = (BackgroundWorker *)bgworker->links.next;
+    return bgworker;
+}
+
+void InitBgworkerGlobal(void)
+{
+    BGW_HDR* bgworker_base = NULL;
+    BackgroundWorker* bgws = NULL;
+    bool needPalloc = false;
+
+    MemoryContext oldContext = MemoryContextSwitchTo(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
+    if (g_instance.bgw_base == NULL) {
+        /* Create the g_instance.proc_base shared structure */
+        bgworker_base = (BGW_HDR *)CACHELINEALIGN(palloc(sizeof(BGW_HDR) + PG_CACHE_LINE_SIZE));
+        g_instance.bgw_base = (void *)bgworker_base;
+        needPalloc = true;
+    } else {
+        bgworker_base = (BGW_HDR *)g_instance.bgw_base;
+        Assert(bgworker_base->bgws != NULL);
+    }
+    pg_atomic_init_u64(&bgworker_base->bgw_id_seq, 1);
+
+    if (needPalloc) {
+        bgws = (BackgroundWorker*)CACHELINEALIGN(
+            palloc0(g_max_worker_processes * sizeof(BackgroundWorker) + PG_CACHE_LINE_SIZE));
+        bgworker_base->bgws = bgws;
+    } else {
+        bgws = bgworker_base->bgws;
+    }
+
+    for (int i = 0; i < g_max_worker_processes; i++) {
+        BgworkerPutBackToFreeList(&bgws[i]);
+    }
+
+    pthread_mutex_init(&g_instance.bgw_base_lock, NULL);
+    MemoryContextSwitchTo(oldContext);
+}
+
 void SetUpBgWorkerTxnEnvironment()
 {
     /* resotre transaction context. */
@@ -160,22 +214,25 @@ void BackgroundWorkerMain(void)
 {
     BgWorkerContext *bwc = (BgWorkerContext  *)t_thrd.bgworker_cxt.bgwcontext;
     BackgroundWorker *bgw = (BackgroundWorker *)t_thrd.bgworker_cxt.bgworker;
+    uint64 bgwId = t_thrd.bgworker_cxt.bgworkerId;
     MemoryContext workerContext = NULL;
     MemoryContext oldcontext = NULL;
     sigjmp_buf local_sigjmp_buf;
     int *oldTryCounter = NULL;
     int curTryCounter;
 
-    if (pg_atomic_fetch_add_u32(&bgw->disable_count, 1) > 0) {
+    pthread_mutex_lock(&g_instance.bgw_base_lock);
+    if (bgwId != bgw->bgw_id || pg_atomic_fetch_add_u32(&bgw->disable_count, 1) > 0) {
         /* The leader disallowed this worker to do index build due to startup time longer than 5s. */
         ereport(WARNING, (errmsg("BgWorker thread %lu was disabled for long startup time.",
             t_thrd.proc_cxt.MyProcPid)));
         /* Note that we are in the state BGW_NOT_YET_STARTED. */
+        pthread_mutex_unlock(&g_instance.bgw_base_lock);
         goto out;
     }
+    pthread_mutex_unlock(&g_instance.bgw_base_lock);
 
     BackgroundWorkerInit();
-
     workerContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "BgWorker", ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE);
 
@@ -191,6 +248,8 @@ void BackgroundWorkerMain(void)
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -286,13 +345,22 @@ out:
  * This can only be called in the _PG_init function of a module library
  * that's loaded by shared_preload_libraries; otherwise it has no effect.
  */
-void RegisterBackgroundWorker(BgWorkerContext *bwc)
+bool RegisterBackgroundWorker(BgWorkerContext *bwc)
 {
-    BackgroundWorker *bgw;
-    BackgroundWorkerArgs *bwa;
+    BGW_HDR* bgworker_base = (BGW_HDR *)g_instance.bgw_base;
+    BackgroundWorker *bgw = NULL;
+    BackgroundWorkerArgs *bwa = NULL;
 
-    bgw = (BackgroundWorker*)MemoryContextAllocZero(
-        INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), sizeof(BackgroundWorker));
+    pthread_mutex_lock(&g_instance.bgw_base_lock);
+    bgw = GetFreeBgworker();
+    if (bgw == NULL) {
+        pthread_mutex_unlock(&g_instance.bgw_base_lock);
+        ereport(WARNING, (errmsg("There are no more free background workers available")));
+        return false;
+    }
+    bgw->bgw_id = pg_atomic_fetch_add_u64(&bgworker_base->bgw_id_seq, 1);
+    pthread_mutex_unlock(&g_instance.bgw_base_lock);
+
     bgw->bgw_status = BGW_NOT_YET_STARTED;
     bgw->bgw_status_dur = 0;
     bgw->disable_count = 0;
@@ -301,12 +369,14 @@ void RegisterBackgroundWorker(BgWorkerContext *bwc)
     bwa = (BackgroundWorkerArgs*)palloc(sizeof(BackgroundWorkerArgs));
     bwa->bgwcontext = bwc;
     bwa->bgworker = bgw;
+    bwa->bgworkerId = bgw->bgw_id;
 
     /* Fork a new worker thread */
     bgw->bgw_notify_pid = initialize_util_thread(BGWORKER, bwa);
 
     /* Copy the registration data into the registered workers list. */
     slist_push_head(&t_thrd.bgworker_cxt.bgwlist, &bgw->rw_lnode);
+    return true;
 }
 
 static void BgworkerCleanupSharedContext()
@@ -339,21 +409,23 @@ loop:
     alldone = true;
     slist_foreach_modify(iter, &t_thrd.bgworker_cxt.bgwlist) {
         BackgroundWorker *bgw = slist_container(BackgroundWorker, rw_lnode, iter.cur);
-        if (bgw->bgw_status != BGW_FAILED && bgw->bgw_status != BGW_TERMINATED) {
-            if (!sigsent && gs_signal_send(bgw->bgw_notify_pid, SIGINT) != 0) {
-                ereport(WARNING, (errmsg("BgworkerListSyncQuit kill(pid %lu, stat %d) failed: %m",
-                    bgw->bgw_notify_pid, bgw->bgw_status)));
-            }
-
-            if (bgw->bgw_status == BGW_NOT_YET_STARTED && (pg_atomic_fetch_add_u32(&bgw->disable_count, 1) == 0)) {
-                ereport(WARNING, (errmsg("The bgworker thread %lu hasn't started at the moment "
-                                         "when the leader quits, disable it.", bgw->bgw_notify_pid)));
+        if (bgw->bgw_status == BGW_FAILED || bgw->bgw_status == BGW_TERMINATED) {
+            slist_delete_current(&iter);
+            pthread_mutex_lock(&g_instance.bgw_base_lock);
+            BgworkerPutBackToFreeList(bgw);
+            pthread_mutex_unlock(&g_instance.bgw_base_lock);
+        } else if (bgw->bgw_status == BGW_NOT_YET_STARTED) {
+            alldone = false;
+            if (++bgw->bgw_status_dur > BGWORKER_STATUS_DURLIMIT &&
+                (pg_atomic_fetch_add_u32(&bgw->disable_count, 1) == 0)) {
                 bgw->bgw_status = BGW_FAILED;
             }
-            alldone = false;
         } else {
-            slist_delete_current(&iter);
-            pfree(bgw);
+            if (!sigsent && gs_signal_send(bgw->bgw_notify_pid, SIGINT) != 0) {
+                ereport(WARNING, (errmsg("BgworkerListSyncQuit kill(pid %lu, stat %d) failed: %m",
+                                         bgw->bgw_notify_pid, bgw->bgw_status)));
+            }
+            alldone = false;
         }
     }
 
@@ -375,7 +447,9 @@ static inline void CleanupUnstartBgworkers(int nunstarts)
             if (bgw->bgw_status == BGW_NOT_YET_STARTED) {
                 /* the bgworker thread is unable to start, remove it from the waiting list */
                 slist_delete_current(&iter);
-                pfree(bgw);
+                pthread_mutex_lock(&g_instance.bgw_base_lock);
+                BgworkerPutBackToFreeList(bgw);
+                pthread_mutex_unlock(&g_instance.bgw_base_lock);
             }
         }
     }
@@ -427,8 +501,9 @@ void BgworkerListWaitFinish(int *nparticipants)
     }
 }
 
-void LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit)
+int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit)
 {
+    int actualWorkers = 0;
     MemoryContext oldcontext;
     BgWorkerContext *bwc;
 
@@ -465,9 +540,12 @@ void LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain,
     StreamSaveTxnContext(&bwc->transactionCxt);
 
     for (int i = 0; i < nworkers; ++i) {
-        RegisterBackgroundWorker(bwc);
+        if (RegisterBackgroundWorker(bwc)) {
+            actualWorkers++;
+        }
     }
 
     /* Restore previous memory context. */
     MemoryContextSwitchTo(oldcontext);
+    return actualWorkers;
 }

@@ -20,11 +20,11 @@ SELECT * FROM SEQ_CURRVAL_TABLE_009 ORDER BY COL_NAME,COL_NUM;
 (2 rows)
 
 explain (costs off) UPDATE  SEQ_CURRVAL_TABLE_009 SET COL_NAME='new' WHERE COL_NUM=currval('CURRVAL_SEQUENCE_009');
-                              QUERY PLAN                               
------------------------------------------------------------------------
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
  Update on seq_currval_table_009
    ->  Seq Scan on seq_currval_table_009
-         Filter: (col_num = currval('currval_sequence_009'::regclass))
+         Filter: ((col_num)::numeric = currval('currval_sequence_009'::regclass))
 (3 rows)
 
 UPDATE  SEQ_CURRVAL_TABLE_009 SET COL_NAME='new' WHERE COL_NUM=currval('CURRVAL_SEQUENCE_009');

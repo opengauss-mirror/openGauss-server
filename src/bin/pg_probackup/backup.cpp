@@ -2377,8 +2377,10 @@ StreamLog(void *arg)
         ctl.synchronous = false;
         ctl.mark_done = false;
 
-        if(ReceiveXlogStream(stream_arg->conn, &ctl) == false)
+        if(ReceiveXlogStream(stream_arg->conn, &ctl) == false) {
+            interrupted = true;
             elog(ERROR, "Problem in receivexlog");
+        }
 
 #if PG_VERSION_NUM >= 100000
         if (!ctl.walmethod->finish())
@@ -2389,8 +2391,10 @@ StreamLog(void *arg)
 #else
     if(ReceiveXlogStream(stream_arg->conn, stream_arg->startpos, stream_arg->starttli,
                             NULL, (const char *) stream_arg->basedir, stop_streaming,
-                            standby_message_timeout_local, stream_arg->renamepartial) == false)
+                            standby_message_timeout_local, stream_arg->renamepartial) == false) {
+        interrupted = true;
         elog(ERROR, "Problem in receivexlog");
+    }
 #endif
 
     elog(LOG, "finished streaming WAL at %X/%X (timeline %u)",

@@ -25,9 +25,11 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include "utils/elog.h"
+#include "knl/knl_variable.h"
 #include "libpq/ip.h"
 #include "replication/heartbeat/libpq/libpq-fe.h"
 #include "utils/palloc.h"
+#include "utils/timestamp.h"
 
 #define SOCK_ERRNO errno
 #define SOCK_ERRNO_SET(e) (errno = (e))
@@ -131,6 +133,9 @@ static int internalConnect(ConnParam *param)
     int sock = -1;
     errno_t rc = 0;
     struct sockaddr_in remoteAddr;
+    TimestampTz nowFailedTimestamp = 0;
+    long secs = 0;
+    int msecs = 0;
     rc = memset_s(&remoteAddr, sizeof(remoteAddr), 0, sizeof(remoteAddr));
     securec_check(rc, "", "");
     remoteAddr.sin_family = AF_INET;
@@ -205,7 +210,14 @@ static int internalConnect(ConnParam *param)
      * are in nonblock mode.  If it does, well, too bad.
      */
     if (connect(sock, (struct sockaddr *)&remoteAddr, sizeof(struct sockaddr)) < 0) {
-        ereport(COMMERROR, (errmsg("Connect failed.")));
+        t_thrd.heartbeat_cxt.total_failed_times++;
+        nowFailedTimestamp = GetCurrentTimestamp();
+        TimestampDifference(t_thrd.heartbeat_cxt.last_failed_timestamp, nowFailedTimestamp, &secs, &msecs);
+        if (secs > 1) {
+            t_thrd.heartbeat_cxt.last_failed_timestamp = nowFailedTimestamp;
+            ereport(COMMERROR, (errmsg("Connect failed, total failed times is %d.",
+                t_thrd.heartbeat_cxt.total_failed_times)));
+        }
         close(sock);
         return -1;
     }

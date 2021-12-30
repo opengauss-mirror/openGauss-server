@@ -565,6 +565,7 @@ bool buildACLCommands(const char* name, const char* subname, const char* type, c
     PQExpBuffer grantee, grantor, privs, privswgo;
     PQExpBuffer firstsql, secondsql;
     bool found_owner_privs = false;
+    bool hasRevoke = false;
     char* rolepassword = NULL;
     char* newname = NULL;
 
@@ -667,11 +668,14 @@ bool buildACLCommands(const char* name, const char* subname, const char* type, c
                         temp_grantee_username = binary_upgrade_newowner;
                     }
 
-                    (void)appendPQExpBuffer(firstsql, "%sREVOKE ALL", prefix);
-                    if (NULL != subname)
-                        (void)appendPQExpBuffer(firstsql, "(%s)", subname);
-                    (void)appendPQExpBuffer(
-                        firstsql, " ON %s %s FROM %s;\n", type, newname, fmtId(temp_grantee_username));
+                    if (!hasRevoke) {
+                        (void)appendPQExpBuffer(firstsql, "%sREVOKE ALL", prefix);
+                        if (NULL != subname)
+                            (void)appendPQExpBuffer(firstsql, "(%s)", subname);
+                        (void)appendPQExpBuffer(
+                            firstsql, " ON %s %s FROM %s;\n", type, newname, fmtId(temp_grantee_username));
+                        hasRevoke = true;
+                    }
                     if (privs->len > 0)
                         (void)appendPQExpBuffer(firstsql,
                             "%sGRANT %s ON %s %s TO %s;\n",
@@ -886,13 +890,13 @@ static bool parseAclItem(const char* item, const char* type, const char* name, c
     (void)resetPQExpBuffer(privswgo);
 
     if (strcmp(type, "TABLE") == 0 || strcmp(type, "SEQUENCE") == 0 || strcmp(type, "TABLES") == 0 ||
-        strcmp(type, "SEQUENCES") == 0) {
+        strcmp(type, "SEQUENCES") == 0 || strcmp(type, "LARGE SEQUENCE") == 0) {
         CONVERT_PRIV('r', "SELECT");
         if (remoteVersion >= 90200) {
             CONVERT_PRIV('m', "COMMENT");
         }
 
-        if (strcmp(type, "SEQUENCE") == 0 || strcmp(type, "SEQUENCES") == 0) {
+        if (strcmp(type, "SEQUENCE") == 0 || strcmp(type, "SEQUENCES") == 0 || strcmp(type, "LARGE SEQUENCE") == 0) {
             /* sequence only */
             CONVERT_PRIV('U', "USAGE");
 
@@ -925,7 +929,8 @@ static bool parseAclItem(const char* item, const char* type, const char* name, c
         }
 
         /* UPDATE */
-        if (remoteVersion >= 70200 || strcmp(type, "SEQUENCE") == 0 || strcmp(type, "SEQUENCES") == 0)
+        if (remoteVersion >= 70200 || strcmp(type, "SEQUENCE") == 0 || strcmp(type, "SEQUENCES") == 0 ||
+            strcmp(type, "LARGE SEQUENCE") == 0)
             CONVERT_PRIV('w', "UPDATE");
         else
             /* 7.0 and 7.1 have a simpler worldview */
@@ -1005,11 +1010,20 @@ static bool parseAclItem(const char* item, const char* type, const char* name, c
     } else if (strcmp(type, "DATA SOURCE") == 0) {
         CONVERT_PRIV('U', "USAGE");
     } else if (strcmp(type, "DIRECTORY") == 0) {
-        CONVERT_PRIV('X', "EXECUTE");
-        CONVERT_PRIV('C', "CREATE");
+        CONVERT_PRIV('R', "READ");
+        CONVERT_PRIV('W', "WRITE");
+        if (remoteVersion >= 90200) {
+            CONVERT_PRIV('A', "ALTER");
+            CONVERT_PRIV('P', "DROP");
+        }
     } else if (strcmp(type, "GLOBAL SETTINGS") == 0 || strcmp(type, "COLUMN SETTINGS") == 0) {
         CONVERT_PRIV('U', "USAGE");
         CONVERT_PRIV('P', "DROP");
+    } else if (strcmp(type, "PACKAGE") == 0 || strcmp(type, "PACKAGE BODY") == 0) {
+        CONVERT_PRIV('X', "EXECUTE");
+        CONVERT_PRIV('A', "ALTER");
+        CONVERT_PRIV('P', "DROP");
+        CONVERT_PRIV('m', "COMMENT");
     } else {
         abort();
     }

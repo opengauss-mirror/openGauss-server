@@ -59,8 +59,13 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92425;
+const uint32 GRAND_VERSION_NUM = 92507;
 
+const uint32 SUPPORT_HASH_XLOG_VERSION_NUM = 92501;
+const uint32 FUNC_PARAM_COL_VERSION_NUM = 92500;
+const uint32 SUBPARTITION_VERSION_NUM = 92436;
+const uint32 DEFAULT_MAT_CTE_NUM = 92429;
+const uint32 MATERIALIZED_CTE_NUM = 92424;
 const uint32 HINT_ENHANCEMENT_VERSION_NUM = 92359;
 const uint32 MATVIEW_VERSION_NUM = 92213;
 const uint32 PARTIALPUSH_VERSION_NUM = 92087;
@@ -87,6 +92,13 @@ const uint32 DECODE_ABORT_VERSION_NUM = 92386;
 const uint32 COPY_TRANSFORM_VERSION_NUM = 92394;
 const uint32 COMMENT_PCT_TYPE_VERSION_NUM = 92396;
 const uint32 TDE_VERSION_NUM = 92407;
+const uint32 SWCB_VERSION_NUM = 92427;
+const uint32 COMMENT_ROWTYPE_TABLEOF_VERSION_NUM = 92513;
+const uint32 PRIVS_DIRECTORY_VERSION_NUM = 92460;
+const uint32 COMMENT_RECORD_PARAM_VERSION_NUM = 92484;
+const uint32 ANALYZER_HOOK_VERSION_NUM = 92502;
+const uint32 PUBLICATION_VERSION_NUM = 92504;
+
 /* Version number of the guc parameter backend_version added in V500R001C20 */
 const uint32 V5R1C20_BACKEND_VERSION_NUM = 92305;
 /* Version number starting from V500R002C00 */
@@ -94,14 +106,10 @@ const uint32 V5R2C00_START_VERSION_NUM = 92350;
 /* Version number of the guc parameter backend_version added in V500R002C00 */
 const uint32 V5R2C00_BACKEND_VERSION_NUM = 92412;
 
-const uint32 ANALYZER_HOOK_VERSION_NUM = 92420;
-const uint32 SUPPORT_HASH_XLOG_VERSION_NUM = 92420;
-const uint32 PUBLICATION_VERSION_NUM = 92425;
-
-const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM = 92423;
-
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;
+
+const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM = 92506;
 
 const uint32 TWOPHASE_FILE_VERSION = 92414;
 

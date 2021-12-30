@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2010-2011, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *		  src/gausskernel/storage/bulkload/dist_fdw.cpp
@@ -1488,6 +1489,7 @@ void InitDistImport(DistImportExecutionState *importstate, Relation rel, const c
 
     /* Set up variables to avoid per-attribute overhead. */
     initStringInfo(&importstate->attribute_buf);
+    initStringInfo(&importstate->sequence_buf);
     initStringInfo(&importstate->line_buf);
     importstate->line_buf_converted = false;
     importstate->raw_buf = (char *)palloc(RAW_BUF_SIZE + 1);

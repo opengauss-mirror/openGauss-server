@@ -18,10 +18,10 @@
 
  <refsynopsisdiv>
 <synopsis>
-ALTER SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> 
+ALTER [ LARGE ] SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> 
     [ MAXVALUE <replaceable class="parameter">maxvalue</replaceable> | NO MAXVALUE | NOMAXVALUE ]
     [ OWNED BY { <replaceable class="parameter">table_name</replaceable>.<replaceable class="parameter">column_name</replaceable> | NONE } ];
-ALTER SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> OWNER TO <replaceable class="PARAMETER">new_owner</replaceable>;
+ALTER [ LARGE ] SEQUENCE [ IF EXISTS ] <replaceable class="parameter">name</replaceable> OWNER TO <replaceable class="PARAMETER">new_owner</replaceable>;
 </synopsis>
  </refsynopsisdiv>
 

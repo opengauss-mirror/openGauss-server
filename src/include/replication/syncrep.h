@@ -69,6 +69,7 @@ extern void SyncRepCleanupAtProcExit(void);
 /* called by wal sender */
 extern void SyncRepInitConfig(void);
 extern void SyncRepReleaseWaiters(void);
+extern int SyncRepWakeQueue(bool all, int mode);
 extern void SyncPaxosReleaseWaiters(XLogRecPtr PaxosConsensusLSN);
 
 /* called by wal writer */

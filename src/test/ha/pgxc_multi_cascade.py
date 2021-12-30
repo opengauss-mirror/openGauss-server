@@ -124,17 +124,6 @@ class Pterodb():
 		string = "port = " + str(port) + "\n"
 		file_handler.write(string)
 
-		string = "comm_control_port = " + str(port + 2) + "\n"
-		file_handler.write(string)
-		
-		if(role_flag == 1):
-			string = "comm_sctp_port = " + str(g_base_port+n*256) + "\n"
-		elif(role_flag == 2):
-			string = "comm_sctp_port = " + str(g_base_port+n*256+256) + "\n"
-		else:
-			string = "comm_sctp_port = " + str(g_base_port+n*256+2*256) + "\n"
-		file_handler.write(string)
-
 		file_handler.close()
 
 	def __turn_on_pg_log(self, conf_file):

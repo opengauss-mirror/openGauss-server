@@ -782,12 +782,14 @@ HINT:  Use DROP ... CASCADE to drop the dependent objects too.
 -- On the other hand, this should work because int implicitly promotes to
 -- numeric, and we allow promotion on the FK side
 CREATE TABLE PKTABLE (ptest1 numeric PRIMARY KEY);
-ERROR:  relation "pktable" already exists
+ERROR:  relation "pktable" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
 INSERT INTO PKTABLE VALUES(42);
 ERROR:  duplicate key value violates unique constraint "pktable_pkey"
 DETAIL:  Key (ptest1)=(42) already exists.
 CREATE TABLE FKTABLE (ftest1 int REFERENCES pktable);
-ERROR:  relation "fktable" already exists
+ERROR:  relation "fktable" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
 -- Check it actually works
 INSERT INTO FKTABLE VALUES(42);		-- should succeed
 INSERT INTO FKTABLE VALUES(43);		-- should fail

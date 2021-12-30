@@ -4243,13 +4243,13 @@ static int pingNode(const char* host, const char* port, const char* dbname)
     if (host != NULL) {
         nRet = snprintf_s(editBuf, MAXPATH + 1, MAXPATH, "host = '%s' ", host);
         securec_check_ss(nRet, "\0", "\0");
-        rc = strncat_s(conninfo, MAXLINE + 1, editBuf, MAXLINE);
+        rc = strncat_s(conninfo, MAXLINE + 1, editBuf, strlen(editBuf));
         securec_check(rc, "\0", "\0");
     }
     if (port != NULL) {
         nRet = snprintf_s(editBuf, MAXPATH + 1, MAXPATH, "port = %d ", atoi(port));
         securec_check_ss(nRet, "\0", "\0");
-        rc = strncat_s(conninfo, MAXLINE + 1, editBuf, MAXLINE);
+        rc = strncat_s(conninfo, MAXLINE + 1, editBuf, strlen(editBuf));
         securec_check(rc, "\0", "\0");
     }
 
@@ -4260,13 +4260,13 @@ static int pingNode(const char* host, const char* port, const char* dbname)
         dbname ? dbname : "postgres",
         u_sess->attr.attr_network.PoolerCancelTimeout);
     securec_check_ss(nRet, "\0", "\0");
-    rc = strncat_s(conninfo, MAXLINE + 1, editBuf, MAXLINE);
+    rc = strncat_s(conninfo, MAXLINE + 1, editBuf, strlen(editBuf));
     securec_check(rc, "\0", "\0");
 
     char* remoteType = (char*)(IS_PGXC_COORDINATOR ? "coordinator" : "datanode");
     nRet = snprintf_s(editBuf, MAXPATH + 1, MAXPATH, "options='-c remotetype=%s' ", remoteType);
     securec_check_ss(nRet, "\0", "\0");
-    rc = strncat_s(conninfo, MAXLINE + 1, editBuf, MAXLINE);
+    rc = strncat_s(conninfo, MAXLINE + 1, editBuf, strlen(editBuf));
     securec_check(rc, "\0", "\0");
 
     if (conninfo[0]) {

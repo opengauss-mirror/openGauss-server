@@ -174,6 +174,9 @@ static void deinit_optimizer_context(PlannerGlobal* glob);
 static void check_index_column();
 static bool check_sort_for_upsert(PlannerInfo* root);
 
+extern void PushDownFullPseudoTargetlist(PlannerInfo *root, Plan *topNode, Plan *botNode,
+            List *fullEntryList);
+
 #ifdef PGXC
 static void separate_rowmarks(PlannerInfo* root);
 #endif
@@ -805,7 +808,8 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
 
 #ifdef STREAMPLAN
         /* We set reference of some plans in finalize_node_id. For undone plan, set plan references */
-        if (subplan_ids[i] == 0 || IsA(subplan, RecursiveUnion)) {
+        if (subplan_ids[i] == 0 || IsA(subplan, RecursiveUnion) ||
+            IsA(subplan, StartWithOp)) {
             if (STREAM_RECURSIVECTE_SUPPORTED && IsA(subplan, RecursiveUnion)) {
                 RecursiveRefContext context;
                 errno_t rc = EOK;
@@ -824,6 +828,11 @@ PlannedStmt* standard_planner(Query* parse, int cursorOptions, ParamListInfo bou
             } else {
                 subplan = try_vectorize_plan(subplan, subroot->parse, true);
                 lfirst(lp) = set_plan_references(subroot, subplan);
+            }
+
+            /* for start with processing */
+            if (IsA(subplan, StartWithOp)) {
+                ProcessStartWithOpMixWork(root, top_plan, subroot, (StartWithOp *)subplan);
             }
 
             /*
@@ -1303,14 +1312,6 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     DEBUG_QRW("After const params replace ");
 
     /*
-     * Try to subsitute CTEs with subqueries.
-     */
-    if (IS_STREAM_PLAN)
-        substitute_ctes_with_subqueries(root, parse, root->is_under_recursive_tree);
-
-    DEBUG_QRW("After CTE substitution");
-
-    /*
      * If there is a WITH list, process each WITH query and build an initplan
      * SubPlan structure for it. For stream plan, it's already be replaced, so
      * no need to do this.
@@ -1320,6 +1321,8 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
     if (parse->cteList) {
         SS_process_ctes(root);
     }
+
+    DEBUG_QRW("After CTE substitution");
 
     /*
      * If the FROM clause is empty, replace it with a dummy RTE_RESULT RTE, so
@@ -1423,6 +1426,10 @@ Plan* subquery_planner(PlannerGlobal* glob, Query* parse, PlannerInfo* parent_ro
 
     foreach (l, parse->rtable) {
         RangeTblEntry* rte = (RangeTblEntry*)lfirst(l);
+
+        if (rte->swAborted) {
+            continue;
+        }
 
         if (rte->rtekind == RTE_JOIN) {
             root->hasJoinRTEs = true;
@@ -3036,6 +3043,9 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
              * results.
              */
             bool need_sort_for_grouping = false;
+
+            /* TOD for some cases, we need backup the original subtlist, e.g. we will add  */
+            root->origin_tlist = sub_tlist;
 
             result_plan = create_plan(root, best_path);
 
@@ -6892,13 +6902,26 @@ static List* postprocess_setop_tlist(List* new_tlist, List* orig_tlist)
             "The resno of new target entry does not match to the resno of origin target entry.");
         new_tle->ressortgroupref = orig_tle->ressortgroupref;
     }
-    if (orig_tlist_item != NULL)
+
+    if (orig_tlist_item != NULL) {
+        TargetEntry *extTle = (TargetEntry *)lfirst(orig_tlist_item);
+
+        /*
+         * In case of start with debug, we add a pseudo return column under CteScan plan,
+         * so we don't process such kind of exception case, once we verify the extra tle
+         * is a pseudo return column, then pass new_tlist as return value.
+         */
+        if (IsPseudoReturnTargetEntry(extTle)) {
+            return new_tlist;
+        }
+
         ereport(ERROR,
             (errmodule(MOD_OPT_PLANNER), errcode(ERRCODE_CASE_NOT_FOUND),
                 errmsg("Resjunk output columns are not implemented."),
                 errdetail("N/A"),
                 errcause("System error."),
                 erraction("Contact Huawei Engineer.")));
+    }
     return new_tlist;
 }
 
@@ -8722,6 +8745,7 @@ static bool vector_engine_walker(Plan* result_plan, bool check_rescan)
         case T_LockRows:
         case T_MergeAppend:
         case T_RecursiveUnion:
+        case T_StartWithOp:
             return true;
 
         case T_RemoteQuery:
@@ -8989,6 +9013,7 @@ static Plan* fallback_plan(Plan* result_plan)
         case T_Sort:
         case T_Stream:
         case T_Material:
+        case T_StartWithOp:
         case T_WindowAgg:
         case T_Hash:
         case T_Agg:
@@ -9138,6 +9163,7 @@ Plan* vectorize_plan(Plan* result_plan, bool ignore_remotequery)
         case T_Unique:
         case T_BaseResult:
         case T_Sort:
+        case T_StartWithOp:
         case T_Stream:
         case T_Material:
         case T_WindowAgg:

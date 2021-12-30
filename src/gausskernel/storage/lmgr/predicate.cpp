@@ -905,7 +905,7 @@ void CheckPointPredicate(void)
      * pointless.
      */
     int flush_num = SimpleLruFlush(t_thrd.shemem_ptr_cxt.OldSerXidSlruCtl, true);
-    g_instance.ckpt_cxt_ctl->ckpt_predicate_flush_num += flush_num;
+    g_instance.ckpt_cxt_ctl->ckpt_view.ckpt_predicate_flush_num += flush_num;
 }
 
 bool

@@ -7,6 +7,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -158,6 +159,57 @@ bool defGetBoolean(DefElem* def)
     }
     ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s requires a Boolean value", def->defname)));
     return false; /* keep compiler quiet */
+}
+
+/*
+* Extract a boolean/int mixed value from a DefElem.(copy from fill_missing_fields)
+*/
+int defGetMixdInt(DefElem *def)
+{
+    /*
+     * If no parameter given, assume "true" is meant.
+     */
+    if (def->arg == NULL)
+        return 1;
+
+    /*
+     * Allow 0, 1, "true", "false", "on", "off", "one", "multi"
+     */
+    switch (nodeTag(def->arg)) {
+        case T_Integer:
+            switch (intVal(def->arg)) {
+                case 0:
+                    return 0;
+                case 1:
+                    return 1;
+                default:
+                    /* otherwise, error out below */
+                    break;
+            }
+            break;
+        default: {
+            char *sval = defGetString(def);
+
+            /*
+             * The set of strings accepted here should match up with the
+             * grammar's opt_boolean production.
+             */
+            if (pg_strcasecmp(sval, "true") == 0)
+                return 1;
+            if (pg_strcasecmp(sval, "false") == 0)
+                return 0;
+            if (pg_strcasecmp(sval, "on") == 0)
+                return 1;
+            if (pg_strcasecmp(sval, "off") == 0)
+                return 0;
+            if (pg_strcasecmp(sval, "one") == 0)
+                return 1;
+            if (pg_strcasecmp(sval, "multi") == 0)
+                return -1;
+        } break;
+    }
+    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("%s requires a Boolean value", def->defname)));
+    return 0; /* keep compiler quiet */
 }
 
 /*

@@ -56,6 +56,7 @@
 #include "opfusion/opfusion_mot.h"
 #endif
 #include "gs_ledger/blockchain.h"
+#include "gs_policy/policy_common.h"
 
 extern void opfusion_executeEnd(PlannedStmt *plannedstmt, const char *queryString, Snapshot snapshot);
 
@@ -414,72 +415,106 @@ bool OpFusion::executeEnd(const char *portal_name, bool *isQueryCompleted)
     return has_completed;
 }
 
+void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted)
+{
+    long max_rows = FETCH_ALL;
+    bool completed = false;
+    const char *portal_name = NULL;
+
+    /* msg is null means 'U' message, need fetch all. */
+    if (msg != NULL) {
+        /* 'U' message and simple query has already assign value to debug_query_string. */
+        if (u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_psrc != NULL) {
+            t_thrd.postgres_cxt.debug_query_string =
+                u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_psrc->query_string;
+        }
+        portal_name = pq_getmsgstring(msg);
+        max_rows = (long)pq_getmsgint(msg, 4);
+        if (max_rows <= 0)
+            max_rows = FETCH_ALL;
+    }
+
+    u_sess->exec_cxt.CurrentOpFusionObj->executeInit();
+    gstrace_entry(GS_TRC_ID_BypassExecutor);
+    bool old_status = u_sess->exec_cxt.need_track_resource;
+    if (u_sess->attr.attr_resource.resource_track_cost == 0 && u_sess->attr.attr_resource.enable_resource_track &&
+        u_sess->attr.attr_resource.resource_track_level != RESOURCE_TRACK_NONE) {
+        u_sess->exec_cxt.need_track_resource = true;
+        WLMSetCollectInfoStatus(WLM_STATUS_RUNNING);
+    }
+    ResourceOwner saveResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    PG_TRY();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = u_sess->exec_cxt.CurrentOpFusionObj->m_local.m_resOwner;
+        if (!(g_instance.status > NoShutdown) && opfusion_unified_audit_executor_hook != NULL) {
+            opfusion_unified_audit_executor_hook(u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_planstmt);
+        }
+        u_sess->exec_cxt.CurrentOpFusionObj->execute(max_rows, completionTag);
+        u_sess->exec_cxt.need_track_resource = old_status;
+        gstrace_exit(GS_TRC_ID_BypassExecutor);
+        completed = u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted);
+        if (completed && u_sess->exec_cxt.CurrentOpFusionObj->IsGlobal()) {
+            Assert(ENABLE_GPC);
+            tearDown(u_sess->exec_cxt.CurrentOpFusionObj);
+        }
+        t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
+        if (!(g_instance.status > NoShutdown) && opfusion_unified_audit_flush_logs_hook != NULL) {
+            opfusion_unified_audit_flush_logs_hook(AUDIT_OK);
+        }
+    }
+    PG_CATCH();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
+        if (!(g_instance.status > NoShutdown) && opfusion_unified_audit_flush_logs_hook != NULL) {
+            opfusion_unified_audit_flush_logs_hook(AUDIT_FAILED);
+        }
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+}
+
 bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted)
 {
     if (op == FUSION_EXECUTE && msg != NULL)
         refreshCurFusion(msg);
 
     bool res = false;
-    if (u_sess->exec_cxt.CurrentOpFusionObj != NULL) {
-        switch (op) {
-            case FUSION_EXECUTE: {
-                long max_rows = FETCH_ALL;
-                const char *portal_name = NULL;
-
-                /* msg is null means 'U' message, need fetch all. */
-                if (msg != NULL) {
-                    /* 'U' message and simple query has already assign value to debug_query_string. */
-                    if (u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_psrc != NULL){
-                        t_thrd.postgres_cxt.debug_query_string =
-                            u_sess->exec_cxt.CurrentOpFusionObj->m_global->m_psrc->query_string;
-                    }
-                    portal_name = pq_getmsgstring(msg);
-                    max_rows = (long)pq_getmsgint(msg, 4);
-                    if (max_rows <= 0)
-                        max_rows = FETCH_ALL;
-                }
-
-                u_sess->exec_cxt.CurrentOpFusionObj->executeInit();
-                gstrace_entry(GS_TRC_ID_BypassExecutor);
-                bool old_status = u_sess->exec_cxt.need_track_resource;
-                if (u_sess->attr.attr_resource.resource_track_cost == 0 &&
-                    u_sess->attr.attr_resource.enable_resource_track &&
-                    u_sess->attr.attr_resource.resource_track_level != RESOURCE_TRACK_NONE) {
-                    u_sess->exec_cxt.need_track_resource = true;
-                    WLMSetCollectInfoStatus(WLM_STATUS_RUNNING);
-                }
-                u_sess->exec_cxt.CurrentOpFusionObj->execute(max_rows, completionTag);
-                u_sess->exec_cxt.need_track_resource = old_status;
-                gstrace_exit(GS_TRC_ID_BypassExecutor);
-                bool completed = false;
-                completed = u_sess->exec_cxt.CurrentOpFusionObj->executeEnd(portal_name, isQueryCompleted);
-                if (completed && u_sess->exec_cxt.CurrentOpFusionObj->IsGlobal()) {
-                    Assert(ENABLE_GPC);
-                    tearDown(u_sess->exec_cxt.CurrentOpFusionObj);
-                }
-                u_sess->exec_cxt.CurrentOpFusionObj = NULL;
-                UpdateSingleNodeByPassUniqueSQLStat(isTopLevel);
-                break;
-            }
-
-            case FUSION_DESCRIB: {
-                u_sess->exec_cxt.CurrentOpFusionObj->describe(msg);
-                break;
-            }
-
-            default: {
-                Assert(0);
-                ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND),
-                    errmsg("unrecognized bypass support process option: %d", (int)op)));
-            }
-        }
-        res = true;
+    if (u_sess->exec_cxt.CurrentOpFusionObj == NULL) {
+        return res;
     }
+
+    switch (op) {
+        case FUSION_EXECUTE: {
+            u_sess->exec_cxt.CurrentOpFusionObj->fusionExecute(msg, completionTag, isTopLevel, isQueryCompleted);
+            break;
+        }
+
+        case FUSION_DESCRIB: {
+            u_sess->exec_cxt.CurrentOpFusionObj->describe(msg);
+            break;
+        }
+
+        default: {
+            Assert(0);
+            ereport(ERROR,
+                (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("unrecognized bypass support process option: %d", (int)op)));
+        }
+    }
+    res = true;
 
     /*
      * Emit duration logging if appropriate.
      */
+    u_sess->exec_cxt.CurrentOpFusionObj->CheckLogDuration();
 
+    if (op == FUSION_EXECUTE) {
+        u_sess->exec_cxt.CurrentOpFusionObj = NULL;
+    }
+    return res;
+}
+
+void OpFusion::CheckLogDuration()
+{
     char msec_str[32];
     switch (check_log_duration(msec_str, false)) {
         case 1:
@@ -496,8 +531,6 @@ bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLe
         default:
             break;
     }
-
-    return res;
 }
 
 void OpFusion::CopyFormats(int16 *formats, int numRFormats)

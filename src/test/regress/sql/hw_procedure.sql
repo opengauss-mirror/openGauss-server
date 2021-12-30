@@ -1,4 +1,6 @@
 ---------------------forall------------------------
+create database pl_test_pkg DBCOMPATIBILITY 'pg';
+\c pl_test_pkg;
 SET CHECK_FUNCTION_BODIES TO ON;
 CREATE TABLE if not exists test_forall(a char(10));
 
@@ -1637,3 +1639,5 @@ end;
 /
 
 call func_proc_no_arg();
+\c regression;
+drop database IF EXISTS pl_test_pkg;

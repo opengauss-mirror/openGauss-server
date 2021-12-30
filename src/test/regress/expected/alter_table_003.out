@@ -327,7 +327,7 @@ select * from anothertab order by atcol1, atcol2;
       2 | f
 (2 rows)
 
-alter table anothertab alter column atcol1 type boolean; -- we could support this cast
+alter table anothertab alter column atcol1 type boolean; -- we cannot support this cast with numeric nextval
 alter table anothertab alter column atcol1 type integer;
 select * from anothertab order by atcol1, atcol2;
  atcol1 | atcol2 

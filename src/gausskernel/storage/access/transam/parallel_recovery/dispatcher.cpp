@@ -31,8 +31,8 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "access/nbtree.h"
-#include "access/ubtree.h"
 #include "access/hash_xlog.h"
+#include "access/ubtree.h"
 #include "access/xlogreader.h"
 #include "access/gist_private.h"
 #include "access/multixact.h"
@@ -161,6 +161,7 @@ static bool DispatchUHeapUndoRecord(XLogReaderState *record, List *expectedTLIs,
 static bool DispatchUndoActionRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchRollbackFinishRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static uint32 GetUndoSpaceWorkerId(int zid);
+static void HandleStartupProcInterruptsForParallelRedo(void);
 
 RedoWaitInfo redo_get_io_event(int32 event_id);
 
@@ -416,6 +417,7 @@ static void StartPageRedoWorkers(uint32 parallelism)
     g_dispatcher->chosedWorkerIds = (uint32 *)palloc(sizeof(uint32) * started);
 
     g_dispatcher->chosedWorkerCount = 0;
+    g_dispatcher->oldStartupIntrruptFunc = RegisterRedoInterruptCallBack(HandleStartupProcInterruptsForParallelRedo);
 }
 
 static void ResetChosedWorkerList()
@@ -1701,6 +1703,7 @@ void SendRecoveryEndMarkToWorkersAndWaitForFinish(int code)
             errmsg("[REDO_LOG_TRACE]SendRecoveryEndMarkToWorkersAndWaitForFinish, disptach total elapsed: %lu,"
                 " txn elapsed: %lu, process pending record elapsed: %lu code: %d",
                 g_dispatcher->totalCostTime, g_dispatcher->txnCostTime, g_dispatcher->pprCostTime, code)));
+        (void)RegisterRedoInterruptCallBack(g_dispatcher->oldStartupIntrruptFunc);
     }
 }
 
@@ -2362,5 +2365,32 @@ static uint32 GetUndoSpaceWorkerId(int zid)
     } else {
         return (tag_hash(&zid, sizeof(zid)) % workerCount);
     }
+}
+
+/* Handle SIGHUP and SIGTERM signals of startup process */
+static void HandleStartupProcInterruptsForParallelRedo(void)
+{
+    /*
+     * Check if we were requested to re-read config file.
+     */
+    if (t_thrd.startup_cxt.got_SIGHUP) {
+        t_thrd.startup_cxt.got_SIGHUP = false;
+        ProcessConfigFile(PGC_SIGHUP);
+        SendSingalToPageWorker(SIGHUP);
+    }
+
+    /*
+     * Check if we were requested to exit without finishing recovery.
+     */
+    if (t_thrd.startup_cxt.shutdown_requested && SmartShutdown != g_instance.status) {
+        proc_exit(1);
+    }
+
+    /*
+     * Emergency bailout if postmaster has died.  This is to avoid the
+     * necessity for manual cleanup of all postmaster children.
+     */
+    if (IsUnderPostmaster && !PostmasterIsAlive())
+        gs_thread_exit(1);
 }
 }

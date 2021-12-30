@@ -15,7 +15,7 @@ partition by range (c1)
 
 INSERT INTO gpi_uniquecheck_table1 SELECT r, r, r FROM generate_series(0,40000) AS r;
 
-CREATE UNIQUE INDEX idx1_gpi_uniquecheck_table1 ON gpi_uniquecheck_table1 (c2) GLOBAL;
+CREATE UNIQUE INDEX idx1_gpi_uniquecheck_table1 ON gpi_uniquecheck_table1 (c2);
 
 INSERT INTO gpi_uniquecheck_table1 VALUES (9999,1,1);
 --error

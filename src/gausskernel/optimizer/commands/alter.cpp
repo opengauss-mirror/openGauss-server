@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -147,6 +148,7 @@ void ExecRenameStmt(RenameStmt* stmt)
 
         case OBJECT_TABLE:
         case OBJECT_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE:
         case OBJECT_VIEW:
         case OBJECT_CONTQUERY:
         case OBJECT_MATVIEW:
@@ -240,6 +242,7 @@ void ExecAlterObjectSchemaStmt(AlterObjectSchemaStmt* stmt)
             break;
 
         case OBJECT_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE:
         case OBJECT_TABLE:
         case OBJECT_VIEW:
         case OBJECT_CONTQUERY:

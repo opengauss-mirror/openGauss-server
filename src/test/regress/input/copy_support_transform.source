@@ -50,8 +50,8 @@ AS
 /
 select copy_in_procedure();
 select * from test order by mes1;
+drop function copy_in_procedure;
 
-drop procedure copy_in_procedure;
 drop table test;
 drop table test1;
 

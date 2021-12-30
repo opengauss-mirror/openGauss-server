@@ -137,6 +137,7 @@
 
 #define MALLOC_BY_NODE_NUM 0
 #define MALLOC_BY_NODE_MAXNUM 1
+
 #define CASCADE_STANDBY_TYPE 3
 #define STATIC_CONFIG_FILE "cluster_static_config"
 #define DYNAMIC_DNROLE_FILE "cluster_dnrole_config"

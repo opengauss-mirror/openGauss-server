@@ -350,7 +350,7 @@ public:
     static int AllocateZone(UndoPersistence upersistence);
     static void ReleaseZone(int zid, UndoPersistence upersistence);
     static UndoZone *SwitchZone(int zid, UndoPersistence upersistence);
-    static UndoZone *GetUndoZone(int zid);
+    static UndoZone *GetUndoZone(int zid, bool needInit = false);
 }; // class UndoZoneGroup
 
 void AllocateZonesBeforXid();

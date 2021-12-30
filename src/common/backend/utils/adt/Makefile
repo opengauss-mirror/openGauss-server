@@ -26,7 +26,8 @@ OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 	array_userfuncs.o arrayutils.o bool.o \
 	cash.o char.o date.o datetime.o datum.o domains.o \
 	enum.o float.o format_type.o \
-	geo_ops.o geo_selfuncs.o hotkey.o int.o int8.o json.o jsonb.o jsonb_gin.o jsonb_op.o jsonb_util.o jsonfuncs.o like.o lockfuncs.o \
+	geo_ops.o geo_selfuncs.o hotkey.o int.o int8.o int16.o \
+	json.o jsonb.o jsonb_gin.o jsonb_op.o jsonb_util.o jsonfuncs.o like.o lockfuncs.o \
 	misc.o nabstime.o name.o numeric.o numutils.o \
 	oid.o a_compat.o orderedsetaggs.o pseudotypes.o rangetypes.o rangetypes_gist.o \
 	rowtypes.o regexp.o regproc.o ruleutils.o selfuncs.o \
@@ -38,7 +39,7 @@ OBJS = acl.o arrayfuncs.o array_selfuncs.o array_typanalyze.o \
 	tsquery_op.o tsquery_rewrite.o tsquery_util.o tsrank.o \
 	tsvector.o tsvector_op.o tsvector_parser.o \
 	txid.o uuid.o windowfuncs.o xml.o extended_statistics.o clientlogic_bytea.o clientlogicsettings.o \
-	median_aggs.o expr_distinct.o first_last_agg.o
+	median_aggs.o expr_distinct.o nlssort.o
 
 like.o: like.cpp like_match.cpp
 

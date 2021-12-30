@@ -12,11 +12,11 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  * ---------------------------------------------------------------------------------------
- * 
+ *
  * gscodegen.h
- * 
- * 
- * 
+ *
+ *
+ *
  * IDENTIFICATION
  *        src/include/codegen/gscodegen.h
  *
@@ -555,6 +555,11 @@ private:
      * functions.
      */
     void optimizeModule(llvm::Module* module);
+
+    /*
+     * check preload module
+     */
+    bool CheckPreloadModule(llvm::Module* module);
 
     /* Flag used to optimize the module or not */
     bool m_optimizations_enabled;

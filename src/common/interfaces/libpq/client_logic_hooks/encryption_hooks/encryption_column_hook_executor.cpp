@@ -87,10 +87,6 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
         printfPQExpBuffer(&conn->errorMessage, libpq_gettext("ERROR(CLIENT): failed to get key_value.\n"));
         return -1;
     }
-    size_t decrypted_key_size = 0;
-    unsigned char *cek_keys = NULL;
-    cek_keys = get_cek_keys();
-    decrypted_key_size = get_cek_size();
 
     ColumnEncryptionAlgorithm column_encryption_algorithm = get_column_encryption_algorithm();
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
@@ -113,7 +109,8 @@ int EncryptionColumnHookExecutor::process_data_impl(const ICachedColumn *cached_
         set_column_encryption_algorithm(column_encryption_algorithm);
     }
 
-    if (cek_keys == NULL || decrypted_key_size == 0) {
+    if (!is_cek_set) {
+        size_t decrypted_key_size = 0;
         unsigned char encrypted_key[MAX_CEK_LENGTH];
         errno_t rc = memset_s(encrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(rc, "\0", "\0");
@@ -158,10 +155,6 @@ DecryptDataRes EncryptionColumnHookExecutor::deprocess_data_impl(const unsigned 
         return DECRYPT_CEK_ERR;
     }
     errno_t res;
-    size_t decrypted_key_size = 0;
-    unsigned char *cek_keys = NULL;
-    cek_keys = get_cek_keys();
-    decrypted_key_size = get_cek_size();
     ColumnEncryptionAlgorithm column_encryption_algorithm = get_column_encryption_algorithm();
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
         size_t algorithm_str_size(0);
@@ -183,7 +176,8 @@ DecryptDataRes EncryptionColumnHookExecutor::deprocess_data_impl(const unsigned 
         set_column_encryption_algorithm(column_encryption_algorithm);
     }
 
-    if (cek_keys == NULL || decrypted_key_size == 0) {
+    if (!is_cek_set) {
+        size_t decrypted_key_size = 0;
         unsigned char decrypted_key[MAX_CEK_LENGTH];
         errno_t rc = memset_s(decrypted_key, MAX_CEK_LENGTH, 0, MAX_CEK_LENGTH);
         securec_check_c(rc, "\0", "\0");
@@ -318,9 +312,12 @@ static unsigned char *create_or_check_cek(PGconn* conn, unsigned char *cek_plain
     }
 }
 
-void free_after_check(bool condition, unsigned char *ptr)
+void free_after_check(bool condition, unsigned char *ptr, size_t ptr_size)
 {
     if (condition) {
+        errno_t res = EOK;
+        res = memset_s(ptr, MAX_CEK_LENGTH, 0, ptr_size);
+        securec_check_c(res, "\0", "\0");
         free(ptr);
         ptr = NULL;
     }
@@ -330,7 +327,7 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     StringArgs &new_args)
 {
     bool has_user_set_cek = false;
-    
+
     EncryptionGlobalHookExecutor *encryption_global_hook_executor =
         dynamic_cast<EncryptionGlobalHookExecutor *>(m_global_hook_executor);
     if (!encryption_global_hook_executor) {
@@ -351,7 +348,8 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     CmkIdentity cmk_identify = {cmk_store_str, cmk_path_str, cmk_algo_str, 0, column_encryption.client_cache_id};
 
     ColumnEncryptionAlgorithm column_encryption_algorithm(ColumnEncryptionAlgorithm::INVALID_ALGORITHM);
-    const char *expected_value = NULL;
+    char *expected_value = NULL;
+    const char *expected_value_find = NULL;
     const char *algorithm_str = NULL;
     size_t expected_value_size(0);
 
@@ -359,10 +357,10 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     if (algorithm_str != NULL) {
         column_encryption_algorithm = get_cek_algorithm_from_string(algorithm_str);
     }
-    expected_value = args.find("encrypted_value");
-    if (expected_value != NULL) {
+    expected_value_find = args.find("encrypted_value");
+    if (expected_value_find != NULL) {
         has_user_set_cek = true;
-        expected_value_size = strlen(expected_value);
+        expected_value_size = strlen(expected_value_find);
     }
 
     if (column_encryption_algorithm == ColumnEncryptionAlgorithm::INVALID_ALGORITHM) {
@@ -380,14 +378,14 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     }
 
     /* genereate CEK if not provided (common case) */
-    expected_value = (const char *)create_or_check_cek(conn, (unsigned char *)expected_value, expected_value_size);
+    expected_value = (char *)create_or_check_cek(conn, (unsigned char *)expected_value_find, expected_value_size);
     if (expected_value == NULL) {
         return false;
     }
 
     set_column_encryption_algorithm(column_encryption_algorithm);
     if (!set_cek_keys((unsigned char *)expected_value, expected_value_size)) {
-        free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
+        free_after_check(!has_user_set_cek, (unsigned char *)expected_value, expected_value_size);
         return false;
     }
     /* encrypt CEK */
@@ -398,12 +396,12 @@ bool EncryptionColumnHookExecutor::pre_create(PGClientLogic &column_encryption, 
     ret = reg_all_cmk_entity_manager();
     if (ret != CMKEM_SUCCEED) {
         printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
-        free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
+        free_after_check(!has_user_set_cek, (unsigned char *)expected_value, expected_value_size);
         return false;
     }
     
     ret = encrypt_cek_plain(&cek_plain, &cmk_identify, &cek_cipher);
-    free_after_check(!has_user_set_cek, (unsigned char *)expected_value);
+    free_after_check(!has_user_set_cek, (unsigned char *)expected_value, expected_value_size);
     if (ret != CMKEM_SUCCEED) {
         printfPQExpBuffer(&conn->errorMessage, "ERROR(CLIENT): %s\n", get_cmkem_errmsg(ret));
         conn->client_logic->is_external_err = true;

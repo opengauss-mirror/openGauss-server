@@ -53,13 +53,7 @@ public:
         add_allowed_value("encryption_type");
         add_allowed_value("algorithm");
     }
-    virtual ~EncryptionColumnHookExecutor()
-    {
-        if (m_cek_keys != NULL) {
-            free(m_cek_keys);
-        }
-        m_cek_keys = NULL;
-    }
+    virtual ~EncryptionColumnHookExecutor() {}
     int get_estimated_processed_data_size_impl(int data_size) const override;
     int process_data_impl(const ICachedColumn *cached_column, const unsigned char *data,
         int data_size, unsigned char *processed_data) override;
@@ -75,49 +69,21 @@ public:
 private:
     void init()
     {
-        m_cek_keys = (unsigned char *)malloc(MAX_CEK_LENGTH);
-        errno_t securec_rc = EOK;
-        if (m_cek_keys == NULL) {
-            return;
-        }
-        securec_rc = memset_s(m_cek_keys, MAX_CEK_LENGTH, '\0', MAX_CEK_LENGTH);
-        securec_check_c(securec_rc, "\0", "\0");
-        m_cek_size = 0;
-        
-        return;
+        is_cek_set = false;
     }
     bool deprocess_column_encryption_key(EncryptionGlobalHookExecutor *encryption_global_hook_executor,
         unsigned char *decryptedKey, size_t *decryptedKeySize, const char *encrypted_key_value, 
         const size_t *encrypted_key_value_size) const;
     bool set_cek_keys(const unsigned char *cek_keys, size_t cek_size)
     {
-        if (cek_keys == NULL || cek_size == 0 || m_cek_keys == NULL) {
+        if (cek_keys == NULL || cek_size == 0 || cek_size > MAX_CEK_LENGTH) {
             return false;
         }
-        errno_t securec_rc = EOK;
-        Assert(cek_size <= MAX_CEK_LENGTH);
-        securec_rc = memcpy_s(m_cek_keys, MAX_CEK_LENGTH, cek_keys, cek_size);
-        securec_check_c(securec_rc, "\0", "\0");
-        set_cek_size(cek_size);
         if (!aesCbcEncryptionKey.generate_keys((unsigned char *)cek_keys, cek_size)) {
             return false;
         }
+        is_cek_set = true;
         return true;
-    }
-
-    unsigned char *get_cek_keys() const
-    {
-        return m_cek_keys;
-    }
-
-    void set_cek_size(size_t cek_size)
-    {
-        m_cek_size = cek_size;
-    }
-
-    size_t get_cek_size() const
-    {
-        return m_cek_size;
     }
 
     ColumnEncryptionAlgorithm get_column_encryption_algorithm() const
@@ -130,8 +96,7 @@ private:
         m_column_encryption_algorithm = column_encryption_algorithm;
     }
 
-    unsigned char *m_cek_keys;
-    size_t m_cek_size;
+    bool is_cek_set;
     ColumnEncryptionAlgorithm m_column_encryption_algorithm = ColumnEncryptionAlgorithm::INVALID_ALGORITHM;
     AeadAesHamcEncKey aesCbcEncryptionKey;         /* contains iv, encryption and mac keys */
 };

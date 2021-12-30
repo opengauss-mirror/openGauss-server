@@ -18,11 +18,15 @@ import os
 import re
 import sys
 import shlex
+import ctypes
 import subprocess
 import requests
 import config
 from datetime import timedelta
 from threading import Thread, Event
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+import hashlib
 
 import psycopg2
 import sqlparse
@@ -32,6 +36,139 @@ from sqlparse.tokens import Keyword, DML
 from global_vars import DATE_FORMAT
 
 split_flag = ('!=', '<=', '>=', '==', '<', '>', '=', ',', '*', ';', '%', '+', ',', ';', '/')
+
+
+class AesCbcUtil(object):
+    """
+    aes  cbc tool
+    """
+    @classmethod
+    def check_content_key(cls, content, key):
+        """
+        check ase cbc content and key
+        """
+        if not isinstance(content, bytes):
+            raise ValueError('incorrect parameter.')
+        if not isinstance(key, (bytes, str)):
+            raise ValueError('incorrect parameter.')
+
+        iv_len = 16
+        if not len(content) >= (iv_len + 16):
+            raise Exception(Errors.GAUSS_61101.build_msg("check content key. "
+                            "content's len must >= (iv_len + 16)."))
+
+    @classmethod
+    def aes_cbc_decrypt(cls, content, key):
+        """
+        aes cbc decrypt for content and key
+        """
+        cls.check_content_key(content, key)
+        if isinstance(key, str):
+            key = bytes(key)
+        iv_len = 16
+        # pre shared key iv
+        iv = content[16 + 1 + 16 + 1:16 + 1 + 16 + 1 + 16]
+
+        # pre shared key  enctryt
+        enc_content = content[:iv_len]
+
+        try:
+            backend = default_backend()
+        except Exception as imp_clib_err:
+            if str(imp_clib_err).find('SSLv3_method') == -1:
+                # not find SSLv3_method, and it's not ours
+                local_path = os.path.dirname(os.path.realpath(__file__))
+                clib_path = os.path.realpath(os.path.join(local_path, "../clib"))
+                ssl_path = os.path.join(clib_path, 'libssl.so.1.1')
+                crypto_path = os.path.join(clib_path, 'libcrypto.so.1.1')
+                if os.path.isfile(crypto_path):
+                    ctypes.CDLL(crypto_path, mode=ctypes.RTLD_GLOBAL)
+                if os.path.isfile(ssl_path):
+                    ctypes.CDLL(ssl_path, mode=ctypes.RTLD_GLOBAL)
+            else:
+                ssl_path = '/usr/lib64/libssl.so.1.1'
+                crypto_path = '/usr/lib64/libcrypto.so.1.1'
+                if os.path.isfile(crypto_path):
+                    ctypes.CDLL(crypto_path, mode=ctypes.RTLD_GLOBAL)
+                if os.path.isfile(ssl_path):
+                    ctypes.CDLL(ssl_path, mode=ctypes.RTLD_GLOBAL)
+            backend = default_backend()
+
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=backend)
+        decrypter = cipher.decryptor()
+        dec_content = decrypter.update(enc_content) + decrypter.finalize()
+        server_decipher_key = dec_content.rstrip(b'\x00')[:-1].decode()
+        return server_decipher_key
+
+    @classmethod
+    def get_old_version_path(cls, path):
+        """ Compatible old version path, only 'encrypt'
+            old: /home/xxx/key_0
+            new: /home/xxx/cipher/key_0
+        """
+        dirname, basename = os.path.split(path.rstrip("/"))
+        dirname, _ = os.path.split(dirname)
+        path = os.path.join(dirname, basename)
+        return path
+
+    @classmethod
+    def aes_cbc_decrypt_with_path(cls, cipher_path, rand_path):
+        """
+        aes cbc decrypt for one path
+        """
+        if not os.path.isdir(cipher_path):
+            cipher_path = cls.get_old_version_path(cipher_path)
+            rand_path = cls.get_old_version_path(rand_path)
+        with open(os.path.join(cipher_path, 'server.key.cipher'), 'rb') as cipher_file:
+            cipher_txt = cipher_file.read()
+        with open(os.path.join(rand_path, 'server.key.rand'), 'rb') as rand_file:
+            rand_txt = rand_file.read()
+
+        if cipher_txt is None or cipher_txt == "":
+            return None
+
+        server_vector_cipher_vector = cipher_txt[16 + 1:16 + 1 + 16]
+        # pre shared key rand
+        server_key_rand = rand_txt[:16]
+
+        # worker key
+        server_decrypt_key = hashlib.pbkdf2_hmac('sha256', server_key_rand,
+                                                 server_vector_cipher_vector, 10000, 16)
+
+        enc = cls.aes_cbc_decrypt(cipher_txt, server_decrypt_key)
+        return enc
+
+    @classmethod
+    def aes_cbc_decrypt_with_multi(cls, cipher_root, rand_root):
+        """
+        decrypt message with multi depth
+        """
+        num = 0
+        rt = ""
+        if not os.path.isdir(cipher_root):
+            cipher_root = os.path.dirname(cipher_root.rstrip("/"))
+            rand_root = os.path.dirname(rand_root.rstrip("/"))
+        while True:
+            cipher_path = os.path.join(cipher_root, "key_%s" % num)
+            rand_path = os.path.join(rand_root, "key_%s" % num)
+            part = cls.aes_cbc_decrypt_with_path(cipher_path, rand_path)
+            if part is None:
+                break
+            elif len(part) < 15:
+                rt += part
+                break
+            else:
+                rt += part
+            num = num + 1
+
+        if rt == "":
+            return None
+        return rt
+
+    @staticmethod
+    def format_path(root_path):
+        """format decrypt_with_multi or decrypt_with_path"""
+        return os.path.join(root_path, "cipher"), os.path.join(root_path, "rand")
 
 
 class RepeatTimer(Thread):
@@ -389,3 +526,15 @@ def check_tls_protocol():
     except Exception as e:
         agent_logger.error("[security] part must exists in configure file.")
         raise 
+
+
+def getpasswd(key_path):
+    if os.path.isdir(key_path):
+        output = AesCbcUtil.aes_cbc_decrypt_with_multi(*AesCbcUtil.format_path(key_path))
+        if len(str(output).strip().split()) < 1:
+            return ''
+        else:
+            return str(output).strip().split()[-1]
+    else:
+        return ''
+

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -45,6 +46,7 @@
 #include "utils/guc.h"
 #include "utils/ps_status.h"
 #include "utils/elog.h"
+#include "utils/numeric.h"
 #include "utils/memprot.h"
 #include "utils/builtins.h"
 #include "tcop/dest.h"
@@ -65,7 +67,6 @@
 #include "pgxc/groupmgr.h"
 
 const int PGSTAT_RESTART_INTERVAL = 60;
-#define MAX_INT ((unsigned)(-1) >> 1)
 #define COUNT_ARRAY_SIZE(array) (sizeof((array)) / sizeof(*(array)))
 
 using namespace std;
@@ -181,6 +182,7 @@ static bool CheckNodeGroup()
     return true;
 #endif
     errno_t rc;
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
         ereport(ERROR,
             (errmodule(MOD_WDR_SNAPSHOT),
@@ -195,6 +197,7 @@ static bool CheckNodeGroup()
     const char* query =
         "select count(*) from pgxc_group WHERE in_redistribution='n' and is_installation = TRUE;";
     colval = GetDatumValue(query, 0, 0, &isnull);
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
     return !isnull && (colval != 0);
 }
@@ -248,6 +251,7 @@ static bool CheckMemProtectInit()
         errno_t rc;
         start_xact_command();
         PushActiveSnapshot(GetTransactionSnapshot());
+        SPI_STACK_LOG("connect", NULL, NULL);
         if ((rc = SPI_connect()) != SPI_OK_CONNECT)
             ereport(ERROR,
                 (errmodule(MOD_WDR_SNAPSHOT),
@@ -258,6 +262,7 @@ static bool CheckMemProtectInit()
                 erraction("Analyze the error message before the error")));
         const char *query = "select * from DBE_PERF.global_memory_node_detail";
         (void)SnapshotNameSpace::ExecuteQuery(query, SPI_OK_SELECT);
+        SPI_STACK_LOG("finish", query, NULL);
         SPI_finish();
         PopActiveSnapshot();
         finish_xact_command();
@@ -265,6 +270,7 @@ static bool CheckMemProtectInit()
     }
     PG_CATCH();
     {
+        SPI_STACK_LOG("finish", NULL, NULL);
         SPI_finish();
         (void)MemoryContextSwitchTo(currentCtx);
         ErrorData *edata = CopyErrorData();
@@ -534,7 +540,9 @@ void SnapshotNameSpace::CreateSequence(void)
     Datum colval;
     bool isnull = false;
     const char* query_seq_sql =
-        "select count(*) from pg_statio_all_sequences where schemaname = 'snapshot' and relname = 'snap_seq'";
+        "select count(*) from pg_class c left join pg_namespace n"
+        " on n.oid = c.relnamespace"
+        " where n.nspname = 'snapshot' and c.relname = 'snap_seq'";
     colval = GetDatumValue(query_seq_sql, 0, 0, &isnull);
     if (isnull) {
         colval = 0;
@@ -559,10 +567,8 @@ void SnapshotNameSpace::init_curr_snapid(void)
     if (isnull) {
         colval = 0;
     }
-    t_thrd.perf_snap_cxt.curr_snapid = DatumGetInt32(colval);
-    if (t_thrd.perf_snap_cxt.curr_snapid >= MAX_INT - 1) {
-        t_thrd.perf_snap_cxt.curr_snapid = 0;
-    }
+    /* MAX value of the snapshot.snap_seq is MAX INT64 */
+    t_thrd.perf_snap_cxt.curr_snapid = numeric_int16_internal(DatumGetNumeric(colval));
 }
 /*
  * UpdateSnapEndTime -- update snapshot end time stamp
@@ -638,6 +644,35 @@ void SnapshotNameSpace::GetQueryData(const char* query, bool with_column_name, L
         *cstring_values = lappend(*cstring_values, row_string);
     }
 }
+
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+/*
+ * SnapshotView
+ * Since the snapshot table can be queried only when the parameter is on,
+ * the view is created during snapshot initialization.
+ * when the parameter is off, an empty view is provided.
+ */
+static void SnapshotView()
+{
+    const char* createSnapshotviewdrop = "drop view if exists SYS.ADM_HIST_SNAPSHOT";
+    if (SPI_execute(createSnapshotviewdrop, false, 0) != SPI_OK_UTILITY) {
+        ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),
+            errmsg("drop view failed"),
+            errdetail("query(%s) execute failed", createSnapshotviewdrop),
+            errcause("System error."),
+            erraction("Check whether the query can be executed")));
+    }
+    const char* createSnapshotview = "CREATE OR REPLACE VIEW SYS.ADM_HIST_SNAPSHOT AS "
+        "SELECT s.snapshot_id AS SNAP_ID, s.start_ts AS BEGIN_INTERVAL_TIME FROM SNAPSHOT.SNAPSHOT s";
+    if (SPI_execute(createSnapshotview, false, 0) != SPI_OK_UTILITY) {
+        ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_DATA_EXCEPTION),
+            errmsg("CREATE VIEW failed"),
+            errdetail("query(%s) execute failed", createSnapshotview),
+            errcause("System error."),
+            erraction("Check whether the query can be executed")));
+    }
+}
+#endif
 /*
  * take_snapshot
  * All the snapshot processes are executed here,
@@ -657,6 +692,7 @@ void SnapshotNameSpace::take_snapshot()
         uint32 max_snap_size = 0;
         SnapshotNameSpace::SetSnapshotSize(&max_snap_size);
         /* connect SPI to execute query */
+        SPI_STACK_LOG("connect", NULL, NULL);
         if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
             ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_INTERNAL_ERROR),
                 errmsg("SPI_connect failed: %s", SPI_result_code_string(rc)),
@@ -667,7 +703,7 @@ void SnapshotNameSpace::take_snapshot()
         SnapshotNameSpace::init_curr_table_size();
         while (t_thrd.perf_snap_cxt.curr_table_size >= max_snap_size) {
             bool isnull = false;
-            const char* sql = "select min(snapshot_id) from snapshot.snapshot";
+            const char* sql = "select snapshot_id from snapshot.snapshot order by start_ts limit 1";
             Datum colval = GetDatumValue(sql, 0, 0, &isnull);
             if (isnull) {
                 colval = 0;
@@ -690,11 +726,13 @@ void SnapshotNameSpace::take_snapshot()
                 erraction("Check whether the snapshot retry is successful")));
         }
         SnapshotNameSpace::UpdateSnapEndTime(t_thrd.perf_snap_cxt.curr_snapid);
+        SPI_STACK_LOG("finish", query.data, NULL);
         pfree_ext(query.data);
         SPI_finish();
     }
     PG_CATCH();
     {
+        SPI_STACK_LOG("finish", query.data, NULL);
         pfree_ext(query.data);
         SPI_finish();
         /* Carry on with error handling. */
@@ -1016,6 +1054,9 @@ void SnapshotNameSpace::InitTables()
     numViews = COUNT_ARRAY_SIZE(lastStatViews);
     SnapshotNameSpace::CreateTable(lastStatViews, numViews, true);
     SnapshotNameSpace::CreateIndexes();
+#if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
+    SnapshotView();
+#endif
 }
 
 void SnapshotNameSpace::CreateTable(const char** views, int numViews, bool isSharedViews)
@@ -1488,6 +1529,7 @@ static void analyze_snap_table()
     int rc = 0;
     start_xact_command();
     PushActiveSnapshot(GetTransactionSnapshot());
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
         ereport(ERROR, (errmodule(MOD_WDR_SNAPSHOT), errcode(ERRCODE_INTERNAL_ERROR),
             errmsg("analyze table, connection failed: %s", SPI_result_code_string(rc)),
@@ -1498,6 +1540,7 @@ static void analyze_snap_table()
     SnapshotNameSpace::GetAnalyzeList(&(analyzeTableList));
     set_lock_timeout();
     SnapshotNameSpace::AnalyzeTable(analyzeTableList);
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
     PopActiveSnapshot();
     finish_xact_command();
@@ -1511,6 +1554,7 @@ void InitSnapshot()
     PushActiveSnapshot(GetTransactionSnapshot());
     int rc = 0;
     /* connect SPI to execute query */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
         ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
             errmsg("snapshot thread SPI_connect failed: %s", SPI_result_code_string(rc)),
@@ -1520,6 +1564,7 @@ void InitSnapshot()
     }
     set_lock_timeout();
     SnapshotNameSpace::InitTables();
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
     PopActiveSnapshot();
     finish_xact_command();
@@ -1557,9 +1602,6 @@ void SnapshotNameSpace::SubSnapshotMain(void)
             SnapshotNameSpace::take_snapshot();
             PopActiveSnapshot();
             finish_xact_command();
-            if (OidIsValid(u_sess->proc_cxt.MyDatabaseId)) {
-                pgstat_report_stat(true);
-            }
             ereport(LOG, (errcode(ERRCODE_SUCCESSFUL_COMPLETION), errmsg("WDR snapshot end")));
 
             /*  a snapshot has token on next_timestamp, we need get next_timestamp */

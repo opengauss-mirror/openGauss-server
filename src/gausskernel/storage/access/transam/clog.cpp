@@ -817,7 +817,7 @@ void CheckPointCLOG(void)
     for (int i = 0; i < NUM_CLOG_PARTITIONS; i++) {
         flush_num += SimpleLruFlush(ClogCtl(i), true);
     }
-    g_instance.ckpt_cxt_ctl->ckpt_clog_flush_num += flush_num;
+    g_instance.ckpt_cxt_ctl->ckpt_view.ckpt_clog_flush_num += flush_num;
     TRACE_POSTGRESQL_CLOG_CHECKPOINT_DONE(true);
 }
 

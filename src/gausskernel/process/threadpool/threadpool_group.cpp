@@ -270,7 +270,11 @@ bool ThreadPoolGroup::EnlargeWorkers(int enlargeNum)
         for (int i = num; i < num + wakeUpNum; i++) {
             if (m_workers[i].stat.slotStatus == THREAD_SLOT_INUSE) {
                 worker = m_workers[i].worker;
-                worker->WakeUpToUpdate(THREAD_RUN);
+                if (worker->GetthreadStatus() == THREAD_PENDING) {
+                    worker->WakeUpToUpdate(THREAD_RUN);
+                    elog(LOG, "[SCHEDULER] Group %d enlarge: wakeup pending worker %lu",
+                               m_groupId, m_workers[i].worker->GetThreadId());
+                }
             }
         }
     }
@@ -297,23 +301,29 @@ void ThreadPoolGroup::ReduceWorkers(int reduceNum)
     m_pendingWorkerNum += (num - m_expectWorkerNum);
     elog(LOG, "[SCHEDULER] Group %d reduce worker. Old worker num %d, new worker num %d",
               m_groupId, num, m_expectWorkerNum);
-
+    /* only wake up free thread to pending, if we meet working thread, just skip it. */
     for (int i = m_expectWorkerNum; i < num; i++) {
         if (m_workers[i].stat.slotStatus == THREAD_SLOT_INUSE) {
             Assert(m_workers[i].worker != NULL);
-            m_workers[i].worker->WakeUpToUpdate(THREAD_PENDING);
+            if (m_workers[i].worker->WakeUpToPendingIfFree()) {
+                elog(LOG, "[SCHEDULER] Group %d reduce: pending worker %lu",
+                          m_groupId, m_workers[i].worker->GetThreadId());
+            }
         }
     }
+
+    elog(LOG, "[SCHEDULER] Group %d reduce worker end. Old worker num %d, new worker num %d",
+              m_groupId, num, m_expectWorkerNum);
     alock.unLock();
 }
-
 void ThreadPoolGroup::ShutDownPendingWorkers()
 {
     if (m_pendingWorkerNum == 0) {
         return;
     }
 
-    elog(LOG, "[SCHEDULER] Group %d shut down pending workers.", m_groupId);
+    elog(LOG, "[SCHEDULER] Group %d shut down pending workers start. pending worker num %d, current worker num %d",
+              m_groupId, m_pendingWorkerNum, m_expectWorkerNum);
 
     AutoMutexLock alock(&m_mutex);
     ThreadPoolWorker* worker = NULL;
@@ -321,10 +331,14 @@ void ThreadPoolGroup::ShutDownPendingWorkers()
     for (int i = m_expectWorkerNum; i < m_expectWorkerNum + m_pendingWorkerNum; i++) {
         if (m_workers[i].stat.slotStatus == THREAD_SLOT_INUSE) {
             worker = m_workers[i].worker;
-            worker->WakeUpToUpdate(THREAD_EXIT);
+            if (worker->GetthreadStatus() == THREAD_PENDING) {
+                worker->WakeUpToUpdate(THREAD_EXIT);
+            }
         }
     }
     m_pendingWorkerNum = 0;
+    elog(LOG, "[SCHEDULER] Group %d shut down pending workers end. pending worker num %d, current worker num %d",
+              m_groupId, m_pendingWorkerNum, m_expectWorkerNum);
     alock.unLock();
 }
 
@@ -332,7 +346,7 @@ void ThreadPoolGroup::ShutDownThreads()
 {
     AutoMutexLock alock(&m_mutex);
     alock.lock();
-    for (int i = 0; i < m_expectWorkerNum + m_pendingWorkerNum; i++) {
+    for (int i = 0; i < m_maxWorkerNum; i++) {
         if (m_workers[i].stat.slotStatus != THREAD_SLOT_UNUSE) {
             m_workers[i].worker->WakeUpToUpdate(THREAD_EXIT);
         }
@@ -418,6 +432,9 @@ ThreadId ThreadPoolGroup::GetStreamFromPool(StreamProducer* producer)
         }
 
         producer->setChildSlot(AssignPostmasterChildSlot());
+        if (producer->getChildSlot() == -1) {
+            return InvalidTid;
+        }
         tid = AddStream(producer);
     } else {
         Dlelem* elem = m_freeStreamList->RemoveHead();

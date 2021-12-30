@@ -67,6 +67,7 @@ typedef enum ObjectType {
     OBJECT_INTERNAL,
     OBJECT_INTERNAL_PARTITION,
     OBJECT_LANGUAGE,
+    OBJECT_LARGE_SEQUENCE,
     OBJECT_LARGEOBJECT,
     OBJECT_MATVIEW,
     OBJECT_OPCLASS,
@@ -102,6 +103,9 @@ typedef enum ObjectType {
 	OBJECT_PUBLICATION_REL,
 	OBJECT_SUBSCRIPTION
 } ObjectType;
+
+#define OBJECT_IS_SEQUENCE(obj) \
+    ((obj) == OBJECT_LARGE_SEQUENCE || (obj) == OBJECT_SEQUENCE)
 
 typedef enum DropBehavior {
     DROP_RESTRICT, /* drop fails if any dependent objects */
@@ -165,6 +169,7 @@ typedef struct TypeName {
     List *arrayBounds; /* array bounds */
     int location;      /* token location, or -1 if unknown */
     int end_location;  /* %TYPE and date specified, token end location */
+    bool pct_rowtype;  /* %ROWTYPE specified? */
 } TypeName;
 
 typedef enum FunctionParameterMode {
@@ -237,6 +242,50 @@ typedef struct CopyColExpr {
     Node *colexpr;      /* expr of column */
 } CopyColExpr;
 
+typedef struct SqlLoadColPosInfo {
+    NodeTag type;
+    int start;
+    int end;
+}SqlLoadColPosInfo;
+
+typedef struct SqlLoadScalarSpec {
+    NodeTag type;
+    TypeName *typname;  /* type of column */
+    Node *position_info;
+    Node *sqlstr;
+    char *nullif_col;
+} SqlLoadScalarSpec;
+
+#define LOADER_SEQUENCE_MAX_FLAG -1
+#define LOADER_SEQUENCE_COUNT_FLAG -2
+typedef struct SqlLoadSequInfo {
+    NodeTag type;
+    char *colname;      /* name of column */
+    int64 start;
+    int64 step;
+} SqlLoadSequInfo;
+
+typedef struct SqlLoadFillerInfo {
+    NodeTag type;
+    char *colname;      /* name of column */
+    int index;
+} SqlLoadFillerInfo;
+
+typedef struct SqlLoadConsInfo {
+    NodeTag type;
+    char *colname;      /* name of column */
+    char *consVal;
+} SqlLoadConsInfo;
+
+typedef struct SqlLoadColExpr {
+    NodeTag type;
+    char *colname;      /* name of column */
+    bool is_filler;
+    Node *const_info;      /*CONSTANT value*/
+    Node *sequence_info;
+    Node *scalar_spec;
+} SqlLoadColExpr;
+
 
 typedef enum SortByNulls {
     SORTBY_NULLS_DEFAULT,
@@ -294,6 +343,7 @@ typedef struct IndexElem {
     SortByNulls nulls_ordering; /* FIRST/LAST/default */
 } IndexElem;
 
+struct StartWithClause;
 /*
  * WithClause -
  * representation of WITH clause
@@ -306,6 +356,13 @@ typedef struct WithClause {
     List *ctes;     /* list of CommonTableExprs */
     bool recursive; /* true = WITH RECURSIVE */
     int location;   /* token location, or -1 if unknown */
+
+    /*
+     * Start with support,
+     *
+     * Add a StartWithClause information
+     */
+    struct StartWithClause *sw_clause;
 } WithClause;
 
 /*
@@ -530,6 +587,19 @@ typedef enum SetOperation {
     SETOP_EXCEPT
 } SetOperation;
 
+typedef struct StartWithClause {
+    NodeTag type;
+    Node *startWithExpr;
+    Node *connectByExpr;
+    Node *siblingsOrderBy; /* acutually it's a List */
+
+    bool  priorDirection;
+    bool  nocycle;
+
+    /* extension opetions */
+    bool  opt;
+} StartWithClause;
+
 typedef struct SelectStmt {
     NodeTag type;
 
@@ -541,6 +611,7 @@ typedef struct SelectStmt {
     IntoClause *intoClause; /* target for SELECT INTO */
     List *targetList;       /* the target list (of ResTarget) */
     List *fromClause;       /* the FROM clause */
+    Node *startWithClause;  /* START WITH...CONNECT BY clause */
     Node *whereClause;      /* WHERE qualification */
     List *groupClause;      /* GROUP BY clauses */
     Node *havingClause;     /* HAVING conditional-expression */
@@ -581,6 +652,32 @@ typedef struct SelectStmt {
     bool hasPlus;
     /* Eventually add fields for CORRESPONDING spec here */
 } SelectStmt;
+
+/* ----------------------
+ *		CREATE TABLE AS Statement (a/k/a SELECT INTO)
+ *
+ * A query written as CREATE TABLE AS will produce this node type natively.
+ * A query written as SELECT ... INTO will be transformed to this form during
+ * parse analysis.
+ * A query written as CREATE MATERIALIZED view will produce this node type,
+ * during parse analysis, since it needs all the same data.
+ *
+ * The "query" field is handled similarly to EXPLAIN, though note that it
+ * can be a SELECT or an EXECUTE, but not other DML statements.
+ * ----------------------
+ */
+typedef struct CreateTableAsStmt {
+    NodeTag type;
+    Node* query;         /* the query (see comments above) */
+    IntoClause* into;    /* destination table */
+    ObjectType  relkind; /* type of object */
+    bool is_select_into; /* it was written as SELECT INTO */
+#ifdef PGXC
+    Oid groupid;
+    void* parserSetup;
+    void* parserSetupArg;
+#endif
+} CreateTableAsStmt;
 
 /*
  * CollateClause - a COLLATE expression
@@ -714,6 +811,8 @@ typedef enum AlterTableType {
     AT_ExchangePartition, /* ALTER TABLE EXCHANGE PARTITION WITH TABLE */
     AT_MergePartition,    /* MERGE PARTITION */
     AT_SplitPartition,    /* SPLIT PARTITION */
+    AT_TruncateSubPartition,
+    AT_SplitSubPartition,
     /* this will be in a more natural position in 9.3: */
     AT_ReAddConstraint, /* internal to commands/tablecmds.c */
     AT_AddIntoCBI
@@ -918,6 +1017,7 @@ typedef struct RangePartitionDefState {
     char *tablespacename; /* table space to use, or NULL */
     Const *curStartVal;
     char *partitionInitName;
+    List* subPartitionDefState;
 } RangePartitionDefState;
 
 typedef struct RangePartitionStartEndDefState {
@@ -934,6 +1034,7 @@ typedef struct ListPartitionDefState {
     char* partitionName;  /* name of list partition */
     List* boundary;       /* the boundary of a list partition */
     char* tablespacename; /* table space to use, or NULL */
+    List* subPartitionDefState;
 } ListPartitionDefState;
 
 typedef struct HashPartitionDefState {
@@ -941,6 +1042,7 @@ typedef struct HashPartitionDefState {
     char* partitionName;  /* name of hash partition */
     List* boundary;       /* the boundary of a hash partition */
     char* tablespacename; /* table space to use, or NULL */
+    List* subPartitionDefState;
 } HashPartitionDefState;
 
 typedef struct RangePartitionindexDefState {
@@ -983,6 +1085,7 @@ typedef struct PartitionState {
     List *partitionKey;                         /* partition key of partitioned table , which is list of ColumnRef */
     List *partitionList;                        /* list of partition definition */
     RowMovementValue rowMovement; /* default: for colum-stored table means true, for row-stored means false */
+    PartitionState *subPartitionState;
 } PartitionState;
 
 typedef struct AddPartitionState { /* ALTER TABLE ADD PARTITION */
@@ -991,12 +1094,21 @@ typedef struct AddPartitionState { /* ALTER TABLE ADD PARTITION */
     bool isStartEnd;
 } AddPartitionState;
 
+typedef enum SplitPartitionType {
+    RANGEPARTITIION, /* not used */
+    LISTPARTITIION, /*  not support */
+    RANGESUBPARTITIION,
+    LISTSUBPARTITIION
+} SplitPartitionType;
+
 typedef struct SplitPartitionState { /* ALTER TABLE SPLIT PARTITION INTO */
     NodeTag type;
+    SplitPartitionType splitType;
     char *src_partition_name;
     List *partition_for_values;
     List *split_point;
     List *dest_partition_define_list;
+    List *newListSubPartitionBoundry;
 } SplitPartitionState;
 
 typedef struct ReplicaIdentityStmt {
@@ -1255,6 +1367,8 @@ typedef enum TableLikeOption {
 typedef struct ColumnRef {
     NodeTag type;
     List *fields; /* field names (Value strings) or A_Star */
+    bool prior;   /* it is a prior column of startwith, TODO need refactor */
+    int indnum;   /* it is number of index for this column */
     int location; /* token location, or -1 if unknown */
 } ColumnRef;
 
@@ -1337,6 +1451,40 @@ typedef struct A_Star {
     NodeTag type;
 } A_Star;
 
+typedef enum CTEMaterialize {
+    CTEMaterializeDefault,  /* no option specified */
+    CTEMaterializeAlways,   /* MATERIALIZED */
+    CTEMaterializeNever     /* NOT MATERIALIZED */
+} CTEMaterialize;
+
+typedef enum StartWithConnectByType {
+    CONNECT_BY_PRIOR = 0,  /* default */
+    CONNECT_BY_LEVEL,
+    CONNECT_BY_ROWNUM,
+    CONNECT_BY_MIXED_LEVEL,
+    CONNECT_BY_MIXED_ROWNUM
+} StartWithConnectByType;
+
+typedef struct StartWithOptions {
+    NodeTag type;
+
+    /* List of node SORTBY */
+    List    *siblings_orderby_clause;
+
+    /* List of targetlist index by connectby prior columns */
+    List    *prior_key_index;
+
+    /* flag to indicate CONNECT BY LEVEL/ROWNUM */
+    StartWithConnectByType      connect_by_type;
+
+    /* quals for connect-by-level/rownum, that extract in transform stage */
+    Node *connect_by_level_quals;
+    Node *connect_by_other_quals;
+
+    /* flag to indicate nocycle */
+    bool     nocycle;
+} StartWithOptions;
+
 /*
  * CommonTableExpr -
  * representation of WITH list element
@@ -1347,6 +1495,7 @@ typedef struct CommonTableExpr {
     NodeTag type;
     char *ctename;       /* query name (never qualified) */
     List *aliascolnames; /* optional list of column names */
+    CTEMaterialize ctematerialized; /* is this an optimization fence? */
     /* SelectStmt/InsertStmt/etc before parse analysis, Query afterwards: */
     Node *ctequery; /* the CTE's subquery */
     int location;   /* token location, or -1 if unknown */
@@ -1359,6 +1508,9 @@ typedef struct CommonTableExpr {
     List *ctecoltypmods;    /* integer list of output column typmods */
     List *ctecolcollations; /* OID list of column collation OIDs */
     char locator_type;      /* the location type of cte */
+    bool self_reference;    /* is this a recursive self-reference? */
+    bool referenced_by_subquery; /* is this cte referenced by subquery */
+    StartWithOptions    *swoptions; /* START WITH CONNECT BY options */
 } CommonTableExpr;
 
 /*
@@ -1908,6 +2060,8 @@ typedef struct CreateFunctionStmt {
     bool isFunctionDeclare; /* in package,it's true is a function delcare*/
     bool isExecuted;
     char* queryStr;
+    int startLineNumber;
+    int firstLineNumber;
 } CreateFunctionStmt;
 
 typedef struct FunctionSources {
@@ -1937,7 +2091,7 @@ typedef struct CreatePackageStmt {
     NodeTag type;
     bool replace;         /* T => replace if already exists */
     List* pkgname;       /* qualified name of function to create */
-    List* options;        /* a list of DefElem */
+    bool pkgsecdef;        /* package security definer or invoker */
     char* pkgspec;            /* content of package spec */
 } CreatePackageStmt;
 
@@ -1947,6 +2101,7 @@ typedef struct CreatePackageBodyStmt {
     List* pkgname;       /* qualified name of function to create */
     char* pkgbody;
     char* pkginit;
+    bool pkgsecdef;
 } CreatePackageBodyStmt;
 
 /* ----------------------

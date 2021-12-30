@@ -2,6 +2,7 @@
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 2002-2007, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * fmgr_comp.h
  * Definitions for the fmgr-compatible function
@@ -121,6 +122,7 @@ extern struct varlena* pg_detoast_datum_packed(struct varlena* datum);
 #define PG_GETARG_FLOAT4(n) DatumGetFloat4(PG_GETARG_DATUM(n))
 #define PG_GETARG_FLOAT8(n) DatumGetFloat8(PG_GETARG_DATUM(n))
 #define PG_GETARG_INT64(n) DatumGetInt64(PG_GETARG_DATUM(n))
+#define PG_GETARG_INT128(n) DatumGetInt128(PG_GETARG_DATUM(n))
 #define PG_GETARG_TRANSACTIONID(n) DatumGetTransactionId(PG_GETARG_DATUM(n))
 #define PG_GETARG_SHORTTRANSACTIONID(n) DatumGetShortTransactionId(PG_GETARG_DATUM(n))
 /* use this if you want the raw, possibly-toasted input datum: */
@@ -216,6 +218,7 @@ extern struct varlena* pg_detoast_datum_packed(struct varlena* datum);
 #define PG_RETURN_FLOAT4(x) return Float4GetDatum(x)
 #define PG_RETURN_FLOAT8(x) return Float8GetDatum(x)
 #define PG_RETURN_INT64(x) return Int64GetDatum(x)
+#define PG_RETURN_INT128(x) return Int128GetDatum(x)
 #define PG_RETURN_TRANSACTIONID(x) return TransactionIdGetDatum(x)
 #define PG_RETURN_SHORTTRANSACTIONID(x) return ShortTransactionIdGetDatum(x)
 /* RETURN macros for other pass-by-ref types will typically look like this: */

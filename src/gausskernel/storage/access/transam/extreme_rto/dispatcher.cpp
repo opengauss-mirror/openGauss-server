@@ -32,8 +32,8 @@
 #include "access/xact.h"
 #include "access/xlog_internal.h"
 #include "access/nbtree.h"
-#include "access/hash_xlog.h"
 #include "access/ubtree.h"
+#include "access/hash_xlog.h"
 #include "access/xlogreader.h"
 #include "access/gist_private.h"
 #include "access/multixact.h"
@@ -1157,7 +1157,6 @@ static bool DispatchCLogRecord(XLogReaderState *record, List *expectedTLIs, Time
 static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
 {
     bool isNeedFullSync = false;
-
     /* index not support mvcc, so we need to sync with trx thread when the record is vacuum */
     if (IsHashVacuumPages(record) && g_supportHotStandby) {
         GetSlotIds(record, ANY_WORKER, true);
@@ -1168,7 +1167,6 @@ static bool DispatchHashRecord(XLogReaderState *record, List *expectedTLIs, Time
     } else {
         DispatchRecordWithPages(record, expectedTLIs, true);
     }
-
     return isNeedFullSync;
 }
 

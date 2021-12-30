@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -24,6 +25,7 @@
 #include "libpq/pqformat.h"
 #include "utils/array.h"
 #include "utils/builtins.h"
+#include "utils/guc_sql.h"
 #include "optimizer/pgxcship.h"
 #include "miscadmin.h"
 
@@ -61,6 +63,7 @@ static const uint32 nan[2] = {0xffffffff, 0x7fffffff};
 
 static int float4_cmp_internal(float4 a, float4 b);
 int float8_cmp_internal(float8 a, float8 b);
+double float8in_internal(char* str, char** s, bool* hasError);
 
 #ifndef HAVE_CBRT
 /*
@@ -83,6 +86,78 @@ static double cbrt(double x);
  * place is less well standardized; pre-C99 systems tend not to have C99's
  * INFINITY and NAN macros.  We centralize our workarounds for this here.
  */
+
+double float8in_internal(char* str, char** endptr_p, bool* hasError)
+{
+    double val;
+    char* endptr = NULL;
+    /* Marking down the initial value of str. */
+    const char* orig_num = str;
+    const int nanLen = 3;
+    const int infinityLen = 8;
+    const int minusInfinityLen = 9;
+
+    Assert(str != NULL);
+
+    while (*str != '\0' && isspace((unsigned char)*str)) {
+        str++;
+    }
+
+    if (*str == '\0') {
+        *hasError = TRUE;
+        return 0.0;
+    }
+
+    errno = 0;
+    val = strtod(str, &endptr);
+
+    if (endptr == str || errno != 0) {
+        int save_errno = errno;
+
+        if (pg_strncasecmp(str, "NaN", nanLen) == 0) {
+            val = get_float8_nan();
+            endptr = str + 3;
+        } else if (pg_strncasecmp(str, "Infinity", infinityLen) == 0) {
+            val = get_float8_infinity();
+            endptr = str + 8;
+        } else if (pg_strncasecmp(str, "-Infinity", minusInfinityLen) == 0) {
+            val = -get_float8_infinity();
+            endptr = str + 9;
+        } else if (save_errno == ERANGE) {
+            if (val == 0.0 || val >= HUGE_VAL || val <= -HUGE_VAL) {
+                char* errnumber = pstrdup(str);
+                errnumber[endptr - str] = '\0';
+                ereport(ERROR,
+                    (errmodule(MOD_FUNCTION), errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                        errmsg("\"%s\" is out of range for type double precision", errnumber),
+                        errdetail("N/A"),
+                        errcause("Input number exceeding limit of float8."),
+                        erraction("Change input number within float8 interval.")));
+            }
+        } else {
+            *hasError = TRUE;
+            return 0.0;
+        }
+    }
+
+    while (*endptr != '\0' && isspace((unsigned char)*endptr)) {
+        endptr++;
+    }
+
+    /* report stopping point, else report error if not end of string */
+    if (endptr_p) {
+        *endptr_p = endptr;
+    } else if (*endptr != '\0') {
+        ereport(ERROR,
+            (errmodule(MOD_FUNCTION), errcode(ERRCODE_INVALID_TEXT_REPRESENTATION),
+                errmsg("invalid input syntax for type double precision: \"%s\"", orig_num),
+                errdetail("N/A"),
+                errcause("Wrong input syntax."),
+                erraction("Change input syntax.")));
+    }
+    return val;
+}
+
 
 double get_float8_infinity(void)
 {
@@ -294,6 +369,20 @@ Datum float4in(PG_FUNCTION_ARGS)
 Datum float4out(PG_FUNCTION_ARGS)
 {
     float4 num = PG_GETARG_FLOAT4(0);
+    
+    if (u_sess->attr.attr_sql.for_print_tuple) {
+        char *result = NULL;
+        double var = (double)num;
+        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
+            result = apply_num_format(var);
+        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
+            result = apply_num_width(var);
+        }
+        if (result != NULL) {
+            PG_RETURN_CSTRING(result);
+        }
+    }
+
     char* ascii = (char*)palloc(MAXFLOATWIDTH + 1);
     errno_t rc = EOK;
 
@@ -508,6 +597,20 @@ Datum float8in(PG_FUNCTION_ARGS)
 Datum float8out(PG_FUNCTION_ARGS)
 {
     float8 num = PG_GETARG_FLOAT8(0);
+
+    if (u_sess->attr.attr_sql.for_print_tuple) {
+        char *result = NULL;
+        double var = num;
+        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
+            result = apply_num_format(var);
+        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
+            result = apply_num_width(var);
+        }
+        if (result != NULL) {
+            PG_RETURN_CSTRING(result);
+        }
+    }
+
     char* ascii = (char*)palloc(MAXDOUBLEWIDTH + 1);
     errno_t rc = EOK;
 

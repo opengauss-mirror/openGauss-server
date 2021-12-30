@@ -461,6 +461,7 @@ bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_
         IndexItemIdSetFrozen(iid);
         *xmin = FrozenTransactionId;
     }
+
     if (isDead) {
         ItemIdMarkDead(iid);
         *xmin = InvalidTransactionId;

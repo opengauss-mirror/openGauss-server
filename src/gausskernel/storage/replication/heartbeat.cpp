@@ -409,12 +409,18 @@ TimestampTz get_last_reply_timestamp(int replindex)
         return last_reply_time;
     }
 
-    if (replindex < START_REPLNODE_NUM || replindex >= MAX_REPLNODE_NUM) {
+    if (replindex < START_REPLNODE_NUM || replindex >= DOUBLE_MAX_REPLNODE_NUM) {
         ereport(COMMERROR, (errmsg("Invalid channel id: %d.", replindex)));
         return last_reply_time;
     }
 
-    if (t_thrd.postmaster_cxt.ReplConnArray[replindex] == NULL) {
+    ReplConnInfo* replconninfo = NULL;
+    if (replindex >= MAX_REPLNODE_NUM)
+            replconninfo = t_thrd.postmaster_cxt.CrossClusterReplConnArray[replindex - MAX_REPLNODE_NUM];
+        else
+            replconninfo = t_thrd.postmaster_cxt.ReplConnArray[replindex]; 
+
+    if (replconninfo == NULL) {
         ereport(COMMERROR, (errmsg("The reliconninfo is not find.")));
         return last_reply_time;
     }
@@ -442,9 +448,13 @@ void InitHeartbeatTimestamp()
 {
     volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
 
+    ReplConnInfo* replconninfo = NULL;
     SpinLockAcquire(&stat->mutex);
-    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+    for (int i = 1; i < DOUBLE_MAX_REPLNODE_NUM; i++) {
+        if (i >= MAX_REPLNODE_NUM)
+            replconninfo = t_thrd.postmaster_cxt.CrossClusterReplConnArray[i - MAX_REPLNODE_NUM];
+        else
+            replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];        
         if (replconninfo == NULL) {
             continue;
         }
@@ -502,8 +512,8 @@ static void heartbeat_kill(int code, Datum arg)
     stat->pid = 0;
     stat->lwpId = 0;
 
-    rc = memset_s(stat->channel_array, sizeof(channel_info) * MAX_REPLNODE_NUM, 0,
-                  sizeof(channel_info) * MAX_REPLNODE_NUM);
+    rc = memset_s(stat->channel_array, sizeof(channel_info) * DOUBLE_MAX_REPLNODE_NUM, 0,
+                  sizeof(channel_info) * DOUBLE_MAX_REPLNODE_NUM);
     securec_check_c(rc, "", "");
     SpinLockRelease(&stat->mutex);
 

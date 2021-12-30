@@ -106,7 +106,7 @@ void InitBufferPool(void)
         (CkptSortItem *)ShmemInitStruct("Checkpoint BufferIds",
                                         TOTAL_BUFFER_NUM * sizeof(CkptSortItem), &found_buf_ckpt);
 
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
+    if (ENABLE_INCRE_CKPT && g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
         g_instance.ckpt_cxt_ctl->dirty_page_queue_size = TOTAL_BUFFER_NUM *
                                                          PAGE_QUEUE_SLOT_MULTI_NBUFFERS;
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
@@ -114,9 +114,6 @@ void InitBufferPool(void)
         Size queue_mem_size = g_instance.ckpt_cxt_ctl->dirty_page_queue_size * sizeof(DirtyPageQueueSlot);
         g_instance.ckpt_cxt_ctl->dirty_page_queue =
             (DirtyPageQueueSlot *)palloc_huge(CurrentMemoryContext, queue_mem_size);
-        if (g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
-            ereport(ERROR, (errmodule(MOD_INCRE_CKPT), errmsg("Memory allocation failed.\n")));
-        }
 
         /* The memory of the memset sometimes exceeds 2 GB. so, memset_s cannot be used. */
         MemSet((char*)g_instance.ckpt_cxt_ctl->dirty_page_queue, 0, queue_mem_size);
@@ -125,6 +122,11 @@ void InitBufferPool(void)
 
     if (g_instance.bgwriter_cxt.unlink_rel_hashtbl == NULL) {
         g_instance.bgwriter_cxt.unlink_rel_hashtbl = relfilenode_hashtbl_create("unlink_rel_hashtbl", true);
+    }
+
+    if (g_instance.bgwriter_cxt.unlink_rel_fork_hashtbl == NULL) {
+        g_instance.bgwriter_cxt.unlink_rel_fork_hashtbl =
+            relfilenode_fork_hashtbl_create("unlink_rel_one_fork_hashtbl", true);
     }
 
     if (found_descs || found_bufs || found_buf_ckpt) {
@@ -152,6 +154,7 @@ void InitBufferPool(void)
             buf->encrypt = false;
         }
         g_instance.bgwriter_cxt.rel_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_TBL);
+        g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock = LWLockAssign(LWTRANCHE_UNLINK_REL_FORK_TBL);
     }
 
     /* Init other shared buffer-management stuff */
@@ -193,10 +196,10 @@ Size BufferShmemSize(void)
     size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(CkptSortItem)));
 
     /* size of candidate buffers */
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(Buffer)));
+    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(Buffer)));
 
     /* size of candidate free map */
-    size = add_size(size, mul_size(g_instance.attr.attr_storage.NBuffers, sizeof(bool)));
+    size = add_size(size, mul_size(TOTAL_BUFFER_NUM, sizeof(bool)));
 
     return size;
 }

@@ -137,23 +137,17 @@ order by 1, 2;
                              ->  Append
                                    ->  Subquery Scan on "*SELECT* 1"
                                          ->  Subquery Scan on __unnamed_subquery__
-                                               ->  CTE Scan on tmp
-                                                     CTE tmp
-                                                       ->  Seq Scan on rec_tb1
-                                                             Filter: (id < 4)
+                                               ->  Seq Scan on rec_tb1
+                                                     Filter: (id < 4)
                                    ->  Subquery Scan on "*SELECT* 2"
-                                         ->  CTE Scan on tmp
-                                               CTE tmp
-                                                 ->  Partition Iterator
-                                                       Iterations: 4
-                                                       ->  Partitioned Seq Scan on rec_tb4
-                                                             Filter: (id < 4)
-                                                             Selected Partitions:  1..4
+                                         ->  Partition Iterator
+                                               Iterations: 4
+                                               ->  Partitioned Seq Scan on rec_tb4
+                                                     Filter: (id < 4)
+                                                     Selected Partitions:  1..4
                  ->  Subquery Scan on "*SELECT* 3"
-                       ->  CTE Scan on tmp
-                             CTE tmp
-                               ->  Seq Scan on rec_tb3
-                                     Filter: (id < 4)
+                       ->  Seq Scan on rec_tb3
+                             Filter: (id < 4)
            ->  Subquery Scan on "*SELECT* 4"
                  ->  Hash Join
                        Hash Cond: (b.parentid = a.id)
@@ -214,7 +208,7 @@ order by 1, 2;
                      ->  CTE Scan on cte1 e
          ->  Hash
                ->  CTE Scan on cte n
-(87 rows)
+(81 rows)
 
 with recursive cte as
 (
@@ -622,23 +616,17 @@ order by 1, 2;
                              ->  Append
                                    ->  Subquery Scan on "*SELECT* 1"
                                          ->  Subquery Scan on __unnamed_subquery__
-                                               ->  CTE Scan on tmp
-                                                     CTE tmp
-                                                       ->  Seq Scan on rec_tb1
-                                                             Filter: (id < 4)
+                                               ->  Seq Scan on rec_tb1
+                                                     Filter: (id < 4)
                                    ->  Subquery Scan on "*SELECT* 2"
-                                         ->  CTE Scan on tmp
-                                               CTE tmp
-                                                 ->  Partition Iterator
-                                                       Iterations: 4
-                                                       ->  Partitioned Seq Scan on rec_tb4
-                                                             Filter: (id < 4)
-                                                             Selected Partitions:  1..4
+                                         ->  Partition Iterator
+                                               Iterations: 4
+                                               ->  Partitioned Seq Scan on rec_tb4
+                                                     Filter: (id < 4)
+                                                     Selected Partitions:  1..4
                  ->  Subquery Scan on "*SELECT* 3"
-                       ->  CTE Scan on tmp
-                             CTE tmp
-                               ->  Seq Scan on rec_tb3
-                                     Filter: (id < 4)
+                       ->  Seq Scan on rec_tb3
+                             Filter: (id < 4)
            ->  Subquery Scan on "*SELECT* 4"
                  ->  Hash Join
                        Hash Cond: (b.parentid = a.id)
@@ -699,7 +687,7 @@ order by 1, 2;
                      ->  CTE Scan on cte1 e
          ->  Hash
                ->  CTE Scan on cte n
-(87 rows)
+(81 rows)
 
 with recursive cte as
 (
@@ -1099,23 +1087,17 @@ order by 1, 2;
                              ->  Append
                                    ->  Subquery Scan on "*SELECT* 1"
                                          ->  Subquery Scan on __unnamed_subquery__
-                                               ->  CTE Scan on tmp
-                                                     CTE tmp
-                                                       ->  Seq Scan on rec_tb1
-                                                             Filter: (id < 4)
+                                               ->  Seq Scan on rec_tb1
+                                                     Filter: (id < 4)
                                    ->  Subquery Scan on "*SELECT* 2"
-                                         ->  CTE Scan on tmp
-                                               CTE tmp
-                                                 ->  Partition Iterator
-                                                       Iterations: 4
-                                                       ->  Partitioned Seq Scan on rec_tb4
-                                                             Filter: (id < 4)
-                                                             Selected Partitions:  1..4
+                                         ->  Partition Iterator
+                                               Iterations: 4
+                                               ->  Partitioned Seq Scan on rec_tb4
+                                                     Filter: (id < 4)
+                                                     Selected Partitions:  1..4
                  ->  Subquery Scan on "*SELECT* 3"
-                       ->  CTE Scan on tmp
-                             CTE tmp
-                               ->  Seq Scan on rec_tb3
-                                     Filter: (id < 4)
+                       ->  Seq Scan on rec_tb3
+                             Filter: (id < 4)
            ->  Subquery Scan on "*SELECT* 4"
                  ->  Hash Join
                        Hash Cond: (b.parentid = a.id)
@@ -1166,7 +1148,7 @@ order by 1, 2;
                      ->  CTE Scan on cte1 e
          ->  Hash
                ->  CTE Scan on cte1 m
-(77 rows)
+(71 rows)
 
 with recursive cte as
 (
@@ -1495,23 +1477,17 @@ order by 1, 2;
                              ->  Append
                                    ->  Subquery Scan on "*SELECT* 1"
                                          ->  Subquery Scan on __unnamed_subquery__
-                                               ->  CTE Scan on tmp
-                                                     CTE tmp
-                                                       ->  Seq Scan on rec_tb1
-                                                             Filter: (id < 4)
+                                               ->  Seq Scan on rec_tb1
+                                                     Filter: (id < 4)
                                    ->  Subquery Scan on "*SELECT* 2"
-                                         ->  CTE Scan on tmp
-                                               CTE tmp
-                                                 ->  Partition Iterator
-                                                       Iterations: 4
-                                                       ->  Partitioned Seq Scan on rec_tb4
-                                                             Filter: (id < 4)
-                                                             Selected Partitions:  1..4
+                                         ->  Partition Iterator
+                                               Iterations: 4
+                                               ->  Partitioned Seq Scan on rec_tb4
+                                                     Filter: (id < 4)
+                                                     Selected Partitions:  1..4
                  ->  Subquery Scan on "*SELECT* 3"
-                       ->  CTE Scan on tmp
-                             CTE tmp
-                               ->  Seq Scan on rec_tb3
-                                     Filter: (id < 4)
+                       ->  Seq Scan on rec_tb3
+                             Filter: (id < 4)
            ->  Subquery Scan on "*SELECT* 4"
                  ->  Hash Join
                        Hash Cond: (b.parentid = a.id)
@@ -1558,7 +1534,7 @@ order by 1, 2;
          ->  CTE Scan on cte1 e
          ->  Hash
                ->  CTE Scan on cte1 m
-(73 rows)
+(67 rows)
 
 with recursive cte as
 (
@@ -1777,23 +1753,17 @@ order by 1, 2;
                              ->  Append
                                    ->  Subquery Scan on "*SELECT* 1"
                                          ->  Subquery Scan on __unnamed_subquery__
-                                               ->  CTE Scan on tmp
-                                                     CTE tmp
-                                                       ->  Seq Scan on rec_tb1
-                                                             Filter: (id < 4)
+                                               ->  Seq Scan on rec_tb1
+                                                     Filter: (id < 4)
                                    ->  Subquery Scan on "*SELECT* 2"
-                                         ->  CTE Scan on tmp
-                                               CTE tmp
-                                                 ->  Partition Iterator
-                                                       Iterations: 4
-                                                       ->  Partitioned Seq Scan on rec_tb4
-                                                             Filter: (id < 4)
-                                                             Selected Partitions:  1..4
+                                         ->  Partition Iterator
+                                               Iterations: 4
+                                               ->  Partitioned Seq Scan on rec_tb4
+                                                     Filter: (id < 4)
+                                                     Selected Partitions:  1..4
                  ->  Subquery Scan on "*SELECT* 3"
-                       ->  CTE Scan on tmp
-                             CTE tmp
-                               ->  Seq Scan on rec_tb3
-                                     Filter: (id < 4)
+                       ->  Seq Scan on rec_tb3
+                             Filter: (id < 4)
            ->  Subquery Scan on "*SELECT* 4"
                  ->  Hash Join
                        Hash Cond: (b.parentid = a.id)
@@ -1844,7 +1814,7 @@ order by 1, 2;
                      ->  CTE Scan on cte1 e
          ->  Hash
                ->  CTE Scan on cte1 m
-(77 rows)
+(71 rows)
 
 with recursive cte as
 (

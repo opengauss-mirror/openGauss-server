@@ -52,5 +52,6 @@ extern bool get_cmk_from_cache(CmkCacheList *cmk_cache_list, unsigned int cmk_id
 extern void free_cmk_cache_list(CmkCacheList *cmk_cahce_list);
 
 extern int reg_cmke_manager_gs_ktool_main();
+extern void exit_cmke_manager_gs_ktool();
 
 #endif /* REGISTER_GS_KTOOL_H */

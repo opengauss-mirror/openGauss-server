@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-DROP MASKING POLICY [IF EXISTS] policy_name;
+DROP MASKING POLICY [ IF EXISTS ] policy_name;
 </synopsis>
 </refsynopsisdiv>
 </refentry>

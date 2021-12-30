@@ -34,7 +34,6 @@ typedef struct AccountLockHashEntry {
 
 #define PASSWORD_TYPE_SHA256 2
 #define PASSWORD_TYPE_SM3 3
-
 #define UNLOCK_FLAG -1
 
 /* status of the account */
@@ -79,7 +78,6 @@ int64 SearchAllAccounts();
 void InitAccountLockHashTable();
 extern USER_STATUS GetAccountLockedStatusFromHashTable(Oid roleid);
 extern void UpdateAccountInfoFromHashTable();
-
 
 extern inline void str_reset(char* str)
 {

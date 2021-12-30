@@ -55,13 +55,9 @@ class HttpSink(Sink):
         self.logger.info('Begin send data to %s' % self._url)
         while self.running:
             time.sleep(self._interval)
-            # {'OSExporter': {metric1: value, ...}, 'DatabaseExporter': {metric1: value, ...}}
             contents = self._channel_manager.get_channel_content()
             retry_times = 0
             if contents:
-                # {'database': ip_port,
-                # 'OSExporter': {metric1: value, ...},
-                # 'DatabaseExporter': {metric1: value, ...}}
                 contents.update(
                     {"database": "%s:%s:%s:%s" % (self.cluster_name, self.host.replace(".", "_"),
                                                   str(self.port), self.data_type)})

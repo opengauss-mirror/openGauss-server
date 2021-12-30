@@ -1133,6 +1133,7 @@ Datum ts_stat1(PG_FUNCTION_ARGS)
         /*
          * Connect to SPI manager
          */
+        SPI_STACK_LOG("connect", NULL, NULL);
         if ((rc = SPI_connect()) != SPI_OK_CONNECT)
             ereport(ERROR,
                 (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
@@ -1141,6 +1142,7 @@ Datum ts_stat1(PG_FUNCTION_ARGS)
         stat = ts_stat_sql(funcctx->multi_call_memory_ctx, txt, NULL);
         PG_FREE_IF_COPY(txt, 0);
         ts_setup_firstcall(fcinfo, funcctx, stat);
+        SPI_STACK_LOG("finish", NULL, NULL);
         SPI_finish();
     }
 
@@ -1166,6 +1168,7 @@ Datum ts_stat2(PG_FUNCTION_ARGS)
         /*
          * Connect to SPI manager
          */
+        SPI_STACK_LOG("connect", NULL, NULL);
         if ((rc = SPI_connect()) != SPI_OK_CONNECT)
             ereport(ERROR,
                 (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
@@ -1175,6 +1178,7 @@ Datum ts_stat2(PG_FUNCTION_ARGS)
         PG_FREE_IF_COPY(txt, 0);
         PG_FREE_IF_COPY(ws, 1);
         ts_setup_firstcall(fcinfo, funcctx, stat);
+        SPI_STACK_LOG("finish", NULL, NULL);
         SPI_finish();
     }
 

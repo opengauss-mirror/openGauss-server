@@ -9,6 +9,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -475,7 +476,8 @@ bool IsStpInOuterSubTransaction()
     TransactionState s = CurrentTransactionState;
     if (s->blockState >= TBLOCK_SUBBEGIN
         && u_sess->SPI_cxt.is_stp 
-        && s->nestingLevel > u_sess->SPI_cxt.portal_stp_exception_counter + 1) {
+        && s->nestingLevel > (u_sess->SPI_cxt.portal_stp_exception_counter
+            + u_sess->plsql_cxt.stp_savepoint_cnt + 1)) {
         return true;
     }
     return false;
@@ -1478,8 +1480,10 @@ static void AtStart_Memory(void)
         t_thrd.xact_cxt.TransactionAbortContext = AllocSetContextCreate(t_thrd.top_mem_cxt, "TransactionAbortContext",
                                                                         32 * 1024, 32 * 1024, 32 * 1024);
 
+#ifndef ENABLE_PRIVATEGAUSS
     /* Set global variable context_array to NIL at beginning of a transaction */
     u_sess->plsql_cxt.context_array = NIL;
+#endif
 
     /* We shouldn't have a transaction context already. */
     Assert(u_sess->top_transaction_mem_cxt == NULL);
@@ -1619,7 +1623,7 @@ static TransactionId RecordTransactionCommit(void)
     XLogRecPtr commitRecLSN = InvalidXLogRecPtr;
 
     /* Get data needed for commit record */
-    nrels = smgrGetPendingDeletes(true, &rels, true, &temp_nrels);
+    nrels = smgrGetPendingDeletes(true, &rels, false, &temp_nrels);
     nchildren = xactGetCommittedChildren(&children);
     if (XLogStandbyInfoActive())
         nmsgs = xactGetCommittedInvalidationMessages(&invalMessages, &RelcacheInitFileInval);
@@ -2068,7 +2072,7 @@ static void AtSubCommit_Memory(void)
      * there isn't actually anything in it, we can throw it away.  This avoids
      * a small memory leak in the common case of "trivial" subxacts.
      */
-    if (MemoryContextIsEmpty(s->curTransactionContext)) {
+    if (MemoryContextIsValid(s->curTransactionContext) && MemoryContextIsEmpty(s->curTransactionContext)) {
         MemoryContextDelete(s->curTransactionContext);
         s->curTransactionContext = NULL;
     }
@@ -2226,7 +2230,7 @@ static TransactionId RecordTransactionAbort(bool isSubXact)
                         errmsg("cannot abort transaction %lu, it was already committed", xid)));
 
     /* Fetch the data we need for the abort record */
-    nrels = smgrGetPendingDeletes(false, &rels, true, &temp_nrels);
+    nrels = smgrGetPendingDeletes(false, &rels, false, &temp_nrels);
     nchildren = xactGetCommittedChildren(&children);
 
     if (bCanAbort) {
@@ -2428,7 +2432,9 @@ static void AtCleanup_Memory(void)
      */
     if (u_sess->top_transaction_mem_cxt != NULL)
         MemoryContextDelete(u_sess->top_transaction_mem_cxt);
+#ifndef ENABLE_PRIVATEGAUSS
     u_sess->plsql_cxt.context_array = NIL;
+#endif
     u_sess->top_transaction_mem_cxt = NULL;
     t_thrd.mem_cxt.cur_transaction_mem_cxt = NULL;
 
@@ -2608,7 +2614,6 @@ static void StartTransaction(bool begin_on_gtm)
     s->maxChildXids = 0;
     GetUserIdAndSecContext(&s->prevUser, &s->prevSecContext);
     /* SecurityRestrictionContext should never be set outside a transaction */
-    Assert(s->prevSecContext == 0);
 
     /*
      * set transaction_timestamp() (a/k/a now()).  We want this to be the same
@@ -2672,8 +2677,13 @@ static void StartTransaction(bool begin_on_gtm)
 #endif
     ResetBCMArray();
 
-    /* Get node group status and save in cache */
-    InitNodeGroupStatus();
+    /* 
+     * Get node group status and save in cache,
+     * if we are doing two phase commit, skip init cache.
+     */
+    if (begin_on_gtm && !u_sess->storage_cxt.twoPhaseCommitInProgress) {
+        InitNodeGroupStatus();
+    }
 
     /* done with start processing, set current transaction state to "in progress" */
     s->state = TRANS_INPROGRESS;
@@ -2774,9 +2784,11 @@ static void CommitTransaction(bool STP_commit)
     t_thrd.xact_cxt.handlesDestroyedInCancelQuery = false;
     ThreadLocalFlagCleanUp();
 
-    /* release ref for spi's cachedplan */
     if (!STP_commit) {
+        /* release ref for spi's cachedplan */
         ReleaseSpiPlanRef();
+
+        XactResumeSPIContext(true);
     }
 
     /* When commit within nested store procedure, it will create a plan cache.
@@ -3748,8 +3760,9 @@ static void PrepareTransaction(bool STP_commit)
 
     PostPrepare_Locks(xid);
     PostPrepare_PredicateLocks(xid);
-    if (IS_PGXC_DATANODE)
+    if (IS_PGXC_DATANODE || IsConnFromCoord()) {
         u_sess->storage_cxt.twoPhaseCommitInProgress = true;
+    }
     t_thrd.xact_cxt.needRemoveTwophaseState = false;
 
     ResourceOwnerRelease(t_thrd.utils_cxt.TopTransactionResourceOwner, RESOURCE_RELEASE_LOCKS, true, true);
@@ -4001,9 +4014,11 @@ static void AbortTransaction(bool PerfectRollback, bool STP_rollback)
 
     ThreadLocalFlagCleanUp();
 
-    /* release ref for spi's cachedplan */
     if (!STP_rollback) {
+        /* release ref for spi's cachedplan */
         ReleaseSpiPlanRef();
+
+        XactResumeSPIContext(true);
     }
 #ifdef PGXC
     /*
@@ -4310,9 +4325,14 @@ static void CleanupTransaction(void)
     /* do abort cleanup processing */
     AtCleanup_Portals();      /* now safe to release portal memory */
     AtEOXact_Snapshot(false); /* and release the transaction's snapshots */
-    pfree_ext(u_sess->xact_cxt.sendSeqDbName);
-    pfree_ext(u_sess->xact_cxt.sendSeqSchmaName);
-    pfree_ext(u_sess->xact_cxt.sendSeqName);
+    list_free_deep(u_sess->xact_cxt.sendSeqDbName);
+    list_free_deep(u_sess->xact_cxt.sendSeqSchmaName);
+    list_free_deep(u_sess->xact_cxt.sendSeqName);
+    list_free_deep(u_sess->xact_cxt.send_result);
+    u_sess->xact_cxt.sendSeqDbName = NULL;
+    u_sess->xact_cxt.sendSeqSchmaName = NULL;
+    u_sess->xact_cxt.sendSeqName = NULL;
+    u_sess->xact_cxt.send_result = NULL;
     t_thrd.utils_cxt.CurrentResourceOwner = NULL; /* and resource owner */
     if (t_thrd.utils_cxt.TopTransactionResourceOwner)
         ResourceOwnerDelete(t_thrd.utils_cxt.TopTransactionResourceOwner);
@@ -4478,28 +4498,20 @@ void CommitTransactionCommand(bool STP_commit)
         case TBLOCK_SUBINPROGRESS:
             CommandCounterIncrement();
 
-            if (u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
-                int subTransactionCounter = 0;
+            if (STP_commit || TopTransactionStateData.blockState == TBLOCK_STARTED) {
                 Assert(!StreamThreadAmI());
                 do {
                     MemoryContextSwitchTo(t_thrd.mem_cxt.cur_transaction_mem_cxt);
                     CommitSubTransaction(STP_commit);
                     s = CurrentTransactionState;    /* changed by pop */
-                    subTransactionCounter++;
-#ifdef ENABLE_MULTIPLE_NODES
-                    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-                        /* CN should send release savepoint command to remote nodes for savepoint name reuse */
-                        HandleReleaseOrRollbackSavepoint("release s1", "s1", SUB_STMT_RELEASE);
-                        pgxc_node_remote_savepoint("release s1", EXEC_ON_DATANODES, false, false);
-                    }
-#endif
-               }while (s->blockState == TBLOCK_SUBINPROGRESS);
-
-               /* If we had a COMMIT command, finish off the main xact too */
-               Assert(subTransactionCounter == u_sess->SPI_cxt.portal_stp_exception_counter);
-               t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.STPSavedResourceOwner;
-               CommitTransaction(STP_commit);
-               s->blockState = TBLOCK_DEFAULT;
+                } while (s->blockState == TBLOCK_SUBINPROGRESS);
+                if (STP_commit) {
+                    /* If we had a COMMIT command, finish off the main xact too */
+                    Assert(t_thrd.utils_cxt.STPSavedResourceOwner != NULL);
+                    t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.STPSavedResourceOwner;
+                }
+                CommitTransaction(STP_commit);
+                s->blockState = TBLOCK_DEFAULT;
             }
             break;
 
@@ -4538,7 +4550,7 @@ void CommitTransactionCommand(bool STP_commit)
              */
         case TBLOCK_ABORT_PENDING:
             SetUndoActionsInfo();
-            AbortTransaction(true);
+            AbortTransaction(true, STP_commit);
             ApplyUndoActions();
             CleanupTransaction();
             s->blockState = TBLOCK_DEFAULT;
@@ -4560,12 +4572,6 @@ void CommitTransactionCommand(bool STP_commit)
              * state.)
              */
         case TBLOCK_SUBBEGIN:
-            // Recording Portal's ResourceOwner for rebuilding resource chain 
-            // when procedure contain transaction and exception statement.
-            // nestingLevel = 2: Top ResourceOwner -> Portal ResourceOwner (current).
-            if (CurrentTransactionState->nestingLevel == 2 && STP_commit) {
-                t_thrd.utils_cxt.STPSavedResourceOwner = t_thrd.utils_cxt.CurrentResourceOwner;
-            }
             StartSubTransaction();
             s->blockState = TBLOCK_SUBINPROGRESS;
             break;
@@ -4578,11 +4584,12 @@ void CommitTransactionCommand(bool STP_commit)
              */
         case TBLOCK_SUBRELEASE:
             do {
-                CommitSubTransaction();
+                CommitSubTransaction(STP_commit);
                 s = CurrentTransactionState; /* changed by pop */
             } while (s->blockState == TBLOCK_SUBRELEASE);
 
-            Assert(s->blockState == TBLOCK_INPROGRESS || s->blockState == TBLOCK_SUBINPROGRESS);
+            Assert(s->blockState == TBLOCK_INPROGRESS || s->blockState == TBLOCK_SUBINPROGRESS ||
+                (s->blockState == TBLOCK_STARTED && STP_commit));
             break;
 
             /*
@@ -4606,17 +4613,17 @@ void CommitTransactionCommand(bool STP_commit)
                     if (!IS_VALID_UNDO_REC_PTR(s->parent->first_urp[i]))
                         s->parent->first_urp[i] = s->first_urp[i];
                 }
-                CommitSubTransaction();
+                CommitSubTransaction(STP_commit);
                 s = CurrentTransactionState; /* changed by pop */
             } while (s->blockState == TBLOCK_SUBCOMMIT);
             /* If we had a COMMIT command, finish off the main xact too */
             if (s->blockState == TBLOCK_END) {
                 Assert(s->parent == NULL);
-                CommitTransaction();
+                CommitTransaction(STP_commit);
                 s->blockState = TBLOCK_DEFAULT;
             } else if (s->blockState == TBLOCK_PREPARE) {
                 Assert(s->parent == NULL);
-                PrepareTransaction();
+                PrepareTransaction(STP_commit);
                 s->blockState = TBLOCK_DEFAULT;
             } else
                 ereport(ERROR,
@@ -4631,15 +4638,15 @@ void CommitTransactionCommand(bool STP_commit)
              */
         case TBLOCK_SUBABORT_END:
             CleanupSubTransaction();
-            CommitTransactionCommand();
+            CommitTransactionCommand(STP_commit);
             break;
 
             /* As above, but it's not dead yet, so abort first. */
         case TBLOCK_SUBABORT_PENDING:
             SetUndoActionsInfo();
-            AbortSubTransaction();
+            AbortSubTransaction(STP_commit);
             ApplyUndoActions();
-            CleanupSubTransaction();
+            CleanupSubTransaction(STP_commit);
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(
                     WARNING,
@@ -4647,7 +4654,7 @@ void CommitTransactionCommand(bool STP_commit)
                         "Transaction aborted as connection handles were destroyed due to clean up stream failed.")));
                 AbortOutOfAnyTransaction(true);
             } else
-                CommitTransactionCommand();
+                CommitTransactionCommand(STP_commit);
             break;
 
             /*
@@ -4665,15 +4672,21 @@ void CommitTransactionCommand(bool STP_commit)
             savepointLevel = s->savepointLevel;
 
             SetUndoActionsInfo();
-            AbortSubTransaction();
+            AbortSubTransaction(STP_commit);
             ApplyUndoActions();
-            CleanupSubTransaction();
+            CleanupSubTransaction(STP_commit);
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(
                     WARNING,
                     (errmsg(
                         "Transaction aborted as connection handles were destroyed due to clean up stream failed.")));
                 AbortOutOfAnyTransaction(true);
+            } else if (STP_commit) {
+                BeginInternalSubTransaction(NULL);
+
+                s = CurrentTransactionState; /* changed by push */
+                s->name = name;
+                s->savepointLevel = savepointLevel;
             } else {
                 DefineSavepoint(NULL);
                 s = CurrentTransactionState; /* changed by push */
@@ -4702,15 +4715,22 @@ void CommitTransactionCommand(bool STP_commit)
 
             CleanupSubTransaction();
 
-            DefineSavepoint(NULL);
-            s = CurrentTransactionState; /* changed by push */
-            s->name = name;
-            s->savepointLevel = savepointLevel;
+            if (STP_commit) {
+                BeginInternalSubTransaction(NULL);
+                s = CurrentTransactionState; /* changed by push */
+                s->name = name;
+                s->savepointLevel = savepointLevel;
+            } else {
+                DefineSavepoint(NULL);
+                s = CurrentTransactionState; /* changed by push */
+                s->name = name;
+                s->savepointLevel = savepointLevel;
 
-            /* This is the same as TBLOCK_SUBBEGIN case */
-            AssertState(s->blockState == TBLOCK_SUBBEGIN);
-            StartSubTransaction();
-            s->blockState = TBLOCK_SUBINPROGRESS;
+                /* This is the same as TBLOCK_SUBBEGIN case */
+                AssertState(s->blockState == TBLOCK_SUBBEGIN);
+                StartSubTransaction();
+                s->blockState = TBLOCK_SUBINPROGRESS;
+            }
         } break;
         default:
             ereport(FATAL,
@@ -4858,18 +4878,15 @@ void AbortCurrentTransaction(bool STP_rollback)
              * we get ROLLBACK.
              */
         case TBLOCK_SUBINPROGRESS:
-            if (u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
-                int subTransactionCounter = 0;
+            if (STP_rollback || TopTransactionStateData.blockState == TBLOCK_STARTED) {
                 do {
                     AbortSubTransaction(STP_rollback);
                     ApplyUndoActions();
                     s->blockState = TBLOCK_SUBABORT;
-                    CleanupSubTransaction();
+                    CleanupSubTransaction(STP_rollback);
                     s = CurrentTransactionState;
-                    subTransactionCounter++;
                 } while(s->blockState == TBLOCK_SUBINPROGRESS);
 
-                Assert(subTransactionCounter == u_sess->SPI_cxt.portal_stp_exception_counter);
                 if (s->state == TRANS_START) {
                     s->state = TRANS_INPROGRESS;
                 }
@@ -4878,7 +4895,7 @@ void AbortCurrentTransaction(bool STP_rollback)
                 CleanupTransaction();
                 s->blockState = TBLOCK_DEFAULT;
             } else {
-                AbortSubTransaction();
+                AbortSubTransaction(STP_rollback);
                 ApplyUndoActions();
                 s->blockState = TBLOCK_SUBABORT;
             }
@@ -4902,9 +4919,9 @@ void AbortCurrentTransaction(bool STP_rollback)
         case TBLOCK_SUBCOMMIT:
         case TBLOCK_SUBABORT_PENDING:
         case TBLOCK_SUBRESTART:
-            AbortSubTransaction();
+            AbortSubTransaction(STP_rollback);
             ApplyUndoActions();
-            CleanupSubTransaction();
+            CleanupSubTransaction(STP_rollback);
             if (t_thrd.xact_cxt.handlesDestroyedInCancelQuery) {
                 ereport(
                     WARNING,
@@ -4912,14 +4929,14 @@ void AbortCurrentTransaction(bool STP_rollback)
                         "Transaction aborted as connection handles were destroyed due to clean up stream failed.")));
                 AbortOutOfAnyTransaction(true);
             } else
-                AbortCurrentTransaction();
+                AbortCurrentTransaction(STP_rollback);
             break;
 
             /* Same as above, except the Abort() was already done. */
         case TBLOCK_SUBABORT_END:
         case TBLOCK_SUBABORT_RESTART:
             CleanupSubTransaction();
-            AbortCurrentTransaction();
+            AbortCurrentTransaction(STP_rollback);
             break;
         default:
             ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
@@ -5699,43 +5716,40 @@ void DefineSavepoint(const char *name)
     }
 }
 
-/*
- * ReleaseSavepoint
- *		This executes a RELEASE command.
- *
- * As above, we don't actually do anything here except change blockState.
- */
-void ReleaseSavepoint(List *options)
+static TransactionState FindTargetSavepoint(const char* name, bool inSTP)
 {
-#ifdef ENABLE_DISTRIBUTE_TEST
-    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
-        if (TEST_STUB(CN_RELEASESAVEPOINT_BEFORE_LOCAL_DEAL_FAILED, twophase_default_error_emit)) {
-            ereport(g_instance.distribute_test_param_instance->elevel,
-                    (errmsg("SUBXACT_TEST %s: cn release savepoint before local deal failed.",
-                            g_instance.attr.attr_common.PGXCNodeName)));
-        }
-    } else {
-        if (TEST_STUB(DN_RELEASESAVEPOINT_BEFORE_LOCAL_DEAL_FAILED, twophase_default_error_emit)) {
-            ereport(g_instance.distribute_test_param_instance->elevel,
-                    (errmsg("SUBXACT_TEST %s:dn release savepoint before local deal failed.",
-                            g_instance.attr.attr_common.PGXCNodeName)));
+    TransactionState s = CurrentTransactionState;
+    TransactionState target;
+
+    Assert(PointerIsValid(name) || inSTP);
+    for (target = s; PointerIsValid(target); target = target->parent) {
+        if (!PointerIsValid(target->name) && !PointerIsValid(name)) {
+            /* internal savepoint for exception */
+            Assert(s != &TopTransactionStateData && inSTP);
+            break;
+        } else if (PointerIsValid(target->name) && PointerIsValid(name)) {
+            /* user defined savepoint */
+            if (strcmp(target->name, name) == 0) {
+                break;
+            }
         }
     }
-#endif
 
+    if (!PointerIsValid(target)) {
+        ereport(ERROR, (errcode(ERRCODE_S_E_INVALID_SPECIFICATION), errmsg("no such savepoint")));
+    }
+
+    /* disallow crossing savepoint level boundaries */
+    if (target->savepointLevel != s->savepointLevel) {
+        ereport(ERROR, (errcode(ERRCODE_S_E_INVALID_SPECIFICATION), errmsg("no such savepoint")));
+    }
+
+    return target;
+}
+
+static void CheckReleaseSavepointBlockState(bool inSTP)
+{
     TransactionState s = CurrentTransactionState;
-    TransactionState target, xact;
-
-    char *name = NULL;
-    errno_t rc;
-
-    UndoRecPtr latestUrecPtr[UNDO_PERSISTENCE_LEVELS];
-    UndoRecPtr startUrecPtr[UNDO_PERSISTENCE_LEVELS];
-
-    rc = memcpy_s(latestUrecPtr, sizeof(latestUrecPtr), s->latest_urp, sizeof(latestUrecPtr));
-    securec_check(rc, "\0", "\0");
-    rc = memcpy_s(startUrecPtr, sizeof(startUrecPtr), s->first_urp, sizeof(startUrecPtr));
-    securec_check(rc, "\0", "\0");
 
     switch (s->blockState) {
             /*
@@ -5753,9 +5767,11 @@ void ReleaseSavepoint(List *options)
         case TBLOCK_SUBINPROGRESS:
             break;
 
+        case TBLOCK_STARTED:
+            if (inSTP)
+                break;
             /* These cases are invalid. */
         case TBLOCK_DEFAULT:
-        case TBLOCK_STARTED:
         case TBLOCK_BEGIN:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_END:
@@ -5775,35 +5791,68 @@ void ReleaseSavepoint(List *options)
                             errmsg("ReleaseSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
+}
 
-    name = GetSavepointName(options);
-
-    Assert(PointerIsValid(name));
-
-    for (target = s; PointerIsValid(target); target = target->parent) {
-        if (PointerIsValid(target->name) && strcmp(target->name, name) == 0) {
-            break;
+/*
+ * ReleaseSavepoint
+ *		This executes a RELEASE command.
+ *
+ * As above, we don't actually do anything here except change blockState.
+ */
+void ReleaseSavepoint(const char* name, bool inSTP)
+{
+#ifdef ENABLE_DISTRIBUTE_TEST
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        if (TEST_STUB(CN_RELEASESAVEPOINT_BEFORE_LOCAL_DEAL_FAILED, twophase_default_error_emit)) {
+            ereport(g_instance.distribute_test_param_instance->elevel,
+                    (errmsg("SUBXACT_TEST %s: cn release savepoint before local deal failed.",
+                            g_instance.attr.attr_common.PGXCNodeName)));
+        }
+    } else {
+        if (TEST_STUB(DN_RELEASESAVEPOINT_BEFORE_LOCAL_DEAL_FAILED, twophase_default_error_emit)) {
+            ereport(g_instance.distribute_test_param_instance->elevel,
+                    (errmsg("SUBXACT_TEST %s:dn release savepoint before local deal failed.",
+                            g_instance.attr.attr_common.PGXCNodeName)));
         }
     }
+#endif
 
-    if (!PointerIsValid(target)) {
-        ereport(ERROR, (errcode(ERRCODE_S_E_INVALID_SPECIFICATION), errmsg("no such savepoint")));
-    }
+    /* check expected state. */
+    CheckReleaseSavepointBlockState(inSTP);
 
-    /* disallow crossing savepoint level boundaries */
-    if (target->savepointLevel != s->savepointLevel) {
-        ereport(ERROR, (errcode(ERRCODE_S_E_INVALID_SPECIFICATION), errmsg("no such savepoint")));
-    }
+    TransactionState target = FindTargetSavepoint(name, inSTP);
 
     /*
      * Mark "commit pending" all subtransactions up to the target
      * subtransaction.	The actual commits will happen when control gets to
      * CommitTransactionCommand.
      */
-    xact = CurrentTransactionState;
+    TransactionState xact = CurrentTransactionState;
+    errno_t rc;
+    UndoRecPtr latestUrecPtr[UNDO_PERSISTENCE_LEVELS];
+    UndoRecPtr startUrecPtr[UNDO_PERSISTENCE_LEVELS];
+
+    rc = memcpy_s(latestUrecPtr, sizeof(latestUrecPtr), xact->latest_urp, sizeof(latestUrecPtr));
+    securec_check(rc, "\0", "\0");
+    rc = memcpy_s(startUrecPtr, sizeof(startUrecPtr), xact->first_urp, sizeof(startUrecPtr));
+
+    securec_check(rc, "\0", "\0");
     for (;;) {
         Assert(xact->blockState == TBLOCK_SUBINPROGRESS);
         xact->blockState = TBLOCK_SUBRELEASE;
+
+        /*
+         * User savepoint is dropped automatically, dont take PL exception's one
+         * into consideration.
+         */
+        if (inSTP) {
+            if (PointerIsValid(xact->name) && u_sess->plsql_cxt.stp_savepoint_cnt > 0) {
+                u_sess->plsql_cxt.stp_savepoint_cnt--;
+            } else if (!PointerIsValid(xact->name) && u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+                u_sess->SPI_cxt.portal_stp_exception_counter--;
+            }
+        }
+
         if (xact == target) {
             break;
         }
@@ -5835,36 +5884,30 @@ void ReleaseSavepoint(List *options)
     }
 }
 
-/*
- * RollbackToSavepoint
- *		This executes a ROLLBACK TO <savepoint> command.
- *
- * As above, we don't actually do anything here except change blockState.
- */
-void RollbackToSavepoint(List *options)
+static void CheckRollbackSavepointBlockState(bool inSTP)
 {
     TransactionState s = CurrentTransactionState;
-    TransactionState target, xact;
-    char *name = NULL;
 
     switch (s->blockState) {
-            /*
-             * We can't rollback to a savepoint if there is no savepoint
-             * defined.
-             */
+        /*
+         * We can't rollback to a savepoint if there is no savepoint
+         * defined.
+         */
         case TBLOCK_INPROGRESS:
         case TBLOCK_ABORT:
             ereport(ERROR, (errcode(ERRCODE_S_E_INVALID_SPECIFICATION), errmsg("no such savepoint")));
             break;
 
-            /* There is at least one savepoint, so proceed. */
+        /* There is at least one savepoint, so proceed. */
         case TBLOCK_SUBINPROGRESS:
         case TBLOCK_SUBABORT:
             break;
-
-            /* These cases are invalid. */
-        case TBLOCK_DEFAULT:
         case TBLOCK_STARTED:
+            if (inSTP)
+                break;
+
+        /* These cases are invalid. */
+        case TBLOCK_DEFAULT:
         case TBLOCK_BEGIN:
         case TBLOCK_SUBBEGIN:
         case TBLOCK_END:
@@ -5882,32 +5925,27 @@ void RollbackToSavepoint(List *options)
                             errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(s->blockState))));
             break;
     }
+}
 
-    name = GetSavepointName(options);
+/*
+ * RollbackToSavepoint
+ *		This executes a ROLLBACK TO <savepoint> command.
+ *
+ * As above, we don't actually do anything here except change blockState.
+ */
+void RollbackToSavepoint(const char* name, bool inSTP)
+{
+    /* check expected state. */
+    CheckRollbackSavepointBlockState(inSTP);
 
-    Assert(PointerIsValid(name));
-
-    for (target = s; PointerIsValid(target); target = target->parent) {
-        if (PointerIsValid(target->name) && strcmp(target->name, name) == 0) {
-            break;
-        }
-    }
-
-    if (!PointerIsValid(target)) {
-        ereport(ERROR, (errcode(ERRCODE_S_E_INVALID_SPECIFICATION), errmsg("no such savepoint")));
-    }
-
-    /* disallow crossing savepoint level boundaries */
-    if (target->savepointLevel != s->savepointLevel) {
-        ereport(ERROR, (errcode(ERRCODE_S_E_INVALID_SPECIFICATION), errmsg("no such savepoint")));
-    }
+    TransactionState target = FindTargetSavepoint(name, inSTP);
 
     /*
      * Mark "abort pending" all subtransactions up to the target
      * subtransaction.	The actual aborts will happen when control gets to
      * CommitTransactionCommand.
      */
-    xact = CurrentTransactionState;
+    TransactionState xact = CurrentTransactionState;
     for (;;) {
         if (xact == target) {
             break;
@@ -5920,6 +5958,19 @@ void RollbackToSavepoint(List *options)
             ereport(FATAL, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
                             errmsg("RollbackToSavepoint: unexpected state %s", BlockStateAsString(xact->blockState))));
         }
+
+        /*
+         * User savepoint is dropped automatically, dont take PL exception's one
+         * into consideration.
+         */
+        if (inSTP) {
+            if (PointerIsValid(xact->name) && u_sess->plsql_cxt.stp_savepoint_cnt > 0) {
+                u_sess->plsql_cxt.stp_savepoint_cnt--;
+            } else if (!PointerIsValid(xact->name) && u_sess->SPI_cxt.portal_stp_exception_counter > 0) {
+                u_sess->SPI_cxt.portal_stp_exception_counter--;
+            }
+        }
+
         xact = xact->parent;
         Assert(PointerIsValid(xact));
     }
@@ -5988,7 +6039,7 @@ void BeginInternalSubTransaction(const char *name)
     }
 
     CommitTransactionCommand(true);
-    StartTransactionCommand();
+    StartTransactionCommand(true);
 }
 
 /*
@@ -5996,7 +6047,7 @@ void BeginInternalSubTransaction(const char *name)
  * savepoint name (if any).
  * NB: do NOT use CommitTransactionCommand/StartTransactionCommand with this.
  */
-void ReleaseCurrentSubTransaction(void)
+void ReleaseCurrentSubTransaction(bool inSTP)
 {
     TransactionState s = CurrentTransactionState;
     int              i;
@@ -6019,7 +6070,7 @@ void ReleaseCurrentSubTransaction(void)
             s->parent->first_urp[i] = s->first_urp[i];
     }
 
-    CommitSubTransaction();
+    CommitSubTransaction(inSTP);
     s = CurrentTransactionState; /* changed by pop */
     Assert(s->state == TRANS_INPROGRESS);
 }
@@ -6031,7 +6082,7 @@ void ReleaseCurrentSubTransaction(void)
  * of its savepoint name (if any).
  * NB: do NOT use CommitTransactionCommand/StartTransactionCommand with this.
  */
-void RollbackAndReleaseCurrentSubTransaction(void)
+void RollbackAndReleaseCurrentSubTransaction(bool inSTP)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -6074,13 +6125,13 @@ void RollbackAndReleaseCurrentSubTransaction(void)
 
     /* Abort the current subtransaction, if needed. */
     if (s->blockState == TBLOCK_SUBINPROGRESS) {
-        AbortSubTransaction();
+        AbortSubTransaction(inSTP);
     }
 
     ApplyUndoActions();
 
     /* And clean it up, too */
-    CleanupSubTransaction();
+    CleanupSubTransaction(inSTP);
 
     s = CurrentTransactionState; /* changed by pop */
     AssertState(s->blockState == TBLOCK_SUBINPROGRESS || s->blockState == TBLOCK_INPROGRESS ||
@@ -6667,6 +6718,11 @@ static void CommitSubTransaction(bool STP_commit)
     ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_LOCKS, true, false);
     ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_AFTER_LOCKS, true, false);
 
+    /* reserve some related resource once any SPI have referenced it. */
+    if (STP_commit) {
+        XactReserveSPIContext();
+    }
+
     AtEOXact_GUC(true, s->gucNestLevel);
     if(!STP_commit) {
         AtEOSubXact_SPI(true, s->subTransactionId, false, STP_commit);
@@ -6689,8 +6745,10 @@ static void CommitSubTransaction(bool STP_commit)
 
     t_thrd.utils_cxt.CurrentResourceOwner = s->parent->curTransactionOwner;
     t_thrd.utils_cxt.CurTransactionResourceOwner = s->parent->curTransactionOwner;
-    ResourceOwnerDelete(s->curTransactionOwner);
-    s->curTransactionOwner = NULL;
+    if (s->curTransactionOwner != NULL) {
+        ResourceOwnerDelete(s->curTransactionOwner);
+        s->curTransactionOwner = NULL;
+    }
 
     AtCommit_RelationSync();
     AtSubCommit_Memory();
@@ -6821,7 +6879,7 @@ void AbortSubTransaction(bool STP_rollback)
         }
         AfterTriggerEndSubXact(false);
         AtSubAbort_Portals(s->subTransactionId, s->parent->subTransactionId, s->curTransactionOwner,
-                           s->parent->curTransactionOwner);
+                           s->parent->curTransactionOwner, STP_rollback);
         AtEOSubXact_LargeObject(false, s->subTransactionId, s->parent->subTransactionId);
         AtSubAbort_Notify();
 
@@ -6883,7 +6941,7 @@ void AbortSubTransaction(bool STP_rollback)
  *	The caller has to make sure to always reassign CurrentTransactionState
  *	if it has a local pointer to it after calling this function.
  */
-void CleanupSubTransaction(void)
+void CleanupSubTransaction(bool inSTP)
 {
     TransactionState s = CurrentTransactionState;
 
@@ -6897,10 +6955,16 @@ void CleanupSubTransaction(void)
 
     t_thrd.utils_cxt.CurrentResourceOwner = s->parent->curTransactionOwner;
     t_thrd.utils_cxt.CurTransactionResourceOwner = s->parent->curTransactionOwner;
-    if (s->curTransactionOwner) {
-        ResourceOwnerDelete(s->curTransactionOwner);
+
+    if (s->curTransactionOwner != NULL) {
+        if (inSTP) {
+            /* reserve ResourceOwner in STP running. */
+            XactReserveSPIContext();
+        } else {
+            ResourceOwnerDelete(s->curTransactionOwner);
+            s->curTransactionOwner = NULL;
+        }
     }
-    s->curTransactionOwner = NULL;
 
     AtSubCleanup_Memory();
 
@@ -8534,3 +8598,97 @@ CanPerformUndoActions(void)
 
     return s->perform_undo;
 }
+
+typedef struct {
+    ResourceOwner resowner;
+    void *next;
+} XactContextItem;
+
+/*
+ * Reserve the necessary context in current transaction for SPI.
+ */
+void XactReserveSPIContext()
+{
+    TransactionState s = CurrentTransactionState;
+
+    MemoryContext oldcxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE));
+    XactContextItem *item = (XactContextItem*)palloc(sizeof(XactContextItem));
+    item->resowner = s->curTransactionOwner;
+
+    ResourceOwnerNewParent(item->resowner, NULL);
+    ResourceOwnerMarkInvalid(item->resowner);
+    item->next = u_sess->plsql_cxt.spi_xact_context;
+    MemoryContextSwitchTo(oldcxt);
+
+    u_sess->plsql_cxt.spi_xact_context = item;
+    s->curTransactionOwner = NULL;
+}
+
+/*
+ * Restore the reserved context for SPI into CurrentTransaction.
+ */
+void XactResumeSPIContext(bool clean)
+{
+    while (u_sess->plsql_cxt.spi_xact_context != NULL) {
+        XactContextItem *item = (XactContextItem*)u_sess->plsql_cxt.spi_xact_context;
+
+        if (clean) {
+            ResourceOwnerDelete(item->resowner);
+        } else {
+            ResourceOwnerNewParent(item->resowner, t_thrd.utils_cxt.CurrentResourceOwner);
+        }
+
+        u_sess->plsql_cxt.spi_xact_context = item->next;
+        pfree(item);
+    }
+}
+
+/*
+ * With longjump after ERROR, some resource, such as Snapshot, are not released as done by normal.
+ * Some cleanup are required for subtransactions inside PL exception block.
+ *
+ * head: the first subtransaction in this Exception block, cleanup is required for all after this.
+ * hasAbort: whether or not rollback has been done for the lastest subtransaction.
+ */
+void XactCleanExceptionSubTransaction(SubTransactionId head, bool hasAbort)
+{
+    TransactionState s = CurrentTransactionState;
+
+    while (s->subTransactionId >= head && s->parent != NULL) {
+        /* reset cursor's attribute var */
+        ResetPortalCursor(s->subTransactionId, InvalidOid, 0);
+
+        AtSubAbort_Portals(s->subTransactionId, s->parent->subTransactionId,
+                           s->curTransactionOwner, s->parent->curTransactionOwner, true);
+
+        ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, false);
+        ResourceOwnerRelease(s->curTransactionOwner, RESOURCE_RELEASE_AFTER_LOCKS, false, false);
+
+        AtSubAbort_Snapshot(s->nestingLevel);
+
+        s = s->parent;
+    }
+
+    if (!hasAbort) {
+        AbortBufferIO();
+        UnlockBuffers();
+        LockErrorCleanup();
+
+        /* cancel and clear connection remaining data for connection reuse */
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            SubXactCancel_Remote();
+        }
+#ifdef ENABLE_MULTIPLE_NODES
+        reset_handles_at_abort();
+#endif
+    }
+}
+
+/*
+ * Get Current Transaction's name.
+ */
+char* GetCurrentTransactionName()
+{
+    return CurrentTransactionState->name;
+}
+

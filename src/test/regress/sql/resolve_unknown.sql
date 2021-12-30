@@ -15,8 +15,8 @@ select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (sele
 select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) group by col1 having col1 <> 'aaa';
 select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from (select 'vasya' as col1) where col1 <> 'aaa';
 
-explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
-explain (verbose on, costs off) with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
+explain (verbose on, costs off) with t as materialized (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
+explain (verbose on, costs off) with t as materialized (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
 with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where substr(col1, 1, 2) <> 'a';
 with t as (select 'vasya' as col1) select pg_typeof(col1), col1, col1 is of (unknown), col1 is of (text) from t where col1 <> 'aaa';
 

@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -2301,6 +2302,24 @@ void index_update_stats(
     heap_close(pg_class, RowExclusiveLock);
 }
 
+static Relation part_get_parent(Partition rel)
+{
+    Oid parentOid = InvalidOid;
+    Relation parent = NULL;
+
+    Assert(rel != NULL);
+
+    if (PartitionIsTableSubPartition(rel)) {
+        parentOid = partid_get_parentid(rel->pd_part->parentid);
+        parent = relation_open(parentOid, NoLock);
+    } else {
+        parent = relation_open(rel->pd_part->parentid, NoLock);
+    }
+    parentOid = partid_get_parentid(rel->pd_part->parentid);
+
+    return parent;
+}
+
 static void partition_index_update_stats(
     Partition rel, bool hasindex, bool isprimary, Oid reltoastidxid, Oid relcudescidx, double reltuples)
 {
@@ -2310,7 +2329,7 @@ static void partition_index_update_stats(
     HeapTuple tuple;
     Form_pg_partition rd_rel;
     bool dirty = false;
-    Relation parent = relation_open(rel->pd_part->parentid, NoLock);
+    Relation parent = part_get_parent(rel);
 
     /*
      * We always update the pg_class row using a non-transactional,
@@ -2347,7 +2366,6 @@ static void partition_index_update_stats(
      * updated reltuples count, because that would bollix the
      * reltuples/relpages ratio which is what's really important.
      */
-
     pg_partition = heap_open(PartitionRelationId, RowExclusiveLock);
 
     /*
@@ -2409,8 +2427,6 @@ static void partition_index_update_stats(
             BlockNumber relpages = PartitionGetNumberOfBlocks(parent, rel);
             BlockNumber relallvisible;
 
-            Relation partRel = partitionGetRelation(parent, rel);
-
             if (rd_rel->parttype != PART_OBJ_TYPE_INDEX_PARTITION) {
                 relallvisible = visibilitymap_count(parent, rel);
             } else /* don't bother for indexes */
@@ -2430,8 +2446,6 @@ static void partition_index_update_stats(
                 rd_rel->relallvisible = (int32)relallvisible;
                 dirty = true;
             }
-
-            releaseDummyRelation(&partRel);
         }
 #ifdef PGXC
     }
@@ -2474,6 +2488,7 @@ static void index_build_bucketstorage_main(const BgWorkerContext *bwc)
     IndexBucketShared *ibshared = (IndexBucketShared *)bwc->bgshared;
     Relation heapRel  = heap_open(ibshared->heaprelid, NoLock);
     Relation indexRel = index_open(ibshared->indexrelid, NoLock);
+    IndexInfo* indexInfo = NULL;
     oidvector *bucketlist = searchHashBucketByOid(indexRel->rd_bucketoid);
     MemoryContext indexbuildContext = NULL;
     MemoryContext old_context = NULL;
@@ -2499,9 +2514,10 @@ static void index_build_bucketstorage_main(const BgWorkerContext *bwc)
         bucketid = bucketlist->values[bucketid];
         Relation indexBucketRel = bucketGetRelation(indexRel, indexPart, bucketid);
         Relation heapBucketRel = bucketGetRelation(heapRel, heapPart, bucketid);
+        indexInfo = BuildIndexInfo(indexBucketRel);
         old_context = MemoryContextSwitchTo(indexbuildContext);
 
-        IndexBuildResult* results = index_build_storage(heapBucketRel, indexBucketRel, &ibshared->indexInfo);
+        IndexBuildResult* results = index_build_storage(heapBucketRel, indexBucketRel, indexInfo);
         indexTuples += results->index_tuples;
         heapTuples += results->heap_tuples;
 
@@ -2526,7 +2542,7 @@ static void index_build_bucketstorage_main(const BgWorkerContext *bwc)
     MemoryContextDelete(indexbuildContext);
 }
 
-static IndexBuildResult* index_build_bucketstorage_end(IndexBucketShared *ibshared, IndexInfo* indexInfo)
+static IndexBuildResult* index_build_bucketstorage_end(IndexBucketShared *ibshared)
 {
     BgworkerListWaitFinish(&ibshared->nparticipants);
 
@@ -2539,14 +2555,13 @@ static IndexBuildResult* index_build_bucketstorage_end(IndexBucketShared *ibshar
 
     stats->index_tuples += ibshared->indresult.index_tuples;
     stats->heap_tuples += ibshared->indresult.heap_tuples;
-    *indexInfo = ibshared->indexInfo;
 
     BgworkerListSyncQuit();
     return stats;
 }
 
 static IndexBuildResult* index_build_bucketstorage_parallel(Relation heapRelation, Relation indexRelation,
-    Partition heapPartition, Partition indexPartition, IndexInfo* indexInfo, int parallel_workers)
+    Partition heapPartition, Partition indexPartition, int parallel_workers)
 {
     IndexBucketShared *ibshared;
 
@@ -2558,12 +2573,11 @@ static IndexBuildResult* index_build_bucketstorage_parallel(Relation heapRelatio
     ibshared->indexrelid = RelationGetRelid(indexRelation);
     ibshared->heappartid  = heapPartition ? PartitionGetPartid(heapPartition) : InvalidOid;
     ibshared->indexpartid = indexPartition ? PartitionGetPartid(indexPartition) : InvalidOid;
-    ibshared->indexInfo  = *indexInfo;
     ibshared->nparticipants = parallel_workers;
     SpinLockInit(&ibshared->mutex);
 
     LaunchBackgroundWorkers(parallel_workers, ibshared, index_build_bucketstorage_main, NULL);
-    IndexBuildResult* stats = index_build_bucketstorage_end(ibshared, indexInfo);
+    IndexBuildResult* stats = index_build_bucketstorage_end(ibshared);
 
     return stats;
 }
@@ -2581,7 +2595,6 @@ static IndexBuildResult* index_build_bucketstorage(Relation heapRelation, Relati
                 indexRelation,
                 heapPartition,
                 indexPartition,
-                indexInfo,
                 parallel_workers);
             if (stats != NULL) {
                 return stats;
@@ -2620,14 +2633,32 @@ void UpdateStatsForGlobalIndex(
     foreach (partitionCell, partitionOidList) {
         partitionOid = lfirst_oid(partitionCell);
         partition = partitionOpen(heapRelation, partitionOid, ShareLock);
-        partition_index_update_stats(partition,
-            true,
-            isPrimary,
-            (heapRelation->rd_rel->relkind == RELKIND_TOASTVALUE) ? RelationGetRelid(indexRelation) : InvalidOid,
-            cudescIdxOid,
-            (stats->all_part_tuples != NULL) ? stats->all_part_tuples[partitionIdx] : 0);
-        partitionClose(heapRelation, partition, NoLock);
-        partitionIdx++;
+        if (RelationIsSubPartitioned(heapRelation)) {
+            Relation partRel = partitionGetRelation(heapRelation, partition);
+            List* subPartitionOidList = relationGetPartitionOidList(partRel);
+            ListCell* subPartitionCell = NULL;
+            foreach (subPartitionCell, subPartitionOidList) {
+                Oid subPartitionOid = lfirst_oid(subPartitionCell);
+                Partition subPart = partitionOpen(partRel, subPartitionOid, ShareLock);
+                partition_index_update_stats(
+                    subPart, true, isPrimary,
+                    (heapRelation->rd_rel->relkind == RELKIND_TOASTVALUE) ? RelationGetRelid(indexRelation)
+                                                                          : InvalidOid,
+                    cudescIdxOid, (stats->all_part_tuples != NULL) ? stats->all_part_tuples[partitionIdx] : 0);
+                partitionClose(partRel, subPart, NoLock);
+                partitionIdx++;
+            }
+            releasePartitionOidList(&subPartitionOidList);
+            releaseDummyRelation(&partRel);
+            partitionClose(heapRelation, partition, ShareLock);
+        } else {
+            partition_index_update_stats(
+                partition, true, isPrimary,
+                (heapRelation->rd_rel->relkind == RELKIND_TOASTVALUE) ? RelationGetRelid(indexRelation) : InvalidOid,
+                cudescIdxOid, (stats->all_part_tuples != NULL) ? stats->all_part_tuples[partitionIdx] : 0);
+            partitionClose(heapRelation, partition, NoLock);
+            partitionIdx++;
+        }
     }
     releasePartitionOidList(&partitionOidList);
     index_update_stats(heapRelation,
@@ -2680,6 +2711,8 @@ void index_build(Relation heapRelation, Partition heapPartition, Relation indexR
     Assert(RelationIsValid(indexRelation));
     Assert(PointerIsValid(indexRelation->rd_am));
 
+    Oid parentOid = partid_get_parentid(RelationGetRelid(heapRelation));
+
     /*
      * Determine worker process details for parallel CREATE INDEX.  Currently,
      * only btree has support for parallel builds.
@@ -2695,8 +2728,16 @@ void index_build(Relation heapRelation, Partition heapPartition, Relation indexR
             indexInfo->ii_ParallelWorkers = RELATION_OWN_BUCKET(heapRelation) ? parallel_workers : 0;
         } else if (RelationIsGlobalIndex(indexRelation)) {
             /* pure global partitioned index */
-            int nparts = getPartitionNumber(heapRelation->partMap);
+            int nparts = 0;
+            if (RelationIsSubPartitioned(heapRelation)) {
+                nparts = GetSubPartitionNumber(heapRelation);
+            } else {
+                nparts = getPartitionNumber(heapRelation->partMap);
+            }
             indexInfo->ii_ParallelWorkers = Min(parallel_workers, nparts);
+        } else if (parentOid != InvalidOid) {
+            /* sub-partition */
+            indexInfo->ii_ParallelWorkers = 0;
         } else if (!RELATION_OWN_BUCKET(heapRelation)) {
             /* plain table or part of table, no extra partition or bucket under it */
             indexInfo->ii_ParallelWorkers = plan_create_index_workers(RelationGetRelid(heapRelation));
@@ -3487,30 +3528,29 @@ double IndexBuildUHeapScan(Relation heapRelation, Relation indexRelation, IndexI
     return reltuples;
 }
 
-double* GlobalIndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
+double* GetGlobalIndexTuplesForPartition(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
     IndexBuildCallback callback, void* callbackState)
 {
-    ListCell* partitionCell = NULL;
+    ListCell *partitionCell = NULL;
     Oid partitionId;
     Partition partition = NULL;
-    List* partitionIdList = NIL;
+    List *partitionIdList = NIL;
     Relation heapPartRel = NULL;
 
     partitionIdList = relationGetPartitionOidList(heapRelation);
-
     double relTuples;
     int partitionIdx = 0;
     int partNum = partitionIdList->length;
-    double* globalIndexTuples = (double*)palloc0(partNum * sizeof(double));
-    foreach(partitionCell, partitionIdList) {
+    double *globalIndexTuples = (double *)palloc0(partNum * sizeof(double));
+    foreach (partitionCell, partitionIdList) {
         partitionId = lfirst_oid(partitionCell);
         partition = partitionOpen(heapRelation, partitionId, ShareLock);
         heapPartRel = partitionGetRelation(heapRelation, partition);
         if (RelationIsCrossBucketIndex(indexRelation)) {
             relTuples = IndexBuildHeapScanCrossBucket(heapPartRel, indexRelation, indexInfo, callback, callbackState);
         } else {
-            relTuples = tableam_index_build_scan(heapPartRel, indexRelation, indexInfo, true, callback, callbackState,
-                NULL);
+            relTuples =
+                tableam_index_build_scan(heapPartRel, indexRelation, indexInfo, true, callback, callbackState, NULL);
         }
         globalIndexTuples[partitionIdx] = relTuples;
         releaseDummyRelation(&heapPartRel);
@@ -3518,6 +3558,94 @@ double* GlobalIndexBuildHeapScan(Relation heapRelation, Relation indexRelation, 
         partitionIdx++;
     }
     releasePartitionOidList(&partitionIdList);
+    return globalIndexTuples;
+}
+
+List* LockAllGlobalIndexes(Relation relation, LOCKMODE lockmode)
+{
+    ListCell* cell = NULL;
+    List* indexRelList = NIL;
+    List* indexIds = NIL;
+
+    indexIds = RelationGetSpecificKindIndexList(relation, true);
+    foreach (cell, indexIds) {
+        Oid indexOid = lfirst_oid(cell);
+        Relation indexRel = index_open(indexOid, lockmode);
+        indexRelList = lappend(indexRelList, indexRel);
+    }
+    list_free_ext(indexIds);
+    return indexRelList;
+}
+
+void ReleaseLockAllGlobalIndexes(List** indexRelList, LOCKMODE lockmode)
+{
+    ListCell* cell = NULL;
+    foreach (cell, *indexRelList) {
+        Relation indexRel = (Relation)lfirst(cell);
+        relation_close(indexRel, lockmode);
+    }
+    list_free_ext(*indexRelList);
+}
+
+double* GetGlobalIndexTuplesForSubPartition(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
+    IndexBuildCallback callback, void* callbackState)
+{
+    ListCell* partitionCell = NULL;
+    ListCell* subPartitionCell = NULL;
+    Oid partitionId = InvalidOid;
+    Oid subPartitionId = InvalidOid;
+    Partition partition = NULL;
+    Partition subPartition = NULL;
+    List* partitionIdList = NIL;
+    List* subPartitionIdList = NIL;
+    Relation heapPartRel = NULL;
+    Relation heapSubPartRel = NULL;
+
+    partitionIdList = relationGetPartitionOidList(heapRelation);
+    double relTuples;
+    int subPartitionIdx = 0;
+    double* globalIndexTuples = NULL;
+    foreach(partitionCell, partitionIdList) {
+        partitionId = lfirst_oid(partitionCell);
+        partition = partitionOpen(heapRelation, partitionId, ShareLock);
+        heapPartRel = partitionGetRelation(heapRelation, partition);
+        subPartitionIdList = relationGetPartitionOidList(heapPartRel);
+        int subPartNum = subPartitionIdList->length;
+        if (globalIndexTuples != NULL) {
+            globalIndexTuples = (double*)repalloc(globalIndexTuples, (subPartitionIdx + subPartNum) * sizeof(double));
+        } else {
+            globalIndexTuples = (double*)palloc0(subPartNum * sizeof(double));
+        }
+        foreach(subPartitionCell, subPartitionIdList) {
+            subPartitionId = lfirst_oid(subPartitionCell);
+            subPartition = partitionOpen(heapPartRel, subPartitionId, ShareLock);
+            heapSubPartRel = partitionGetRelation(heapPartRel, subPartition);
+            relTuples =
+                tableam_index_build_scan(heapSubPartRel, indexRelation, indexInfo, true, callback, callbackState, NULL);
+            globalIndexTuples[subPartitionIdx] = relTuples;
+            subPartitionIdx++;
+            releaseDummyRelation(&heapSubPartRel);
+            partitionClose(heapPartRel, subPartition, NoLock);
+        }
+        releaseDummyRelation(&heapPartRel);
+        partitionClose(heapRelation, partition, ShareLock);
+        releasePartitionOidList(&subPartitionIdList);
+    }
+    releasePartitionOidList(&partitionIdList);
+    return globalIndexTuples;
+}
+
+double* GlobalIndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
+    IndexBuildCallback callback, void* callbackState)
+{
+    double* globalIndexTuples = NULL;
+    if (RelationIsSubPartitioned(heapRelation)) {
+        globalIndexTuples =
+            GetGlobalIndexTuplesForSubPartition(heapRelation, indexRelation, indexInfo, callback, callbackState);
+    } else {
+        globalIndexTuples =
+            GetGlobalIndexTuplesForPartition(heapRelation, indexRelation, indexInfo, callback, callbackState);
+    }
     return globalIndexTuples;
 }
 
@@ -4244,7 +4372,11 @@ void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo*
 {
     List* partitionList = NULL;
     /* We'll open any partition of relation by partition OID and lock it */
-    partitionList = relationGetPartitionList(heapRelation, ShareLock);
+    if (RelationIsSubPartitioned(heapRelation)) {
+        partitionList = RelationGetSubPartitionList(heapRelation, ShareLock);
+    } else {
+        partitionList = relationGetPartitionList(heapRelation, ShareLock);
+    }
 
     /* We'll build a new physical relation for the index */
     RelationSetNewRelfilenode(iRel, InvalidTransactionId, InvalidMultiXactId);
@@ -5598,6 +5730,8 @@ void AddGPIForPartition(Oid partTableOid, Oid partOid)
     List* indexRelList = NIL;
     List* indexInfoList = NIL;
     ListCell* cell = NULL;
+    ListCell* lc1 = NULL;
+    ListCell* lc2 = NULL;
 
     partTableRel = heap_open(partTableOid, AccessShareLock);
     part = partitionOpen(partTableRel, partOid, AccessExclusiveLock);
@@ -5615,10 +5749,12 @@ void AddGPIForPartition(Oid partTableOid, Oid partOid)
 
     ScanPartitionInsertIndex(partTableRel, partRel, indexRelList, indexInfoList);
 
-    foreach (cell, indexRelList) {
-        Relation indexRel = (Relation)lfirst(cell);
+    forboth (lc1, indexRelList, lc2, indexInfoList) {
+        Relation indexRel = (Relation)lfirst(lc1);
+        IndexInfo* indexInfo  = (IndexInfo*)lfirst(lc2);
 
         relation_close(indexRel, RowExclusiveLock);
+        pfree_ext(indexInfo);
     }
 
     list_free_ext(indexList);
@@ -5632,10 +5768,66 @@ void AddGPIForPartition(Oid partTableOid, Oid partOid)
 
 /*
  * @@GaussDB@@
- * Target		: This routine is used to scan partition tuples and elete them from all global partition indexes.
+ * Target		: This routine is used to inserts the partition tuples into all global partition indexes.
  * Brief		:
  * Description	:
  * Notes		:
+ */
+void AddGPIForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid)
+{
+    Relation partTableRel = NULL;
+    Relation partRel = NULL;
+    Partition part = NULL;
+    Relation subPartRel = NULL;
+    Partition subPart = NULL;
+    List* indexList = NIL;
+    List* indexRelList = NIL;
+    List* indexInfoList = NIL;
+    ListCell* cell = NULL;
+    ListCell* lc1 = NULL;
+    ListCell* lc2 = NULL;
+
+    partTableRel = heap_open(partTableOid, AccessShareLock);
+    part = partitionOpen(partTableRel, partOid, AccessShareLock);
+    partRel = partitionGetRelation(partTableRel, part);
+    subPart = partitionOpen(partRel, subPartOid, AccessExclusiveLock);
+    subPartRel = partitionGetRelation(partRel, subPart);
+    indexList = RelationGetSpecificKindIndexList(partTableRel, true);
+
+    foreach (cell, indexList) {
+        Oid indexOid = lfirst_oid(cell);
+        Relation indexRel = relation_open(indexOid, RowExclusiveLock);
+        IndexInfo* indexInfo = BuildIndexInfo(indexRel);
+
+        indexRelList = lappend(indexRelList, indexRel);
+        indexInfoList = lappend(indexInfoList, indexInfo);
+    }
+
+    ScanPartitionInsertIndex(partTableRel, subPartRel, indexRelList, indexInfoList);
+
+    forboth (lc1, indexRelList, lc2, indexInfoList) {
+        Relation indexRel = (Relation)lfirst(lc1);
+        IndexInfo* indexInfo  = (IndexInfo*)lfirst(lc2);
+
+        relation_close(indexRel, RowExclusiveLock);
+        pfree_ext(indexInfo);
+    }
+
+
+    list_free_ext(indexList);
+    list_free_ext(indexRelList);
+    list_free_ext(indexInfoList);
+
+    releaseDummyRelation(&subPartRel);
+    partitionClose(partRel, subPart, NoLock);
+    releaseDummyRelation(&partRel);
+    partitionClose(partTableRel, part, NoLock);
+    heap_close(partTableRel, NoLock);
+}
+
+/*
+ * @@GaussDB@@
+ * Target : This routine is used to scan partition tuples and elete them from all global partition indexes.
  */
 void ScanPartitionDeleteGPITuples(Relation partTableRel, Relation partRel, const List* indexRelList, 
     const List* indexInfoList)
@@ -5704,10 +5896,7 @@ void ScanPartitionDeleteGPITuples(Relation partTableRel, Relation partRel, const
 
 /*
  * @@GaussDB@@
- * Target		: This routine is used to delete the partition tuples from all global partition indexes.
- * Brief		:
- * Description	:
- * Notes		:
+ * Target : This routine is used to delete the partition tuples from all global partition indexes.
  */
 void DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid)
 {
@@ -5745,6 +5934,60 @@ void DeleteGPITuplesForPartition(Oid partTableOid, Oid partOid)
     list_free_ext(indexRelList);
     list_free_ext(indexInfoList);
 
+    releaseDummyRelation(&partRel);
+    partitionClose(partTableRel, part, NoLock);
+    heap_close(partTableRel, NoLock);
+}
+
+/*
+ * @@GaussDB@@
+ * Target		: This routine is used to delete the partition tuples from all global partition indexes.
+ * Brief		:
+ * Description	:
+ * Notes		:
+ */
+void DeleteGPITuplesForSubPartition(Oid partTableOid, Oid partOid, Oid subPartOid)
+{
+    Relation partTableRel = NULL;
+    Relation partRel = NULL;
+    Partition part = NULL;
+    Relation subPartRel = NULL;
+    Partition subPart = NULL;
+    List* indexList = NIL;
+    List* indexRelList = NIL;
+    List* indexInfoList = NIL;
+    ListCell* cell = NULL;
+
+    partTableRel = heap_open(partTableOid, AccessShareLock);
+    part = partitionOpen(partTableRel, partOid, AccessShareLock);
+    partRel = partitionGetRelation(partTableRel, part);
+    subPart = partitionOpen(partRel, subPartOid, AccessExclusiveLock);
+    subPartRel = partitionGetRelation(partRel, subPart);
+    indexList = RelationGetSpecificKindIndexList(partTableRel, true);
+
+    foreach (cell, indexList) {
+        Oid indexOid = lfirst_oid(cell);
+        Relation indexRel = relation_open(indexOid, RowExclusiveLock);
+        IndexInfo* indexInfo = BuildIndexInfo(indexRel);
+
+        indexRelList = lappend(indexRelList, indexRel);
+        indexInfoList = lappend(indexInfoList, indexInfo);
+    }
+
+    ScanPartitionDeleteGPITuples(partTableRel, subPartRel, indexRelList, indexInfoList);
+
+    foreach (cell, indexRelList) {
+        Relation indexRel = (Relation)lfirst(cell);
+
+        relation_close(indexRel, RowExclusiveLock);
+    }
+
+    list_free_ext(indexList);
+    list_free_ext(indexRelList);
+    list_free_ext(indexInfoList);
+
+    releaseDummyRelation(&subPartRel);
+    partitionClose(partRel, subPart, NoLock);
     releaseDummyRelation(&partRel);
     partitionClose(partTableRel, part, NoLock);
     heap_close(partTableRel, NoLock);

@@ -29,6 +29,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = job_scheduler.o job_worker.o 
+OBJS = job_scheduler.o job_worker.o gs_job_manager.o gs_job_calendar.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

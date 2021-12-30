@@ -48,7 +48,6 @@ static void remove_target_symlink(const char* path);
 static bool is_special_dir(const char* path);
 static void get_file_path(const char* path, const char* file_name, char* file_path);
 static bool directory_is_empty(const char* path);
-static void copy_file(const char* fromfile, char* tofile);
 static void copy_dir(const char* fromdir, char* todir);
 static void restore_gaussdb_state(void);
 
@@ -433,6 +432,7 @@ char* slurpFile(const char* datadir, const char* path, size_t* filesize)
     if (read(fd, buffer, len) != len) {
         (void)close(fd);
         pg_free(buffer);
+        buffer = NULL;
         pg_fatal("could not read file \"%s\": %s\n", fullpath, strerror(errno));
         return NULL;
     }
@@ -1042,7 +1042,7 @@ go_exit:
 }
 
 #define COPY_BUF_SIZE (8 * BLCKSZ)
-static void copy_file(const char* fromfile, char* tofile)
+void copy_file(const char* fromfile, char* tofile)
 {
     char* buffer = NULL;
     int srcfd = 0;
@@ -1128,6 +1128,10 @@ static void copy_file(const char* fromfile, char* tofile)
     }
     return;
 go_exit:
+    if (buffer != NULL) {
+        free(buffer);
+        buffer = NULL;
+    }
     pg_log(PG_PRINT, _("%s"), errmsg);
     exit(1);
     return; /* suppress compile warning. */

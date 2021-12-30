@@ -49,6 +49,7 @@ extern Datum ubtoptions(PG_FUNCTION_ARGS);
 extern bool UBTreeDelete(Relation index_relation, Datum* values, const bool* isnull, ItemPointer heapTCtid);
 
 extern bool IndexPagePrepareForXid(Relation rel, Page page, TransactionId xid, bool needWal, Buffer buf);
+extern void FreezeSingleIndexPage(Relation rel, Buffer buf, bool *hasPruned);
 
 /* structures for ubtrecycle.cpp */
 typedef enum {
@@ -241,12 +242,25 @@ typedef struct xl_ubtree2_recycle_queue_modify {
 #define SizeOfUBTree2RecycleQueueModify (sizeof(xl_ubtree2_recycle_queue_modify))
 
 typedef struct xl_ubtree2_freeze {
-    TransactionId latestRemovedXid;
+    TransactionId oldestXmin;
     BlockNumber blkno;
     int32 nfrozen;
 } xl_ubtree2_freeze;
 
 #define SizeOfUBTree2Freeze (sizeof(xl_ubtree2_freeze))
+
+typedef struct xl_ubtree_split {
+    uint32 level;            /* tree level of page being split */
+    OffsetNumber firstright; /* first item moved to right page */
+    OffsetNumber newitemoff; /* new item's offset (if placed on left page) */
+    uint32 opaqueVersion;    /* the opaque version */
+    UBTPageOpaqueDataInternal lopaque;
+    UBTPageOpaqueDataInternal ropaque;
+} xl_ubtree_split;
+
+#define SizeOfUBtreeSplit (sizeof(xl_ubtree_split))
+
+#define UBTREE_OPAQUE_VERSION_RCR 1
 
 /*
  * Notes on B-Tree tuple format, and key and non-key attributes:
@@ -503,8 +517,8 @@ extern IndexTuple UBTreeTruncate(Relation rel, IndexTuple lastleft,
 extern int	UBTreeKeepNattsFast(Relation rel, IndexTuple lastleft, IndexTuple firstright);
 extern bool UBTreeCheckNatts(const Relation index, bool heapkeyspace, Page page, OffsetNumber offnum);
 extern void BtCheckThirdPage(Relation rel, Relation heap, bool needheaptidspace, Page page, IndexTuple newtup);
-extern bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_xmin,
-    TransactionId *xmin, TransactionId *xmax, bool *xminCommitted, bool *xmaxCommitted);
+extern bool UBTreeItupGetXminXmax(Page page, OffsetNumber offnum, TransactionId oldest_xmin, TransactionId *xmin,
+    TransactionId *xmax, bool *xminCommitted, bool *xmaxCommitted);
 extern TransactionIdStatus UBTreeCheckXid(TransactionId xid);
 
 /*

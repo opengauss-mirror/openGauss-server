@@ -66,20 +66,13 @@ void PallocBCMBCMElementArray(void);
 Size DataQueueShmemSize(void)
 {
     Size size = 0;
-
-    /* Don't need allocate SHM in single node mode */
-    // if(!IS_SINGLE_NODE)
-    {
-        Assert(g_instance.attr.attr_storage.DataQueueBufSize > 0);
-
-        /* DataQueue */
-        size = sizeof(DataQueueData);
-        /* extra alignment padding for DataQueue I/O buffers */
-        size = add_size(size, ALIGNOF_BUFFER);
-        /* and the buffers themselves */
-        size = add_size(size, g_instance.attr.attr_storage.DataQueueBufSize * 1024);
-    }
-
+    Assert(g_instance.attr.attr_storage.DataQueueBufSize > 0);
+    /* DataQueue */
+    size = sizeof(DataQueueData);
+    /* extra alignment padding for DataQueue I/O buffers */
+    size = add_size(size, ALIGNOF_BUFFER);
+    /* and the buffers themselves */
+    size = add_size(size, g_instance.attr.attr_storage.DataQueueBufSize * 1024);
     return size;
 }
 
@@ -307,7 +300,7 @@ DataQueuePtr PushToSenderQueue(const RelFileNode &rnode, BlockNumber blockNum, S
         LWLockRelease(DataSyncRepLock);
 
         if (g_instance.attr.attr_storage.max_wal_senders > 0) {
-            if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone) {
+            if (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE) {
                 ereport(
                     LOG,
                     (errmsg("failed to push rnode %u/%u/%u blockno %u into data-queue becuase sync_master_standalone "

@@ -197,6 +197,8 @@ void ThreadPoolSessControl::MarkAllSessionClose()
         elem = DLGetSucc(elem);
     }
     alock.unLock();
+    ereport(LOG, (errmodule(MOD_THREAD_POOL),
+                    errmsg("pmState:%d, mark all threadpool sessions closed.", pmState)));
 }
 
 void ThreadPoolSessControl::CheckPermissionForSendSignal(knl_session_context* sess, sig_atomic_t* lock)

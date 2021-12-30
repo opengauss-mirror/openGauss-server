@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -23,9 +24,10 @@
  */
 
 #include "access/tableam.h"
+#include "catalog/cstore_ctlg.h"
 #include "catalog/indexing.h"
 #include "catalog/pg_proc.h"
-#include "catalog/cstore_ctlg.h"
+#include "catalog/pg_partition_fn.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"

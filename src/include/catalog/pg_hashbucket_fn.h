@@ -48,6 +48,6 @@ extern HeapTuple HbktTransferModifyPgClassRelbucket(HeapTuple tuple, DataTransfe
 extern HeapTuple HbktTransferModifyRelationRelnatts(HeapTuple reltup, DataTransferType transferType, bool cboffIndex);
 extern HeapTuple HbktTtransferModifyRelationReloptions(HeapTuple reltup, DataTransferType transferType, bool isUsable);
 extern HeapTuple HbktModifyRelationRelfilenode(HeapTuple reltup, DataTransferType transferType, Relation indexrel, bool isUsable, Oid rel2bucketId);
-
+extern int bid_cmp(const void* p1, const void* p2);
 #endif
 

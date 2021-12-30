@@ -159,6 +159,9 @@ uint32 comm_get_cpylen(const char* src, uint32 max_len)
 {
     uint32 cpylen = 0;
 
+    if (src == NULL || strlen(src) == 0) {
+        return cpylen;
+    }
     /*
      * src is from the network
      * maybe do not have '\0'

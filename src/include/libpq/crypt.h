@@ -40,9 +40,9 @@ extern int CheckUserValid(Port* port, const char* role);
 extern bool VerifyPasswdDigest(const char* roleID, char* passwd, char* passDigest);
 extern int crypt_verify(const Port* port, const char* user, char* client_pass);
 extern int get_stored_iteration(const char* role);
+#ifdef USE_IAM
 extern char* verify_cms_token(char* token_string);
 extern bool parse_token(const char* token_string, iam_token* token);
 extern bool check_token(iam_token token, char* rolname);
-extern bool get_stored_password(const char *role,password_info *pass_info);
-
+#endif
 #endif

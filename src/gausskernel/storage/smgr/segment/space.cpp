@@ -266,25 +266,12 @@ SegSpace *spc_init_space_node(Oid spcNode, Oid dbNode)
     return entry;
 }
 
-void spc_drop_space_node(Oid spcNode, Oid dbNode)
-{
-    AutoMutexLock spc_lock(&segspace_lock);
-    SegSpcTag tag = {.spcNode = spcNode, .dbNode = dbNode};
-    SegmentCheck(t_thrd.storage_cxt.SegSpcCache != NULL);
-
-    spc_lock.lock();
-    hash_search(t_thrd.storage_cxt.SegSpcCache, (void *)&tag, HASH_REMOVE, NULL);
-    spc_lock.unLock();
-
-    return;
-}
-
 /*
  * Each pair of <tablespace, database> has only one segment space.
  * This function just creates an object in memory. It does not create
  * any physical files. But it ensures the tablespace directory exsiting.
  */
-SegSpace *spc_open(Oid spcNode, Oid dbNode, bool create)
+SegSpace *spc_open(Oid spcNode, Oid dbNode, bool create, bool isRedo)
 {
     SegSpace *entry = spc_init_space_node(spcNode, dbNode);
 
@@ -295,7 +282,7 @@ SegSpace *spc_open(Oid spcNode, Oid dbNode, bool create)
                 /*
                 * make sure the directory exists; do it before locking to avoid deadlock with spc_drop
                 */
-                TablespaceCreateDbspace(entry->spcNode, entry->dbNode, false);
+                TablespaceCreateDbspace(entry->spcNode, entry->dbNode, isRedo);
             } else {
                 return NULL;
             }
@@ -312,7 +299,7 @@ SegSpace *spc_open(Oid spcNode, Oid dbNode, bool create)
  *
  * Space object in hash table is not removed. Just set as closed.
  */
-bool spc_drop(Oid spcNode, Oid dbNode, bool redo)
+SegSpace *spc_drop(Oid spcNode, Oid dbNode, bool redo)
 {
     SegSpace *spc = spc_init_space_node(spcNode, dbNode);
     AutoMutexLock spc_lock(&spc->lock);
@@ -321,7 +308,7 @@ bool spc_drop(Oid spcNode, Oid dbNode, bool redo)
     SpaceDataFileStatus dataStatus = spc_status(spc);
     if (dataStatus == SpaceDataFileStatus::EMPTY) {
         // there is no segment data file, return directly.
-        return true;
+        return spc;
     }
 
     spc_lock.unLock();
@@ -361,10 +348,8 @@ bool spc_drop(Oid spcNode, Oid dbNode, bool redo)
         /* Even redo is true, the space should be empty. */
         ereport(ERROR, (errmsg("could not remove the tablespace, because there are data in segment files.")));
     }
-    spc_lock.unLock();
 
-    spc_drop_space_node(spcNode, dbNode);
-    return true;
+    return spc;
 }
 
 /*
@@ -512,13 +497,19 @@ static void copy_extent(SegExtentGroup *seg, RelFileNode logic_rnode, uint32 log
             PageSetLSN(pagedata, recptr);
 
             /* 2. double write */
-            uint32 pos = dw_single_flush_without_buffer(tag, (Block)pagedata);
+            bool flush_old_file = false;
+            uint32 pos = seg_dw_single_flush_without_buffer(tag, (Block)pagedata, &flush_old_file);
             t_thrd.proc->dw_pos = pos;
+            t_thrd.proc->flush_new_dw = !flush_old_file;
 
             /* 3. checksum and write to file */
             PageSetChecksumInplace((Page)pagedata, to_block);
             df_pwrite_block(seg->segfile, pagedata, to_block);
-            g_instance.dw_single_cxt.single_flush_state[pos].data_flush = true;
+            if (flush_old_file) {
+                g_instance.dw_single_cxt.recovery_buf.single_flush_state[pos] = true;
+            } else {
+                g_instance.dw_single_cxt.single_flush_state[pos] = true;
+            }
             t_thrd.proc->dw_pos = -1;
         }
         END_CRIT_SECTION();
@@ -605,6 +596,45 @@ Oid get_relation_oid(Oid spcNode, Oid relNode)
     return relation_oid;
 }
 
+/*
+ * same as get_relation_oid except we check for cache invalidation here;
+ * If relation oid is valid, lock it before return.
+ */
+Oid get_valid_relation_oid(Oid spcNode, Oid relNode)
+{
+    Oid reloid, oldreloid;
+    bool retry = false;
+    for (;;) {
+        uint64 inval_count = u_sess->inval_cxt.SharedInvalidMessageCounter;
+        reloid = get_relation_oid(spcNode, relNode);
+
+        if (retry) {
+            /* nothing changed after we lock the relation */
+            if (reloid == oldreloid) {
+                return reloid;
+            }
+            if (OidIsValid(oldreloid)) {
+                UnlockRelationOid(oldreloid, AccessExclusiveLock);
+            }
+            /* relation oid is invalid after retry */
+            if (!OidIsValid(reloid)) {
+                return InvalidOid;
+            }
+        }
+
+        if (OidIsValid(reloid)) {
+            LockRelationOid(reloid, AccessExclusiveLock);
+        }
+
+        /* No invalidation message */
+        if (inval_count == u_sess->inval_cxt.SharedInvalidMessageCounter) {
+            return reloid;
+        }
+        retry = true;
+        oldreloid = reloid;
+    }
+}
+
 void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePointer iptr)
 {
     uint32 extent_id = SPC_INVRSPTR_GET_SPECIAL_DATA(iptr);
@@ -616,7 +646,7 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
 
     RelFileNode logic_rnode = get_segment_logic_rnode(spc, owner, seg->forknum);
 
-    Oid relation_oid = get_relation_oid(spcNode, logic_rnode.relNode);
+    Oid relation_oid = get_valid_relation_oid(spcNode, logic_rnode.relNode);
     if (!OidIsValid(relation_oid)) {
         /*
          * As we lock the database to prevent any DDL, current segment should have a 'owner' relation or partition.
@@ -627,7 +657,6 @@ void move_data_extent(SegExtentGroup *seg, BlockNumber extent, ExtentInversePoin
                         logic_rnode.spcNode, logic_rnode.dbNode, logic_rnode.spcNode)));
         return;
     }
-    LockRelationOid(relation_oid, AccessExclusiveLock);
 
     /*
      * Lock the segment head buffer first. So concurrent workers can not
@@ -1095,16 +1124,17 @@ static int gs_space_shrink_internal(Oid spaceid, Oid dbid, uint32 extent_type, F
         return 0;
     }
 
-    /* DDL is forbidden during space shrink */
-    DirectFunctionCall2(pg_advisory_xact_lock_int4, t_thrd.postmaster_cxt.xc_lockForBackupKey1,
-                        t_thrd.postmaster_cxt.xc_lockForBackupKey2);
-
     spc_shrink(spaceid, dbid, extent_type, forknum);
     return 0;
 }
 
 Datum gs_space_shrink(PG_FUNCTION_ARGS)
 {
+    if (!XLogInsertAllowed()) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Don't shrink space, for recovery is in progress.")));
+    }
+
     Oid spaceid = PG_GETARG_OID(0);
     Oid dbid = PG_GETARG_OID(1);
     uint32 extent_type = PG_GETARG_UINT32(2);
@@ -1115,6 +1145,11 @@ Datum gs_space_shrink(PG_FUNCTION_ARGS)
 
 Datum local_space_shrink(PG_FUNCTION_ARGS)
 {
+    if (!XLogInsertAllowed()) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Don't shrink space locally, for recovery is in progress.")));
+    }
+
     char *tablespacename = text_to_cstring(PG_GETARG_TEXT_PP(0));
     char *dbname = text_to_cstring(PG_GETARG_TEXT_PP(1));
     Oid spaceid = get_tablespace_oid_by_name(tablespacename);
@@ -1131,6 +1166,11 @@ Datum local_space_shrink(PG_FUNCTION_ARGS)
 
 Datum global_space_shrink(PG_FUNCTION_ARGS)
 {
+    if (!XLogInsertAllowed()) {
+        ereport(ERROR, (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                errmsg("Don't shrink space globally, for recovery is in progress.")));
+    }
+
     char *tablespacename = text_to_cstring(PG_GETARG_TEXT_PP(0));
     char *dbname = text_to_cstring(PG_GETARG_TEXT_PP(1));
 
@@ -1140,6 +1180,11 @@ Datum global_space_shrink(PG_FUNCTION_ARGS)
     if (dbid != u_sess->proc_cxt.MyDatabaseId) {
         ereport(ERROR, (errmodule(MOD_SEGMENT_PAGE), errmsg("database id is not current database")));
     }
+
+    /* DDL is forbidden during space shrink */
+    DirectFunctionCall2(pg_advisory_xact_lock_int4, t_thrd.postmaster_cxt.xc_lockForBackupKey1,
+                        t_thrd.postmaster_cxt.xc_lockForBackupKey2);
+
     StringInfoData buf;
     initStringInfo(&buf);
     appendStringInfo(&buf, "select local_space_shrink(\'%s\', \'%s\')", tablespacename, dbname);

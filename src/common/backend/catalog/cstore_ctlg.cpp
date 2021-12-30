@@ -1,4 +1,5 @@
 /*
+ * Portions Copyright (c) 2021, openGauss Contributors
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2013, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
@@ -39,6 +40,7 @@
 #include "catalog/pg_depend.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_opclass.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/pg_type.h"
 #include "catalog/cstore_ctlg.h"
 #include "catalog/toasting.h"

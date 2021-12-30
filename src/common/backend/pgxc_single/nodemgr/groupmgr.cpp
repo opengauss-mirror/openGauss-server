@@ -4692,7 +4692,7 @@ List* PgxcGroupGetLogicClusterList(Bitmapset* nodeids)
 
 /*
  * gs_get_nodegroup_tablecount
- *	get total table numbers of a nodegroup.
+ *	marked unsupported for centralized
  *
  * Parameters:
  *	@in node group name
@@ -4701,66 +4701,10 @@ List* PgxcGroupGetLogicClusterList(Bitmapset* nodeids)
  */
 Datum gs_get_nodegroup_tablecount(PG_FUNCTION_ARGS)
 {
-    Name str = PG_GETARG_NAME(0);
-    int32 count = 0;
-    char* group_name = NULL;
-    char* database_name = NULL;
-    Relation pg_database_rel = NULL;
-    TableScanDesc scan;
-    HeapTuple tup = NULL;
-    Datum datum;
-    bool isNull = false;
-    Oid group_oid;
-    errno_t rc;
-    char cmd[CHAR_BUF_SIZE];
-
-    if (str == NULL) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_ATTRIBUTE),
-                errmsg("Invalid null pointer attribute for gs_get_nodegroup_tablecount()")));
-    }
-
-    group_name = NameStr(*str);
-
-    group_oid = get_pgxc_groupoid(group_name, true);
-    if (!OidIsValid(group_oid))
-        PG_RETURN_INT32(0);
-
-    rc = snprintf_s(cmd,
-        CHAR_BUF_SIZE,
-        CHAR_BUF_SIZE - 1,
-        "select count(*) from pgxc_class, pgxc_group "
-        "where pgroup=group_name and pgxc_group.oid=%u;",
-        group_oid);
-
-    securec_check_ss(rc, "\0", "\0");
-
-    pg_database_rel = heap_open(DatabaseRelationId, AccessShareLock);
-
-    if (!pg_database_rel) {
-        ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("can not open pg_database")));
-    }
-
-    scan = tableam_scan_begin(pg_database_rel, SnapshotNow, 0, NULL);
-    while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
-        datum = heap_getattr(tup, Anum_pg_database_datname, RelationGetDescr(pg_database_rel), &isNull);
-        Assert(!isNull);
-
-        database_name = (char*)DatumGetCString(datum);
-        if (strcmp(database_name, "template0") == 0) {
-            continue;
-        }
-
-        int tmpCount = GetTableCountByDatabase(database_name, cmd);
-        if (INT_MAX - tmpCount < count) {
-            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), 
-                errmsg("count is invalid, count:%d, tmpCount:%d", count, tmpCount)));
-        }
-        count += tmpCount;
-    }
-
-    tableam_scan_end(scan);
-    heap_close(pg_database_rel, AccessShareLock);
-
-    PG_RETURN_INT32(count);
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        (errmsg("Unsupport feature"),
+            errdetail("gs_get_nodegroup_tablecount is not supported for centralize deployment"),
+            errcause("The function is not implemented."),
+            erraction("Do not use this function with centralize deployment."))));
+    PG_RETURN_INT32(0);
 }

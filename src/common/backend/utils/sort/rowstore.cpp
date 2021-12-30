@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -37,7 +38,7 @@ typedef enum RESIDENCE { RES_UNKNOWN = 0, RES_MEM, RES_DISK } RESIDENCE;
 static Bank* bank_open(size_t max_size);
 
 /* write a data row to bank */
-static RESIDENCE bank_write(Bank* bank, RowStoreCell cell);
+static RESIDENCE bank_write(RowStoreManager rs, Bank* bank, RowStoreCell cell);
 
 /* read a data row from bank */
 static bool bank_read(Bank* bank, RowStoreCell data);
@@ -126,11 +127,12 @@ static bool should_write_to_memory(Bank* bank, RowStoreCell cell);
  *     change within a query?
  *
  * @param[IN] context:  memory context the row store will be working on
+ * @param[IN] resowner: resource owner the row store will attach with
  * @param[IN] max_size: the max size of data can hold in memory
  *                      if more data is coming, they will be written to disk
  * @return RowStore: which hold all the status of row store
  */
-RowStoreManager RowStoreAlloc(MemoryContext context, size_t max_size)
+RowStoreManager RowStoreAlloc(MemoryContext context, size_t max_size, ResourceOwner resowner)
 {
     AutoContextSwitch acs(context);
 
@@ -139,6 +141,7 @@ RowStoreManager RowStoreAlloc(MemoryContext context, size_t max_size)
 
     /* the rs is palloc0, so only need to fill the needed value */
     rs->context = context;
+    rs->resowner = (resowner != NULL) ? resowner : t_thrd.utils_cxt.TopTransactionResourceOwner;
     rs->cn_bank_num = u_sess->pgxc_cxt.NumCoords;
     rs->dn_bank_num = u_sess->pgxc_cxt.NumDataNodes;
 
@@ -314,7 +317,7 @@ void RowStoreInsert(RowStoreManager rs, RemoteDataRow data)
 
     RowStoreCell cell = make_one_cell(data);
 
-    RESIDENCE res = bank_write(bank, cell);
+    RESIDENCE res = bank_write(rs, bank, cell);
     if (res == RES_DISK) {
         /* the cell will be freed if write to disk */
         free_one_cell(cell);
@@ -560,7 +563,7 @@ static bool should_write_to_memory(Bank* bank, RowStoreCell cell)
  * @param[IN] cell: the cell to write to the bank
  * @return void
  */
-static RESIDENCE bank_write(Bank* bank, RowStoreCell cell)
+static RESIDENCE bank_write(RowStoreManager rs, Bank* bank, RowStoreCell cell)
 {
     if (should_write_to_memory(bank, cell)) {
         /* can hold in memory */
@@ -586,11 +589,11 @@ static RESIDENCE bank_write(Bank* bank, RowStoreCell cell)
                  * important: wrap the resource owner change in PG_TRY to
                  * restore to CurrentResourceOwner upon error
                  */
-                t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
+                t_thrd.utils_cxt.CurrentResourceOwner = rs->resowner;
 
                 /*
-                 * attach temp file in TopTransactionResourceOwner
-                 * so it will out live the current portal
+                 * register temp file into RowStore itself's ResourceOwner so that it will
+                 * be unregisted at right place when its transaction finishs.
                  */
                 bank->file = BufFileCreateTemp(false);
 

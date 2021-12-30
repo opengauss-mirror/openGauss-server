@@ -261,6 +261,7 @@ struct PGPROC {
 
     char *dw_unaligned_buf;
     char *dw_buf;
+    volatile bool flush_new_dw;
     volatile int32 dw_pos;
 
     /*
@@ -358,6 +359,7 @@ typedef struct PROC_HDR {
     Latch* checkpointerLatch;
     /* BCMWriter process's latch */
     Latch* cbmwriterLatch;
+    volatile Latch* ShareStoragexlogCopyerLatch;
     /* Current shared estimate of appropriate spins_per_delay value */
     int spins_per_delay;
     /* The proc of the Startup process, since not in ProcArray */
@@ -382,15 +384,13 @@ typedef struct PROC_HDR {
  *
  * PGXC needs another slot for the pool manager process
  */
-const int MAX_PAGE_WRITER_THREAD_NUM = 8;
-const int MAX_BG_WRITER_THREAD_NUM = 8;
+const int MAX_PAGE_WRITER_THREAD_NUM = 16;
 const int MAX_COMPACTION_THREAD_NUM = 100;
 
 /* number of multi auxiliary threads. */
 #define NUM_MULTI_AUX_PROC \
     (MAX_PAGE_WRITER_THREAD_NUM + \
      MAX_RECOVERY_THREAD_NUM + \
-     MAX_BG_WRITER_THREAD_NUM + \
      g_instance.shmem_cxt.ThreadPoolGroupNum + \
      MAX_COMPACTION_THREAD_NUM \
     )

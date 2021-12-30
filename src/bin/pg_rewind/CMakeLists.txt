@@ -1,6 +1,7 @@
 #This is the main CMAKE for build all components.
 # pg_rewind.bin
 set(TGT_rewind_SRC ${CMAKE_CURRENT_SOURCE_DIR}/datapagemap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/compressed_rewind.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fetch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/filemap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/file_ops.cpp
@@ -16,6 +17,7 @@ set(TGT_rewind_INC
     ${PROJECT_SRC_DIR}/common/interfaces/libpq
     ${PROJECT_SRC_DIR}/include/libpq 
     ${LIBOPENSSL_INCLUDE_PATH}
+    ${ZSTD_INCLUDE_PATH}
 )
 
 set(rewind_DEF_OPTIONS ${MACRO_OPTIONS})

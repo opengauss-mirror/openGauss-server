@@ -21,6 +21,16 @@ WHERE WITH_001.c1 LIKE '%c_'
 GROUP BY ROLLUP(PARTY_FIRSTNAME);
 
 explain  (costs off, verbose on)
+WITH WITH_001 AS materialized (
+    SELECT CAST(associate_expns_type_cd AS varchar) c1
+    FROM associate_benefit_expense
+    GROUP BY CUBE(c1))
+SELECT PARTY_FIRSTNAME
+FROM WITH_001,offers_20050701
+WHERE WITH_001.c1 LIKE '%c_'
+GROUP BY ROLLUP(PARTY_FIRSTNAME);
+
+explain  (costs off, verbose on)
 WITH WITH_001 AS (
     SELECT CAST(associate_expns_type_cd AS varchar) c1
     FROM associate_benefit_expense

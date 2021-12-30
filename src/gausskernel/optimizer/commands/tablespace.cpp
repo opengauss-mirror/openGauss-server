@@ -1641,6 +1641,7 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo)
     }
 
     while ((de = ReadDir(dirdesc, linkloc_with_version_dir)) != NULL) {
+        SegSpace *spc = NULL;
         len = strlen(linkloc_with_version_dir) + 1 + strlen(de->d_name) + 1;
         rc = EOK;
 
@@ -1654,7 +1655,7 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo)
         /* remove segment file */
         if (!redo && strcmp(de->d_name, "pgsql_tmp") != 0) {
             Oid dbNode = atoi(de->d_name);
-            spc_drop(tablespaceoid, dbNode, redo);
+            spc = spc_drop(tablespaceoid, dbNode, redo);
         }
 
         /* This check is just to deliver a friendlier error message */
@@ -1664,17 +1665,21 @@ static bool destroy_tablespace_directories(Oid tablespaceoid, bool redo)
             pfree_ext(linkloc_with_version_dir);
             return false;
         }
-
         /* remove empty directory */
+        if (spc) {
+            spc_lock(spc);
+        }
         if (rmdir(subfile) < 0)
             ereport(redo ? LOG : ERROR,
                 (errcode_for_file_access(), errmsg("could not remove directory \"%s\": %m", subfile)));
 
+        if (spc) {
+            spc_unlock(spc);
+        }
         pfree_ext(subfile);
     }
 
     FreeDir(dirdesc);
-
     /* remove version directory */
     if (rmdir(linkloc_with_version_dir) < 0) {
         ereport(redo ? LOG : ERROR,

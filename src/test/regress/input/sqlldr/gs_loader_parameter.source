@@ -1,0 +1,47 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+
+-- testcase1 basic
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- testcase2 invalid datafile
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl port=@portstring@ db=regression passwd=gauss@123 errors=4
+
+-- testcase3 invalid contrlfile
+\! @abs_bindir@/gs_loader data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+
+-- testcase4 invalid db
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ errors=4 passwd=gauss@123
+
+-- testcase5 invalid users and passwd
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 user="xxx" passwd="xxx"
+
+-- testcase6 invalid host
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 host=1212
+
+-- testcase7 invalid port
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data db=regression passwd=gauss@123 errors=4 port=0
+
+-- testcase8 invalid errors
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=-1
+
+-- testcase9 invalid skip
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 skip=-1
+
+-- testcase10 invalid bad file path
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 discard=@abs_srcdir@/data/gs_loader_basic.dis bad=@abs_srcdir@/data/c/a.bad
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- testcase11 invalid discard file path
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 bad=@abs_srcdir@/data/gs_loader_basic.bad discard=@abs_srcdir@/data/c/a.dis
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- teardown
+drop table SQLLDR_TBL;

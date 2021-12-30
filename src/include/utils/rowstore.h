@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -131,6 +132,7 @@ typedef RowStoreCellData* RowStoreCell;
 typedef struct RowStoreManagerData {
 
     MemoryContext context; /* memory context for the RowStore */
+    ResourceOwner resowner;     /* resource owner for the RowStore */
 
     Bank** cn_banks;          /* each coordinator has its own bank */
     int cn_bank_num;          /* total number of cn_banks, should equal to NumCoordinates */
@@ -145,7 +147,7 @@ typedef RowStoreManagerData* RowStoreManager;
 /*===============API================*/
 
 /* initialize a row store */
-extern RowStoreManager RowStoreAlloc(MemoryContext context, size_t max_size);
+extern RowStoreManager RowStoreAlloc(MemoryContext context, size_t max_size, ResourceOwner resowner = NULL);
 
 /* insert a value into row store */
 extern void RowStoreInsert(RowStoreManager rs, RemoteDataRow data);

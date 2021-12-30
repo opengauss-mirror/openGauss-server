@@ -39,6 +39,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/backend/utils/cache/plancache.c
@@ -429,8 +430,8 @@ CachedPlanSource* CreateOneShotCachedPlan(Node* raw_parse_tree, const char* quer
  * fixed_result: TRUE to disallow future changes in query's result tupdesc
  */
 void CompleteCachedPlan(CachedPlanSource* plansource, List* querytree_list, MemoryContext querytree_context,
-    Oid* param_types, int num_params, ParserSetupHook parserSetup, void* parserSetupArg, int cursor_options,
-    bool fixed_result, const char* stmt_name, ExecNodes* single_exec_node, bool is_read_only)
+    Oid* param_types, const char* paramModes, int num_params, ParserSetupHook parserSetup, void* parserSetupArg, 
+    int cursor_options, bool fixed_result, const char* stmt_name, ExecNodes* single_exec_node, bool is_read_only)
 {
     MemoryContext source_context = plansource->context;
     MemoryContext oldcxt = CurrentMemoryContext;
@@ -516,6 +517,15 @@ void CompleteCachedPlan(CachedPlanSource* plansource, List* querytree_list, Memo
         securec_check(rc, "", "");
     } else
         plansource->param_types = NULL;
+	
+    if (num_params > 0 && paramModes != NULL) {
+        plansource->param_modes = (char*)palloc(num_params * sizeof(char));
+        rc = memcpy_s(plansource->param_modes, num_params * sizeof(char), paramModes, num_params * sizeof(char));
+        securec_check(rc, "", "");
+    } else {
+        plansource->param_modes = NULL;
+    }
+
     plansource->num_params = num_params;
     plansource->parserSetup = parserSetup;
     plansource->parserSetupArg = parserSetupArg;
@@ -1163,6 +1173,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
      * do SPI_push whenever a replan could happen, it seems best to take care
      * of the case here.
      */
+    SPI_STACK_LOG("push cond", NULL, NULL);
     spi_pushed = SPI_push_conditional();
     u_sess->pcache_cxt.query_has_params = (plansource->num_params > 0);
     /*
@@ -1174,10 +1185,8 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
         /* Save stream supported info since it will be reset when generate the plan. */
         outer_is_stream = u_sess->opt_cxt.is_stream;
         outer_is_stream_support = u_sess->opt_cxt.is_stream_support;
-#ifndef ENABLE_MULTIPLE_NODES
         /* opengaussdb:jdbc to create vecplan */
         set_default_stream();
-#endif
         plist = pg_plan_queries(qlist, plansource->cursor_options, boundParams);
     }
     PG_CATCH();
@@ -1191,6 +1200,7 @@ static CachedPlan* BuildCachedPlan(CachedPlanSource* plansource, List* qlist, Pa
     ResetStream(outer_is_stream, outer_is_stream_support);
 
     /* Clean up SPI state */
+    SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(spi_pushed);
 
     /* Release snapshot if we got one */

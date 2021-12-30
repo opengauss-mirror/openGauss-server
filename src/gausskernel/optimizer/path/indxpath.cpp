@@ -38,12 +38,14 @@
 #include "optimizer/restrictinfo.h"
 #include "optimizer/var.h"
 #include "parser/parse_hint.h"
+#include "parser/parse_oper.h"
 #include "parser/parsetree.h"
 #include "utils/builtins.h"
 #include "utils/bytea.h"
 #include "utils/lsyscache.h"
 #include "utils/pg_locale.h"
 #include "utils/selfuncs.h"
+#include "rusagestub.h"
 
 #define IsBooleanOpfamily(opfamily) ((opfamily) == BOOL_BTREE_FAM_OID || \
     (opfamily) == BOOL_HASH_FAM_OID || (opfamily) == BOOL_UBTREE_FAM_OID)
@@ -797,14 +799,14 @@ inline bool ContainAllColsAndEqRestrict(const IndexPath* newPath, const IndexOpt
  */
 void MarkUniqueIndexFirstRule(const RelOptInfo* rel, const IndexOptInfo* index, List* result)
 {
-    if (!ENABLE_SQL_BETA_FEATURE(NO_UNIQUE_INDEX_FIRST) && index->relam == BTREE_AM_OID) {
+    if (!ENABLE_SQL_BETA_FEATURE(NO_UNIQUE_INDEX_FIRST) && OID_IS_BTREE(index->relam)) {
         ListCell* lcr = NULL;
         foreach (lcr, result) {
             IndexPath* newPath = (IndexPath*)lfirst(lcr);
             ListCell* lci = NULL;
             foreach (lci, rel->indexlist) {
                 IndexOptInfo* indexToMatch = (IndexOptInfo*)lfirst(lci);
-                if (indexToMatch->relam == BTREE_AM_OID && indexToMatch->unique && 
+                if (OID_IS_BTREE(indexToMatch->relam) && indexToMatch->unique && 
                     ContainAllColsAndEqRestrict(newPath, indexToMatch)) {
                         newPath->rulesforindexgen |= BTREE_INDEX_CONTAIN_UNIQUE_COLS;
                         break;
@@ -812,6 +814,41 @@ void MarkUniqueIndexFirstRule(const RelOptInfo* rel, const IndexOptInfo* index, 
             }
         }
     }
+}
+
+static bool PathkeysIsUnusefulForPartition(const IndexOptInfo* index)
+{
+    if (!index->ispartitionedindex) {
+        return false;
+    }
+    /*
+    * Only the local index's pathkeys is unuseful. 
+    * It can only ensure that the current partition data is in order.
+    */
+    if (index->ispartitionedindex && index->isGlobal) {
+        return false;
+    }
+    bool result = false;
+    Oid heapOid = IndexGetRelation(index->indexoid, false);
+    Relation rel = heap_open(heapOid, NoLock);
+
+    switch (rel->partMap->type) {
+        case PART_TYPE_LIST:
+        case PART_TYPE_HASH:
+            result = true;
+            break;
+        case PART_TYPE_RANGE:
+        case PART_TYPE_INTERVAL:
+        case PART_TYPE_VALUE:
+            result = false;
+            break;
+        default:
+            result = true;
+            break;
+    }
+
+    heap_close(rel, NoLock);
+    return result;
 }
 
 /*
@@ -1009,7 +1046,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
      * predicate, OR an index-only scan is possible.
      */
     if (found_clause || useful_pathkeys != NIL || useful_predicate || index_only_scan) {
-        if (relHasbkt && !index->crossbucket) {
+        if ((relHasbkt && !index->crossbucket) || PathkeysIsUnusefulForPartition(index)) {
             useful_pathkeys = NIL;
         }
         ipath = create_index_path(root,
@@ -1034,7 +1071,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
         index_pathkeys = build_index_pathkeys(root, index, BackwardScanDirection);
         useful_pathkeys = truncate_useless_pathkeys(root, rel, index_pathkeys);
         if (useful_pathkeys != NIL) {
-            if (relHasbkt && !index->crossbucket) {
+            if ((relHasbkt && !index->crossbucket) || PathkeysIsUnusefulForPartition(index)) {
                 useful_pathkeys = NIL;
             }
             ipath = create_index_path(root,
@@ -1605,8 +1642,7 @@ static Path* choose_bitmap_and(PlannerInfo* root, RelOptInfo* rel, List* paths, 
      * we can remove this limitation.  (But note that this also defends
      * against flat-out duplicate input paths, which can happen because
      * match_join_clauses_to_index will find the same OR join clauses that
-     * extract_restriction_or_clauses has pulled OR restriction clauses out
-     * of.)
+     * create_or_index_quals has pulled OR restriction clauses out of.)
      *
      * For the same reason, we reject AND combinations in which an index
      * predicate clause duplicates another clause.	Here we find it necessary
@@ -2180,6 +2216,100 @@ static void match_clauses_to_index(IndexOptInfo* index, List* clauses, IndexClau
     }
 }
 
+static Oid typeCastForIdxMatch[] = {RTRIM1FUNCOID /* bpchar to text func */
+                                    /* Supported in the future */};
+
+inline bool SupportedConvertForIdxMatch(Oid FuncOid)
+{
+    for (int i = 0; i < (int)lengthof(typeCastForIdxMatch); ++i) {
+        if (typeCastForIdxMatch[i] == FuncOid) {
+            return true;
+        }
+    }
+    /* Didn't find. */
+    return false;
+}
+
+static bool ConvertFuncEqConst(Expr* clause, Node* leftop, Node* rightop,
+    RestrictInfo* rinfo, RestrictInfo* &rinfo_converted)
+{
+    if ((IsA(leftop, FuncExpr) && IsA(rightop, Const) && SupportedConvertForIdxMatch(((FuncExpr*)leftop)->funcid)) ||
+        (IsA(leftop, Const) && IsA(rightop, FuncExpr) && SupportedConvertForIdxMatch(((FuncExpr*)rightop)->funcid))) {
+        Node* funcop = IsA(leftop, FuncExpr) ? leftop : rightop;
+        Node* constop = IsA(leftop, FuncExpr) ? rightop : leftop;
+        if (list_length(((FuncExpr*)funcop)->args) == 1 && IsA(lfirst(list_head(((FuncExpr*)funcop)->args)), Var)) {
+            Var* var = (Var*)copyObject((Var*)linitial(((FuncExpr*)funcop)->args));
+            Const* c = (Const*)copyObject(constop);
+            c->consttype = var->vartype;
+
+            rinfo_converted = (RestrictInfo*)copyObject(rinfo);
+            rinfo_converted->clause = make_op(NULL,
+                get_operator_name(((OpExpr*)clause)->opno, exprType((Node*)var), exprType((Node*)c)),
+                (Node*)var, (Node*)c, ((OpExpr*)clause)->location);
+
+            exprSetInputCollation((Node*)rinfo_converted->clause, ((OpExpr*)clause)->inputcollid);
+            rinfo_converted->converted = true; /* Mark this rinfo is built by type conversion */
+            rinfo->converted = true; /* Mark this rinfo has been converted */
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool ConvertFuncEqVar(Expr* clause, Node* leftop, Node* rightop,
+    RestrictInfo* rinfo, RestrictInfo* &rinfo_converted)
+{
+    if ((IsA(leftop, FuncExpr) && IsA(rightop, Var) && SupportedConvertForIdxMatch(((FuncExpr*)leftop)->funcid)) ||
+        (IsA(leftop, Var) && IsA(rightop, FuncExpr) && SupportedConvertForIdxMatch(((FuncExpr*)rightop)->funcid))) {
+        Node* funcop = IsA(leftop, FuncExpr) ? leftop : rightop;
+        Node* varop = IsA(leftop, FuncExpr) ? rightop : leftop;
+        if (list_length(((FuncExpr*)funcop)->args) == 1 && IsA(lfirst(list_head(((FuncExpr*)funcop)->args)), Var)) {
+            Var* var1 = (Var*)copyObject((Var*)linitial(((FuncExpr*)funcop)->args));
+            Var* var2 = (Var*)copyObject(varop);
+            var2->vartype = var1->vartype;
+
+            rinfo_converted = (RestrictInfo*)copyObject(rinfo);
+            rinfo_converted->clause = make_op(NULL,
+                get_operator_name(((OpExpr*)clause)->opno, exprType((Node*)var1), exprType((Node*)var2)),
+                (Node*)var1, (Node*)var2, ((OpExpr*)clause)->location);
+
+            exprSetInputCollation((Node*)rinfo_converted->clause, ((OpExpr*)clause)->inputcollid);
+            rinfo_converted->converted = true; /* Mark this rinfo is built by type conversion */
+            rinfo->converted = true; /* Mark this rinfo has been converted */
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool ConvertTypeForIdxMatch(RestrictInfo* rinfo, RestrictInfo* &rinfo_converted)
+{
+    bool converted = false;
+    Expr* clause = rinfo->clause;
+    if (is_opclause(clause)) {
+        Node* leftop = NULL;
+        Node* rightop = NULL;
+
+        leftop = get_leftop(clause);
+        rightop = get_rightop(clause);
+        if (leftop == NULL || rightop == NULL) {
+            return false;
+        }
+
+        /* 1. consider FuncExpr = Const, like: a = 1, b = 'zzy'... */
+        converted = converted ? true : ConvertFuncEqConst(clause, leftop, rightop, rinfo, rinfo_converted);
+
+        /* 2. consider FuncExpr = Var, like: join XXX on t.a = t.b */
+        converted = converted ? true : ConvertFuncEqVar(clause, leftop, rightop, rinfo, rinfo_converted);
+    }
+
+    return converted;
+}
+
 /*
  * match_clause_to_index
  *	  Test whether a qual clause can be used with an index.
@@ -2224,10 +2354,19 @@ static void match_clause_to_index(IndexOptInfo* index, RestrictInfo* rinfo, Inde
         return;
     }
 
+    /*
+     * Before matching, We try to convert const type for adapting to the
+     * index aiming to match.
+     */
+    RestrictInfo* rinfo_converted = NULL;
+    bool converted = ConvertTypeForIdxMatch(rinfo, rinfo_converted);
+    Assert((converted && rinfo_converted) || (!converted && !rinfo_converted));
+
     /* OK, check each index column for a match */
     for (indexcol = 0; indexcol < index->nkeycolumns; indexcol++) {
-        if (match_clause_to_indexcol(index, indexcol, rinfo)) {
-            clauseset->indexclauses[indexcol] = list_append_unique_ptr(clauseset->indexclauses[indexcol], rinfo);
+        if (match_clause_to_indexcol(index, indexcol, converted ? rinfo_converted : rinfo)) {
+            clauseset->indexclauses[indexcol] = list_append_unique_ptr(clauseset->indexclauses[indexcol],
+                                                                        converted ? rinfo_converted : rinfo);
             clauseset->nonempty = true;
             return;
         }

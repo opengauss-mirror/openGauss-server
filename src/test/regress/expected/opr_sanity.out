@@ -2616,6 +2616,8 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  5031 | pg_stat_get_wlm_instance_info
  5032 | pg_stat_get_wlm_instance_info_with_cleanup
  5034 | gs_io_wait_status
+ 5077 | gs_hadr_local_rto_and_rpo_stat
+ 5078 | gs_hadr_remote_rto_and_rpo_stat
  5345 | pv_builtin_functions
  5519 | int1cmp
  5520 | hashint1

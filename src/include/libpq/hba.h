@@ -69,6 +69,7 @@ typedef struct HbaLine {
 typedef struct Port hbaPort;
 
 extern bool load_hba(void);
+extern void check_old_hba(bool);
 extern void load_ident(void);
 extern void hba_getauthmethod(hbaPort* port);
 extern bool IsLoopBackAddr(Port* port);

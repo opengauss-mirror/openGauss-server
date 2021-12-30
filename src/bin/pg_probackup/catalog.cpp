@@ -1927,13 +1927,17 @@ write_backup(pgBackup *backup, bool strict)
     securec_check_ss_c(nRet, "\0", "\0");
     canonicalize_path(path_temp);
     fp = fopen(path_temp, PG_BINARY_W);
-    if (fp == NULL)
+    if (fp == NULL) {
         elog(ERROR, "Cannot open control file \"%s\": %s",
             path_temp, strerror(errno));
+        return;
+    }
 
-    if (chmod(path_temp, FILE_PERMISSION) == -1)
+    if (chmod(path_temp, FILE_PERMISSION) == -1) {
         elog(ERROR, "Cannot change mode of \"%s\": %s", path_temp,
          strerror(errno));
+        return;
+    }
 
     setvbuf(fp, buf, _IOFBF, sizeof(buf));
 

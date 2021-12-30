@@ -54,7 +54,7 @@ InSideView query_from_view_hook = NULL;
 static void setEncryptedColumnRef(ColumnDef *def, TargetEntry *tle)
 {
     def->clientLogicColumnRef = (ClientLogicColumnRef*)palloc(sizeof(ClientLogicColumnRef));
-    HeapTuple tup = search_sys_cache_ce_col_name(tle->resorigtbl, def->colname);
+    HeapTuple tup = SearchSysCache2(CERELIDCOUMNNAME, ObjectIdGetDatum(tle->resorigtbl), CStringGetDatum(def->colname));
     if (!HeapTupleIsValid(tup)) {
         ereport(ERROR,
                 (errcode(ERRCODE_UNDEFINED_COLUMN), errmsg("client encrypted column \"%s\" does not exist", def->colname)));

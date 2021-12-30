@@ -55,11 +55,10 @@ update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_
                    Output: subplan_new.boolor_006.col_boolor
                    ->  Index Only Scan Backward using boolor_006_pkey on subplan_new.boolor_006
                          Output: subplan_new.boolor_006.col_boolor
-                         Index Cond: (subplan_new.boolor_006.col_boolor IS NOT NULL)
    ->  Index Scan using boolor_006_pkey on subplan_new.boolor_006
          Output: false, subplan_new.boolor_006.ctid
          Index Cond: (subplan_new.boolor_006.col_boolor = $1)
-(13 rows)
+(12 rows)
 
 update BOOLOR_006 set COL_BOOLOR = false where COL_BOOLOR = (select bool_or(COL_BOOLOR) from BOOLOR_006);
 ERROR:  duplicate key value violates unique constraint "boolor_006_pkey"
@@ -293,7 +292,7 @@ from
                                        Selected Partitions:  1..15
                ->  Subquery Scan on "*SELECT* 2"
                      ->  Aggregate
-                           InitPlan 1 (returns $2)
+                           InitPlan 1 (returns $4)
                              ->  Aggregate
                                    ->  Hash Left Join
                                          Hash Cond: (subplan_new.customer.c_birth_month = web_site.web_mkt_id)
@@ -654,8 +653,8 @@ where c_birth_day = web_mkt_id and web_site_sk = length(trim(c_birth_country))
          Filter: (SubPlan 2)
          SubPlan 2
            ->  Result
-                 Output: $3
-                 InitPlan 1 (returns $3)
+                 Output: $4
+                 InitPlan 1 (returns $4)
                    ->  Limit
                          Output: subplan_new.web_site_1.web_mkt_id
                          ->  Partition Iterator

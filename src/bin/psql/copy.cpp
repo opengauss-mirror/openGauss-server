@@ -57,7 +57,12 @@ struct copy_options {
     char* relName;       /* relation name. If enclosed in quotation marks, take out the value in the quotation marks,
                           * otherwise convert to lowercase. only for copy from */
     bool isFileBinary;   /* true if file format is binary, only for copy from */
+    bool isEol;         /* true if 'eol' exists in copy options, only for copy from */
+    bool hasHeader;     /* true if 'header' exists and value is true in copy options, only for copy from */
 };
+
+/* read chunk size for COPY IN - size is not critical */
+#define COPYBUFSIZ 8192
 
 static void free_copy_options(struct copy_options* ptr)
 {
@@ -115,6 +120,59 @@ static bool AtoiStrictly(const char *str, int *num)
     return true;
 }
 
+static void toUpper(char* dest, const char* source)
+{
+    size_t i;
+    size_t len = strlen(source);
+    for (i = 0; i < len; i++) {
+        dest[i] = toupper(source[i]);
+    }
+    dest[len] = '\0';
+}
+
+// check if copy options keyword key exists in source or not
+// if ,key or key' exists in source, return true
+static bool IsCopyOptionKeyWordExists(const char* source, const char* key)
+{
+    size_t sourceLen = strlen(source);
+    size_t keyLen = strlen(key);
+
+    if (sourceLen < keyLen) {
+        return false;
+    }
+
+    if (pg_strcasecmp(source, key) == 0) {
+        return true;
+    }
+
+    char* upperSource = (char*)pg_malloc(sourceLen + 1);
+    // compare ,key or key', so malloc size is keyLen + 2
+    char* upperKey = (char*)pg_malloc(keyLen + 2);
+
+    *upperKey = ',';
+    toUpper(upperSource, source);
+    toUpper(upperKey + 1, key);
+    if (strstr(upperSource, upperKey) != NULL) {
+        free(upperKey);
+        free(upperSource);
+        return true;
+    }
+
+    toUpper(upperKey, key);
+    upperKey[keyLen] = '\'';
+    upperKey[keyLen + 1] = '\0';
+
+    if (strstr(upperSource, upperKey) != NULL) {
+        free(upperKey);
+        free(upperSource);
+        return true;
+    }
+
+    free(upperKey);
+    free(upperSource);
+    return false;
+}
+
 /* parse parallel settings */
 static bool ParseParallelOption(struct copy_options* result, char** errToken)
 {
@@ -153,12 +211,32 @@ static bool ParseParallelOption(struct copy_options* result, char** errToken)
             return true;
         }
 
-        if (pg_strcasecmp(token, "binary") == 0) {
+        if (IsCopyOptionKeyWordExists(token, "binary")) {
             result->isFileBinary = true;
         }
 
-        xstrcat(&result->after_tofrom, " ");
-        xstrcat(&result->after_tofrom, token);
+        if (IsCopyOptionKeyWordExists(token, "eol")) {
+            result->isEol = true;
+        }
+
+        if (IsCopyOptionKeyWordExists(token, "header")) {
+            // if header keyword exists, read a token forward
+            // when header is true, copy "header false" to result->after_tofrom
+            xstrcat(&result->after_tofrom, " ");
+            xstrcat(&result->after_tofrom, token);
+
+            token = strtokx(nullptr, whitespace, ",()", NULL, 0, false, false, pset.encoding);
+            if (pg_strcasecmp(token, "true") == 0) {
+                result->hasHeader = true;
+                xstrcat(&result->after_tofrom, " false");
+            } else {
+                xstrcat(&result->after_tofrom, " ");
+                xstrcat(&result->after_tofrom, token);
+            }
+        } else {
+            xstrcat(&result->after_tofrom, " ");
+            xstrcat(&result->after_tofrom, token);
+        }
 
         token = strtokx(nullptr, whitespace, NULL, NULL, 0, false, false, pset.encoding);
         if (token == nullptr) {
@@ -205,6 +283,7 @@ static struct copy_options* parse_slash_copy(const char* args)
     result->before_tofrom = pg_strdup(""); /* initialize for appending */
     result->parallel = 0;
     result->isFileBinary = false;
+    result->isEol = false;
 
     token = strtokx(args, whitespace, ".,()", "\"", 0, false, false, pset.encoding);
     if (token == NULL)
@@ -335,7 +414,7 @@ static bool IsParallelCopyFrom(const struct copy_options* options)
         return false;
     }
     
-    if (!options->from || options->parallel == 0
+    if (!options->from || options->parallel == 0 || options->isEol
         || options->isFileBinary || pset.decryptInfo.encryptInclude) {
         return false;
     }
@@ -367,6 +446,16 @@ static bool IsParallelCopyFrom(const struct copy_options* options)
     PQclear(result);
     
     return true;
+}
+
+static void skip_first_line_when_has_header(const struct copy_options* options, FILE* copystream)
+{
+    if (!options->hasHeader) {
+        return;
+    }
+
+    char buf[COPYBUFSIZ];
+    fgets(buf, sizeof(buf), copystream);
 }
 
 /*
@@ -420,6 +509,9 @@ bool do_copy(const char* args)
         free_copy_options(options);
         return false;
     }
+
+    // if header = true, skip first line
+    skip_first_line_when_has_header(options, copystream);
 
     /* make sure the specified file is not a directory */
     fstat(fileno(copystream), &st);
@@ -557,9 +649,6 @@ bool handleCopyOut(PGconn* conn, FILE* copystream)
  *
  * result is true if successful, false if not.
  */
-
-/* read chunk size for COPY IN - size is not critical */
-#define COPYBUFSIZ 8192
 
 bool handleCopyIn(PGconn* conn, FILE* copystream, bool isbinary)
 {

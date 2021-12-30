@@ -28,6 +28,7 @@ set(TGT_gsctl_INC
     ${PROJECT_TRUNK_DIR}/distribute/include
     ${LIBHOTPATCH_INCLUDE_PATH}
     ${ZLIB_INCLUDE_PATH}
+    ${ZSTD_INCLUDE_PATH}
 )
 
 set(gsctl_DEF_OPTIONS ${MACRO_OPTIONS} -DHAVE_LIBZ -DFRONTEND)
@@ -38,7 +39,7 @@ add_bintarget(gs_ctl TGT_gsctl_SRC TGT_gsctl_INC "${gsctl_DEF_OPTIONS}" "${gsctl
 add_dependencies(gs_ctl elog_static buildquery_static pg_rewind_static pgcommon_static hotpatchclient_static pgport_static pq)
 target_link_directories(gs_ctl PUBLIC
     ${LIBOPENSSL_LIB_PATH} ${PROTOBUF_LIB_PATH} ${LIBPARQUET_LIB_PATH} ${LIBCURL_LIB_PATH}
-    ${ZLIB_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH}
+    ${ZLIB_LIB_PATH} ${ZSTD_LIB_PATH} ${LIBOBS_LIB_PATH} ${LIBEDIT_LIB_PATH} ${LIBCGROUP_LIB_PATH} ${SECURE_LIB_PATH}
     ${LIBHOTPATCH_LIB_PATH} ${KERBEROS_LIB_PATH} ${CMAKE_BINARY_DIR}/lib
 )
 install(TARGETS gs_ctl RUNTIME DESTINATION bin)

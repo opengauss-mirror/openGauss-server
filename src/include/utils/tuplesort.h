@@ -139,6 +139,7 @@ extern void tuplesort_remoteread_end(Tuplesortstate* state);
 #endif
 
 extern void tuplesort_set_bound(Tuplesortstate* state, int64 bound);
+extern void tuplesort_set_siblings(Tuplesortstate* state, const int numKeys, const List *internalEntryList);
 
 extern void tuplesort_puttupleslot(Tuplesortstate* state, TupleTableSlot* slot);
 extern void TuplesortPutheaptuple(Tuplesortstate* state, HeapTuple tup);

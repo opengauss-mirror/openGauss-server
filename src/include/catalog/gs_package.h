@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2021 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -29,7 +30,7 @@
 
 /* ----------------------------------------------------------------
  *        gs_package definition.
- *
+*
  *        cpp turns this into typedef struct FormData_gs_package
  *
  *    nspname             name of the namespace
@@ -42,13 +43,16 @@
 extern Oid PackageNameGetOid(const char* pkgname, Oid namespaceId = InvalidOid);
 extern PLpgSQL_package* PackageInstantiation(Oid packageOid);
 extern void PackageInit(PLpgSQL_package* pkg, bool isCreate=false);
-extern void DisconnectSPI();
+extern Oid SysynonymPkgNameGetOid(const char* pkgname, Oid namespaceId);
 extern Oid saveCallFromPkgOid(Oid pkgOid);
 extern void restoreCallFromPkgOid(Oid pkgOid);
-extern void ConnectSPI();
 extern NameData* GetPackageName(Oid packageOid);
 extern Oid PackageNameListGetOid(List* pkgnameList, bool missing_ok=false);
+extern Oid GetPackageNamespace(Oid packageOid);
 extern bool IsExistPackageName(const char* pkgname);
+extern void BuildSessionPackageRuntime(uint64 sessionId, uint64 parentSessionId);
+extern void initAutonomousPkgValue(PLpgSQL_package* targetPkg, uint64 sessionId);
+extern void processAutonmSessionPkgs(PLpgSQL_function* func);
 CATALOG(gs_package,7815) BKI_BOOTSTRAP BKI_ROWTYPE_OID(9745) BKI_SCHEMA_MACRO
 {
     Oid         pkgnamespace;   /*package name space*/
@@ -60,6 +64,7 @@ CATALOG(gs_package,7815) BKI_BOOTSTRAP BKI_ROWTYPE_OID(9745) BKI_SCHEMA_MACRO
     text        pkgbodydeclsrc; /* package delcare */
     text        pkgbodyinitsrc; /* package body */
     aclitem     pkgacl[1];      /* package privilege */
+    bool        pkgsecdef;       /* definer or invoker*/
 #endif
 } FormData_gs_package;
 
@@ -75,7 +80,7 @@ typedef FormData_gs_package *Form_gs_package;
  * ----------------
  */
 
-#define Natts_gs_package				7
+#define Natts_gs_package                8
 #define Anum_gs_package_pkgnamespace    1
 #define Anum_gs_package_pkgowner        2
 #define Anum_gs_package_pkgname         3
@@ -83,7 +88,6 @@ typedef FormData_gs_package *Form_gs_package;
 #define Anum_gs_package_pkgbodydeclsrc  5
 #define Anum_gs_package_pkgbodyinitsrc  6
 #define Anum_gs_package_pkgacl          7
-
-
+#define Anum_gs_package_pkgsecdef       8
 #endif   /* PG_PACKAGRE_H */
 

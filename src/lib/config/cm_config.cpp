@@ -1351,6 +1351,7 @@ int get_dynamic_dn_role(void)
 
     nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, DYNAMIC_DNROLE_FILE);
     securec_check_ss_c(nRet, "\0", "\0");
+    canonicalize_path(path);
 
     if (lstat(path, &statbuf) != 0) {
         return 0;
@@ -1362,12 +1363,16 @@ int get_dynamic_dn_role(void)
     }
 
     while ((fgets(line_info, 1023 - 1, fp)) != NULL) {
-        line_info[(int)strlen(line_info) - 1] = '\0';
-        node_name = strtok_r(line_info, "=", &dn_role);
-        for (nodeidx = 0; node_name && (nodeidx < g_node_num); nodeidx++) {
-            if (strncmp(g_node[nodeidx].nodeName, node_name, strlen(node_name)) == 0){
-                g_node[nodeidx].datanode[0].datanodeRole = (uint32)atoi(dn_role);
-                break;
+        if ((int)strlen(line_info) > 0) {
+            if (line_info[(int)strlen(line_info) - 1] == '\n') {
+                line_info[(int)strlen(line_info) - 1] = '\0';
+            }
+            node_name = strtok_r(line_info, "=", &dn_role);
+            for (nodeidx = 0; node_name && (nodeidx < g_node_num); nodeidx++) {
+                if (strncmp(g_node[nodeidx].nodeName, node_name, strlen(node_name)) == 0) {
+                    g_node[nodeidx].datanode[0].datanodeRole = (uint32)atoi(dn_role);
+                    break;
+                }
             }
         }
     }

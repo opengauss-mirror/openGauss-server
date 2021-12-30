@@ -7,6 +7,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/parser/parse_utilcmd.h
  *
@@ -39,6 +40,7 @@ typedef struct {
     PartitionState* csc_partTableState;
     List* reloptions;
     List* partitionKey; /* partitionkey for partiitoned table */
+    List* subPartitionKey; /* subpartitionkey for subpartiitoned table */
     IndexStmt* pkey;    /* PRIMARY KEY index, if any */
 #ifdef PGXC
     List* fallback_dist_col;    /* suggested column to distribute on */
@@ -61,7 +63,7 @@ extern List* transformAlterTableStmt(Oid relid, AlterTableStmt* stmt, const char
 extern IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryString);
 extern void transformRuleStmt(RuleStmt* stmt, const char* queryString, List** actions, Node** whereClause);
 extern List* transformCreateSchemaStmt(CreateSchemaStmt* stmt);
-extern void transformRangePartitionValue(ParseState* pstate, Node* rangePartDef, bool needCheck);
+extern void transformPartitionValue(ParseState* pstate, Node* rangePartDef, bool needCheck);
 extern List* transformListPartitionValue(ParseState* pstate, List* boundary, bool needCheck, bool needFree);
 extern List* transformRangePartitionValueInternal(ParseState* pstate, List* boundary,
     bool needCheck, bool needFree, bool isPartition = true);
@@ -73,6 +75,8 @@ extern bool CheckLocalIndexColumn(char loctype, char* partcolname, char* indexco
 extern Oid generateClonedIndex(Relation source_idx, Relation source_relation, char* tempIndexName, Oid targetTblspcOid,
     bool skip_build, bool partitionedIndex);
 extern void checkPartitionName(List* partitionList, bool isPartition = true);
+extern void checkSubPartitionName(List* partitionList);
+extern List* GetPartitionNameList(List* partitionList);
 
 extern Oid searchSeqidFromExpr(Node* cooked_default);
 extern bool is_start_end_def_list(List* def_list);

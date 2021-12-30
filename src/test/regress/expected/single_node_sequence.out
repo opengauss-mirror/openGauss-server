@@ -317,12 +317,12 @@ SELECT * FROM information_schema.sequences WHERE sequence_name IN
   ORDER BY sequence_name ASC;
  sequence_catalog | sequence_schema |   sequence_name    | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |    maximum_value    | increment | cycle_option 
 ------------------+-----------------+--------------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+---------------------+-----------+--------------
- regression       | public          | sequence_test2     | bigint    |                64 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
- regression       | public          | serialtest2_f2_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
- regression       | public          | serialtest2_f3_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
- regression       | public          | serialtest2_f4_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
- regression       | public          | serialtest2_f5_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
- regression       | public          | serialtest2_f6_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | sequence_test2     | int16     |               128 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | serialtest2_f2_seq | int16     |               128 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | serialtest2_f3_seq | int16     |               128 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | serialtest2_f4_seq | int16     |               128 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | serialtest2_f5_seq | int16     |               128 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | serialtest2_f6_seq | int16     |               128 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
 (6 rows)
 
 -- Test comments
@@ -398,7 +398,7 @@ SELECT * FROM information_schema.sequences WHERE sequence_name IN
   ORDER BY sequence_name ASC;
  sequence_catalog | sequence_schema | sequence_name  | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |    maximum_value    | increment | cycle_option 
 ------------------+-----------------+----------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+---------------------+-----------+--------------
- regression       | public          | sequence_test2 | bigint    |                64 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | sequence_test2 | int16     |               128 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
 (1 row)
 
 DROP USER seq_user;

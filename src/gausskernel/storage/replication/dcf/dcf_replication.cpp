@@ -40,6 +40,11 @@
 #include "replication/dcf_data.h"
 
 #ifndef ENABLE_MULTIPLE_NODES
+
+#ifdef ENABLE_UT
+#define static
+#endif
+
 #define TEMP_CONF_FILE "postgresql.conf.bak"
 #define CONFIG_BAK_FILENAME "postgresql.conf.bak"
 
@@ -435,6 +440,8 @@ bool SetDcfParams()
 
     SetDcfParam("LOG_LEVEL", u_sess->attr.attr_storage.dcf_attr.dcf_log_level);
 
+    SetDcfParam("LOG_FILENAME_FORMAT", "1");
+
     /* to limit line width */
     uint64_t dcf_guc_param = 0;
 
@@ -573,7 +580,7 @@ bool IsForceUpdate(TimestampTz preSendTime, TimestampTz curSendTime)
     int microsecToTime;
     long millisecTimeDiff = 0;
     TimestampDifference(preSendTime,
-        preSendTime, &secToTime, &microsecToTime);
+        curSendTime, &secToTime, &microsecToTime);
     millisecTimeDiff = secToTime * MILLISECONDS_PER_SECONDS
         + microsecToTime / MILLISECONDS_PER_MICROSECONDS;
     ereport(DEBUG1, (errmsg("The millisec_time_diff is %ld", millisecTimeDiff)));
@@ -661,24 +668,24 @@ static void DCFLogCtrlCalculateIndicatorChange(DCFLogCtrlData *logCtrl, int64 *g
     int64 rpoGapDiff = 0;
     int64 rpoGap = 0;
 
-    if (u_sess->attr.attr_storage.target_rto > 0) {
+    if (t_thrd.dcf_cxt.dcfCtxInfo->targetRTO > 0) {
         if (logCtrl->prev_RTO < 0) {
             logCtrl->prev_RTO = logCtrl->current_RTO;
         }
 
-        int targetRTO = u_sess->attr.attr_storage.target_rto;
+        int targetRTO = t_thrd.dcf_cxt.dcfCtxInfo->targetRTO;
         int64 currentRTO = logCtrl->current_RTO;
         rtoGap = currentRTO - targetRTO;
         rtoPrevGap = logCtrl->prev_RTO - targetRTO;
         rtoGapDiff = rtoGap - rtoPrevGap;
     }
 
-    if (u_sess->attr.attr_storage.time_to_target_rpo > 0) {
+    if (t_thrd.dcf_cxt.dcfCtxInfo->targetRPO > 0) {
         if (logCtrl->prev_RPO < 0) {
             logCtrl->prev_RPO = logCtrl->current_RPO;
         }
 
-        int targetRPO = u_sess->attr.attr_storage.time_to_target_rpo;
+        int targetRPO = t_thrd.dcf_cxt.dcfCtxInfo->targetRPO;
         int64 currentRPO = logCtrl->current_RPO;
         rpoGap = currentRPO - targetRPO;
         rpoPrevGap = logCtrl->prev_RPO - targetRPO;
@@ -773,7 +780,7 @@ void DCFLogCtrlCalculateSleepTime(DCFLogCtrlData *logCtrl)
                 (errmodule(MOD_RTO_RPO),
                  errmsg("Log control take effect, target_rto is %d, current_rto is %ld, current the sleep time is %ld "
                         "microseconds",
-                        u_sess->attr.attr_storage.target_rto, logCtrl->current_RTO,
+                        t_thrd.dcf_cxt.dcfCtxInfo->targetRTO, logCtrl->current_RTO,
                         logCtrl->sleep_time)));
     }
     /* log control take does not effect */
@@ -781,7 +788,7 @@ void DCFLogCtrlCalculateSleepTime(DCFLogCtrlData *logCtrl)
         ereport(LOG, (errmodule(MOD_RTO_RPO),
             errmsg("Log control does not take effect, target_rto is %d, current_rto is %ld, current the sleep time "
                     "is %ld microseconds",
-                u_sess->attr.attr_storage.target_rto, logCtrl->current_RTO, logCtrl->sleep_time)));
+                t_thrd.dcf_cxt.dcfCtxInfo->targetRTO, logCtrl->current_RTO, logCtrl->sleep_time)));
     }
     ereport(DEBUG4, (errmodule(MOD_RTO_RPO),
                      errmsg("The sleep time for log control is : %ld microseconds", logCtrl->sleep_time)));
@@ -1018,14 +1025,16 @@ void LaunchPaxos()
     if(dcfCtx == NULL) {
         ereport(FATAL, (errmsg("dcf context info is null, please init it.")));
     }
-    /* Set it after walreceiver is ready and before dcf start. */
-    t_thrd.dcf_cxt.dcfCtxInfo->isWalRcvReady = true;
 
     SpinLockAcquire(&dcfCtx->dcfStartedMutex);
     if (!dcfCtx->isDcfStarted) {
+        /* Set it after walreceiver is ready and before dcf start. */
+        t_thrd.dcf_cxt.dcfCtxInfo->isWalRcvReady = true;
         dcfCtx->isDcfStarted = InitPaxosModule();
     } else {
         RewindDcfIndex();
+        /* Set it after walreceiver is ready and dcf index rewound. */
+        t_thrd.dcf_cxt.dcfCtxInfo->isWalRcvReady = true;
     }
     if (!dcfCtx->isDcfStarted) {
         SpinLockRelease(&dcfCtx->dcfStartedMutex);
@@ -1226,13 +1235,22 @@ void DcfLogTruncate()
                          errmsg("Failed to write paxosindex into paxosIndex file and don't truncate this time!")));
                 return;
             }
-            unsigned long long toTruncateLsn = Min(static_cast<uint64>(minAppliedIdx), flushedIdx);
-            if (dcf_truncate(1, toTruncateLsn) == 0) {
-                dcfCtx->truncateDcfIndex = toTruncateLsn;
+            unsigned long long toTruncateIdx = Min(static_cast<uint64>(minAppliedIdx), flushedIdx);
+            /*
+             * One more DCF log entry should be kept
+             * in case not continuous DCF log exception happened.
+             */
+            const unsigned long long minTruncateIdx = 2;
+            if (toTruncateIdx < minTruncateIdx) {
+                return;
+            }
+            toTruncateIdx -= 1;
+            if (dcf_truncate(1, toTruncateIdx) == 0) {
+                dcfCtx->truncateDcfIndex = toTruncateIdx;
             } else {
                 ereport(WARNING,(errmodule(MOD_DCF),
                                  errmsg("Failed to truncate DCF log before index %lld.",
-                                        toTruncateLsn)));
+                                        toTruncateIdx)));
             }
         } else {
             ereport(WARNING, (errmodule(MOD_DCF), errmsg("Failed to get cluster min applied index.")));
@@ -1430,5 +1448,71 @@ void DcfSendArchiveXlogResponse(ArchiveTaskStatus *archive_task_status)
     volatile unsigned int *pitr_task_status = &archive_task_status->pitr_task_status;
     pg_memory_barrier();
     pg_atomic_write_u32(pitr_task_status, PITR_TASK_NONE);
+}
+
+/* It is necessary to free nodeinfos outside when call this function */
+bool GetNodeInfos(cJSON **nodeInfos)
+{
+    char replicInfo[DCF_MAX_STREAM_INFO_LEN] = {0};
+    int len = dcf_query_stream_info(1, replicInfo, DCF_MAX_STREAM_INFO_LEN * sizeof(char));
+    if (len == 0) {
+        ereport(WARNING, (errmodule(MOD_DCF), errmsg("Failed to query dcf config!")));
+        return false;
+    }
+    *nodeInfos = cJSON_Parse(replicInfo);
+    if (*nodeInfos == nullptr) {
+        const char* errorPtr = cJSON_GetErrorPtr();
+        if (errorPtr != nullptr) {
+            ereport(WARNING, (errmodule(MOD_DCF), errmsg("Failed to parse dcf config: %s!", errorPtr)));
+        } else {
+            ereport(WARNING, (errmodule(MOD_DCF), errmsg("Failed to parse dcf config: unkonwn error.")));
+        }
+        return false;
+    }
+    return true;
+}
+
+/* Get dcf role, ip and port from cJSON corresponding to its nodeID */
+bool GetDCFNodeInfo(const cJSON *nodeJsons, int nodeID, char *role, int roleLen, char *ip, int ipLen, int *port)
+{
+    if (!cJSON_IsArray(nodeJsons)) {
+        ereport(WARNING, (errmodule(MOD_DCF), errmsg("Must exist array format in the json file.")));
+        return false;
+    }
+    const cJSON* nodeJson = nullptr;
+    errno_t rc = EOK;
+    cJSON_ArrayForEach(nodeJson, nodeJsons)
+    {
+        cJSON *idJson = cJSON_GetObjectItem(nodeJson, "node_id");
+        if (idJson == nullptr) {
+            ereport(WARNING, (errmodule(MOD_DCF), errmsg("No items with node id %d!", nodeID)));
+            return false;
+        }
+        if (idJson->valueint == nodeID) {
+            cJSON *roleJson = cJSON_GetObjectItem(nodeJson, "role");
+            if (roleJson == nullptr) {
+                ereport(WARNING, (errmodule(MOD_DCF), errmsg("No role item with node id %d!", nodeID)));
+                return false;
+            }
+            rc = strcpy_s(role, roleLen, roleJson->valuestring);
+            securec_check(rc, "\0", "\0");
+            cJSON *ipJson = cJSON_GetObjectItem(nodeJson, "ip");
+            if (ipJson == nullptr) {
+                ereport(WARNING, (errmodule(MOD_DCF), errmsg("No ip item with node id %d!", nodeID)));
+                return false;
+            }
+            rc = strcpy_s(ip, ipLen, ipJson->valuestring);
+            securec_check(rc, "\0", "\0");
+            cJSON *portJson = cJSON_GetObjectItem(nodeJson, "port");
+            if (portJson == nullptr) {
+                ereport(WARNING, (errmodule(MOD_DCF), errmsg("No port item with node id %d!", nodeID)));
+                return false;
+            }
+            *port = portJson->valueint;
+            return true;
+        }
+    }
+    ereport(WARNING, (errmodule(MOD_DCF), errmsg("No node item with node id %d found!", nodeID)));
+    return false;
 }
 #endif

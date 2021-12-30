@@ -148,6 +148,7 @@ typedef struct BTMetaPageData {
 /* Upgrade support for btree split/delete optimization. */
 #define BTREE_SPLIT_DELETE_UPGRADE_VERSION 92136
 #define BTREE_SPLIT_UPGRADE_FLAG 0x01
+#define BTREE_SPLIT_OPAQUE_FLAG 0x01
 #define BTREE_DELETE_UPGRADE_FLAG XLR_BTREE_UPGRADE_FLAG
 
 /*

@@ -14,8 +14,8 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 OBJS = walsender.o datasender.o walreceiverfuncs.o walreceiver.o walrcvwriter.o subscription_walreceiver.o\
-	datareceiver.o datarcvwriter.o basebackup.o libpqwalreceiver.o obswalreceiver.o repl_gram.o\
-	syncrep.o dataqueue.o bcm.o datasyncrep.o catchup.o slot.o slotfuncs.o \
+	datareceiver.o datarcvwriter.o basebackup.o libpqwalreceiver.o archive_walreceiver.o repl_gram.o\
+	syncrep.o dataqueue.o bcm.o datasyncrep.o catchup.o slot.o slotfuncs.o shared_storage_walreceiver.o\
 	syncrep_gram.o heartbeat.o rto_statistic.o
 SUBDIRS = logical heartbeat dcf
 

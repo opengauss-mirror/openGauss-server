@@ -214,14 +214,6 @@ static const PQconninfoOption PQconninfoOptions[] = {
     {"keepalives_interval", NULL, NULL, NULL, "TCP-Keepalives-Interval", "", 10, 0},
     {"keepalives_count", NULL, NULL, NULL, "TCP-Keepalives-Count", "", 10, 0},
     {"rw_timeout", NULL, NULL, NULL, "Read write timeout", "", 10, 0},
-#ifdef USE_SSL
-
-    /*
-     * "requiressl" is deprecated, its purpose having been taken over by
-     * "sslmode". It remains for backwards compatibility.
-     */
-    {"requiressl", "PGREQUIRESSL", "0", NULL, "Require-SSL", "D", 1, 0},
-#endif
 
     /*
      * ssl options are allowed even without client SSL support because the
@@ -907,15 +899,6 @@ static void fillPGconn(PGconn* conn, PQconninfoOption* connOptions)
     conn->sslrootcert = (tmp != NULL) ? strdup(tmp) : NULL;
     tmp = conninfo_getval(connOptions, "sslcrl");
     conn->sslcrl = (tmp != NULL) ? strdup(tmp) : NULL;
-#ifdef USE_SSL
-    tmp = conninfo_getval(connOptions, "requiressl");
-    if (tmp != NULL && tmp[0] == '1') {
-        /* here warn that the requiressl option is deprecated? */
-        if (conn->sslmode != NULL)
-            free(conn->sslmode);
-        conn->sslmode = strdup("require");
-    }
-#endif
     tmp = conninfo_getval(connOptions, "requirepeer");
     conn->requirepeer = (tmp != NULL) ? strdup(tmp) : NULL;
 #if defined(KRB5) || defined(ENABLE_GSS) || defined(ENABLE_SSPI)
@@ -6161,5 +6144,23 @@ static void set_libpq_stat_info(Oid nodeid, int count)
 void uttest_parseServiceInfo(PQconninfoOption* options, PQExpBuffer errorMessage)
 {
     parseServiceInfo(options, errorMessage);
+}
+
+void uttest_conninfo_uri_parse(const char* uri, PQExpBuffer errorMessage, bool use_defaults)
+{
+    (void)conninfo_uri_parse(uri, errorMessage, use_defaults);
+    return;
+}
+
+void uttest_conninfo_uri_parse_options(PQconninfoOption* options, const char* uri, PQExpBuffer errorMessage)
+{
+    (void)conninfo_uri_parse_options(options, uri, errorMessage);
+    return;
+}
+
+int uttest_parseServiceFile(const char* serviceFile, const char* service, PQconninfoOption* options,
+    PQExpBuffer errorMessage, bool* group_found)
+{
+    return parseServiceFile(serviceFile, service, options, errorMessage, group_found);
 }
 #endif

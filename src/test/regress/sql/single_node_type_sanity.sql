@@ -18,12 +18,12 @@
 
 SELECT p1.oid, p1.typname
 FROM pg_type as p1
-WHERE p1.typnamespace = 0 OR
+WHERE (p1.typnamespace = 0 OR
     (p1.typlen <= 0 AND p1.typlen != -1 AND p1.typlen != -2) OR
     (p1.typtype not in ('b', 'c', 'd', 'e', 'p', 'r')) OR
     NOT p1.typisdefined OR
     (p1.typalign not in ('c', 's', 'i', 'd')) OR
-    (p1.typstorage not in ('p', 'x', 'e', 'm'));
+    (p1.typstorage not in ('p', 'x', 'e', 'm'))) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table');
 
 -- Look for "pass by value" types that can't be passed by value.
 
@@ -61,7 +61,7 @@ WHERE p1.typtype not in ('c','d','p') AND p1.typname NOT LIKE E'\\_%'
     AND NOT EXISTS
     (SELECT 1 FROM pg_type as p2
      WHERE p2.typname = ('_' || p1.typname)::name AND
-           p2.typelem = p1.oid and p1.typarray = p2.oid);
+           p2.typelem = p1.oid and p1.typarray = p2.oid) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table');
 
 -- Make sure typarray points to a varlena array type of our own base
 SELECT p1.oid, p1.typname as basetype, p2.typname as arraytype,
@@ -123,7 +123,7 @@ ORDER BY 1;
 -- Composites, domains, enums, ranges should all use the same input routines
 SELECT DISTINCT typtype, typinput
 FROM pg_type AS p1
-WHERE p1.typtype not in ('b', 'p')
+WHERE p1.typtype not in ('b', 'p', 'o')
 ORDER BY 1;
 
 -- Check for bogus typoutput routines
@@ -147,7 +147,7 @@ WHERE p1.typoutput = p2.oid AND p1.typtype in ('b', 'p') AND NOT
 -- Composites, enums, ranges should all use the same output routines
 SELECT DISTINCT typtype, typoutput
 FROM pg_type AS p1
-WHERE p1.typtype not in ('b', 'd', 'p')
+WHERE p1.typtype not in ('b', 'd', 'p', 'o')
 ORDER BY 1;
 
 -- Domains should have same typoutput as their base types
@@ -192,7 +192,7 @@ WHERE p1.typinput = p2.oid AND p1.typreceive = p3.oid AND
 -- Composites, domains, enums, ranges should all use the same receive routines
 SELECT DISTINCT typtype, typreceive
 FROM pg_type AS p1
-WHERE p1.typtype not in ('b', 'p')
+WHERE p1.typtype not in ('b', 'p', 'o')
 ORDER BY 1;
 
 -- Check for bogus typsend routines
@@ -216,7 +216,7 @@ WHERE p1.typsend = p2.oid AND p1.typtype in ('b', 'p') AND NOT
 -- Composites, enums, ranges should all use the same send routines
 SELECT DISTINCT typtype, typsend
 FROM pg_type AS p1
-WHERE p1.typtype not in ('b', 'd', 'p')
+WHERE p1.typtype not in ('b', 'd', 'p', 'o')
 ORDER BY 1;
 
 -- Domains should have same typsend as their base types
@@ -247,7 +247,7 @@ WHERE p1.typmodout = p2.oid AND NOT
 SELECT p1.oid, p1.typname, p2.oid, p2.typname
 FROM pg_type AS p1, pg_type AS p2
 WHERE p1.typelem = p2.oid AND NOT
-    (p1.typmodin = p2.typmodin AND p1.typmodout = p2.typmodout);
+    (p1.typmodin = p2.typmodin AND p1.typmodout = p2.typmodout) AND p1.typname not in ('desc_tab', 'date_table', 'number_table', 'varchar2_table');
 
 -- Array types should have same typdelim as their element types
 

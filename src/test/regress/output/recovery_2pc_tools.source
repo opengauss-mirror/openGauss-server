@@ -69,8 +69,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  autovacuum_vacuum_scale_factor    | real    |      | 0       | 100
  autovacuum_vacuum_threshold       | integer |      | 0       | 2147483647
  backend_flush_after               | integer | 8kB  | 0       | 256
- backend_version                   | integer |      | 0       | 1073741823
- backslash_quote                   | enum    |      |         | 
+ backslash_quote                   | enum    |      |         |
  backtrace_min_messages            | enum    |      |         | 
  backwrite_quantity                | integer | 8kB  | 128     | 131072
  bbox_dump_count                   | integer |      | 1       | 20
@@ -100,7 +99,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  codegen_cost_threshold            | integer |      | 0       | 2147483647
  codegen_strategy                  | enum    |      |         | 
  comm_ackchk_time                  | integer | ms   | 0       | 20000
- comm_control_port                 | integer |      | 0       | 65535
  comm_debug_mode                   | bool    |      |         | 
  commit_delay                      | integer |      | 0       | 100000
  commit_siblings                   | integer |      | 0       | 1000
@@ -109,7 +107,6 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  comm_memory_pool_percent          | integer |      | 0       | 100
  comm_no_delay                     | bool    |      |         | 
  comm_quota_size                   | integer | kB   | 0       | 2048000
- comm_sctp_port                    | integer |      | 0       | 65535
  comm_stat_mode                    | bool    |      |         | 
  comm_tcp_mode                     | bool    |      |         | 
  comm_timer_mode                   | bool    |      |         | 
@@ -274,6 +271,10 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  geqo_threshold                    | integer |      | 2       | 2147483647
  gin_fuzzy_search_limit            | integer |      | 0       | 2147483647
  gin_pending_list_limit            | integer | kB   | 64      | 2147483647
+ hadr_max_size_for_xlog_receiver   | integer | kB   | 0       | 2147483647
+ hadr_recovery_time_target         | integer |      | 0       | 3600
+ hadr_recovery_point_target        | integer |      | 0       | 3600
+ hadr_super_user_record_path       | string  |      |         |
  ha_module_debug                   | bool    |      |         | 
  hashagg_table_size                | integer |      | 0       | 1073741823
  hba_file                          | string  |      |         | 
@@ -356,7 +357,7 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  max_loaded_cudesc                 | integer |      | 100     | 1073741823
  max_locks_per_transaction         | integer |      | 10      | 2147483647
  max_pred_locks_per_transaction    | integer |      | 10      | 2147483647
- max_prepared_transactions         | integer |      | 0       | 536870911
+ max_prepared_transactions         | integer |      | 0       | 262143
  max_process_memory                | integer | kB   | 2097152 | 2147483647
  max_query_retry_times             | integer |      | 0       | 20
  max_recursive_times               | integer |      | 0       | 2147483647
@@ -438,6 +439,17 @@ select name,vartype,unit,min_val,max_val from pg_settings where name <> 'qunit_c
  replconninfo5                     | string  |      |         | 
  replconninfo6                     | string  |      |         | 
  replconninfo7                     | string  |      |         | 
+ replconninfo8                     | string  |      |         |
+ replconninfo9                     | string  |      |         |
+ replconninfo10                    | string  |      |         |
+ replconninfo11                    | string  |      |         |
+ replconninfo12                    | string  |      |         |
+ replconninfo13                    | string  |      |         |
+ replconninfo14                    | string  |      |         |
+ replconninfo15                    | string  |      |         |
+ replconninfo16                    | string  |      |         |
+ replconninfo17                    | string  |      |         |
+ replconninfo18                    | string  |      |         |
  replication_type                  | integer |      | 0       | 3
  RepOriginId                       | integer |      | 0       | 2147483647
  require_ssl                       | bool    |      |         | 

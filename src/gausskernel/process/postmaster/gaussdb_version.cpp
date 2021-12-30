@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -119,7 +120,7 @@ static bool isInitialized = false;
  *  And reset after the package operation.
  *  Please do not modify it.
  */
-const char *sha256_digests[SHA256_DIGESTS_COUNT] = {"5237e9ad5b6ecf8d0abba664972bdcb106595b9ec2f52083915e7c829d348f0d", "06354c2857fbf21e5862005a7e60ad210dc4b635dbde891d6e60cbddea465b16"};
+const char *sha256_digests[SHA256_DIGESTS_COUNT] = {NULL, NULL};
 /* The product control file information. */
 static LicenseControl versionControl = {PRODUCT_VERSION_FILE, PRODUCT_VERSION_UNKNOWN, {0}, false};
 /* The license control file information. */

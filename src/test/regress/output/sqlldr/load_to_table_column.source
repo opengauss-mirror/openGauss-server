@@ -1,0 +1,102 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+-- testcase 1 constant
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_test2.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS (ID constant \"0\", NAME constant \"name\", CON, DT);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+TRUNCATE TABLE
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con |            dt            
+----+------+-----+--------------------------
+  0 | name | U   | 
+  0 | name | V   | Sun Jul 08 00:00:00 2007
+  0 | name | X   | 
+  0 | name | Y   | Tue Jul 08 00:00:00 2008
+  0 | name | Z   | Wed Jul 08 00:00:00 2009
+(5 rows)
+
+-- testcase 2 position
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_position.txt' truncate into table sqlldr_tbl TRAILING NULLCOLS (id position(1-3) char \"case when :id<200 then :id else :id - 200 end\", name position(4-11) char  \"trim(:name)\", con position(12-15) \"trim(:con)\", dt);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+TRUNCATE TABLE
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id  |   name   | con  | dt 
+-----+----------+------+----
+ 123 | abcdefg  | hij  | 
+ 256 | opqr_stu | vw-s | 
+(2 rows)
+
+-- testcase 3 sql_string
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_test.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS (ID decimal external \":ID/2\", NAME  \"replace(:CON, '-', '')\", CON char \"('batch_code')\", DT);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+TRUNCATE TABLE
+select * from SQLLDR_TBL order by 1,2,3,4;
+           id           | name |    con     |            dt            
+------------------------+------+------------+--------------------------
+  .50000000000000000000 | X    | batch_code | 
+ 1.00000000000000000000 | Y    | batch_code | Tue Jul 08 00:00:00 2008
+     1.5000000000000000 | Z    | batch_code | Wed Jul 08 00:00:00 2009
+    20.0000000000000000 | U    | batch_code | 
+   283.5000000000000000 | V    | batch_code | Sun Jul 08 00:00:00 2007
+(5 rows)
+
+-- testcase 4 sequence text
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "OPTIONS(errors=100) load data infile '@abs_srcdir@/data/sqlldr_sequence.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS (ID sequence (2,3), name  \"replace(:CON, 'a', 'A')\", con, dt);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+TRUNCATE TABLE
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id  | name | con |            dt            
+-----+------+-----+--------------------------
+  11 | c    | c   | Wed Jul 08 00:00:00 2009
+  14 | d    | d   | 
+  17 | A    | a   | Sun Jul 08 00:00:00 2007
+  26 | c    | c   | Wed Jul 08 00:00:00 2009
+  29 | d    | d   | 
+  32 | A    | a   | Sun Jul 08 00:00:00 2007
+  41 | c    | c   | Wed Jul 08 00:00:00 2009
+  44 | d    | d   | 
+  47 | A    | a   | Sun Jul 08 00:00:00 2007
+  56 | c    | c   | Wed Jul 08 00:00:00 2009
+  59 | d    | d   | 
+  62 | A    | a   | Sun Jul 08 00:00:00 2007
+  71 | c    | c   | Wed Jul 08 00:00:00 2009
+  74 | d    | d   | 
+  77 | A    | a   | Sun Jul 08 00:00:00 2007
+  86 | c    | c   | Wed Jul 08 00:00:00 2009
+  89 | d    | d   | 
+  92 | A    | a   | Sun Jul 08 00:00:00 2007
+ 101 | c    | c   | Wed Jul 08 00:00:00 2009
+ 104 | d    | d   | 
+ 107 | A    | a   | Sun Jul 08 00:00:00 2007
+ 116 | c    | c   | Wed Jul 08 00:00:00 2009
+ 119 | d    | d   | 
+ 122 | A    | a   | Sun Jul 08 00:00:00 2007
+ 131 | c    | c   | Wed Jul 08 00:00:00 2009
+ 134 | d    | d   | 
+ 137 | A    | a   | Sun Jul 08 00:00:00 2007
+ 146 | c    | c   | Wed Jul 08 00:00:00 2009
+ 149 | d    | d   | 
+ 152 | A    | a   | Sun Jul 08 00:00:00 2007
+ 158 | c    | c   | Wed Jul 08 00:00:00 2009
+ 161 | d    | d   | 
+ 164 | A    | a   | Sun Jul 08 00:00:00 2007
+(33 rows)
+
+-- testcase 5 sequence fixed
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_position.txt' truncate into table sqlldr_tbl TRAILING NULLCOLS (id sequence (1,2), name position(4-11) char  \"trim(:name)\", con position(12-15) \"trim(:con)\", dt);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+TRUNCATE TABLE
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id |   name   | con  | dt 
+----+----------+------+----
+  1 | abcdefg  | hij  | 
+  3 | opqr_stu | vw-s | 
+(2 rows)
+
+-- teardown
+drop table SQLLDR_TBL;

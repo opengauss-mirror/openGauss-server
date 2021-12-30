@@ -820,6 +820,13 @@ static void checkUnsupportedCases(ParseState* pstate, MergeStmt* stmt)
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Target relation type is not supported for %s",
                     stmt->is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO")));
+
+    if (RelationIsSubPartitioned(pstate->p_target_relation)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Subpartition is not supported for %s",
+                    stmt->is_insert_update ? "INSERT ... ON DUPLICATE KEY UPDATE" : "MERGE INTO")));
+    }
 }
 
 static Query* tryTransformMergeInsertStmt(ParseState* pstate, MergeStmt* stmt)

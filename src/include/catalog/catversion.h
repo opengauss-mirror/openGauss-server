@@ -36,6 +36,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/catversion.h
  *
@@ -61,6 +62,6 @@
 
 #define NAILED_IN_CATALOG_NUM 8
 
-#define CATALOG_NUM	101
+#define CATALOG_NUM	103
 
 #endif

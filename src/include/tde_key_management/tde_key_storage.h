@@ -75,7 +75,7 @@ public:
     bool empty();
 
     bool insert_cache(RelFileNode tde_rnode, TdeInfo *tde_info);
-    TdeInfo* search_cache(RelFileNode tde_rnode);
+    void search_cache(RelFileNode tde_rnode, TdeInfo *tde_info);
 
 private:
     TDEBufferCache();

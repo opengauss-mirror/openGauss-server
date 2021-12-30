@@ -17,7 +17,6 @@ from tools.global_box import g
 PYTHON_PATH = ''
 
 # Dict of env need defined:
-# {"export PYTHONPATH": "export PYTHONPATH=%s" % PYTHON_PATH}
 ENV_MENU = {
     "export PYTHONPATH": "export PYTHONPATH=%s" % PYTHON_PATH
 }

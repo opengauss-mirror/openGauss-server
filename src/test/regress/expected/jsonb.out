@@ -73,10 +73,10 @@ SELECT '"\u0000"'::jsonb;		-- OK, legal escape
  "\\u0000"
 (1 row)
 
-SELECT '"哈1哈"'::jsonb;		-- OK
-  jsonb  
----------
- "哈1哈"
+SELECT '"哈哈"'::jsonb;			-- OK
+ jsonb  
+--------
+ "哈哈"
 (1 row)
 
 -- use octet_length here so we don't get an odd unicode char in the

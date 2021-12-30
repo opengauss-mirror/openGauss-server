@@ -2,6 +2,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * ---------------------------------------------------------------------------------------
  *
@@ -66,13 +67,14 @@
 #include "pgxc/barrier.h"
 #include "communication/commproxy_basic.h"
 #include "replication/replicainternal.h"
+#include "replication/libpqwalreceiver.h"
 #include "replication/worker_internal.h"
 #include "replication/origin.h"
 #include "catalog/pg_subscription.h"
 #include "port/pg_crc32c.h"
 #define MAX_PATH_LEN 1024
 
-#define RESERVE_SIZE 38
+#define RESERVE_SIZE 49
 
 typedef struct ResourceOwnerData* ResourceOwner;
 
@@ -455,6 +457,7 @@ typedef struct knl_t_xlog_context {
     char* recoveryTargetBarrierId;
     char* recoveryTargetName;
     XLogRecPtr recoveryTargetLSN;
+    bool isRoachSingleReplayDone;
     /* options taken from recovery.conf for XLOG streaming */
     bool StandbyModeRequested;
     char* PrimaryConnInfo;
@@ -548,6 +551,7 @@ typedef struct knl_t_xlog_context {
     XLogRecPtr RedoStartLSN;
     ServerMode server_mode;
     bool is_cascade_standby;
+    bool is_hadr_main_standby;
 
     /* Flags to tell if we are in an startup process */
     bool startup_processing;
@@ -717,6 +721,8 @@ typedef struct knl_t_xlog_context {
     void *xlog_atomic_op;
     /* Record current xlog lsn to avoid pass parameter to underlying functions level-to-level */
     XLogRecPtr current_redo_xlog_lsn;
+    /* for switchover failed when load xlog record invalid retry count */
+    int currentRetryTimes;
 } knl_t_xlog_context;
 
 typedef struct knl_t_dfs_context {
@@ -1074,6 +1080,8 @@ typedef struct knl_t_log_context {
     /* for elog.cpp */
     struct ErrorContextCallback* error_context_stack;
 
+    struct FormatCallStack* call_stack;
+
     sigjmp_buf* PG_exception_stack;
 
     char** thd_bt_symbol;
@@ -1232,7 +1240,7 @@ typedef struct knl_t_arch_context {
     volatile int slot_tline;
     int slot_idx;
     int archive_task_idx;
-    struct ArchiveSlotConfig* obs_config;
+    struct ArchiveSlotConfig* archive_config;
 } knl_t_arch_context;
 
 typedef struct knl_t_barrier_arch_context {
@@ -1499,8 +1507,6 @@ typedef struct knl_t_twophasecleaner_context {
 typedef struct knl_t_bgwriter_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
-    int thread_id;
-    uint64 next_flush_time;
 } knl_t_bgwriter_context;
 
 typedef struct knl_t_pagewriter_context {
@@ -1509,7 +1515,20 @@ typedef struct knl_t_pagewriter_context {
     int page_writer_after;
     int pagewriter_id;
     uint64 next_flush_time;
+    uint64 next_scan_time;
 } knl_t_pagewriter_context;
+
+typedef struct knl_t_sharestoragexlogcopyer_context_ {
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t shutdown_requested;
+    bool wakeUp;
+    int readFile;
+    XLogSegNo readSegNo;
+    uint32 readOff;
+    char *originBuf;
+    char *buf;
+} knl_t_sharestoragexlogcopyer_context;
+
 
 #define MAX_SEQ_SCANS 100
 
@@ -1896,6 +1915,7 @@ typedef struct knl_t_walwriterauxiliary_context {
 
 typedef struct knl_t_poolcleaner_context {
     volatile sig_atomic_t shutdown_requested;
+    volatile sig_atomic_t got_SIGHUP;
 } knl_t_poolcleaner_context;
 
 typedef struct knl_t_catchup_context {
@@ -2059,6 +2079,10 @@ typedef struct knl_t_libwalreceiver_context {
 
     /* Buffer for currently read records */
     char* recvBuf;
+    char* shared_storage_buf;
+    char* shared_storage_read_buf;
+    XLogReaderState* xlogreader;
+    LibpqrcvConnectParam connect_param;
 } knl_t_libwalreceiver_context;
 
 typedef struct knl_t_sig_context {
@@ -2184,6 +2208,9 @@ typedef struct knl_t_walreceiver_context {
     bool AmWalReceiverForFailover;
     bool AmWalReceiverForStandby;
     int control_file_writed;
+    bool checkConsistencyOK;
+    bool hasReceiveNewData;
+    bool termChanged;
 } knl_t_walreceiver_context;
 
 typedef struct knl_t_walsender_context {
@@ -2495,7 +2522,7 @@ typedef struct knl_t_storage_context {
     struct DEADLOCK_INFO* deadlockDetails;
     int nDeadlockDetails;
     /* PGPROC pointer of all blocking autovacuum worker found and its max size.
-     * blocking_autovacuum_proc_num is in [0, autovacuum_max_workers].
+     * blocking_autovacuum_proc_num is in [0, max_blocking_autovacuum_proc_num].
      *
      * Partitioned table has been supported, which maybe have hundreds of partitions.
      * When a few autovacuum workers are active and running, partitions of the same partitioned
@@ -2504,6 +2531,7 @@ typedef struct knl_t_storage_context {
      */
     struct PGPROC** blocking_autovacuum_proc;
     int blocking_autovacuum_proc_num;
+    int max_blocking_autovacuum_proc_num;
     TimestampTz deadlock_checker_start_time;
     const char* conflicting_lock_mode_name;
     ThreadId conflicting_lock_thread_id;
@@ -2633,11 +2661,7 @@ typedef struct knl_t_tsearch_context {
 
 typedef struct knl_t_postmaster_context {
 /* Notice: the value is same sa GUC_MAX_REPLNODE_NUM */
-#ifdef ENABLE_MULTIPLE_NODES
-#define MAX_REPLNODE_NUM 8
-#else
 #define MAX_REPLNODE_NUM 9
-#endif
 #define MAXLISTEN 64
 #define IP_LEN 64
 
@@ -2657,8 +2681,10 @@ typedef struct knl_t_postmaster_context {
      * ReplConn*2 is used to connect secondary on primary or standby, or connect primary
      * or standby on secondary.
      */
-    struct replconninfo* ReplConnArray[MAX_REPLNODE_NUM];
-    bool ReplConnChanged[MAX_REPLNODE_NUM];
+    struct replconninfo* ReplConnArray[DOUBLE_MAX_REPLNODE_NUM + 1];
+    bool ReplConnChanged[DOUBLE_MAX_REPLNODE_NUM + 1];
+    struct replconninfo* CrossClusterReplConnArray[MAX_REPLNODE_NUM];
+    bool CrossClusterReplConnChanged[MAX_REPLNODE_NUM];
     struct hashmemdata* HaShmData;
 
     /* The socket(s) we're listening to. */
@@ -2845,6 +2871,8 @@ typedef struct knl_t_heartbeat_context {
     volatile sig_atomic_t got_SIGHUP;
     volatile sig_atomic_t shutdown_requested;
     struct heartbeat_state* state;
+    int total_failed_times;
+    TimestampTz last_failed_timestamp;
 } knl_t_heartbeat_context;
 
 /* compaction and compaction worker use */
@@ -2862,6 +2890,7 @@ typedef struct knl_t_security_policy_context {
     MemoryContext VectorMemoryContext;
     MemoryContext MapMemoryContext;
     MemoryContext SetMemoryContext;
+    MemoryContext OidRBTreeMemoryContext;
 
     // masking
     const char* prepare_stmt_name;
@@ -2881,6 +2910,7 @@ typedef struct knl_t_bgworker_context {
     slist_head  bgwlist;
     void   *bgwcontext;
     void   *bgworker;
+    uint64  bgworkerId;
 } knl_t_bgworker_context;
 
 
@@ -3023,6 +3053,8 @@ typedef struct DcfContextInfo {
     struct DCFStandbyReplyMessage* dcf_reply_message;
     DCFStandbyInfo nodes_info[DCF_MAX_NODES];
     DCFLogCtrlData log_ctrl[DCF_MAX_NODES];
+    int targetRTO;
+    int targetRPO;
 } DcfContextInfo;
 
 /* dcf (distribute consensus frame work) */
@@ -3104,6 +3136,7 @@ typedef struct knl_thrd_context {
     knl_t_bgwriter_context bgwriter_cxt;
     knl_t_bootstrap_context bootstrap_cxt;
     knl_t_pagewriter_context pagewriter_cxt;
+    knl_t_sharestoragexlogcopyer_context sharestoragexlogcopyer_cxt;
     knl_t_buf_context buf_cxt;
     knl_t_bulkload_context bulk_cxt;
     knl_t_cbm_context cbm_cxt;

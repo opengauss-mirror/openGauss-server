@@ -18,6 +18,7 @@
 #include "nodes/plannodes.h"
 #include "nodes/relation.h"
 #include "optimizer/clauses.h"
+#include "optimizer/planswcb.h"
 #include "nodes/parsenodes.h"
 #include "utils/selfuncs.h"
 

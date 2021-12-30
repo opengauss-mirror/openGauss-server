@@ -2168,13 +2168,8 @@ static void get_obsfile(OBSInfo* obsInfo, const char* tmp_path)
 
     appendStringInfo(&cmd,
         "python %s/udstools.py %s %s %s %s %s %s",
-        tmp_path,
-        obsInfo->accesskey,
-        obsInfo->secretkey,
-        obsInfo->path,
-        obsInfo->region,
-        obsInfo->bucket,
-        tmp_path);
+        tmp_path, obsInfo->accesskey, obsInfo->secretkey, obsInfo->path,
+        obsInfo->region, obsInfo->bucket, tmp_path);
 
     /* reset key buffer to avoid private info leak */
     errno_t ret = memset_s(obsInfo->accesskey, strlen(obsInfo->accesskey) + 1, 0, strlen(obsInfo->accesskey) + 1);
@@ -2439,6 +2434,12 @@ PG_FUNCTION_INFO_V1(gs_extend_library);
  */
 Datum gs_extend_library(PG_FUNCTION_ARGS)
 {
+#ifndef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), (errmsg("Unsupport feature"),
+        errdetail("gs_extend_library is not supported for centralize deployment"),
+        errcause("The function is not implemented."), erraction("Do not use this function."))));
+#endif
+
     if (!superuser()) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 (errmsg("must be system admin to use the gs_extend_library function"))));

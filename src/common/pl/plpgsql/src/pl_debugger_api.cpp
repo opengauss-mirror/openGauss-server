@@ -1,5 +1,6 @@
 /* -------------------------------------------------------------------------
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -51,11 +52,11 @@ typedef struct {
     Oid funcoid;
 } DebuggerServerInfo;
 
-
 /* send/rec msg for client */
 static void debug_client_rec_msg(DebugClientInfo* client);
 static void debug_client_send_msg(DebugClientInfo* client, char first_char, char* msg, int msg_len);
 
+static Datum get_info_local_data(const char* var_name, const int frameno, FunctionCallInfo fcinfo, bool show_all);
 static Datum get_tuple_lineno_and_query(DebugClientInfo* client);
 static void InterfaceCheck(const char* funcname, bool needAttach = true);
 static PlDebugEntry* add_debug_func(Oid key);
@@ -192,7 +193,8 @@ Datum debug_client_attatch(PG_FUNCTION_ARGS)
     pg_lltoa(commidx, buf);
     StringInfoData str;
     initStringInfo(&str);
-    appendStringInfo(&str, "%d:%lu", commidx, u_sess->session_id);
+    uint64 id = ENABLE_THREAD_POOL ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
+    appendStringInfo(&str, "%d:%lu", commidx, id);
     /* send msg */
     debug_client_send_msg(client, DEBUG_ATTACH_HEADER, str.data, str.len);
     /* wait for server msg */
@@ -208,70 +210,19 @@ Datum debug_client_attatch(PG_FUNCTION_ARGS)
  */
 Datum debug_client_print_variables(PG_FUNCTION_ARGS)
 {
-    InterfaceCheck("print_var");
     char* var_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    return get_info_local_data(var_name, 0, fcinfo, false);
+}
 
-    const int DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM = 4;
-
-    FuncCallContext *funcctx = NULL;
-    MemoryContext oldcontext;
-
-    /* stuff done only on the first call of the function */
-    if (SRF_IS_FIRSTCALL()) {
-        TupleDesc tupdesc;
-
-        /* create a function context for cross-call persistence */
-        funcctx = SRF_FIRSTCALL_INIT();
-
-        /*
-         * switch to memory context appropriate for multiple function
-         * calls
-         */
-        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
-
-        /* need a tuple descriptor representing 4 columns */
-        tupdesc = CreateTemplateTupleDesc(DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM, false, TAM_HEAP);
-        int i = 0;
-        TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "varname", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "vartype", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "value", TEXTOID, -1, 0);
-        TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "package_name", TEXTOID, -1, 0);
-
-        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
-
-        /* send msg & receive local variables from debug server */
-        debug_client_send_msg(u_sess->plsql_cxt.debug_client, DEBUG_PRINT_HEADER, var_name, strlen(var_name));
-        debug_client_rec_msg(u_sess->plsql_cxt.debug_client);
-
-        /* total number of tuples to be returned */
-        funcctx->user_fctx = debug_client_split_localvariables_msg(&(funcctx->max_calls));
-        (void)MemoryContextSwitchTo(oldcontext);
-    }
-
-    /* stuff done on every call of the function */
-    funcctx = SRF_PERCALL_SETUP();
-    if (funcctx->user_fctx && funcctx->call_cntr < funcctx->max_calls) { /* do when there is more left to send */
-        Datum values[DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM];
-        bool nulls[DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM];
-        HeapTuple tuple;
-
-        errno_t rc = 0;
-        rc = memset_s(values, sizeof(values), 0, sizeof(values));
-        securec_check(rc, "\0", "\0");
-        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
-        securec_check(rc, "\0", "\0");
-
-        PLDebug_variable* entry = (PLDebug_variable*)funcctx->user_fctx + funcctx->call_cntr;
-
-        int i = 0;
-        values[i++] = CStringGetTextDatum(entry->name);
-        values[i++] = CStringGetTextDatum(entry->var_type);
-        values[i++] = CStringGetTextDatum(entry->value);
-        values[i++] = CStringGetTextDatum("");
-        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
-        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
-    }
-    SRF_RETURN_DONE(funcctx);
+/*
+ *   dbe_pldebugger.print_var
+ *   print the type and value of the given variable at given stack depth
+ */
+Datum debug_client_print_variables_frame(PG_FUNCTION_ARGS)
+{
+    char* var_name = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    int frameno = PG_GETARG_INT32(1);
+    return get_info_local_data(var_name, frameno, fcinfo, false);
 }
 
 /*
@@ -280,8 +231,24 @@ Datum debug_client_print_variables(PG_FUNCTION_ARGS)
  */
 Datum debug_client_local_variables(PG_FUNCTION_ARGS)
 {
+    return get_info_local_data(DEFAULT_UNKNOWN_VALUE, 0, fcinfo, true);
+}
+
+/*
+ *   dbe_pldebugger.info_locals
+ *   print the type and value of the all variables at given stack depth
+ */
+Datum debug_client_local_variables_frame(PG_FUNCTION_ARGS)
+{
+    int frameno = PG_GETARG_INT32(0);
+    return get_info_local_data(DEFAULT_UNKNOWN_VALUE, frameno, fcinfo, true);
+}
+
+static Datum get_info_local_data(const char* var_name, const int frameno, FunctionCallInfo fcinfo, bool show_all)
+{
     InterfaceCheck("info_locals");
-    const int DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM = 4;
+
+    const int DEBUG_LOCAL_VAR_TUPLE_ATTR_NUM = 5;
 
     FuncCallContext *funcctx = NULL;
     MemoryContext oldcontext;
@@ -306,15 +273,27 @@ Datum debug_client_local_variables(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "vartype", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "value", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "package_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "isconst", BOOLOID, -1, 0);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        if (frameno < 0) {
+            ereport(WARNING, (errcode(ERRCODE_WARNING),
+                errmsg("frameno value must be positive")));
+            funcctx->user_fctx = NULL;
+            funcctx->max_calls = 0;
+        } else {
+            /* send msg & receive local variables from debug server */
+            StringInfoData str;
+            initStringInfo(&str);
+            appendStringInfo(&str, "%s:%d:%d", var_name, frameno, show_all ? 1 : 0);
+            debug_client_send_msg(u_sess->plsql_cxt.debug_client, DEBUG_LOCALS_HEADER, str.data, str.len);
+            pfree_ext(str.data);
+            debug_client_rec_msg(u_sess->plsql_cxt.debug_client);
 
-        /* send msg & receive local variables from debug server */
-        debug_client_send_msg(u_sess->plsql_cxt.debug_client, DEBUG_LOCALS_HEADER, NULL, 0);
-        debug_client_rec_msg(u_sess->plsql_cxt.debug_client);
+            /* total number of tuples to be returned */
+            funcctx->user_fctx = debug_client_split_localvariables_msg(&(funcctx->max_calls));
+        }
 
-        /* total number of tuples to be returned */
-        funcctx->user_fctx = debug_client_split_localvariables_msg(&(funcctx->max_calls));
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
@@ -337,7 +316,8 @@ Datum debug_client_local_variables(PG_FUNCTION_ARGS)
         values[i++] = CStringGetTextDatum(entry->name);
         values[i++] = CStringGetTextDatum(entry->var_type);
         values[i++] = CStringGetTextDatum(entry->value);
-        values[i++] = CStringGetTextDatum("");
+        values[i++] = CStringGetTextDatum(entry->pkgname);
+        values[i++] = BoolGetDatum(entry->isconst);
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
@@ -456,6 +436,19 @@ Datum debug_client_continue(PG_FUNCTION_ARGS)
 }
 
 /*
+ *  dbe_pldebugger.finish
+ *  execute until next breakpoint or upper stack
+ */
+Datum debug_client_finish(PG_FUNCTION_ARGS)
+{
+    InterfaceCheck("finish");
+    DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
+    debug_client_send_msg(u_sess->plsql_cxt.debug_client, DEBUG_FINISH_HEADER, NULL, 0);
+    debug_client_rec_msg(u_sess->plsql_cxt.debug_client);
+    return get_tuple_lineno_and_query(client);
+}
+
+/*
  *  dbe_pldebugger.add_breakpoint
  *  add a new breakpoint
  */
@@ -493,6 +486,11 @@ Datum debug_client_add_breakpoint(PG_FUNCTION_ARGS)
     debug_client_rec_msg(client);
     int32 ans = pg_strtoint32(client->rec_buffer);
     pfree(lines);
+    if (ans == -1) {
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+            errmsg("the given line number already contains a valid breakpoint."
+            " Please se dbe_pldebugger.info_breakpoints for detail.")));
+    }
     PG_RETURN_INT32(ans);
 }
 
@@ -533,13 +531,85 @@ error:
 }
 
 /*
+ *  dbe_pldebugger.enable_breakpoint
+ *  enable a existed breakpoint
+ */
+Datum debug_client_enable_breakpoint(PG_FUNCTION_ARGS)
+{
+    InterfaceCheck("enable_breakpoint");
+    int32 bpIndex = PG_GETARG_INT32(0);
+    int32 ans = 0;
+    DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
+    if (bpIndex < 0) {
+        goto error;
+    }
+
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfo(&str, "%d", bpIndex);
+    debug_client_send_msg(client, DEBUG_ENABLEBREAKPOINT_HEADER, str.data, str.len);
+    debug_client_rec_msg(client);
+    ans = pg_strtoint32(client->rec_buffer);
+    if (ans != 0) {
+        goto error;
+    }
+    pfree(str.data);
+    PG_RETURN_BOOL(true);
+
+error:
+    ereport(ERROR,
+        (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_AMBIGUOUS_PARAMETER),
+            errmsg("invalid break point index"),
+            errdetail("the given index is either outside the range or already enabled"),
+            errcause("try to enable a breakpoint that's already enabled"),
+            erraction("use dbe_pldebugger.info_breakpoints() to show all breakpoints")));
+    PG_RETURN_NULL();
+}
+
+/*
+ *  dbe_pldebugger.disable_breakpoint
+ *  disable a existed breakpoint
+ */
+Datum debug_client_disable_breakpoint(PG_FUNCTION_ARGS)
+{
+    InterfaceCheck("disable_breakpoint");
+    int32 bpIndex = PG_GETARG_INT32(0);
+    int32 ans = 0;
+    DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
+    if (bpIndex < 0) {
+        goto error;
+    }
+
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfo(&str, "%d", bpIndex);
+    debug_client_send_msg(client, DEBUG_DISABLEBREAKPOINT_HEADER, str.data, str.len);
+    debug_client_rec_msg(client);
+    ans = pg_strtoint32(client->rec_buffer);
+    if (ans != 0) {
+        goto error;
+    }
+    pfree(str.data);
+    PG_RETURN_BOOL(true);
+
+error:
+    ereport(ERROR,
+        (errmodule(MOD_PLDEBUGGER), errcode(ERRCODE_AMBIGUOUS_PARAMETER),
+            errmsg("invalid break point index"),
+            errdetail("the given index is either outside the range or already disabled"),
+            errcause("try to disabled a breakpoint that's already disabled"),
+            erraction("use dbe_pldebugger.info_breakpoints() to show all breakpoints")));
+    PG_RETURN_NULL();
+}
+
+/*
  *  dbe_pldebugger.info_breakpoints
  *  show all active breakpoints
  */
 Datum debug_client_info_breakpoints(PG_FUNCTION_ARGS)
 {
     InterfaceCheck("info_breakpoints");
-    const int DEBUG_INFO_BP_TUPLE_ATTR_NUM = 4;
+    const int DEBUG_INFO_BP_TUPLE_ATTR_NUM = 5;
 
     FuncCallContext *funcctx = NULL;
     MemoryContext oldcontext;
@@ -564,6 +634,8 @@ Datum debug_client_info_breakpoints(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "funcoid", OIDOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "lineno", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "query", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "enable", BOOLOID, -1, 0);
+
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
@@ -600,6 +672,7 @@ Datum debug_client_info_breakpoints(PG_FUNCTION_ARGS)
         } else {
             values[i++] = CStringGetTextDatum(entry->query);
         }
+        values[i++] = BoolGetDatum(entry->active);
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
@@ -609,6 +682,14 @@ Datum debug_client_info_breakpoints(PG_FUNCTION_ARGS)
 static void* debug_client_split_localvariables_msg(uint32* num)
 {
     char* msg = u_sess->plsql_cxt.debug_client->rec_buffer;
+    if (msg[0] - '0' == DEBUG_SERVER_PRINT_VAR_FRAMENO_EXCEED) {
+        ereport(WARNING, (errcode(ERRCODE_WARNING),
+            errmsg("Frame number exceeds current stack depth."
+            " Please use dbe_pldebugger.backtrace for depth info.")));
+        *num = 0;
+        return NULL;
+    }
+
     Node* ret = (Node*)stringToNode(msg);
     if (ret == NULL || !(IsA(ret, List))) {
         *num = 0;
@@ -632,6 +713,14 @@ static void* debug_client_split_localvariables_msg(uint32* num)
         variable->name = AssignStr(var->name);
         variable->var_type = AssignStr(var->var_type);
         variable->value = AssignStr(var->value);
+        if (var->pkgname != NULL) {
+            variable->pkgname = AssignStr(var->pkgname);
+        } else {
+            variable->pkgname = pstrdup("");
+        }
+
+
+        variable->isconst = var->isconst;
         index++;
     }
     *num = length;
@@ -650,7 +739,7 @@ error:
 Datum debug_client_backtrace(PG_FUNCTION_ARGS)
 {
     InterfaceCheck("backtrace");
-    const int DEBUG_BACKTRACE_ATTR_NUM = 4;
+    const int DEBUG_BACKTRACE_ATTR_NUM = 5;
 
     FuncCallContext *funcctx = NULL;
     MemoryContext oldcontext;
@@ -674,6 +763,7 @@ Datum debug_client_backtrace(PG_FUNCTION_ARGS)
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "funcname", TEXTOID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "lineno", INT4OID, -1, 0);
         TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "query", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber) ++i, "funcoid", OIDOID, -1, 0);
 
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
         /* send msg & receive backtrace from debug server */
@@ -706,6 +796,7 @@ Datum debug_client_backtrace(PG_FUNCTION_ARGS)
         values[i++] = CStringGetTextDatum(entry->funcname);
         values[i++] = Int32GetDatum(entry->lineno);
         values[i++] = CStringGetTextDatum(entry->query);
+        values[i++] = ObjectIdGetDatum((Oid)entry->funcoid);
         tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
         SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
     }
@@ -828,6 +919,52 @@ Datum debug_server_turn_off(PG_FUNCTION_ARGS)
     PG_RETURN_BOOL(delete_debug_func(funcOid));
 }
 
+/*
+ * dbe_pldebugger.set_var
+ *   assign new value to a given variable
+ */
+Datum debug_client_set_variable(PG_FUNCTION_ARGS)
+{
+    InterfaceCheck("set_variable", true);
+    char* varname = text_to_cstring(PG_GETARG_TEXT_PP(0));
+    char* value = text_to_cstring(PG_GETARG_TEXT_PP(1));
+    DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
+    StringInfoData str;
+    initStringInfo(&str);
+    appendStringInfo(&str, "%s:%s", varname, value);
+    debug_client_send_msg(client, DEBUG_SET_VARIABLE_HEADER, str.data, str.len);
+    debug_client_rec_msg(client);
+    int32 ans = client->rec_buffer[0] - '0';
+    bool ret = false;
+    switch (ans) {
+        case DEBUG_SERVER_SET_NO_VAR:
+            ret = false;
+            ereport(WARNING, (errmodule(MOD_PLDEBUGGER),
+                    errmsg("Variable cannot be found on current frame")));
+            break;
+        case DEBUG_SERVER_SET_EXEC_FAILURE:
+            ret = false;
+            ereport(WARNING, (errmodule(MOD_PLDEBUGGER),
+                    errmsg("Exception occurs when trying to set variable: %s", client->rec_buffer + 2)));
+            break;
+        case DEBUG_SERVER_SET_CURSOR:
+            ret = false;
+            ereport(WARNING, (errmodule(MOD_PLDEBUGGER),
+                    errmsg("Not allowed to directly set value for recursor variables")));
+            break;
+        case DEBUG_SERVER_SET_CONST:
+            ret = false;
+            ereport(WARNING, (errmodule(MOD_PLDEBUGGER),
+                    errmsg("Not allowed to set value for constant variables")));
+            break;
+        default:
+            ret = true;
+            break;
+    }
+    pfree_ext(str.data);
+    PG_RETURN_BOOL(ret);
+}
+
 static void InterfaceCheck(const char* funcname, bool needAttach)
 {
 #ifdef ENABLE_MULTIPLE_NODES
@@ -841,9 +978,16 @@ static void InterfaceCheck(const char* funcname, bool needAttach)
         CHECK_DEBUG_COMM_VALID(commIdx);
         /* if current debug index is not myself during debug, clean up my self */
         PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[commIdx];
-        if (debug_comm->clientId != u_sess->session_id) {
-            clean_up_debug_client();
+        DebugClientInfo* client = u_sess->plsql_cxt.debug_client;
+        AutoMutexLock debuglock(&debug_comm->mutex);
+        debuglock.lock();
+        if ((debug_comm->clientId != u_sess->session_id && debug_comm->clientId != t_thrd.proc_cxt.MyProcPid) ||
+            !debug_comm->isRunning()) {
+            client->comm_idx = -1;
+            MemoryContextDelete(client->context);
+            u_sess->plsql_cxt.debug_client = NULL;
         }
+        debuglock.unLock();
     }
     if (needAttach && u_sess->plsql_cxt.debug_client == NULL) {
         ereport(ERROR,
@@ -858,27 +1002,24 @@ static void InterfaceCheck(const char* funcname, bool needAttach)
 static void debug_client_rec_msg(DebugClientInfo* client)
 {
     CHECK_DEBUG_COMM_VALID(client->comm_idx);
-    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[client->comm_idx];
 
     MemoryContext old_context = MemoryContextSwitchTo(client->context);
-    int len = 0;
+    int msgLen = 0;
+    char* copyBuf = NULL;
+    int copyLen = 0;
+    int copyPtr = 0;
     client->rec_ptr = 0;
-    /* wait server's msg */
-    WaitSendMsg(client->comm_idx, false);
-    /* lock */
-    AutoMutexLock debuglock(&debug_comm->mutex);
-    debuglock.lock();
-    RecvUnixMsg(client->comm_idx, (char*)&len, sizeof(int));
-    client->rec_buffer = ResizeDebugBufferIfNecessary(client->rec_buffer, &client->rec_buf_len, len + 1);
-    RecvUnixMsg(client->comm_idx, client->rec_buffer, len);
-    client->rec_ptr = len;
-    client->rec_buffer[len] = '\0';
-    /* flushed invalid */
-    debug_comm->hasServerFlushed = false;
-    debug_comm->bufLen = 0;
-    Assert(debug_comm->startPos == 0);
-    /* unlock */
-    debuglock.unLock();
+    /* wait for client's msg and copy into local buf */
+    WaitSendMsg(client->comm_idx, false, &copyBuf, &copyLen);
+    /* msg len */
+    RecvUnixMsg(copyBuf + copyPtr, copyLen - copyPtr, (char*)&msgLen, sizeof(int));
+    copyPtr += sizeof(int);
+    /* msg */
+    client->rec_buffer = ResizeDebugBufferIfNecessary(client->rec_buffer, &client->rec_buf_len, msgLen + 1);
+    RecvUnixMsg(copyBuf + copyPtr, copyLen - copyPtr, client->rec_buffer, msgLen);
+    client->rec_ptr = msgLen;
+    client->rec_buffer[msgLen] = '\0';
+    pfree_ext(copyBuf);
     (void)MemoryContextSwitchTo(old_context);
 }
 
@@ -986,6 +1127,7 @@ static void* debug_client_split_breakpoints_msg(uint32* num)
         bp->funcoid = b->funcoid;
         bp->lineno = b->lineno;
         bp->query = pstrdup(b->query);
+        bp->active = b->active;
         index++;
     }
     *num = length;
@@ -996,7 +1138,6 @@ error:
     ereport(ERROR, (errmodule(MOD_PLDEBUGGER), errmsg("Get unexpected output for breakpoints type.")));
     return NULL;
 }
-
 
 static void* debug_client_split_backtrace_msg(uint32* num)
 {
@@ -1025,6 +1166,7 @@ static void* debug_client_split_backtrace_msg(uint32* num)
         frame->funcname = AssignStr(var->funcname);
         frame->lineno = var->lineno;
         frame->query = AssignStr(var->query);
+        frame->funcoid = var->funcoid;
         index++;
     }
     *num = length;
@@ -1061,14 +1203,22 @@ static List* collect_breakable_line_oid(Oid funcOid)
     flinfo.fn_oid = funcOid;
     flinfo.fn_mcxt = CurrentMemoryContext;
     _PG_init();
+    /* save flag for nest plpgsql compile */
+    PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
+    int save_compile_status = u_sess->plsql_cxt.compile_status;
     PG_TRY();
     {
         func = plpgsql_compile(&fake_fcinfo, true);
     }
     PG_CATCH();
     {
-        u_sess->plsql_cxt.plpgsql_curr_compile = NULL;
-        u_sess->plsql_cxt.plpgsql_curr_compile_package = NULL;
+        ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
+            errmsg("%s clear curr_compile_context because of error.", __func__)));
+        /* reset nest plpgsql compile */
+        u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+        u_sess->plsql_cxt.compile_status = save_compile_status;
+        clearCompileContextList(save_compile_list_length);
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -1151,16 +1301,7 @@ static void debug_client_send_msg(DebugClientInfo* client, char first_char, char
     (void)MemoryContextSwitchTo(old_context);
 
     CHECK_DEBUG_COMM_VALID(client->comm_idx);
-    PlDebuggerComm* debug_comm = &g_instance.pldebug_cxt.debug_comm[client->comm_idx];
-    /* lock */
-    (void)MemoryContextSwitchTo(g_instance.pldebug_cxt.PldebuggerCxt);
-    AutoMutexLock debuglock(&debug_comm->mutex);
-    debuglock.lock();
-    Assert(debug_comm->hasClientFlushed == false);
-    debug_comm->hasClientFlushed = false;
-    SendUnixMsg(client->comm_idx, client->send_buffer, client->send_ptr);
-    /* unlock */
-    debuglock.unLock();
+    SendUnixMsg(client->comm_idx, client->send_buffer, client->send_ptr, true);
     /* wake up server */
     if (!WakeUpReceiver(client->comm_idx, true)) {
         ereport(ERROR, (errmodule(MOD_PLDEBUGGER),
@@ -1219,17 +1360,29 @@ static void collect_breakable_line_walker(const List* stmts, List** lines)
         return;
     }
 
-    ListCell* lc = NULL;
-    foreach (lc, stmts) {
-        PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)lfirst(lc);
+    ListCell* lc1 = NULL;
+    foreach (lc1, stmts) {
+        PLpgSQL_stmt* stmt = (PLpgSQL_stmt*)lfirst(lc1);
+        if (stmt == NULL) {
+            continue;
+        }
         int lineno = stmt->lineno;
-        if (lineno != 0) {
+        if (lineno != 0 && stmt->cmd_type != PLPGSQL_STMT_GOTO) {
             *lines = lappend_int(*lines, lineno);
         }
         switch ((enum PLpgSQL_stmt_types)stmt->cmd_type) {
-            case PLPGSQL_STMT_BLOCK:
-                collect_breakable_line_walker(((PLpgSQL_stmt_block*)stmt)->body, lines);
+            case PLPGSQL_STMT_BLOCK: {
+                PLpgSQL_stmt_block* block = (PLpgSQL_stmt_block*)stmt;
+                collect_breakable_line_walker(block->body, lines);
+                if (block->exceptions != NULL) {
+                    ListCell* lc2 = NULL;
+                    foreach (lc2, block->exceptions->exc_list) {
+                        PLpgSQL_exception* exception = (PLpgSQL_exception*)lfirst(lc2);
+                        collect_breakable_line_walker(exception->action, lines);
+                    }
+                }
                 break;
+            }
 
             case PLPGSQL_STMT_IF: {
                 PLpgSQL_stmt_if* if_stmt = (PLpgSQL_stmt_if*)stmt;

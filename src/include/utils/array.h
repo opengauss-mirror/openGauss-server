@@ -160,7 +160,8 @@ typedef struct ArrayIteratorData* ArrayIterator;
  * Returns a pointer to the actual array data.
  */
 #define ARR_DATA_PTR(a) (((char*)(a)) + ARR_DATA_OFFSET(a))
-
+/* multiset functions number of args */
+#define MULTISET_ARGS_NUM 2
 /*
  * prototypes for functions defined in arrayfuncs.c
  */
@@ -185,6 +186,14 @@ extern Datum array_lower(PG_FUNCTION_ARGS);
 extern Datum array_upper(PG_FUNCTION_ARGS);
 extern Datum array_extend(PG_FUNCTION_ARGS);
 extern Datum array_length(PG_FUNCTION_ARGS);
+extern Datum array_exists(PG_FUNCTION_ARGS);
+extern Datum array_next(PG_FUNCTION_ARGS);
+extern Datum array_varchar_next(PG_FUNCTION_ARGS);
+extern Datum array_prior(PG_FUNCTION_ARGS);
+extern Datum array_trim(PG_FUNCTION_ARGS);
+extern Datum array_delete(PG_FUNCTION_ARGS);
+extern Datum array_deleteidx(PG_FUNCTION_ARGS);
+extern Datum array_extendnull(PG_FUNCTION_ARGS);
 extern Datum array_larger(PG_FUNCTION_ARGS);
 extern Datum array_smaller(PG_FUNCTION_ARGS);
 extern Datum generate_subscripts(PG_FUNCTION_ARGS);
@@ -192,6 +201,11 @@ extern Datum generate_subscripts_nodir(PG_FUNCTION_ARGS);
 extern Datum array_fill(PG_FUNCTION_ARGS);
 extern Datum array_fill_with_lower_bounds(PG_FUNCTION_ARGS);
 extern Datum array_unnest(PG_FUNCTION_ARGS);
+extern Datum array_cat_distinct(PG_FUNCTION_ARGS);
+extern Datum array_intersect(PG_FUNCTION_ARGS);
+extern Datum array_intersect_distinct(PG_FUNCTION_ARGS);
+extern Datum array_except(PG_FUNCTION_ARGS);
+extern Datum array_except_distinct(PG_FUNCTION_ARGS);
 
 extern Datum array_ref(ArrayType* array, int nSubscripts, const int* indx, int arraytyplen, int elmlen, bool elmbyval,
     char elmalign, bool* isNull);

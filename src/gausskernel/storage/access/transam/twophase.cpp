@@ -833,9 +833,7 @@ static void MarkAsPrepared(GlobalTransaction gxact, bool lock_held)
     }
 
     /* for left two phase transaction, need to sync when satisfyNow */
-    if (lock_held) {
-        g_instance.proc_base_all_xacts[gxact->pgprocno].needToSyncXid |= SNAPSHOT_NOW_NEED_SYNC;
-    }
+    g_instance.proc_base_all_xacts[gxact->pgprocno].needToSyncXid |= SNAPSHOT_NOW_NEED_SYNC;
 
     /*
      * Put it into the global ProcArray so TransactionIdIsInProgress considers
@@ -2447,10 +2445,11 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
 #ifdef ENABLE_MOT
         CallXactCallbacks(XACT_EVENT_COMMIT_PREPARED);
 #endif
-        t_thrd.pgxact->needToSyncXid |= SNAPSHOT_UPDATE_NEED_SYNC;
+        /* Set dummy proc need sync, not current work thread */
+        pgxact->needToSyncXid |= SNAPSHOT_UPDATE_NEED_SYNC;
 
-        RecordTransactionCommitPrepared(xid, hdr->nsubxacts, children, hdr->ncommitrels - ndelrels_temp,
-            commitrels + ndelrels_temp, hdr->ninvalmsgs, invalmsgs, hdr->ncommitlibrarys, commitLibrary,
+        RecordTransactionCommitPrepared(xid, hdr->nsubxacts, children, hdr->ncommitrels,
+            commitrels, hdr->ninvalmsgs, invalmsgs, hdr->ncommitlibrarys, commitLibrary,
             commitLibraryLen, hdr->initfileinval);
 
 #ifdef ENABLE_MOT
@@ -2462,8 +2461,8 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
         CallXactCallbacks(XACT_EVENT_ROLLBACK_PREPARED);
 #endif
 
-        RecordTransactionAbortPrepared(xid, hdr->nsubxacts, children, hdr->nabortrels- ndelrels_temp,
-            abortrels + ndelrels_temp, hdr->nabortlibrarys, abortLibrary, abortLibraryLen);
+        RecordTransactionAbortPrepared(xid, hdr->nsubxacts, children, hdr->nabortrels,
+            abortrels, hdr->nabortlibrarys, abortLibrary, abortLibraryLen);
     }
 
     ProcArrayRemove(proc, latestXid);
@@ -2721,7 +2720,7 @@ void FinishPreparedTransaction(const char *gid, bool isCommit)
     }
 
     PredicateLockTwoPhaseFinish(xid, isCommit);
-    if (IS_PGXC_DATANODE) {
+    if (IS_PGXC_DATANODE || IsConnFromCoord()) {
         u_sess->storage_cxt.twoPhaseCommitInProgress = false;
     }
 
@@ -2996,7 +2995,7 @@ void CheckPointTwoPhase(XLogRecPtr redo_horizon)
         TWOPAHSE_LWLOCK_RELEASE(j);
     }
     CloseTwoPhaseXlogFile();
-    g_instance.ckpt_cxt_ctl->ckpt_twophase_flush_num += serialized_xacts;
+    g_instance.ckpt_cxt_ctl->ckpt_view.ckpt_twophase_flush_num += serialized_xacts;
     TRACE_POSTGRESQL_TWOPHASE_CHECKPOINT_DONE();
 
     if (u_sess->attr.attr_common.log_checkpoints && serialized_xacts > 0) {

@@ -229,6 +229,67 @@ select * from hw_list_partition_dml_t3 order by 1, 2;
 drop table hw_list_partition_dml_t1;
 drop table hw_list_partition_dml_t2;
 drop table hw_list_partition_dml_t3;
+
+drop table test_index_lt;
+ERROR:  table "test_index_lt" does not exist
+create table test_index_lt (a int, b int, c int)
+partition by list(a)
+(
+ PARTITION p1 VALUES (3, 4, 5),
+ PARTITION p2 VALUES (1, 2)
+);
+insert into test_index_lt select generate_series(1,4);
+explain (costs off, verbose on) select * from test_index_lt order by 1;
+                             QUERY PLAN                              
+---------------------------------------------------------------------
+ Sort
+   Output: a, b, c
+   Sort Key: test_index_lt.a
+   ->  Partition Iterator
+         Output: a, b, c
+         Iterations: 2
+         ->  Partitioned Seq Scan on fvt_compress_qwer.test_index_lt
+               Output: a, b, c
+               Selected Partitions:  1..2
+(9 rows)
+
+select * from test_index_lt order by 1;
+ a | b | c 
+---+---+---
+ 1 |   |  
+ 2 |   |  
+ 3 |   |  
+ 4 |   |  
+(4 rows)
+
+create index test_exchange_index_lt_a on test_index_lt (a) local;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain (costs off, verbose on) select * from test_index_lt order by 1;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Sort
+   Output: a, b, c
+   Sort Key: test_index_lt.a
+   ->  Partition Iterator
+         Output: a, b, c
+         Iterations: 2
+         ->  Partitioned Index Scan using test_exchange_index_lt_a on fvt_compress_qwer.test_index_lt
+               Output: a, b, c
+               Selected Partitions:  1..2
+(9 rows)
+
+select * from test_index_lt order by 1;
+ a | b | c 
+---+---+---
+ 1 |   |  
+ 2 |   |  
+ 3 |   |  
+ 4 |   |  
+(4 rows)
+
+drop table test_index_lt;
+
 drop schema FVT_COMPRESS_QWER cascade;
 create schema fvt_other_cmd;
 CREATE TABLE FVT_OTHER_CMD.IDEX_LIST_PARTITION_TABLE_001(COL_INT int)

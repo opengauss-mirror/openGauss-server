@@ -48,7 +48,10 @@ const int RAND_COUNT = 100;
 /* Derives all the required keys from the given root key */
 AeadAesHamcEncKey::AeadAesHamcEncKey(unsigned char *root_key, size_t root_key_size)
 {
+    errno_t rc = EOK;
     generate_keys(root_key, root_key_size);
+    rc = memset_s(root_key, root_key_size, 0, root_key_size);
+    securec_check_c(rc, "\0", "\0");
 }
 
 AeadAesHamcEncKey::AeadAesHamcEncKey()
@@ -119,8 +122,6 @@ bool AeadAesHamcEncKey::generate_keys(unsigned char *root_key, size_t root_key_l
         securec_check_c(rc, "\0", "\0");
         return false;
     }
-    rc = memset_s(root_key, root_key_len, 0, root_key_len);
-    securec_check_c(rc, "\0", "\0");
     return true;
 }
 

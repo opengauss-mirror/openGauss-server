@@ -610,8 +610,10 @@ void SerializeCmd(CmdBase* cmd, StringInfo buf)
     Assert(CurrentMemoryContext);
 
     cmdtype[cmdtypeSize - 1] = '\0';
+#ifdef ENABLE_MULTIPLE_NODES
     if (u_sess->attr.attr_storage.gds_debug_mod)
         ereport(LOG, (errmodule(MOD_GDS), (errmsg("Sending a %s to GDS", cmdtype))));
+#endif
 }
 
 void PackData(StringInfo dst, StringInfo data)
@@ -773,8 +775,9 @@ CmdBase* DeserializeCmd(StringInfo buf)
     buf->cursor += length;
 
     cmdtype[cmdtypeSize - 1] = '\0';
+#ifdef ENABLE_MULTIPLE_NODES
     if (u_sess->attr.attr_storage.gds_debug_mod)
         ereport(LOG, (errmodule(MOD_GDS), (errmsg("Receiving a %s from GDS", cmdtype))));
-
+#endif
     return cmd;
 }

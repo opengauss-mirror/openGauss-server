@@ -232,27 +232,27 @@ BufferDesc* StrategyGetBuffer(BufferAccessStrategy strategy, uint32* buf_state)
     (void)pg_atomic_fetch_add_u32(&t_thrd.storage_cxt.StrategyControl->numBufferAllocs, 1);
 
     /* Check the Candidate list */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
-        g_instance.bgwriter_cxt.curr_bgwriter_num > 0) {
-        if (u_sess->attr.attr_storage.enable_candidate_buf_usage_count) {
-            if (pg_atomic_read_u32(&g_instance.bgwriter_cxt.curr_bgwriter_num) > 0) {
-                uint64 maxSleep = 10000L;
-                uint64 minSleep = 1000L;
-                uint64 sleepTime = minSleep;
-                while (true) {
-                    buf = get_buf_from_candidate_list(strategy, buf_state);
-                    if (buf != NULL) {
-                        (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
-                        return buf;
-                    }
-                    pg_usleep(sleepTime);
-                    sleepTime = Min(sleepTime * 2, maxSleep);
+    if (ENABLE_INCRE_CKPT && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 1) {
+        if (NEED_CONSIDER_USECOUNT) {
+            const uint32 MAX_RETRY_SCAN_CANDIDATE_LISTS = 5;
+            const int MILLISECOND_TO_MICROSECOND = 1000;
+            uint64 maxSleep = u_sess->attr.attr_storage.BgWriterDelay * MILLISECOND_TO_MICROSECOND;
+            uint64 sleepTime = 1000L;
+            uint32 retry_times = 0;
+            while (retry_times < MAX_RETRY_SCAN_CANDIDATE_LISTS) {
+                buf = get_buf_from_candidate_list(strategy, buf_state);
+                if (buf != NULL) {
+                    (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->get_buf_num_candidate_list, 1);
+                    return buf;
                 }
+                pg_usleep(sleepTime);
+                sleepTime = Min(sleepTime * 2, maxSleep);
+                retry_times++;
             }
         } else {
             buf = get_buf_from_candidate_list(strategy, buf_state);
             if (buf != NULL) {
-                (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_candidate_list, 1);
+                (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->get_buf_num_candidate_list, 1);
                 return buf;
             }
         }
@@ -282,14 +282,13 @@ retry:
         }
 
         retry_lock_status.retry_times = 0;
-        if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 &&
-            !(local_buf_state & BM_IS_META) &&
+        if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_IS_META) &&
             (backend_can_flush_dirty_page() || !(local_buf_state & BM_DIRTY))) {
             /* Found a usable buffer */
             if (strategy != NULL)
                 AddBufferToRing(strategy, buf);
             *buf_state = local_buf_state;
-            (void)pg_atomic_fetch_add_u64(&g_instance.bgwriter_cxt.get_buf_num_clock_sweep, 1);
+            (void)pg_atomic_fetch_add_u64(&g_instance.ckpt_cxt_ctl->get_buf_num_clock_sweep, 1);
             return buf;
         } else if (--try_counter == 0) {
             /*
@@ -691,19 +690,30 @@ void StrategyGetRingPrefetchQuantityAndTrigger(BufferAccessStrategy strategy, in
     }
 }
 
+void wakeup_pagewriter_thread()
+{
+    PageWriterProc *pgwr = &g_instance.ckpt_cxt_ctl->pgwr_procs.writer_proc[0];
+    /* The current candidate list is empty, wake up the buffer writer. */
+    if (pgwr->proc != NULL) {
+        SetLatch(&pgwr->proc->procLatch);
+    }
+    return;
+}
+
 const int CANDIDATE_DIRTY_LIST_LEN = 100;
 const float HIGH_WATER = 0.75;
 static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, uint32* buf_state)
 {
     BufferDesc* buf = NULL;
-    int bgwriter_num = g_instance.bgwriter_cxt.bgwriter_num;
     uint32 local_buf_state;
     int buf_id = 0;
-    int list_num = bgwriter_num - 1;
+    int list_num = g_instance.ckpt_cxt_ctl->pgwr_procs.sub_num;
     int list_id = 0;
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
     Buffer *candidate_dirty_list = NULL;
     int dirty_list_num = 0;
+    bool enable_available = false;
+    bool need_push_dirst_list = false;
     bool need_scan_dirty =
         (g_instance.ckpt_cxt_ctl->actual_dirty_page_num / (float)(g_instance.attr.attr_storage.NBuffers) > HIGH_WATER)
         && backend_can_flush_dirty_page();
@@ -712,60 +722,53 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
         candidate_dirty_list = (Buffer*)palloc0(sizeof(Buffer) * CANDIDATE_DIRTY_LIST_LEN);
     }
 
-    if (beentry->st_tid > 0) {
-        list_id = (t_thrd.shemem_ptr_cxt.MyBEEntry->st_tid) % list_num;
-    } else {
-        list_id = (t_thrd.shemem_ptr_cxt.MyBEEntry->st_sessionid) % list_num;
-    }
+    list_id = beentry->st_tid > 0 ? (beentry->st_tid % list_num) : (beentry->st_sessionid % list_num);
 
     for (int i = 0; i < list_num; i++) {
-        int thread_id = (list_id + i) % list_num;
-        BgWriterProc *bgwriter = &g_instance.bgwriter_cxt.bgwriter_procs[thread_id];
-
+        /* the pagewriter sub thread store normal buffer pool, sub thread starts from 1 */
+        int thread_id = (list_id + i) % list_num + 1;
+        Assert(thread_id > 0 && thread_id <= list_num);
         while (candidate_buf_pop(&buf_id, thread_id)) {
             Assert(buf_id < SegmentBufferStartID);
             buf = GetBufferDescriptor(buf_id);
             local_buf_state = LockBufHdr(buf);
 
-            if (g_instance.bgwriter_cxt.candidate_free_map[buf_id]) {
-                g_instance.bgwriter_cxt.candidate_free_map[buf_id] = false;
-                bool empty_usage_count = (!u_sess->attr.attr_storage.enable_candidate_buf_usage_count ||
-                    BUF_STATE_GET_USAGECOUNT(local_buf_state) == 0);
-                bool available_buffer = BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && empty_usage_count 
-                    && !(local_buf_state & BM_IS_META) 
-                    && !(local_buf_state & BM_DIRTY);
-                bool add_to_candidate_dirty_list = (need_scan_dirty && !(local_buf_state & BM_IS_META) &&
-                    BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && dirty_list_num < CANDIDATE_DIRTY_LIST_LEN);
-                if (available_buffer) {
-                    if (strategy != NULL) {
-                        AddBufferToRing(strategy, buf);
+            if (g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id]) {
+                g_instance.ckpt_cxt_ctl->candidate_free_map[buf_id] = false;
+                enable_available = BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 && !(local_buf_state & BM_IS_META);
+                need_push_dirst_list = need_scan_dirty && dirty_list_num < CANDIDATE_DIRTY_LIST_LEN &&
+                        free_space_enough(buf_id);
+                if (enable_available) {
+                    if (NEED_CONSIDER_USECOUNT && BUF_STATE_GET_USAGECOUNT(local_buf_state) != 0) {
+                        local_buf_state -= BUF_USAGECOUNT_ONE;
+                    } else if (!(local_buf_state & BM_DIRTY)) {
+                        if (strategy != NULL) {
+                            AddBufferToRing(strategy, buf);
+                        }
+                        *buf_state = local_buf_state;
+                        if (candidate_dirty_list != NULL) {
+                            pfree(candidate_dirty_list);
+                        }
+                        return buf;
+                    } else if (need_push_dirst_list) {
+                        candidate_dirty_list[dirty_list_num++] = buf_id;
                     }
-                    *buf_state = local_buf_state;
-                    if (candidate_dirty_list != NULL) {
-                        pfree(candidate_dirty_list);
-                    }
-                    return buf;
-                } else if (add_to_candidate_dirty_list) {
-                    candidate_dirty_list[dirty_list_num++] = buf_id;
                 }
             }
-
             UnlockBufHdr(buf, local_buf_state);
         }
-
-        /* The current candidate list is empty, wake up the buffer writer. */
-        if (bgwriter->proc != NULL) {
-            SetLatch(&bgwriter->proc->procLatch);
-        }
     }
+
+    wakeup_pagewriter_thread();
 
     if (need_scan_dirty) {
         for (int i = 0; i < dirty_list_num; i++) {
             buf_id = candidate_dirty_list[i];
             buf = GetBufferDescriptor(buf_id);
             local_buf_state = LockBufHdr(buf);
-            if (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0 
-                && !(local_buf_state & BM_IS_META)) {
+            enable_available = (BUF_STATE_GET_REFCOUNT(local_buf_state) == 0) && !(local_buf_state & BM_IS_META)
+                && free_space_enough(buf_id);
+            if (enable_available) {
                 if (strategy != NULL) {
                     AddBufferToRing(strategy, buf);
                 }
@@ -773,7 +776,6 @@ static BufferDesc* get_buf_from_candidate_list(BufferAccessStrategy strategy, ui
                 pfree(candidate_dirty_list);
                 return buf;
             }
-
             UnlockBufHdr(buf, local_buf_state);
         }
     }

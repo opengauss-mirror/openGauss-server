@@ -53,9 +53,8 @@ extern PGconn* check_and_conn_for_standby(int conn_timeout, int recv_timeout, ui
 int GetLengthAndCheckReplConn(const char* ConnInfoList);
 
 extern int replconn_num;
-extern bool check_conn(int conn_timeout, int recv_timeout);
 extern int get_replconn_number(const char* filename);
-extern ReplConnInfo* ParseReplConnInfo(const char* ConnInfoList, int* InfoLength);
+extern bool ParseReplConnInfo(const char* ConnInfoList, int* InfoLength, ReplConnInfo* repl);
 char** readfile(const char* path);
 extern char* pg_strdup(const char* in);
 extern void pg_free(void* ptr);

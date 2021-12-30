@@ -50,7 +50,7 @@ extern void addRTEtoQuery(
 extern void errorMissingRTE(ParseState* pstate, RangeVar* relation, bool hasplus = false);
 extern void errorMissingColumn(ParseState *pstate, char *relname, char *colname, int location);
 extern void expandRTE(RangeTblEntry* rte, int rtindex, int sublevels_up, int location, bool include_dropped,
-    List** colnames, List** colvars);
+    List** colnames, List** colvars, ParseState* pstate = NULL);
 extern List* expandRelAttrs(ParseState* pstate, RangeTblEntry* rte, int rtindex, int sublevels_up, int location);
 extern int attnameAttNum(Relation rd, const char* attname, bool sysColOK);
 extern Name attnumAttName(Relation rd, int attid);

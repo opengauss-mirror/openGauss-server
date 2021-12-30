@@ -177,7 +177,16 @@ static bool is_valid_language(Oid lang_oid)
 static bool is_valid_for_masking(const char* func_name, Oid funcnsp, int& funcid,
     const char* func_parameters, bool* invalid_params)
 {
-    CatCList   *catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
+    CatCList   *catlist = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(func_name));
+    }
+#else
+    catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(func_name));
+#endif
     bool is_found = false;
     if (catlist != NULL) {
         func_params f_params;

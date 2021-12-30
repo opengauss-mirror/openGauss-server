@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -259,7 +260,7 @@ bool IsStmtRetryCapable(StatementRetryController* controller, bool is_extend_que
     }
 
     if (!bret) {
-        char* ecode_str = unpack_sql_state(sqlerrcode);
+        char* ecode_str = plpgsql_get_sqlstate(sqlerrcode);
         bool valid_ecode = IsStmtNeedRetryByErrCode(ecode_str, elevel);
         bool is_transblock = IsInTransactionChain(true);
         bool is_unsupported_query = controller->is_unsupported_query_type;
@@ -791,7 +792,7 @@ void StatementRetryStub::ECodeStubTest(void)
 
     on_stub_test = true;
     int ecode = ecode_marker[ecode_pos++];
-    char* ecode_str = unpack_sql_state(ecode);
+    char* ecode_str = plpgsql_get_sqlstate(ecode);
     ereport(ERROR,
         (errmodule(MOD_CN_RETRY),
             errcode(ecode),
@@ -810,7 +811,7 @@ void StatementRetryStub::ECodeValidate(void)
     int sqlerrcode;
     getElevelAndSqlstate(&elevel, &sqlerrcode);
 
-    char* ecode_str = unpack_sql_state(sqlerrcode);
+    char* ecode_str = plpgsql_get_sqlstate(sqlerrcode);
     if (IsStmtNeedRetryByErrCode(sqlerrcode, elevel)) {
         ereport(LOG, (errmodule(MOD_CN_RETRY), errmsg("%s catch error pass %s", STUB_PRINT_PREFIX, ecode_str)));
     } else {

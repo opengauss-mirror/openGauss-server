@@ -118,6 +118,7 @@
 #include "commands/tablespace.h"
 #include "executor/executor.h"
 #include "executor/exec/execStream.h"
+#include "executor/node/nodeCtescan.h"
 #include "miscadmin.h"
 #include "pg_trace.h"
 #ifdef PGXC
@@ -609,7 +610,8 @@ static void dumptuples(Tuplesortstate* state, bool alltuples);
 static void make_bounded_heap(Tuplesortstate* state);
 static void sort_bounded_heap(Tuplesortstate* state);
 static void tuplesort_heap_insert(Tuplesortstate* state, SortTuple* tuple, int tupleindex);
-static void tuplesort_heap_siftup(Tuplesortstate* state);
+static void tuplesort_heap_replace_top(Tuplesortstate *state, SortTuple *tuple);
+static void tuplesort_heap_delete_top(Tuplesortstate* state);
 static unsigned int getlen(Tuplesortstate* state, int tapenum, bool eofOK);
 static void markrunend(Tuplesortstate* state, int tapenum);
 static int comparetup_heap(const SortTuple* a, const SortTuple* b, Tuplesortstate* state);
@@ -1068,6 +1070,31 @@ Tuplesortstate* tuplesort_begin_datum(
     (void)MemoryContextSwitchTo(oldcontext);
 
     return state;
+}
+
+void tuplesort_set_siblings(Tuplesortstate* state, const int numKeys, const List *internalEntryList)
+{
+    /* Not Start with case */
+    if (internalEntryList == NULL) {
+        return;
+    }
+
+    /* Not siblings array sort key */
+    if (numKeys != 1) {
+        return;
+    }
+
+    ereport(DEBUG2,
+            (errmodule(MOD_EXECUTOR),
+            errmsg("Need to switch SibglingsKeyCmp function for start with order siblings by.")));
+
+    /*
+     * Here we only fill customized comparator for our siblings key type
+     */
+    state->sortKeys->abbrev_full_comparator = SibglingsKeyCmp;
+    state->sortKeys->comparator = SibglingsKeyCmpFast;
+
+    return;
 }
 
 /*
@@ -1618,8 +1645,8 @@ static void puttuple_common(Tuplesortstate* state, SortTuple* tuple)
             } else {
                 /* discard top of heap, sift up, insert new tuple */
                 free_sort_tuple(state, &state->memtuples[0]);
-                tuplesort_heap_siftup(state);
-                tuplesort_heap_insert(state, tuple, 0);
+                tuple->tupindex = 0;    /* not used */
+                tuplesort_heap_replace_top(state, tuple);
             }
             break;
 
@@ -1929,7 +1956,6 @@ static bool tuplesort_gettuple_common(Tuplesortstate* state, bool forward, SortT
                     state->availMem += tuplength;
                     state->mergeavailmem[srcTape] += tuplength;
                 }
-                tuplesort_heap_siftup(state);
                 if ((tupIndex = state->mergenext[srcTape]) == 0) {
                     /*
                      * out of preloaded data on this tape, try to read more
@@ -1942,15 +1968,22 @@ static bool tuplesort_gettuple_common(Tuplesortstate* state, bool forward, SortT
                     /*
                      * if still no data, we've reached end of run on this tape
                      */
-                    if ((tupIndex = state->mergenext[srcTape]) == 0)
+                    if ((tupIndex = state->mergenext[srcTape]) == 0) {
+                        /* Remove the top node from the heap */
+                        tuplesort_heap_delete_top(state);
                         return true;
+                    }
                 }
-                /* pull next preread tuple from list, insert in heap */
+                /*
+                 * pull next preread tuple from list, and replace the returned
+                 * tuple at top of the heap with it.
+                 */
                 newtup = &state->memtuples[tupIndex];
                 state->mergenext[srcTape] = newtup->tupindex;
                 if (state->mergenext[srcTape] == 0)
                     state->mergelast[srcTape] = 0;
-                tuplesort_heap_insert(state, newtup, srcTape);
+                newtup->tupindex = srcTape;
+                tuplesort_heap_replace_top(state, newtup);
                 /* put the now-unused memtuples entry on the freelist */
                 newtup->tupindex = state->mergefreelist;
                 state->mergefreelist = tupIndex;
@@ -2506,23 +2539,27 @@ static void mergeonerun(Tuplesortstate* state)
         /* writetup adjusted total free space, now fix per-tape space */
         spaceFreed = state->availMem - priorAvail;
         state->mergeavailmem[srcTape] += spaceFreed;
-        /* compact the heap */
-        tuplesort_heap_siftup(state);
         if ((tupIndex = state->mergenext[srcTape]) == 0) {
             /* out of preloaded data on this tape, try to read more */
             mergepreread(state);
             /* if still no data, we've reached end of run on this tape */
             if ((tupIndex = state->mergenext[srcTape]) == 0) {
+                /* remove the written-out tuple from the heap */
+                tuplesort_heap_delete_top(state);
                 continue;
             }
         }
-        /* pull next preread tuple from list, insert in heap */
+        /*
+         * pull next preread tuple from list, and replace the written-out
+         * tuple in the heap with it.
+         */
         tup = &state->memtuples[tupIndex];
         state->mergenext[srcTape] = tup->tupindex;
         if (state->mergenext[srcTape] == 0) {
             state->mergelast[srcTape] = 0;
         }
-        tuplesort_heap_insert(state, tup, srcTape);
+        tup->tupindex = srcTape;
+        tuplesort_heap_replace_top(state, tup);
         /* put the now-unused memtuples entry on the freelist */
         tup->tupindex = state->mergefreelist;
         state->mergefreelist = tupIndex;
@@ -3028,21 +3065,22 @@ static void make_bounded_heap(Tuplesortstate* state)
 
     state->memtupcount = 0; /* make the heap empty */
     for (i = 0; i < tupcount; i++) {
-        if (state->memtupcount >= state->bound && COMPARETUP(state, &state->memtuples[i], &state->memtuples[0]) <= 0) {
-            /* New tuple would just get thrown out, so skip it */
-            free_sort_tuple(state, &state->memtuples[i]);
-            CHECK_FOR_INTERRUPTS();
-        } else {
+        if (state->memtupcount < state->bound) {
             /* Insert next tuple into heap */
             /* Must copy source tuple to avoid possible overwrite */
-            SortTuple stup = state->memtuples[i];
-
+            SortTuple   stup = state->memtuples[i];
             tuplesort_heap_insert(state, &stup, 0);
-
-            /* If heap too full, discard largest entry */
-            if (state->memtupcount > state->bound) {
-                free_sort_tuple(state, &state->memtuples[0]);
-                tuplesort_heap_siftup(state);
+        } else {
+            /*
+             * The heap is full.  Replace the largest entry with the new
+             * tuple, or just discard it, if it's larger than anything already
+             * in the heap.
+             */
+            if (COMPARETUP(state, &state->memtuples[i], &state->memtuples[0]) <= 0) {
+                free_sort_tuple(state, &state->memtuples[i]);
+                CHECK_FOR_INTERRUPTS();
+            } else {
+                tuplesort_heap_replace_top(state, &state->memtuples[i]);
             }
         }
     }
@@ -3064,15 +3102,15 @@ static void sort_bounded_heap(Tuplesortstate* state)
     Assert(SERIAL(state));
 
     /*
-     * We can unheapify in place because each sift-up will remove the largest
-     * entry, which we can promptly store in the newly freed slot at the end.
-     * Once we're down to a single-entry heap, we're done.
+     * We can unheapify in place because each delete-top call will remove the
+     * largest entry, which we can promptly store in the newly freed slot at
+     * the end.  Once we're down to a single-entry heap, we're done.
      */
     while (state->memtupcount > 1) {
         SortTuple stup = state->memtuples[0];
 
         /* this sifts-up the next-largest entry and decreases memtupcount */
-        tuplesort_heap_siftup(state);
+        tuplesort_heap_delete_top(state);
         state->memtuples[state->memtupcount] = stup;
     }
     state->memtupcount = tupcount;
@@ -3132,6 +3170,50 @@ static void tuplesort_heap_insert(Tuplesortstate* state, SortTuple* tuple, int t
     memtuples[j] = *tuple;
 }
 
+/*
+ * Replace the tuple at state->memtuples[0] with a new tuple.  Sift up to
+ * maintain the heap invariant.
+ *
+ * This corresponds to Knuth's "sift-up" algorithm (Algorithm 5.2.3H,
+ * Heapsort, steps H3-H8).
+ */
+static void tuplesort_heap_replace_top(Tuplesortstate *state, SortTuple *tuple)
+{
+    SortTuple  *memtuples = state->memtuples;
+    unsigned int i,
+                n;
+
+    Assert(state->memtupcount >= 1);
+
+    CHECK_FOR_INTERRUPTS();
+
+    /*
+     * state->memtupcount is "int", but we use "unsigned int" for i, j, n.
+     * This prevents overflow in the "2 * i + 1" calculation, since at the top
+     * of the loop we must have i < n <= INT_MAX <= UINT_MAX/2.
+     */
+    n = state->memtupcount;
+    i = 0;                      /* i is where the "hole" is */
+    for (;;)
+    {
+        unsigned int j = 2 * i + 1;
+
+        if (j >= n) {
+            break;
+        }
+        if (j + 1 < n &&
+            COMPARETUP(state, &memtuples[j], &memtuples[j + 1]) > 0) {
+            j++;
+        }
+        if (COMPARETUP(state, tuple, &memtuples[j]) <= 0) {
+            break;
+        }
+        memtuples[i] = memtuples[j];
+        i = j;
+    }
+    memtuples[i] = *tuple;
+}
+
 static void tuplesort_sort_memtuples(Tuplesortstate *state)
 {
     if (state->memtupcount > 1) {
@@ -3143,42 +3225,27 @@ static void tuplesort_sort_memtuples(Tuplesortstate *state)
     }
 }
 
-
-/*
- * The tuple at state->memtuples[0] has been removed from the heap.
- * Decrement memtupcount, and sift up to maintain the heap invariant.
- */
-static void tuplesort_heap_siftup(Tuplesortstate* state)
+ /*
+  * Remove the tuple at state->memtuples[0] from the heap.  Decrement
+  * memtupcount, and sift up to maintain the heap invariant.
+  *
+  * The caller has already free'd the tuple the top node points to,
+  * if necessary.
+  */
+static void tuplesort_heap_delete_top(Tuplesortstate *state)
 {
-    SortTuple* memtuples = state->memtuples;
-    SortTuple* tuple = NULL;
-    int i, n;
+    SortTuple  *memtuples = state->memtuples;
+    SortTuple  *tuple;
 
     if (--state->memtupcount <= 0) {
         return;
     }
-
-    CHECK_FOR_INTERRUPTS();
-
-    n = state->memtupcount;
-    tuple = &memtuples[n]; /* tuple that must be reinserted */
-    i = 0;                 /* i is where the "hole" is */
-    for (;;) {
-        int j = 2 * i + 1;
-
-        if (j >= n) {
-            break;
-        }
-        if (j + 1 < n && COMPARETUP(state, &memtuples[j], &memtuples[j + 1]) > 0) {
-            j++;
-        }
-        if (COMPARETUP(state, tuple, &memtuples[j]) <= 0) {
-            break;
-        }
-        memtuples[i] = memtuples[j];
-        i = j;
-    }
-    memtuples[i] = *tuple;
+    /*
+     * Remove the last tuple in the heap, and re-insert it, by replacing the
+     * current top node with it.
+     */
+    tuple = &memtuples[state->memtupcount];
+    tuplesort_heap_replace_top(state, tuple);
 }
 
 /*

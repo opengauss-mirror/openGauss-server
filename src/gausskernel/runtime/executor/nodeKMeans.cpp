@@ -486,7 +486,8 @@ bool kmeans_get_tupleslot(KMeansState* kmeans_state, TupleTableSlot* slot, Tuple
     values[13] = UInt32GetDatum(current_position);
     values[14] = UInt64GetDatum(kmeans_node->parameters.external_seed);
     /* no null attribute */
-    memset_s(nulls, sizeof(bool) * NUM_ATTR_OUTPUT, 0, sizeof(bool) * NUM_ATTR_OUTPUT);
+    errorno = memset_s(nulls, sizeof(bool) * NUM_ATTR_OUTPUT, 0, sizeof(bool) * NUM_ATTR_OUTPUT);
+    securec_check(errorno, "\0", "\0");
     
     /*
      * this saves one round of copying

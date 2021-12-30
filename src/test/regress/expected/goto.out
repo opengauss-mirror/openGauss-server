@@ -1324,7 +1324,31 @@ GOTO pos1;
     v1 := v1 + 1000;
 END;
 /
+drop table if exists tb_test;
+NOTICE:  table "tb_test" does not exist, skipping
+create table tb_test(group_code varchar2(5), custsort varchar2(4));
+create procedure proc_test() as
+v_tb_log timestamp;
+v_tb_log1 timestamp;
+begin
+    for cm_np_duebill in (select group_code, custsort from tb_test) loop
+        <<next1>>
+        NULL;
+    end loop;
+for cm_np_duebill in (select sysdate) loop
+    v_tb_log1:=cm_np_duebill.sysdate;
+end loop;
+end;
+/
+call proc_test();
+ proc_test 
+-----------
+ 
+(1 row)
+
 drop schema goto_schema cascade;
-NOTICE:  drop cascades to 2 other objects
+NOTICE:  drop cascades to 4 other objects
 DETAIL:  drop cascades to table conttesttbl
 drop cascades to function sp_test_1(integer,integer)
+drop cascades to table tb_test
+drop cascades to function proc_test()

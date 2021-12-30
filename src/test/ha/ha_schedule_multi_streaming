@@ -1,0 +1,6 @@
+streaming/build_disaster_cluster
+streaming/failover
+streaming/reconnect_changed_primary
+streaming/repair_cascade_standby
+streaming/set_rto_rpo_target
+streaming/majority_faults

@@ -756,6 +756,7 @@ static void RbCleanerPurgeImpl(uint64 id)
         }
     }
     list_free_deep(l);
+    l = NULL;
     CommitTransactionCommand();
 
     RbCleanerPurgeFinal(id);
@@ -873,6 +874,8 @@ NON_EXEC_STATIC void RbCleanerMain()
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -1103,6 +1106,8 @@ NON_EXEC_STATIC void RbWorkerMain()
 
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevent interrupts while cleaning up */
         HOLD_INTERRUPTS();

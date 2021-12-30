@@ -121,5 +121,6 @@ HadrSwitchoverLock 111
 TDEKeyCacheLock 112
 RoleIdLock 113
 UniqueSqlEvictLock 114
-ReplicationOriginLock 115
-LogicalRepWorkerLock 116
+InstrStmtTrackCtlLock 115
+ReplicationOriginLock 116
+LogicalRepWorkerLock 117

@@ -145,12 +145,10 @@ static bool PartitionFindReplTupleByIndex(EState *estate, Relation rel, Relation
 {
     /* must be non-GPI index */
     Assert(!RelationIsGlobalIndex(idxrel));
-#ifdef NOT_USED
+
     if (RelationIsSubPartitioned(rel)) {
         fakeRelInfo->partList = RelationGetSubPartitionList(rel, RowExclusiveLock);
-    } else
-#endif
-    {
+    } else {
         fakeRelInfo->partList = relationGetPartitionList(rel, RowExclusiveLock);
     }
 
@@ -191,12 +189,9 @@ static bool PartitionFindReplTupleByIndex(EState *estate, Relation rel, Relation
 static bool PartitionFindReplTupleSeq(Relation rel, LockTupleMode lockmode,
     TupleTableSlot *searchslot, TupleTableSlot *outslot, FakeRelationPartition *fakeRelInfo)
 {
-#ifdef NOT_USED
     if (RelationIsSubPartitioned(rel)) {
         fakeRelInfo->partList = RelationGetSubPartitionList(rel, RowExclusiveLock);
-    } else
-#endif
-    {
+    } else {
         fakeRelInfo->partList = relationGetPartitionList(rel, RowExclusiveLock);
     }
 
@@ -823,7 +818,6 @@ void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeR
             relAndPart->part = partition;
             relAndPart->partOid = partitionOid;
             break;
-#ifdef NOT_USED
         case PARTTYPE_SUBPARTITIONED_RELATION: {
             Relation subPartRel = NULL;
             Partition subPart = NULL;
@@ -840,7 +834,6 @@ void GetFakeRelAndPart(EState *estate, Relation rel, TupleTableSlot *slot, FakeR
             relAndPart->partOid = subPartOid;
             break;
         }
-#endif
         default:
             ereport(ERROR, (errmodule(MOD_EXECUTOR),
                 (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("Unrecognized parttype as \"%c\" for relation \"%s\"",

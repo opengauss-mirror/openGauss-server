@@ -250,7 +250,8 @@ double IncrementalStatistics::getEmpiricalStdDev() const
 
 bool IncrementalStatistics::reset()
 {
-    memset_s(this, sizeof(IncrementalStatistics), 0, sizeof(IncrementalStatistics));
+    errno_t rc = memset_s(this, sizeof(IncrementalStatistics), 0, sizeof(IncrementalStatistics));
+    securec_check(rc, "\0", "\0");
     min_value = DBL_MAX;
     return true;
 }

@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/optimizer/prep.h
  *
@@ -50,7 +51,6 @@ extern void remove_result_refs(PlannerInfo *root, int varno, Node *newjtloc);
 extern bool find_dependent_phvs(Node *node, int varno);
 extern bool find_dependent_phvs_walker(Node *node, find_dependent_phvs_context *context);
 extern void pull_up_sublinks(PlannerInfo* root);
-extern void substitute_ctes_with_subqueries(PlannerInfo* root, Query* parse, bool under_recursive_tree);
 extern void inline_set_returning_functions(PlannerInfo* root);
 extern Node* pull_up_subqueries(PlannerInfo* root, Node* jtnode);
 extern void flatten_simple_union_all(PlannerInfo* root);

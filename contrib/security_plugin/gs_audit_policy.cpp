@@ -491,77 +491,80 @@ bool check_audit_policy_access(const PolicyLabelItem *item, const PolicyLabelIte
         }
     }
 
-    PolicyLabelItem view_object_item(view_item->m_schema, view_item->m_object,
-                                     O_COLUMN, view_item->m_column);
     /*
      * walk through all the access audit label info to match with label of object
      */
+    if (labels.empty()) {
+        return false;
+    }
+
     bool has_column = false;
-    if (labels.size()) {
-        AccessPair object_item("", item->m_obj_type);
-        {
-            gs_stl::gs_string value;
-            item->get_fqdn_value(&value);
-            object_item.first = value.c_str();
+    PolicyLabelItem view_object_item(view_item->m_schema, view_item->m_object,
+                                     O_COLUMN, view_item->m_column);
+    AccessPair object_item("", item->m_obj_type);
+    {
+        gs_stl::gs_string value;
+        item->get_fqdn_value(&value);
+        object_item.first = value.c_str();
+    }
+    loaded_labels *tmp_labels = get_policy_labels();
+    policy_label_map::const_iterator lit = labels.begin();
+    policy_label_map::const_iterator elit = labels.end();
+    for (; lit != elit; ++lit) {
+        const PolicyPair &pol_item = *(lit.first);
+        loaded_labels::const_iterator it;
+        if (tmp_labels != NULL) {
+            it = tmp_labels->find(lit->second->c_str());
         }
-        loaded_labels *tmp_labels = get_policy_labels();
-        policy_label_map::const_iterator lit = labels.begin();
-        policy_label_map::const_iterator elit = labels.end();
-        for (; lit != elit; ++lit) {
-            const PolicyPair& pol_item = *(lit.first);
-            loaded_labels::const_iterator it;
-            if (tmp_labels != NULL) {
-                it = tmp_labels->find(lit->second->c_str());
+        if ((tmp_labels == NULL || it == tmp_labels->end()) && *(lit->second) == "all") {
+            (*pol_result)[pol_item.m_id][object_item];
+            if (pol_item.m_block_type > 0) {
+                *block_behaviour = pol_item.m_block_type;
+                return has_column;
             }
-            if ((tmp_labels == NULL || it == tmp_labels->end()) && *(lit->second) == "all") {
-                (*pol_result)[pol_item.m_id][object_item];
-                if (pol_item.m_block_type > 0) {
-                    *block_behaviour = pol_item.m_block_type;
-                    return has_column;
+        } else if (it != tmp_labels->end()) {
+            /* <label_type, PolicyLabelItem> */
+            typed_labels::const_iterator fit = it->second->begin();
+            typed_labels::const_iterator feit = it->second->end();
+            for (; fit != feit; ++fit) {
+                bool is_columnn = (*(fit->first) == O_COLUMN);
+                has_column = has_column || is_columnn;
+                if (*(fit->first) != item->m_obj_type && (*fit->first) != O_SCHEMA) {
+                    continue;
                 }
-            } else if (it != tmp_labels->end()) {
-                typed_labels::const_iterator fit = it->second->begin();
-                typed_labels::const_iterator feit = it->second->end();
-                for (; fit != feit; ++fit) {
-                    bool is_columnn = (*(fit->first) == O_COLUMN);
-                    has_column = has_column || is_columnn;
-                    if (*(fit->first) != item->m_obj_type && (*fit->first) != O_SCHEMA) {
-                        continue;
-                    }
 
-                    const gs_policy_label_set& objects = *(fit->second);
-                    if (is_columnn) {
-                        if (view_object_item.m_object && !view_object_item.empty() && 
-                            objects.find(view_object_item) != objects.end()) {
-                            gs_stl::gs_string value;
-                            view_object_item.get_fqdn_value(&value);
-                            object_item.first = value.c_str();
+                const gs_policy_label_set &objects = *(fit->second);
+                if (is_columnn) {
+                    if (view_object_item.m_object && !view_object_item.empty() &&
+                        objects.find(view_object_item) != objects.end()) {
+                        gs_stl::gs_string value;
+                        view_object_item.get_fqdn_value(&value);
+                        object_item.first = value.c_str();
 
-                            (*pol_result)[pol_item.m_id][object_item].insert(view_object_item.m_column);
-                            if (pol_item.m_block_type > 0) {
-                                *block_behaviour = pol_item.m_block_type;
-                                return has_column;
-                            }
-                        }
-                        if (objects.find(*item) != objects.end()) {
-                            (*pol_result)[pol_item.m_id][object_item].insert(item->m_column);
-                            if (pol_item.m_block_type > 0) {
-                                *block_behaviour = pol_item.m_block_type;
-                                return has_column;
-                            }
-                        }
-                    } else if (*(fit->first) == O_SCHEMA) {
-                        PolicyLabelItem sch_item;
-                        sch_item.m_schema = item->m_schema;
-                        if (objects.find(sch_item) != objects.end()) {
-                            (*pol_result)[pol_item.m_id][object_item];
-                        }
-                    } else if (objects.find(*item) != objects.end()) {
-                        (*pol_result)[pol_item.m_id][object_item];
+                        (*pol_result)[pol_item.m_id][object_item].insert(view_object_item.m_column);
                         if (pol_item.m_block_type > 0) {
                             *block_behaviour = pol_item.m_block_type;
                             return has_column;
                         }
+                    }
+                    if (objects.find(*item) != objects.end()) {
+                        (*pol_result)[pol_item.m_id][object_item].insert(item->m_column);
+                        if (pol_item.m_block_type > 0) {
+                            *block_behaviour = pol_item.m_block_type;
+                            return has_column;
+                        }
+                    }
+                } else if (*(fit->first) == O_SCHEMA) {
+                    PolicyLabelItem sch_item;
+                    sch_item.m_schema = item->m_schema;
+                    if (objects.find(sch_item) != objects.end()) {
+                        (*pol_result)[pol_item.m_id][object_item];
+                    }
+                } else if (objects.find(*item) != objects.end()) {
+                    (*pol_result)[pol_item.m_id][object_item];
+                    if (pol_item.m_block_type > 0) {
+                        *block_behaviour = pol_item.m_block_type;
+                        return has_column;
                     }
                 }
             }

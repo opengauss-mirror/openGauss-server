@@ -1,0 +1,203 @@
+-- setup
+create table SQLLDR_COL_TBL
+(
+    COL_1   NUMBER,
+    COL_2   VARCHAR,
+    COL_3   VARCHAR,
+    COL_4   INTEGER,
+    COL_5   INTEGER,
+    COL_6   VARCHAR,
+    COL_7   VARCHAR,
+    COL_8   VARCHAR,
+    COL_9   INTEGER,
+    COL_10  INTEGER
+);
+-- position
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position.ctl data=@abs_srcdir@/data/gs_loader_position.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 6 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_position.log
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+ col_1 |                                                               col_2                                                               | col_3 | col_4 | col_5 | col_6 |                                                               col_7                                                               | col_8 | col_9 | col_10 
+-------+-----------------------------------------------------------------------------------------------------------------------------------+-------+-------+-------+-------+-----------------------------------------------------------------------------------------------------------------------------------+-------+-------+--------
+   123 | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | asd   |     4 |  1234 | asd   | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | c     |     2 |    999
+   123 | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | asd   |     4 |  2234 | asd   | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | c     |     2 |      0
+   123 | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | asd   |     4 |  3234 |  asd  | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | c     |     2 |     99
+   123 | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | as d  |     4 |  5234 | as d  | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col |       |     2 |    999
+   123 | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | as d  |     4 |  6234 | as d  | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | c     |     2 |       
+   123 | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | as d  |     4 |  7234 | as d  | constant col constant col constant col constant col constant col constant col constant col constant col constant col constant col | c     |       |       
+(6 rows)
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence.ctl data=@abs_srcdir@/data/gs_loader_sequence.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 20 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_sequence.log
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+ col_1 |    col_2     | col_3 | col_4 | col_5 | col_6 | col_7 | col_8 | col_9 | col_10 
+-------+--------------+-------+-------+-------+-------+-------+-------+-------+--------
+     2 | constant col |       |     4 |  3234 | asd-  | abcd  | AA    |     3 |      6
+     3 | constant col |       |     4 |  4234 | asd-  | abcd  |       |     5 |      9
+     5 | constant col |       |     4 |  6234 | asd-  | abcd  | AA    |     9 |     15
+     6 | constant col |       |     4 |  7234 | asd-  | abcd  | AA    |    11 |     18
+     8 | constant col |       |     4 |  9234 |       |       |       |    15 |     24
+    10 | constant col |       |     4 |  3234 | asd-  | abcd  | AA    |    19 |     30
+    11 | constant col |       |     4 |  4234 | asd-  | abcd  |       |    21 |     33
+    13 | constant col |       |     4 |  6234 | asd-  | abcd  | AA    |    25 |     39
+    14 | constant col |       |     4 |  7234 | asd-  | abcd  | AA    |    27 |     42
+    16 | constant col |       |     4 |  9234 |       |       |       |    31 |     48
+    18 | constant col |       |     4 |  3234 | asd-  | abcd  | AA    |    35 |     54
+    19 | constant col |       |     4 |  4234 | asd-  | abcd  |       |    37 |     57
+    21 | constant col |       |     4 |  6234 | asd-  | abcd  | AA    |    41 |     63
+    22 | constant col |       |     4 |  7234 | asd-  | abcd  | AA    |    43 |     66
+    24 | constant col |       |     4 |  9234 |       |       |       |    47 |     72
+    26 | constant col |       |     4 |  3234 | asd-  | abcd  | AA    |    51 |     78
+    27 | constant col |       |     4 |  4234 | asd-  | abcd  |       |    53 |     81
+    29 | constant col |       |     4 |  6234 | asd-  | abcd  | AA    |    57 |     87
+    30 | constant col |       |     4 |  7234 | asd-  | abcd  | AA    |    59 |     90
+    32 | constant col |       |     4 |  9234 |       |       |       |    63 |     96
+(20 rows)
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence2.ctl data=@abs_srcdir@/data/gs_loader_sequence.csv port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 6 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_sequence2.log
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+ col_1 |    col_2     |  col_3   | col_4 | col_5 |   col_6   | col_7 | col_8 | col_9 | col_10 
+-------+--------------+----------+-------+-------+-----------+-------+-------+-------+--------
+     1 | constant col | abc      |     4 |    10 | def       | abc   | AAA   |     1 |      3
+     2 | constant col | abc      |     4 |    10 | def       | abc   |       |     3 |      6
+     4 | constant col | abc      |     4 |    10 | def       | abc   |       |     7 |     12
+     5 | constant col | abc, qwe |     4 |    10 | def,asd   | abc   | AAA   |     9 |     15
+     6 | constant col | abc      |     4 |    10 | "def,asd" | abc   | AAA   |    11 |     18
+     7 | constant col |          |     4 |       |           |       |       |    13 |     21
+(6 rows)
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence3.ctl data=@abs_srcdir@/data/gs_loader_sequence3.csv port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_sequence3.log
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+ col_1 |    col_2     |  col_3   | col_4 | col_5 |   col_6   | col_7 | col_8 | col_9 | col_10 
+-------+--------------+----------+-------+-------+-----------+-------+-------+-------+--------
+     1 | constant col | abc      |     4 |    10 | def       |       | AAA   |     1 |      3
+     2 | constant col | abc      |     4 |    10 | def       |       |       |     3 |      6
+     3 | constant col | abc      |     4 |    10 | def       |       |       |     5 |      9
+     5 | constant col | abc, qwe |     4 |    10 | def,asd   |       | AAA   |     9 |     15
+     6 | constant col | abc      |     4 |    10 | "def,asd" |       | AAA   |    11 |     18
+(5 rows)
+
+-- sequence
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_sequence4.ctl data=@abs_srcdir@/data/gs_loader_sequence3.csv port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_sequence4.log
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+ col_1 |    col_2     |  col_3   | col_4 | col_5 |   col_6   | col_7 | col_8 | col_9 | col_10 
+-------+--------------+----------+-------+-------+-----------+-------+-------+-------+--------
+     1 | constant col | abc      |     4 |    10 | def       |       | AAA   |     1 |      3
+     1 | constant col | abc      |     4 |    10 | def       |       | AAA   |    13 |      8
+     2 | constant col | abc      |     4 |    10 | def       |       |       |     3 |      6
+     2 | constant col | abc      |     4 |    10 | def       |       |       |    15 |     11
+     3 | constant col | abc      |     4 |    10 | def       |       |       |     5 |      9
+     3 | constant col | abc      |     4 |    10 | def       |       |       |    17 |     14
+     5 | constant col | abc, qwe |     4 |    10 | def,asd   |       | AAA   |     9 |     15
+     5 | constant col | abc, qwe |     4 |    10 | def,asd   |       | AAA   |    21 |     20
+     6 | constant col | abc      |     4 |    10 | "def,asd" |       | AAA   |    11 |     18
+     6 | constant col | abc      |     4 |    10 | "def,asd" |       | AAA   |    23 |     23
+(10 rows)
+
+-- position
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position2.ctl data=@abs_srcdir@/data/gs_loader_position.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 6 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_position2.log
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+ col_1 |  col_2   | col_3 | col_4 | col_5 | col_6 |  col_7   | col_8 | col_9 | col_10 
+-------+----------+-------+-------+-------+-------+----------+-------+-------+--------
+     1 | constant |       |       |  1234 | asd   | constant | c     |     2 |    999
+     2 | constant |       |       |  2234 | asd   | constant | c     |     2 |      0
+     3 | constant |       |       |  3234 |  asd  | constant | c     |     2 |     99
+     5 | constant |       |       |  5234 | as d  | constant |       |     2 |    999
+     6 | constant |       |       |  6234 | as d  | constant | c     |     2 |       
+     7 | constant |       |       |  7234 | as d  | constant | c     |       |       
+(6 rows)
+
+-- position
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position3.ctl data=@abs_srcdir@/data/gs_loader_position.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 6 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_position3.log
+select * from SQLLDR_COL_TBL order by 1,2,3,4,5,6,7,8,9,10;
+ col_1 |  col_2   | col_3 | col_4 | col_5 | col_6 | col_7 | col_8 | col_9 | col_10 
+-------+----------+-------+-------+-------+-------+-------+-------+-------+--------
+     1 | constant |       |       |  1234 | asd   | asd   | c     |     2 |    999
+     2 | constant |       |       |  2234 | asd   | asd   | c     |     2 |      0
+     3 | constant |       |       |  3234 |  asd  |  asd  | c     |     2 |     99
+     5 | constant |       |       |  5234 | as d  | as d  |       |     2 |    999
+     6 | constant |       |       |  6234 | as d  | as d  | c     |     2 |       
+     7 | constant |       |       |  7234 | as d  | as d  | c     |       |       
+(6 rows)
+
+-- nullif
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_position4.ctl data=@abs_srcdir@/data/gs_loader_position4.data port=@portstring@ db=regression passwd=gauss@123 errors=100
+gs_loader: version 0.1
+
+ 7 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_position4.log
+select * from SQLLDR_COL_TBL where col_6 is null;
+ col_1 |  col_2   | col_3 | col_4 | col_5 | col_6 |  col_7   | col_8 | col_9 | col_10 
+-------+----------+-------+-------+-------+-------+----------+-------+-------+--------
+     2 | constant |       |       |  1234 |       | constant | c     |     2 |    999
+(1 row)
+
+-- issue: DTS2021092327784 TIMESTAMP
+CREATE TABLE SQLLDR_COL_001(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    TIMESTAMP VARCHAR2(20)
+);
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_timestamp.ctl data=@abs_srcdir@/data/gs_loader_issue_001.csv port=@portstring@ db=regression passwd=gauss@123 rows=1000000 bindsize=1000000
+gs_loader: version 0.1
+
+ 4 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_timestamp.log
+select * from SQLLDR_COL_001 order by 1,2,3;
+ id | name | timestamp 
+----+------+-----------
+    | abc  | 1
+    | abc  | 2
+    | abc  | 3
+    | abc  | 33
+(4 rows)
+
+drop table SQLLDR_COL_001;
+-- teardown
+drop table SQLLDR_COL_TBL;

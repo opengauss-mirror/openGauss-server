@@ -359,6 +359,12 @@ static RestrictInfo* make_restrictinfo_internal(Expr* clause, Expr* orclause, bo
     rc = memset_s(&restrictinfo->right_bucketsize, sizeof(BucketSize), 0, sizeof(BucketSize));
     securec_check(rc, "\0", "\0");
 
+    /*
+     * Mark whether this rinfo converted.
+     * default false, become true when type conversion happened during index matching process
+     */
+    restrictinfo->converted = false;
+
     return restrictinfo;
 }
 

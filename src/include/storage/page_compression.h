@@ -16,7 +16,6 @@
 #include "storage/buf/bufpage.h"
 #include "datatype/timestamp.h"
 #include "catalog/pg_class.h"
-#include "catalog/pg_am.h"
 #include "utils/atomic.h"
 
 /* The page compression feature relies on native atomic operation support.
@@ -39,7 +38,7 @@
 #define COMPRESS_ALGORITHM_ZSTD 2
 
 constexpr uint32 COMPRESS_ADDRESS_FLUSH_CHUNKS = 5000;
-
+ 
 #define SUPPORT_COMPRESSED(relKind, relam) \
     ((relKind) == RELKIND_RELATION || ((relKind) == RELKIND_INDEX && (relam) == BTREE_AM_OID))
 #define REL_SUPPORT_COMPRESSED(relation)                \
@@ -47,7 +46,7 @@ constexpr uint32 COMPRESS_ADDRESS_FLUSH_CHUNKS = 5000;
      ((relation->rd_rel->relkind) == RELKIND_INDEX && (relation->rd_rel->relam) == BTREE_AM_OID))
 
 typedef uint32 pc_chunk_number_t;
-const uint32 PAGE_COMPRESSION_VERSION = 92424;
+const uint32 PAGE_COMPRESSION_VERSION = 92505;
 
 enum CompressedFileType {
     COMPRESSED_TYPE_UNKNOWN,

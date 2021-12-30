@@ -34,6 +34,7 @@
 #include "catalog/pg_authid.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_description.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_tablespace.h"
 #include "catalog/toasting.h"
@@ -97,7 +98,7 @@ do_end(void)
 %}
 
 %expect 0
-%name-prefix="boot_yy"
+%name-prefix "boot_yy"
 
 %union
 {
@@ -276,6 +277,9 @@ Boot_CreateStmt:
 													  REL_CMPRS_NOT_SUPPORT,
                                                                                                           NULL,
 													  NULL);
+						if (id == DescriptionRelationId) {
+							 InsertBuiltinFuncDescInBootstrap();
+						}
 						ereport(DEBUG4, (errmsg("relation created with OID %u", id)));
 					}
 					do_end();

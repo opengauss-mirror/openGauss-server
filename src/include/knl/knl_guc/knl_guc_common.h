@@ -42,11 +42,7 @@
 
 /* Configuration variables */
 #define MAX_GTM_HOST_NUM (8)
-#ifdef ENABLE_MULTIPLE_NODES
-#define GUC_MAX_REPLNODE_NUM (8)
-#else
-#define GUC_MAX_REPLNODE_NUM (9)
-#endif
+#define GUC_MAX_REPLNODE_NUM (19)
 
 #ifdef WIN32
 typedef unsigned __int64 GS_UINT64;

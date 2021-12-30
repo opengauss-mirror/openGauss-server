@@ -186,6 +186,69 @@ partition p8 values less than (maxvalue)
 );
 set enable_hashagg = off;
 explain (costs off)
+with s1 as materialized (
+	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
+),
+s2 as materialized (
+	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
+)
+select
+	a1, sum(total) total
+from(
+	select * from s1
+	union all
+	select * from s2
+) tmp1
+group by a1
+order by a1
+;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ GroupAggregate
+   Group By Key: s1.a1
+   CTE s1
+     ->  GroupAggregate
+           Group By Key: hw_smp.smp_mergeappend1.a1
+           ->  Merge Join
+                 Merge Cond: (hw_smp.smp_mergeappend1.a1 = hw_smp.smp_mergeappend2.a2)
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend1.a1
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend1
+                                   Selected Partitions:  1..2
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend2.a2
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend2
+                                   Selected Partitions:  1..2
+   CTE s2
+     ->  GroupAggregate
+           Group By Key: hw_smp.smp_mergeappend1.a1
+           ->  Merge Join
+                 Merge Cond: (hw_smp.smp_mergeappend1.a1 = hw_smp.smp_mergeappend2.a2)
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend1.a1
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend1
+                                   Selected Partitions:  1..2
+                 ->  Sort
+                       Sort Key: hw_smp.smp_mergeappend2.a2
+                       ->  Partition Iterator
+                             Iterations: 2
+                             ->  Partitioned Seq Scan on smp_mergeappend2
+                                   Selected Partitions:  1..2
+   ->  Sort
+         Sort Key: s1.a1
+         ->  Result
+               ->  Append
+                     ->  CTE Scan on s1
+                     ->  CTE Scan on s2
+(42 rows)
+
+explain (costs off)
 with s1 as(
 	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
 ),

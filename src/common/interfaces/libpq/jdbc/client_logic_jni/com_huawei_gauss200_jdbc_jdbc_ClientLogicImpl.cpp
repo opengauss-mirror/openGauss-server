@@ -56,6 +56,19 @@ JNIEXPORT jobjectArray JNICALL Java_com_huawei_gauss200_jdbc_jdbc_ClientLogicImp
         data_type);
 }
 
+JNIEXPORT jobjectArray JNICALL JJava_com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl_getRecordIDsImpl (JNIEnv *env,
+    jobject java_object, jlong handle, jstring column_name_java, jint oid)
+{
+    return Java_org_postgresql_jdbc_ClientLogicImpl_getRecordIDsImpl(env, java_object, handle, column_name_java, oid);
+}
+
+JNIEXPORT jobjectArray JNICALL Java_com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl_runClientLogic4RecordImpl(JNIEnv *env,
+    jobject java_object, jlong handle, jstring data_to_process_java, jintArray original_oids_java)
+{
+    return Java_org_postgresql_jdbc_ClientLogicImpl_runClientLogic4RecordImpl(env, java_object, handle,
+        data_to_process_java, original_oids_java);
+}
+
 JNIEXPORT jobjectArray JNICALL Java_com_huawei_gauss200_jdbc_jdbc_ClientLogicImpl_prepareQueryImpl(JNIEnv *env,
     jobject java_object, jlong handle, jstring query_java, jstring statement_name_java, jint parameter_count)
 {

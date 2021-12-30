@@ -1,0 +1,346 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+-- basic
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+-- bad/discard
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data bad=@abs_srcdir@/data/gs_loader_basic.bad discard=@abs_srcdir@/data/gs_loader_basic.dis port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+\! cat @abs_srcdir@/data/gs_loader_basic.bad
+ a,ERROR int,,2007-07-8
+ 8,ERROR date,,2007-37-8
+  ,
+ 8,ERROR fields,,2007-37-8
+\! cat @abs_srcdir@/data/gs_loader_basic.dis
+ 43,DISCARD,,2007-07-8
+ 32,DISCARD,,2007-07-8
+-- errors
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=3
+ERROR: after transform: BEGIN;
+\COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '3' WHEN (2-2) = ',' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
+select 'copy_txid:'||txid_current();
+COMMIT;
+ERROR: BEGIN
+gsql:.gs_loader_file.tmp:17: ERROR:  date/time field value out of range: "2007-37-8"
+HINT:  Perhaps you need a different "datestyle" setting.
+CONTEXT:  COPY sqlldr_tbl, line 12, column dt: "2007-37-8"
+gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con | dt 
+----+------+-----+----
+(0 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=64
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+-- skip
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=64 skip=2
+gs_loader: version 0.1
+
+ 3 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(3 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=64 skip=4
+gs_loader: version 0.1
+
+ 1 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(1 row)
+
+-- when
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_col.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_when_col.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_digit.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_when_digit.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_and.ctl data=@abs_srcdir@/data/gs_loader_basic2.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 2 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_when_and.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+(2 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_greater.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: after transform: BEGIN;
+\COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name > 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
+select 'copy_txid:'||txid_current();
+COMMIT;
+ERROR: BEGIN
+gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
+gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_ge.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: after transform: BEGIN;
+\COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name >= 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
+select 'copy_txid:'||txid_current();
+COMMIT;
+ERROR: BEGIN
+gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
+gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_less.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: after transform: BEGIN;
+\COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name < 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
+select 'copy_txid:'||txid_current();
+COMMIT;
+ERROR: BEGIN
+gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
+gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_when_le.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: after transform: BEGIN;
+\COPY sqlldr_tbl ( id, name, con, dt ) FROM '@abs_srcdir@/data/gs_loader_basic.data' LOAD LOG ERRORS DATA REJECT LIMIT '4' WHEN name <= 'OK' DELIMITER ',' FILL_MISSING_FIELDS 'multi' TRANSFORM(con AS :id || '-' || :name) IGNORE_EXTRA_DATA;
+select 'copy_txid:'||txid_current();
+COMMIT;
+ERROR: BEGIN
+gsql:.gs_loader_file.tmp:17: ERROR:  WHEN field oper error
+CONTEXT:  COPY sqlldr_tbl, line 1: "1,OK,,2007-07-8"
+gsql:.gs_loader_file.tmp:18: ERROR:  current transaction is aborted, commands ignored until end of transaction block, firstChar[Q]
+ROLLBACK
+-- table mode(truncate/insert/replace/append)
+truncate table SQLLDR_TBL;
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_insert.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_insert.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_insert.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: insert into table, but table is not empty
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_insert_none.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: insert into table, but table is not empty
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+truncate table SQLLDR_TBL;
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_insert_none.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_insert_none.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_append.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_append.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(10 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_replace.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_replace.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+truncate table SQLLDR_TBL;
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_insert2.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_insert2.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_append2.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_append2.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(10 rows)
+
+-- teardown
+drop table SQLLDR_TBL;

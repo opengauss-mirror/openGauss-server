@@ -74,8 +74,6 @@ create table pkt (a int primary key, b int, c int);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "pkt_pkey" for table "pkt"
 create table fkt (a int primary key, b int references pkt, c int);
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "fkt_pkey" for table "fkt"
-create table up_neg_11(c1 int, c2 int) partition by range(c1)(partition p1 values less than(10), partition p2 values less than(maxvalue));
-create unique index index_up_neg_11 on up_neg_11(c2);
 -- procedure test
 CREATE SCHEMA upsert_test_procedure;
 -- explain test
@@ -92,7 +90,8 @@ NOTICE:  CREATE TABLE / UNIQUE will create implicit index "up_expl_unlog_c3_key"
 create table up_expl_node(c1 int, c2 int, c3 int unique) ;
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "up_expl_node_c3_key" for table "up_expl_node"
 create table up_expl_repl(c1 int, c2 int, c3 int unique) ;
-ERROR:  relation "up_expl_repl" already exists
+ERROR:  relation "up_expl_repl" already exists in schema "upsert_test_explain"
+DETAIL:  creating new table with existing name in the same schema
 create table up_expl_repl2(c1 int, c2 int, c3 int, c4 int unique, c5 int primary key, unique(c2,c3));
 NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "up_expl_repl2_pkey" for table "up_expl_repl2"
 NOTICE:  CREATE TABLE / UNIQUE will create implicit index "up_expl_repl2_c4_key" for table "up_expl_repl2"

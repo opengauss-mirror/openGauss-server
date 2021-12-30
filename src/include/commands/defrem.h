@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/commands/defrem.h
  *
@@ -168,6 +169,7 @@ extern List* FindOrRemoveForeignTableOption(List* optList, const char* optName, 
 extern char* defGetString(DefElem* def);
 extern double defGetNumeric(DefElem* def);
 extern bool defGetBoolean(DefElem* def);
+extern int defGetMixdInt(DefElem *def);
 extern int64 defGetInt64(DefElem* def);
 extern List* defGetQualifiedName(DefElem* def);
 extern TypeName* defGetTypeName(DefElem* def);

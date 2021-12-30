@@ -1199,7 +1199,8 @@ static List *relid_get_policy_label_namelist(Oid relid, const char *column = NUL
     while ((tup = (HeapTuple) tableam_scan_getnexttuple(scan, ForwardScanDirection)) != NULL) {
         label_data = (Form_gs_policy_label)GETSTRUCT(tup);
         if (label_data->fqdnid == relid && (column == NULL || strcasecmp(column, label_data->relcolumn.data) == 0)) {
-            label_list = lappend(label_list, label_data->labelname.data);
+            char *label_name = pstrdup(label_data->labelname.data);
+            label_list = lappend(label_list, label_name);
         }
     }
     tableam_scan_end(scan);
@@ -1260,7 +1261,7 @@ bool is_masked_relation(Oid relid, const char *column)
     }
     tableam_scan_end(scan);
     heap_close(action_rel, AccessShareLock);
-    list_free(labels);
+    list_free_deep(labels);
 
     return is_masked;
 }
@@ -1300,7 +1301,7 @@ bool is_masked_relation_enabled(Oid relid)
     }
     tableam_scan_end(scan);
     heap_close(action_rel, AccessShareLock);
-    list_free(label_list);
+    list_free_deep(label_list);
     list_free(polid_list);
 
     return is_match;

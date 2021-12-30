@@ -28,7 +28,7 @@ begin
    explain performance select count(*) from explain_table_03 where a = param_1;
 end;
 /
-select * from test_explain_param(123);
+call test_explain_param(123);
 ERROR:  query has no destination for result data
 CONTEXT:  PL/pgSQL function test_explain_param(integer) line 3 at SQL statement
 ----

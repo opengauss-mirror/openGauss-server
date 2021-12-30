@@ -23,7 +23,6 @@
 #include "storage/page_compression.h"
 #include "storage/smgr/relfilenode.h"
 
-
 struct XLogPhyBlock;
 /*
  * The minimum size of the WAL construction working area. If you need to
@@ -49,7 +48,7 @@ struct XLogPhyBlock;
           * is taken */
 /* prototypes for public functions in xloginsert.c: */
 extern void XLogBeginInsert(void);
-extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade = false, int bucket_id = InvalidBktId,
+extern XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade = false, int bucket_id = InvalidBktId, 
     bool isSwitchoverBarrier = false);
 extern void XLogEnsureRecordSpace(int nbuffers, int ndatas);
 extern void XLogRegisterData(char* data, int len);

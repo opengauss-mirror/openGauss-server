@@ -1,0 +1,17 @@
+--
+-- gsql
+--
+
+create user gsqlbot password 'Gaussdba@Mpp';
+create database gsqldb with encoding='UTF8' template=template0 owner gsqlbot;
+\c gsqldb
+grant all on schema public to gsqlbot;
+GRANT CREATE ON SCHEMA public TO PUBLIC;
+
+
+select pg_sleep(5);
+
+\! gsql --help
+
+\! gsql -d gsqldb -h 127.0.0.1,127.0.0.1 -p @portstring@ -U gsqlbot -W Gaussdba@Mpp -c "select 1;"
+

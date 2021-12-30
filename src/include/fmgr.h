@@ -136,6 +136,17 @@ typedef struct RefcusorInfoData {
 } RefcusorInfoData;
 
 /*
+ * start-with support
+ *
+ * Note, need revisit. Basically, we don't want feature oriented stuffs put here
+ */
+typedef struct StartWithFuncEvalInfo
+{
+    Node   *sw_econtext;
+    Node   *sw_exprstate;
+} StartWithFuncEvalInfo;
+
+/*
  * This struct is the data actually passed to an fmgr-called function.
  */
 typedef struct FunctionCallInfoData {
@@ -154,6 +165,7 @@ typedef struct FunctionCallInfoData {
     ScalarVector* argVector;                     /*Scalar Vector */
     RefcusorInfoData refcursor_data;
     UDFInfoType udfInfo;
+    StartWithFuncEvalInfo  swinfo;
 
     FunctionCallInfoData()
     {

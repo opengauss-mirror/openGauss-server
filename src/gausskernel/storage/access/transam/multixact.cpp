@@ -1279,7 +1279,7 @@ static const char *MXStatusToString(MultiXactStatus status)
 
 static char *mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *members)
 {
-    char *str = NULL;
+    static char *str = NULL;
     StringInfoData buf;
     int i;
 
@@ -1296,7 +1296,7 @@ static char *mxid_to_string(MultiXactId multi, int nmembers, MultiXactMember *me
     }
 
     appendStringInfoChar(&buf, ']');
-    str = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), buf.data);
+    str = MemoryContextStrdup(TopMemoryContext, buf.data);
     pfree(buf.data);
     return str;
 }
@@ -1675,9 +1675,9 @@ void CheckPointMultiXact(void)
     int flush_num;
     /* Flush dirty MultiXact pages to disk */
     flush_num = SimpleLruFlush(t_thrd.shemem_ptr_cxt.MultiXactOffsetCtl, true);
-    g_instance.ckpt_cxt_ctl->ckpt_multixact_flush_num += flush_num;
+    g_instance.ckpt_cxt_ctl->ckpt_view.ckpt_multixact_flush_num += flush_num;
     flush_num = SimpleLruFlush(t_thrd.shemem_ptr_cxt.MultiXactMemberCtl, true);
-    g_instance.ckpt_cxt_ctl->ckpt_multixact_flush_num += flush_num;
+    g_instance.ckpt_cxt_ctl->ckpt_view.ckpt_multixact_flush_num += flush_num;
 
 #ifdef ENABLE_MULTIPLE_NODES
     /*
@@ -1989,7 +1989,7 @@ void TruncateMultiXact(MultiXactId oldestMXact)
 
     /* Save the current nextOffset too */
     nextOffset = t_thrd.shemem_ptr_cxt.MultiXactState->nextOffset;
-
+    
     LWLockRelease(MultiXactGenLock);
 
     ereport(DEBUG2, (errmsg("MultiXact: truncation point = %lu", oldestMXact)));
@@ -2135,7 +2135,7 @@ XLogRecParseState *multixact_xlog_mem_parse_to_block(XLogReaderState *record, ui
                                                      XLogRecParseState *recordstatehead)
 {
     uint64 pageno;
-    MultiXactOffset offset;
+    MultiXactOffset offset = 0;
     MultiXactOffset startoffset = 0;
     uint64 prev_pageno;
     int continuenum = 0;

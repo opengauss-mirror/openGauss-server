@@ -8,6 +8,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/pg_operator.h
  *
@@ -1760,6 +1761,37 @@ DATA(insert OID = 4378 (  "="	   PGNSP PGUID b f f 4303 4303	16 4378 4379 hll_ha
 DESCR("hyper log log equal hashval op");
 DATA(insert OID = 4379 (  "<>"	   PGNSP PGUID b f f 4303 4303	16 4379 4378 hll_hashval_ne neqsel neqjoinsel ));
 DESCR("hyper log log not equal hashval op");
+
+DATA(insert OID = 6000 ("="        PGNSP PGUID b f f    34    34    16 6000    6001 int16eq eqsel eqjoinsel));
+DESCR("int16 equal");
+
+DATA(insert OID = 6001 ("<>"       PGNSP PGUID b f f    34    34    16 6001    6000 int16ne neqsel neqjoinsel));
+DESCR("int16 not equal");
+
+DATA(insert OID = 6002 ("<"        PGNSP PGUID b f f    34    34    16 6004    6005 int16lt scalarltsel scalarltjoinsel));
+DESCR("int16 less than");
+
+DATA(insert OID = 6003 ("<="       PGNSP PGUID b f f    34    34    16 6005    6004 int16le scalarltsel scalarltjoinsel));
+DESCR("int16 less or equal");
+
+DATA(insert OID = 6004 (">"        PGNSP PGUID b f f    34    34    16 6002    6003 int16gt scalargtsel scalargtjoinsel));
+DESCR("int16 greater");
+
+DATA(insert OID = 6005 (">="       PGNSP PGUID b f f    34    34    16 6003    6002 int16ge scalargtsel scalargtjoinsel));
+DESCR("int16 greater or equal");
+
+DATA(insert OID = 6006 ("+"        PGNSP PGUID b f f    34    34    34 6006    0 int16pl - -));
+DESCR("int16 plus");
+
+DATA(insert OID = 6007 ("-"        PGNSP PGUID b f f    34    34    34 0       0 int16mi - -));
+DESCR("int16 minus");
+
+DATA(insert OID = 6008 ("*"        PGNSP PGUID b f f    34    34    34 6008    0 int16mul - -));
+DESCR("int16 multiply");
+
+DATA(insert OID = 6009 ("/"        PGNSP PGUID b f f    34    34    701 0       0 int16div - -));
+DESCR("int16 divide");
+
 /*
  * function prototypes
  */

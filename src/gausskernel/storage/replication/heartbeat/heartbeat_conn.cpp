@@ -169,9 +169,13 @@ void UpdateLastHeartbeatTime(const char *remoteHost, int remotePort, TimestampTz
 {
     volatile heartbeat_state *stat = t_thrd.heartbeat_cxt.state;
 
+    ReplConnInfo* replconninfo = NULL;
     SpinLockAcquire(&stat->mutex);
-    for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
-        ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+    for (int i = 1; i < DOUBLE_MAX_REPLNODE_NUM; i++) {        
+        if (i >= MAX_REPLNODE_NUM)
+            replconninfo = t_thrd.postmaster_cxt.CrossClusterReplConnArray[i - MAX_REPLNODE_NUM];
+        else
+            replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i]; 
         if (replconninfo == NULL) {
             continue;
         }

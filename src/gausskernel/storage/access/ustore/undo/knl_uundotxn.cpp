@@ -252,6 +252,9 @@ void *UndoSlotBufferCache::InsertSlotBuffer(UndoSlotPtr ptr, uint32 hashValue)
     SlotBufferCacheEntry *entry = (SlotBufferCacheEntry *)hash_search_with_hash_value(hashTable_, &ptr, 
         hashValue, HASH_ENTER, &found);
     Assert(!found);
+    if (entry == NULL) {
+        ereport(ERROR, (errmodule(MOD_UNDO), errmsg("InsertSlotBuffer: Can not find the free slot")));
+    }
     entry->next_ = head_;
     entry->prev_ = tail_;
     entry->tag_ = ptr;

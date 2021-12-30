@@ -178,21 +178,11 @@ class redis_tester():
             if (status != 0):
                 exitWithError("cp config[%s] failed. Error: %s" % (dbNode.name, output))
 			
-            cmd = "sed -i \"/^comm_sctp_port =/c\\comm_sctp_port = %d\"   %s" % (dbNode.sctp_port, new_config)    
-            (status, output) = commands.getstatusoutput(cmd)
-            if (status != 0):
-                exitWithError("cp config[%s] failed. Error: %s" % (dbNode.name, output))
-				
             cmd = "sed -i \"/^pooler_port =/c\\pooler_port = %d\"   %s" % ((dbNode.port + 1), new_config)    
             (status, output) = commands.getstatusoutput(cmd)
             if (status != 0):
                 exitWithError("cp config[%s] failed. Error: %s" % (dbNode.name, output))
                 
-            cmd = "sed -i \"/^comm_control_port =/c\\comm_control_port = %d\"   %s" % ((dbNode.port + 2), new_config)    
-            (status, output) = commands.getstatusoutput(cmd)
-            if (status != 0):
-                exitWithError("cp config[%s] failed. Error: %s" % (dbNode.name, output))
-
             self.setConfig(dbNode.name, "", new_config)
             self.setConfig(dbNode.name, "port = %d" % dbNode.port, new_config)
             self.setConfig(dbNode.name, "pgxc_node_name = \"%s\"" % dbNode.name, new_config)

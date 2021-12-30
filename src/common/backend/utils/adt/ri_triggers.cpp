@@ -304,6 +304,7 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
     if (riinfo.nkeys == 0) {
         ri_BuildQueryKeyFull(&qkey, &riinfo, RI_PLAN_CHECK_LOOKUPPK_NOCOLS);
 
+        SPI_STACK_LOG("connect", NULL, NULL);
         if (SPI_connect() != SPI_OK_CONNECT) {
             heap_close(pk_rel, RowShareLock);
             ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
@@ -338,6 +339,7 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
          */
         (void)ri_PerformCheck(&qkey, qplan, fk_rel, pk_rel, NULL, NULL, false, SPI_OK_SELECT, NameStr(riinfo.conname));
 
+        SPI_STACK_LOG("finish", NULL, NULL);
         if (SPI_finish() != SPI_OK_FINISH) {
             heap_close(pk_rel, RowShareLock);
             ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
@@ -423,6 +425,7 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
             break;
     }
 
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() != SPI_OK_CONNECT) {
         heap_close(pk_rel, RowShareLock);
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
@@ -477,6 +480,7 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
      */
     (void)ri_PerformCheck(&qkey, qplan, fk_rel, pk_rel, NULL, new_row, false, SPI_OK_SELECT, NameStr(riinfo.conname));
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() != SPI_OK_FINISH) {
         heap_close(pk_rel, RowShareLock);
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
@@ -575,6 +579,7 @@ static bool ri_Check_Pk_Match(Relation pk_rel, Relation fk_rel, HeapTuple old_ro
             break;
     }
 
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() != SPI_OK_CONNECT)
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -636,6 +641,7 @@ static bool ri_Check_Pk_Match(Relation pk_rel, Relation fk_rel, HeapTuple old_ro
         SPI_OK_SELECT,
         NULL);
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() != SPI_OK_FINISH)
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -748,6 +754,7 @@ Datum RI_FKey_noaction(PG_FUNCTION_ARGS)
                 heap_close(fk_rel, RowShareLock);
                 return PointerGetDatum(NULL);
             }
+            SPI_STACK_LOG("connect", NULL, NULL);
             if (SPI_connect() != SPI_OK_CONNECT)
                 ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -809,6 +816,7 @@ Datum RI_FKey_noaction(PG_FUNCTION_ARGS)
                 SPI_OK_SELECT,
                 NameStr(riinfo.conname));
 
+            SPI_STACK_LOG("finish", NULL, NULL);
             if (SPI_finish() != SPI_OK_FINISH)
                 ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -933,6 +941,7 @@ Datum RI_FKey_cascade_del(PG_FUNCTION_ARGS)
                     break;
             }
 
+            SPI_STACK_LOG("connect", NULL, NULL);
             if (SPI_connect() != SPI_OK_CONNECT)
                 ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -989,6 +998,7 @@ Datum RI_FKey_cascade_del(PG_FUNCTION_ARGS)
                 SPI_OK_DELETE,
                 NameStr(riinfo.conname));
 
+            SPI_STACK_LOG("finish", NULL, NULL);
             if (SPI_finish() != SPI_OK_FINISH)
                 ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -1099,6 +1109,7 @@ Datum RI_FKey_cascade_upd(PG_FUNCTION_ARGS)
                 return PointerGetDatum(NULL);
             }
 
+            SPI_STACK_LOG("connect", NULL, NULL);
             if (SPI_connect() != SPI_OK_CONNECT)
                 ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -1166,6 +1177,7 @@ Datum RI_FKey_cascade_upd(PG_FUNCTION_ARGS)
                 SPI_OK_UPDATE,
                 NameStr(riinfo.conname));
 
+            SPI_STACK_LOG("finish", NULL, NULL);
             if (SPI_finish() != SPI_OK_FINISH)
                 ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -1280,6 +1292,7 @@ Datum RI_FKey_restrict(PG_FUNCTION_ARGS)
                 return PointerGetDatum(NULL);
             }
 
+            SPI_STACK_LOG("connect", NULL, NULL);
             if (SPI_connect() != SPI_OK_CONNECT)
                 ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -1342,6 +1355,7 @@ Datum RI_FKey_restrict(PG_FUNCTION_ARGS)
                 SPI_OK_SELECT,
                 NameStr(riinfo.conname));
 
+            SPI_STACK_LOG("finish", NULL, NULL);
             if (SPI_finish() != SPI_OK_FINISH)
                 ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -1475,6 +1489,7 @@ Datum RI_FKey_setnull_del(PG_FUNCTION_ARGS)
                     break;
             }
 
+            SPI_STACK_LOG("connect", NULL, NULL);
             if (SPI_connect() != SPI_OK_CONNECT)
                 ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -1538,6 +1553,7 @@ Datum RI_FKey_setnull_del(PG_FUNCTION_ARGS)
                 SPI_OK_UPDATE,
                 NameStr(riinfo.conname));
 
+            SPI_STACK_LOG("finish", NULL, NULL);
             if (SPI_finish() != SPI_OK_FINISH)
                 ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -1647,6 +1663,7 @@ Datum RI_FKey_setnull_upd(PG_FUNCTION_ARGS)
                 return PointerGetDatum(NULL);
             }
 
+            SPI_STACK_LOG("connect", NULL, NULL);
             if (SPI_connect() != SPI_OK_CONNECT)
                 ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -1738,6 +1755,7 @@ Datum RI_FKey_setnull_upd(PG_FUNCTION_ARGS)
                 SPI_OK_UPDATE,
                 NameStr(riinfo.conname));
 
+            SPI_STACK_LOG("finish", NULL, NULL);
             if (SPI_finish() != SPI_OK_FINISH)
                 ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -1849,6 +1867,7 @@ Datum RI_FKey_setdefault(PG_FUNCTION_ARGS)
                 return PointerGetDatum(NULL);
             }
 
+            SPI_STACK_LOG("connect", NULL, NULL);
             if (SPI_connect() != SPI_OK_CONNECT)
                 ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -1923,6 +1942,7 @@ Datum RI_FKey_setdefault(PG_FUNCTION_ARGS)
                 SPI_OK_UPDATE,
                 NameStr(riinfo.conname));
 
+            SPI_STACK_LOG("finish", NULL, NULL);
             if (SPI_finish() != SPI_OK_FINISH)
                 ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -2234,6 +2254,7 @@ bool RI_Initial_Check(Trigger* trigger, Relation fk_rel, Relation pk_rel)
     securec_check_ss(rc, "\0", "\0");
     (void)set_config_option("work_mem", workmembuf, PGC_USERSET, PGC_S_SESSION, GUC_ACTION_SAVE, true, 0);
 
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() != SPI_OK_CONNECT)
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -2303,6 +2324,7 @@ bool RI_Initial_Check(Trigger* trigger, Relation fk_rel, Relation pk_rel)
         ri_ReportViolation(&qkey, constrname, pk_rel, fk_rel, tuple, tupdesc, false);
     }
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() != SPI_OK_FINISH)
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 

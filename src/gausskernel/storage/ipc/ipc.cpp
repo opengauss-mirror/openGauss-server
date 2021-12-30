@@ -11,6 +11,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -253,6 +254,10 @@ void proc_exit(int code)
     CleanupDfsHandlers(true);
 
     BgworkerListSyncQuit();
+
+    /* Clean up Allocated descs */
+    FreeAllAllocatedDescs();
+
     /* Clean up everything that must be cleaned up */
     proc_exit_prepare(code);
 
@@ -489,15 +494,10 @@ void sess_exit_prepare(int code)
             (u_sess->ext_fdw_ctx[i].fdwExitFunc)(code, UInt32GetDatum(NULL));
         }
     }
-	
-    if (u_sess->gtt_ctx.gtt_cleaner_exit_registered) {
-        pg_on_exit_callback func = u_sess->gtt_ctx.gtt_sess_exit;
-        (*func)(code, UInt32GetDatum(NULL));
-    }
-	
+
     for (; u_sess->on_sess_exit_index < on_sess_exit_size; u_sess->on_sess_exit_index++)
         (*on_sess_exit_list[u_sess->on_sess_exit_index])(code, UInt32GetDatum(NULL));
-    
+
     t_thrd.storage_cxt.on_proc_exit_index = 0;
     RESUME_INTERRUPTS();
     gs_signal_recover_mask(old_sigset);
@@ -649,7 +649,8 @@ void CloseClientSocket(knl_session_context* sess, bool closesock)
     if (sess->proc_cxt.MyProcPort != NULL && closesock) {
         /* if gs_sock is NULL, just clean gs_poll hash table. */
         pfree_ext(sess->proc_cxt.MyProcPort->msgLog);
-        gs_close_gsocket(&(sess->proc_cxt.MyProcPort->gs_sock));
+        gsocket* curGsock = &sess->proc_cxt.MyProcPort->gs_sock;
+        gs_close_gsocket(curGsock);
     }
     if (t_thrd.postmaster_cxt.KeepSocketOpenForStream == false && (sess->proc_cxt.MyProcPort != NULL) &&
         sess->proc_cxt.MyProcPort->sock > 0) {

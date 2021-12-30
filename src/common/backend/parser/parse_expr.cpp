@@ -18,15 +18,18 @@
 
 #include "catalog/pg_type.h"
 #include "catalog/pg_proc.h"
+#include "catalog/gs_package.h"
 #include "commands/dbcommands.h"
 #include "commands/sequence.h"
 #include "db4ai/predict_by.h"
+#include "executor/node/nodeCtescan.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/clauses.h"
 #include "optimizer/var.h"
+#include "optimizer/planner.h"
 #include "parser/analyze.h"
 #include "parser/parser.h"
 #include "parser/parse_coerce.h"
@@ -43,6 +46,7 @@
 #include "utils/lsyscache.h"
 #include "utils/plpgsql.h"
 #include "utils/xml.h"
+#include "funcapi.h"
 
 extern Node* makeAConst(Value* v, int location);
 extern Value* makeStringValue(char* str);
@@ -69,7 +73,6 @@ static Node* transformXmlSerialize(ParseState* pstate, XmlSerialize* xs);
 static Node* transformBooleanTest(ParseState* pstate, BooleanTest* b);
 static Node* transformCurrentOfExpr(ParseState* pstate, CurrentOfExpr* cexpr);
 static Node* transformPredictByFunction(ParseState* pstate, PredictByFunction* cexpr);
-static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref);
 static Node* transformWholeRowRef(ParseState* pstate, RangeTblEntry* rte, int location);
 static Node* transformIndirection(ParseState* pstate, Node* basenode, List* indirection);
 static Node* transformTypeCast(ParseState* pstate, TypeCast* tc);
@@ -79,6 +82,10 @@ static Node* make_row_distinct_op(ParseState* pstate, List* opname, RowExpr* lro
 static Node* convertStarToCRef(RangeTblEntry* rte, char* catname, char* nspname, char* relname, int location);
 static bool IsSequenceFuncCall(Node* filed1, Node* filed2, Node* filed3);
 static Node* transformSequenceFuncCall(ParseState* pstate, Node* field1, Node* field2, Node* field3, int location);
+static Node* transformConnectByRootFuncCall(ParseState* pstate, Node* funcNameVal, ColumnRef *cref);
+static char *ColumnRefFindRelname(ParseState *pstate, const char *colname);
+static Node *transformStartWithColumnRef(ParseState *pstate, ColumnRef *cref, char **colname);
+static Node* tryTransformFunc(ParseState* pstate, List* fields, int location);
 
 #define OrientedIsCOLorPAX(rte) ((rte)->orientation == REL_COL_ORIENTED || (rte)->orientation == REL_PAX_ORIENTED)
 
@@ -440,10 +447,14 @@ static Node* replaceExprAliasIfNecessary(ParseState* pstate, char* colname, Colu
     foreach (lc, pstate->p_target_list) {
         tle = (TargetEntry*)lfirst(lc);
         /*
-         * in a select stmt in stored procudre, a columnref may be a param(e.g. a declared var or the stored procedure's
-         * arg), which is not a alias, so can not be matched here.
+         * 1. in a select stmt in stored procudre, a columnref may be a param(e.g. a declared var or the stored
+         *    procedure's arg), which is not a alias, so can not be matched here.
+         * 2. in a select stmt in stored procudre such like a[1],a[2],a[3], they have same name,
+         *    so, we should pass this target.
          */
-        if (tle->resname != NULL && !IsA(tle->expr, Param) &&
+        bool isArrayParam = IsA(tle->expr, ArrayRef) && ((ArrayRef*)tle->expr)->refexpr != NULL &&
+                            IsA(((ArrayRef*)tle->expr)->refexpr, Param);
+        if (tle->resname != NULL && !IsA(tle->expr, Param) && !isArrayParam &&
             strncmp(tle->resname, colname, strlen(colname) + 1) == 0) {
             if (checkExprHasWindowFuncs((Node*)tle->expr)) {
                 ereport(ERROR,
@@ -494,12 +505,32 @@ static Node* ParseColumnRef(ParseState* pstate, RangeTblEntry* rte, char* colnam
     return node;
 }
 
+static ColumnRef *fixSWNameSubLevel(RangeTblEntry *rte, char *rname, char **colname)
+{
+    ListCell *lc = NULL;
+
+    foreach(lc, rte->eref->colnames) {
+        Value *val = (Value *)lfirst(lc);
+
+        if (strstr(strVal(val), *colname)) {
+            *colname = pstrdup(strVal(val));
+            break;
+        }
+    }
+
+    ColumnRef* c = makeNode(ColumnRef);
+    c->fields = list_make2((Node*)makeString(rname), (Node*)makeString(*colname));
+    c->location = -1;
+
+    return c;
+}
+
 /*
  * Transform a ColumnRef.
  *
  * If you find yourself changing this code, see also ExpandColumnRefStar.
  */
-static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
+Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
 {
     Node* node = NULL;
     char* nspname = NULL;
@@ -573,6 +604,15 @@ static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
             AssertEreport(IsA(field1, String), MOD_OPT, "");
             colname = strVal(field1);
 
+            if (pstate->p_hasStartWith) {
+                Node *expr = transformStartWithColumnRef(pstate, cref, &colname);
+
+                /* function case, return directly */
+                if (expr != NULL) {
+                    return expr;
+                }
+            }
+
             /*
              * Try to identify as an unqualified column
              *
@@ -643,6 +683,17 @@ static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
                                 "Alias \"%s\" contains subplan, which is not supported to use in grouping() function",
                                 colname)));
                 }
+                /* 
+                 * Now give the p_bind_variable_columnref_hook, check column index. only DBE_SQL can get here.
+                 */
+                if (node == NULL) {
+                    if (pstate->p_bind_variable_columnref_hook != NULL) {
+                        node = (*pstate->p_bind_variable_columnref_hook)(pstate, cref);
+                        if (node != NULL) {
+                            return node;
+                        }
+                    }
+                }
             }
             break;
         }
@@ -682,6 +733,33 @@ static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
 
             AssertEreport(IsA(field2, String), MOD_OPT, "");
             colname = strVal(field2);
+
+            if (rte->rtekind == RTE_SUBQUERY && rte->swSubExist) {
+                cref = fixSWNameSubLevel(rte, relname, &colname);
+            }
+
+            if (pstate->p_hasStartWith || rte->swConverted) {
+                Node *expr = transformStartWithColumnRef(pstate, cref, &colname);
+
+                /* function case, return directly */
+                if (expr != NULL) {
+                    return expr;
+                }
+
+                if (strstr(colname, "@")) {
+                    ListCell *lc = NULL;
+
+                    foreach(lc, pstate->p_rtable) {
+                        RangeTblEntry *tbl = (RangeTblEntry *)lfirst(lc);
+
+                        if (tbl->relname != NULL &&
+                            strcmp(tbl->relname, "tmp_reuslt") == 0) {
+                            rte = tbl;
+                            break;
+                        }
+                    }
+                }
+            }
 
             node = ParseColumnRef(pstate, rte, colname, cref);
             break;
@@ -815,6 +893,20 @@ static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
                     parser_errposition(pstate, cref->location)));
         }
     }
+    
+    if (node == NULL && u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        node = tryTransformFunc(pstate, cref->fields, cref->location);
+        if (node) {
+            return node;
+        }
+    }
+    /* check current column match request index or not, use value in func in A_FORMAT */
+    if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+        Node* check = plpgsql_check_match_var(node, pstate, cref);
+        if (check) {
+            return check;
+        }
+    }
 
     /*
      * Throw error if no translation found.
@@ -851,6 +943,103 @@ static Node* transformColumnRef(ParseState* pstate, ColumnRef* cref)
     }
 
     return node;
+}
+
+static bool isCol2Function(List* fields)
+{
+    char* schemaname = NULL;
+    char* pkgname = NULL;
+    char* funcname = NULL;
+    DeconstructQualifiedName(fields, &schemaname, &funcname, &pkgname);
+    Oid npsOid = InvalidOid;
+    Oid pkgOid = InvalidOid;
+    if (schemaname != NULL) {
+        npsOid = get_namespace_oid(schemaname, true);
+    }
+    else {
+        npsOid = getCurrentNamespace();
+    }
+
+    if (pkgname != NULL) {
+        pkgOid = PackageNameListGetOid(fields, true);
+    }
+
+    bool is_found = false;
+    /* check args and if have return arg*/
+    CatCList   *catlist = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
+    }
+#else
+    catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+#endif
+    for (int i = 0; i < catlist->n_members; i++) {
+        HeapTuple proctup = &catlist->members[i]->tuple;
+        Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
+        /* get function all args */
+        Oid *p_argtypes = NULL;
+        char **p_argnames = NULL;
+        char *p_argmodes = NULL;
+        int allArgs = get_func_arg_info(proctup, &p_argtypes, &p_argnames, &p_argmodes);
+        if (allArgs > 0 || !OidIsValid(procform->prorettype)) {
+            continue;
+        }
+
+        if (OidIsValid(npsOid)) {
+            /* Consider only procs in specified namespace */
+            if (procform->pronamespace != npsOid) {
+                continue;
+            }
+	    }
+
+        if (OidIsValid(pkgOid)) {
+            bool isNull = false;
+            Datum packageid_datum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isNull);
+            Oid packageid = ObjectIdGetDatum(packageid_datum);
+            if (packageid != pkgOid) {
+                continue;
+            }
+        }
+        is_found = true;
+    }
+    ReleaseSysCacheList(catlist);
+    return is_found;
+}
+
+static Node* tryTransformFunc(ParseState* pstate, List* fields, int location)
+{
+    if (!isCol2Function(fields)) {
+        return NULL;
+    }
+
+    Node* result = NULL;
+    FuncCall *fn = makeNode(FuncCall);
+    fn->funcname = fields;
+    fn->args = NIL;
+    fn->agg_order = NIL;
+    fn->agg_star = FALSE;
+    fn->agg_distinct = FALSE;
+    fn->func_variadic = FALSE;
+    fn->over = NULL;
+    fn->location = location;
+    fn->call_func = false;
+    /* function must have 0 args */
+    List* targs = NIL;
+
+    /* ... and hand off to ParseFuncOrColumn */
+    result = ParseFuncOrColumn(pstate, fn->funcname, targs, fn, fn->location, fn->call_func);
+
+    /* extract out parameter for package function */
+    if (IsPackageFunction(fn->funcname) && result != NULL && nodeTag(result) == T_FuncExpr && fn->call_func) {
+        FuncExpr* funcexpr = (FuncExpr*)result;
+        int funcoid = funcexpr->funcid;
+        funcexpr->args = extract_function_outarguments(funcoid, funcexpr->args, fn->funcname);
+    }
+
+    return result;
 }
 
 static Node* transformParamRef(ParseState* pstate, ParamRef* pref)
@@ -1202,6 +1391,38 @@ static Node* transformAExprIn(ParseState* pstate, A_Expr* a)
     return result;
 }
 
+static bool IsStartWithFunction(FuncExpr* result)
+{
+    return result->funcid == SYS_CONNECT_BY_PATH_FUNCOID ||
+           result->funcid == CONNECT_BY_ROOT_FUNCOID;
+}
+
+static bool NeedExtractOutParam(FuncCall* fn, Node* result)
+{
+    if (result == NULL || nodeTag(result) != T_FuncExpr) {
+        return false;
+    }
+
+    /* Always extract for called package functions */
+    if (IsPackageFunction(fn->funcname) && fn->call_func) {
+        return true;
+    }
+
+    /*
+     * When proc_outparam_override is on, extract all but select func
+     */
+    FuncExpr* funcexpr = (FuncExpr*)result;
+    char prokind = get_func_prokind(funcexpr->funcid);
+    if (!PROC_IS_PRO(prokind) && !fn->call_func) {
+        return false;
+    }
+
+    if (enable_out_param_override()) {
+        return true;
+    }
+    return false;
+}
+
 static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
 {
     List* targs = NIL;
@@ -1226,8 +1447,17 @@ static Node* transformFuncCall(ParseState* pstate, FuncCall* fn)
     /* ... and hand off to ParseFuncOrColumn */
     result = ParseFuncOrColumn(pstate, fn->funcname, targs, fn, fn->location, fn->call_func);
 
+    if (IsStartWithFunction((FuncExpr*)result) && !pstate->p_hasStartWith) {
+        ereport(ERROR,
+               (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_OPT),
+                errmsg("Invalid function call."),
+                errdetail("START WITH CONNECT BY function found in non-hierarchical query."),
+                errcause("Incorrect query input"),
+                erraction("Please check and revise your query")));
+    }
+
     /* extract out parameter for package function */
-    if (IsPackageFunction(fn->funcname) && result != NULL && nodeTag(result) == T_FuncExpr && fn->call_func) {
+    if (NeedExtractOutParam(fn, result)) {
         FuncExpr* funcexpr = (FuncExpr*)result;
         int funcoid = funcexpr->funcid;
         funcexpr->args = extract_function_outarguments(funcoid, funcexpr->args, fn->funcname);
@@ -1320,6 +1550,8 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     if (OidIsValid(c->casetype)) {
         return (Node*)c;
     }
+    bool saved_is_case_when = pstate->p_is_case_when;
+    pstate->p_is_case_when = true;
     newc = makeNode(CaseExpr);
 
     /* transform the test expression, if any */
@@ -1417,7 +1649,7 @@ static Node* transformCaseExpr(ParseState* pstate, CaseExpr* c)
     }
 
     newc->location = c->location;
-
+    pstate->p_is_case_when = saved_is_case_when;
     return (Node*)newc;
 }
 
@@ -1512,6 +1744,7 @@ static Node* transformSubLink(ParseState* pstate, SubLink* sublink)
             param->paramtypmod = exprTypmod((Node*)tent->expr);
             param->paramcollid = exprCollation((Node*)tent->expr);
             param->location = -1;
+            param->tableOfIndexType = InvalidOid;
 
             right_list = lappend(right_list, param);
         }
@@ -2602,12 +2835,189 @@ static bool IsSequenceFuncCall(Node* filed1, Node* filed2, Node* filed3)
     }
 
     if (strcmp(funcname, "nextval") == 0 || strcmp(funcname, "currval") == 0) {
-        if (filed1 != NULL && get_rel_relkind(get_relname_relid(relname, nspid)) == RELKIND_SEQUENCE) {
+        if (filed1 != NULL && RELKIND_IS_SEQUENCE(get_rel_relkind(get_relname_relid(relname, nspid)))) {
             return true;
-        } else if (filed1 == NULL && get_rel_relkind(RelnameGetRelid(relname)) == RELKIND_SEQUENCE) {
+        } else if (filed1 == NULL && RELKIND_IS_SEQUENCE(get_rel_relkind(RelnameGetRelid(relname)))) {
             return true;
         }
     }
 
     return false;
+}
+
+/*
+ * start with transform support
+ */
+static Node *transformStartWithColumnRef(ParseState *pstate, ColumnRef *cref, char **colname)
+{
+    Assert (*colname != NULL);
+
+    Node *field1 = NULL;
+    Node *field2 = NULL;
+    char *local_column_ref = *colname;
+
+    int len = list_length(cref->fields);
+    switch (len) {
+        case 1: {
+            field1 = (Node*)linitial(cref->fields);
+
+            if (pg_strcasecmp(local_column_ref, "connect_by_root") == 0 ) {
+                Node *funexpr = transformConnectByRootFuncCall(pstate, field1, cref);
+
+                /*
+                 * Return function funexpr, otherwise process
+                 * connect_by_root as regular case
+                 */
+                if (funexpr != NULL) {
+                    return funexpr;
+                }
+            }
+
+            /* for pseudo column, we don't do column name replacement */
+            if (IsPseudoReturnColumn(local_column_ref) ||
+                pg_strcasecmp(local_column_ref, "connect_by_root") == 0) {
+                return NULL;
+            }
+
+            char *relname = ColumnRefFindRelname(pstate, local_column_ref);
+            if (relname == NULL) {
+                elog(LOG, "do not find colname %s in sw-aborted RTE, maybe it's a normal column", *colname);
+                return NULL;
+            }
+
+            *colname = makeStartWithDummayColname(relname, local_column_ref);
+            field1 = (Node*)makeString(pstrdup(*colname));
+            cref->fields = list_make1(field1);
+
+            break;
+        }
+        case 2: {
+            field1 = (Node*)linitial(cref->fields);
+            field2 = (Node*)lsecond(cref->fields);
+
+            char *relname = strVal(field1);
+
+            /* Already rewrite column once relname equal tmp_reuslt */
+            if (pg_strcasecmp(relname, "tmp_reuslt") == 0) {
+                return NULL;
+            }
+
+            *colname = makeStartWithDummayColname(relname, local_column_ref);
+            field1 = (Node *)makeString("tmp_reuslt");
+            field2 = (Node*)makeString(pstrdup(*colname));
+            cref->fields = list_make2(field1, field2);
+
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    return NULL;
+}
+
+static Node* transformConnectByRootFuncCall(ParseState* pstate, Node* funcNameVal, ColumnRef *cref)
+{
+    Assert (pg_strcasecmp(strVal(funcNameVal), "connect_by_root") == 0 &&
+            IsA(pstate->p_sw_selectstmt, SelectStmt));
+
+    /* find the targe column name */
+    List *targetlist = pstate->p_sw_selectstmt->targetList;
+    ListCell *lc = NULL;
+
+    char *relname = NULL;
+    char *colname = NULL;
+
+    /* scan SelectStmt's targetlist to find corresponding ColumnRef */
+    foreach (lc, targetlist) {
+        ResTarget *rt = (ResTarget *)lfirst(lc);
+
+        if (equal(rt->val, cref)) {
+            colname = rt->name;
+
+            /*
+             * Indicate we do not find a case "connect_by_root column", so return to
+             * transformColumnRef and treat conect_by_column as a regular RTE's entry
+             */
+            if (colname == NULL) {
+                return NULL;
+            }
+
+            relname = ColumnRefFindRelname(pstate, colname);
+            if (relname == NULL) {
+                elog(ERROR, "do not find colname %s in sw-aborted RTE", colname);
+                return NULL;
+            }
+
+            colname = makeStartWithDummayColname(relname, colname);
+
+            break;
+        }
+    }
+
+    /* construct function call expr */
+    Value* argExpr = (Value *)makeColumnRef("tmp_reuslt", colname, -1);
+    List* args = list_make1(argExpr);
+    List* funcExpr = list_make1((Value*)funcNameVal);
+    FuncCall* fn = makeFuncCall(funcExpr, args, cref->location);
+
+    return transformFuncCall(pstate, fn);
+}
+
+/*
+ * Note, currently, only support 1 fild ColumnRef, will expand to support multiple case
+ */
+static char *ColumnRefFindRelname(ParseState *pstate, const char *colname)
+{
+    ListCell *lc1 = NULL;
+    ListCell *lc2 = NULL;
+    char *relname = NULL;
+    int count = 0;
+
+    while (pstate != NULL) {
+        foreach(lc1, pstate->p_rtable) {
+            RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc1);
+
+            if (!rte->swAborted) {
+                continue;
+            }
+
+            if (rte->rtekind == RTE_RELATION || rte->rtekind == RTE_SUBQUERY || rte->rtekind == RTE_CTE) {
+                List *colnames = rte->eref->colnames;
+
+                foreach(lc2, colnames) {
+                    Value *col = (Value *)lfirst(lc2);
+                    if (strcmp(colname, strVal(col)) == 0) {
+                        if (rte->rtekind == RTE_RELATION) {
+                            relname = (rte->alias && rte->alias->aliasname) ?
+                                       rte->alias->aliasname : rte->relname;
+                        } else if (rte->rtekind == RTE_SUBQUERY) {
+                            relname = rte->alias->aliasname;
+                        } else if (rte->rtekind == RTE_CTE) {
+                            relname = (rte->alias && rte->alias->aliasname) ?
+                                       rte->alias->aliasname : rte->ctename;
+                        }
+
+                        count++;
+                    }
+                }
+            }
+        }
+
+        /* If we found just break */
+        if (count > 1) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_AMBIGUOUS_COLUMN),
+                    errmsg("column reference \"%s\" is ambiguous", colname)));
+        }
+
+        if (count == 1) {
+            break;
+        }
+
+        pstate = pstate->parentParseState;
+    }
+
+    return relname;
 }

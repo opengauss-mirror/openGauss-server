@@ -14,7 +14,7 @@ test -f regression.diffs.hacheck.cascade && rm regression.diffs.hacheck.cascade
 total_starttime=`date +"%Y-%m-%d %H:%M:%S"`
 total_startvalue=`date -d  "$total_starttime" +%s`
 
-array=("cascade_standby_single")
+array=("cascade")
 for element in ${array[@]}
 do
   mkdir -vp ./results/$element

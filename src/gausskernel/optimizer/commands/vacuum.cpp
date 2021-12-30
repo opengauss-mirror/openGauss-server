@@ -13,6 +13,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -111,8 +112,8 @@ const char* sql_templates[] = {
 };
 
 typedef struct {
-    Bitmapset* invisMap; /* cache invisible tuple's partOid in global partition index */
-    Bitmapset* visMap;   /* cache visible tuple's partOid in global partition index */
+    OidRBTree* invisiblePartOids; /* cache invisible tuple's partOid in global partition index */
+    OidRBTree* visiblePartOids;   /* cache visible tuple's partOid in global partition index */
     oidvector* bucketList;
 } VacStates;
 
@@ -333,6 +334,9 @@ void vacuum(
             vacstmt->onepartrel = NULL;
             vacstmt->onepart = NULL;
             vacstmt->partList = NIL;
+            vacstmt->parentpartrel = NULL;
+            vacstmt->parentpart = NULL;
+            vacstmt->issubpartition = false;
 
             /*
              * do NOT vacuum partitioned table,
@@ -352,6 +356,9 @@ void vacuum(
             vacstmt->flags = vacObj->flags;
             vacstmt->onepartrel = NULL;
             vacstmt->onepart = NULL;
+            vacstmt->parentpartrel = NULL;
+            vacstmt->parentpart = NULL;
+            vacstmt->issubpartition = false;
 
             if (vacstmt->options & VACOPT_ANALYZE) {
                 /*
@@ -487,6 +494,77 @@ char* get_nsp_relname(Oid relid)
     }
 
     return nsp_relname;
+}
+
+static List *GetVacuumObjectOfSubpartitionTable(const Oid relId)
+{
+    Relation pgpartition;
+    TableScanDesc partScan;
+    HeapTuple partTuple;
+    ScanKeyData keys[2];
+    List *result = NULL;
+    MemoryContext oldcontext = NULL;
+    vacuum_object *vacObj = NULL;
+
+    /* Process all plain partitions listed in pg_partition */
+    ScanKeyInit(&keys[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+                CharGetDatum(PART_OBJ_TYPE_TABLE_PARTITION));
+
+    ScanKeyInit(&keys[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(relId));
+
+    pgpartition = heap_open(PartitionRelationId, AccessShareLock);
+    partScan = tableam_scan_begin(pgpartition, SnapshotNow, 2, keys);
+    while (NULL != (partTuple = (HeapTuple)tableam_scan_getnexttuple(partScan, ForwardScanDirection))) {
+        TableScanDesc subPartScan;
+        HeapTuple subPartTuple;
+        ScanKeyData subPartKeys[2];
+
+        /* Process all plain subpartitions listed in pg_partition */
+        ScanKeyInit(&subPartKeys[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+                    CharGetDatum(PART_OBJ_TYPE_TABLE_SUB_PARTITION));
+
+        ScanKeyInit(&subPartKeys[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ,
+                    ObjectIdGetDatum(HeapTupleGetOid(partTuple)));
+
+        subPartScan = tableam_scan_begin(pgpartition, SnapshotNow, 2, subPartKeys);
+        while (NULL != (subPartTuple = (HeapTuple)tableam_scan_getnexttuple(subPartScan, ForwardScanDirection))) {
+            if (t_thrd.vacuum_cxt.vac_context) {
+                oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
+            }
+            vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
+            vacObj->tab_oid = HeapTupleGetOid(subPartTuple);
+            vacObj->parent_oid = HeapTupleGetOid(partTuple);
+            vacObj->flags = VACFLG_SUB_PARTITION;
+            result = lappend(result, vacObj);
+
+            if (t_thrd.vacuum_cxt.vac_context) {
+                (void)MemoryContextSwitchTo(oldcontext);
+            }
+        }
+        heap_endscan(subPartScan);
+    }
+
+    heap_endscan(partScan);
+    heap_close(pgpartition, AccessShareLock);
+
+    /*
+     * add partitioned table to list
+     */
+    if (t_thrd.vacuum_cxt.vac_context) {
+        oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
+    }
+    vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
+    vacObj->tab_oid = relId;
+    vacObj->parent_oid = InvalidOid;
+    vacObj->flags = VACFLG_MAIN_PARTITION;
+    result = lappend(result, vacObj);
+
+    if (t_thrd.vacuum_cxt.vac_context) {
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    return result;
 }
 
 /*
@@ -630,19 +708,53 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
             partitionForm = (Form_pg_partition)GETSTRUCT(partitionTup);
 
             if (partitionForm->parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
-                /* It must be a partition */
-                if (t_thrd.vacuum_cxt.vac_context) {
-                    oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
-                }    
-                vacObj = (vacuum_object*)palloc0(sizeof(vacuum_object));
-                vacObj->tab_oid = partitionid;
-                vacObj->parent_oid = relationid;
-                vacObj->flags = VACFLG_SUB_PARTITION;
-                oid_list = lappend(oid_list, vacObj);
+                if (partitionForm->relfilenode != InvalidOid) {
+                    /* it is a partition of partition table. */
+                    if (t_thrd.vacuum_cxt.vac_context) {
+                        oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
+                    }
+                    vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
+                    vacObj->tab_oid = partitionid;
+                    vacObj->parent_oid = relationid;
+                    vacObj->flags = VACFLG_SUB_PARTITION;
+                    oid_list = lappend(oid_list, vacObj);
 
-                if (t_thrd.vacuum_cxt.vac_context) {
-                    (void)MemoryContextSwitchTo(oldcontext);
-                }   
+                    if (t_thrd.vacuum_cxt.vac_context) {
+                        (void)MemoryContextSwitchTo(oldcontext);
+                    }
+                } else {
+                    /* it is a partition of subpartition table. */
+                    Relation pgpartition;
+                    TableScanDesc subPartScan;
+                    HeapTuple subPartTuple;
+                    ScanKeyData subPartKeys[2];
+
+                    /* Process all plain subpartitions listed in pg_partition */
+                    ScanKeyInit(&subPartKeys[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+                                CharGetDatum(PART_OBJ_TYPE_TABLE_SUB_PARTITION));
+
+                    ScanKeyInit(&subPartKeys[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ,
+                                ObjectIdGetDatum(HeapTupleGetOid(partitionTup)));
+                    pgpartition = heap_open(PartitionRelationId, AccessShareLock);
+                    subPartScan = tableam_scan_begin(pgpartition, SnapshotNow, 2, subPartKeys);
+                    while (NULL !=
+                           (subPartTuple = (HeapTuple)tableam_scan_getnexttuple(subPartScan, ForwardScanDirection))) {
+                        if (t_thrd.vacuum_cxt.vac_context) {
+                            oldcontext = MemoryContextSwitchTo(t_thrd.vacuum_cxt.vac_context);
+                        }
+                        vacObj = (vacuum_object *)palloc0(sizeof(vacuum_object));
+                        vacObj->tab_oid = HeapTupleGetOid(subPartTuple);
+                        vacObj->parent_oid = HeapTupleGetOid(partitionTup);
+                        vacObj->flags = VACFLG_SUB_PARTITION;
+                        oid_list = lappend(oid_list, vacObj);
+
+                        if (t_thrd.vacuum_cxt.vac_context) {
+                            (void)MemoryContextSwitchTo(oldcontext);
+                        }
+                    }
+                    heap_endscan(subPartScan);
+                    heap_close(pgpartition, AccessShareLock);
+                }
             }
 
             ReleaseSysCache(partitionTup);
@@ -722,9 +834,13 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     if (t_thrd.vacuum_cxt.vac_context) {
                         (void)MemoryContextSwitchTo(oldcontext);
                     }
+                } else if (classForm->parttype == PARTTYPE_SUBPARTITIONED_RELATION &&
+                           classForm->relkind == RELKIND_RELATION &&
+                           ((vacstmt->options & VACOPT_FULL) || (vacstmt->options & VACOPT_VACUUM))) {
+                    oid_list = list_concat(oid_list, GetVacuumObjectOfSubpartitionTable(relationid));
                 } else {
-                    /* 
-                     * non-partitioned table 
+                    /*
+                     * non-partitioned table
                      * forbit vacuum full/vacuum/analyze cstore.xxxxx direct on datanode
                      * except for timeseries index tables.
                      */
@@ -734,10 +850,9 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                             && memcmp(vacstmt->relation->relname, TsConf::TAG_TABLE_NAME_PREFIX,
                                       strlen(TsConf::TAG_TABLE_NAME_PREFIX))
 #endif
-                            ) {
-                            ereport(ERROR,
-                                (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
-                                    errmsg("cstore.%s is a internal table", vacstmt->relation->relname)));
+                        ) {
+                            ereport(ERROR, (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                                            errmsg("cstore.%s is a internal table", vacstmt->relation->relname)));
                         }
                     }
 
@@ -758,8 +873,8 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                     }
                 }
             } else {
-                ereport(ERROR,
-                    (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for relation %u", relationid)));
+                ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                                errmsg("cache lookup failed for relation %u", relationid)));
             }
 
             ReleaseSysCache(classTup);
@@ -826,8 +941,10 @@ List* get_rel_oids(Oid relid, VacuumStmt* vacstmt)
                 oid_list = lappend(oid_list, vacObj);
 
                 if (t_thrd.vacuum_cxt.vac_context) {
-                    (void)MemoryContextSwitchTo(oldcontext);                
+                    (void)MemoryContextSwitchTo(oldcontext);
                 }
+            } else if (classForm->parttype == PARTTYPE_SUBPARTITIONED_RELATION) {
+                oid_list = list_concat(oid_list, GetVacuumObjectOfSubpartitionTable(HeapTupleGetOid(tuple)));
             } else {
                 /* 
                  * Partitioned table 
@@ -1223,11 +1340,10 @@ void vac_update_relstats(Relation relation, Relation classRel, RelPageType num_p
 #endif
 
     if ((TransactionIdIsNormal(frozenxid) && (TransactionIdPrecedes(relfrozenxid, frozenxid)
-#ifdef PGXC
-                                                || !IsPostmasterEnvironment
-#endif
-    )) || (MultiXactIdIsValid(minmulti) && (MultiXactIdPrecedes(relminmxid, minmulti) || !IsPostmasterEnvironment)) ||
-    isNull) {
+                                                || !IsPostmasterEnvironment)) ||
+        (MultiXactIdIsValid(minmulti) && (MultiXactIdPrecedes(relminmxid, minmulti)
+                                                || !IsPostmasterEnvironment)) || isNull
+    ) {
 
         Datum values[Natts_pg_class];
         bool nulls[Natts_pg_class];
@@ -1729,6 +1845,16 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     LockRelId cudescLockRelid = InvalidLockRelId;
     LockRelId deltaLockRelid = InvalidLockRelId;
 
+    /*
+     * we use this identify whether the partition is a subpartition
+     * subparentid is valid means it's a subpartition, then relationid saves the grandparentid
+     */
+    Oid subparentid = InvalidOid;
+    Partition onesubpart = NULL;
+    Relation onesubpartrel = NULL;
+    PartitionIdentifier* subpartIdentifier = NULL;
+    PartitionIdentifier subpartIdtf;
+
     /* Vacuum map/log table obeys the same rule as toast, only triggered by vacuum, ignored by autovacuum */
     bool doMapLog = do_toast;
     Oid maplogOid;
@@ -1792,6 +1918,11 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         if (!OidIsValid(relationid)) {
             proc_snapshot_and_transaction();
             return false;
+        }
+        Oid grandparentid = partid_get_parentid(relationid);
+        if (OidIsValid(grandparentid)) {
+            subparentid = relationid;
+            relationid = grandparentid;
         }
     }
 
@@ -1947,12 +2078,23 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         onepartrel = try_relation_open(relationid, lmodePartTable);
 
         if (onepartrel) {
-            /* Open the partition */
-            onepart = tryPartitionOpen(onepartrel, relid, lmode);
+            if (!OidIsValid(subparentid)) { /* for a partition */
+                /* Open the partition */
+                onepart = tryPartitionOpen(onepartrel, relid, lmode);
 
-            if (onepart) {
-                /* Get a Relation from a Partition */
-                onerel = partitionGetRelation(onepartrel, onepart);
+                if (onepart) {
+                    /* Get a Relation from a Partition */
+                    onerel = partitionGetRelation(onepartrel, onepart);
+                }
+            } else { /* for a subpartition */
+                onepart = tryPartitionOpen(onepartrel, subparentid, lmode);
+                if (onepart) {
+                    onesubpartrel = partitionGetRelation(onepartrel, onepart);
+                    onesubpart = tryPartitionOpen(onesubpartrel, relid, lmode);
+                    if (onesubpartrel && onesubpart) {
+                        onerel = partitionGetRelation(onesubpartrel, onesubpart);
+                    }
+                }
             }
         }
 
@@ -1994,31 +2136,53 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         onepartrel = try_relation_open(relationid, NoLock);
 
         if (onepartrel) {
-            if (onepartrel->rd_rel->relkind == RELKIND_RELATION) {
-                partID = partOidGetPartID(onepartrel, relid);
-                if (PART_AREA_RANGE == partID->partArea ||
-                    partID->partArea == PART_AREA_INTERVAL ||
-                    PART_AREA_LIST == partID->partArea ||
-                    PART_AREA_HASH == partID->partArea) {
+            if (!OidIsValid(subparentid)) { /* for a partition */
+                if (onepartrel->rd_rel->relkind == RELKIND_RELATION) {
+                    partID = partOidGetPartID(onepartrel, relid);
+                    if (PART_AREA_RANGE == partID->partArea ||
+                        partID->partArea == PART_AREA_INTERVAL ||
+                        PART_AREA_LIST == partID->partArea ||
+                        PART_AREA_HASH == partID->partArea) {
+                        if (ConditionalLockPartition(onepartrel->rd_id, relid, lmode, PARTITION_LOCK)) {
+                            GetLock = true;
+                        }
+                    }
+                    // remember to free partID
+                    pfree_ext(partID);
+                } else if (onepartrel->rd_rel->relkind == RELKIND_INDEX) {
                     if (ConditionalLockPartition(onepartrel->rd_id, relid, lmode, PARTITION_LOCK)) {
                         GetLock = true;
                     }
                 }
-                // remember to free partID
-                pfree_ext(partID);
-            } else if (onepartrel->rd_rel->relkind == RELKIND_INDEX) {
-                if (ConditionalLockPartition(onepartrel->rd_id, relid, lmode, PARTITION_LOCK)) {
-                    GetLock = true;
+
+                if (GetLock) {
+                    /* Open the partition */
+                    onepart = tryPartitionOpen(onepartrel, relid, NoLock);
+
+                    /* Get a Relation from a Partition */
+                    if (onepart)
+                        onerel = partitionGetRelation(onepartrel, onepart);
                 }
-            }
+            } else { /* for a subpartition */
+                PartitionIdentifier* subpartID = NULL;
 
-            if (GetLock) {
-                /* Open the partition */
-                onepart = tryPartitionOpen(onepartrel, relid, NoLock);
+                partID = partOidGetPartID(onepartrel, subparentid);
+                if (ConditionalLockPartition(onepartrel->rd_id, subparentid, lmode, PARTITION_LOCK)) {
+                    onepart = tryPartitionOpen(onepartrel, subparentid, NoLock);
+                    if (onepart) {
+                        onesubpartrel = partitionGetRelation(onepartrel, onepart);
+                        subpartID = partOidGetPartID(onesubpartrel, relid);
+                        if (ConditionalLockPartition(onesubpartrel->rd_id, relid, lmode, PARTITION_LOCK)) {
+                            GetLock = true;
+                        }
+                    }
+                }
 
-                /* Get a Relation from a Partition */
-                if (onepart)
-                    onerel = partitionGetRelation(onepartrel, onepart);
+                if (GetLock) {
+                    onesubpart = tryPartitionOpen(onesubpartrel, relid, NoLock);
+                    if (onesubpart)
+                        onerel = partitionGetRelation(onesubpartrel, onesubpart);
+                }
             }
         } else
             GetLock = true;
@@ -2071,23 +2235,37 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             deltarel = try_relation_open(deltarelid, NoLock);
     }
 
-#define CloseAllRelationsBeforeReturnFalse()                \
-    do {                                                    \
-        if (RelationIsPartition(onerel)) {                  \
-            releaseDummyRelation(&onerel);                  \
-            if (onepart != NULL) {                          \
-                partitionClose(onepartrel, onepart, lmode); \
-            }                                               \
-            if (onepartrel != NULL) {                       \
-                relation_close(onepartrel, lmodePartTable); \
-            }                                               \
-        } else {                                            \
-            relation_close(onerel, lmode);                  \
-        }                                                   \
-        if (cudescrel != NULL)                              \
-            relation_close(cudescrel, lmode);               \
-        if (deltarel != NULL)                               \
-            relation_close(deltarel, lmode);                \
+#define CloseAllRelationsBeforeReturnFalse()                      \
+    do {                                                          \
+        if (OidIsValid(subparentid)) {                            \
+            releaseDummyRelation(&onerel);                        \
+            if (onesubpart != NULL) {                             \
+                partitionClose(onesubpartrel, onesubpart, lmode); \
+            }                                                     \
+            if (onesubpartrel != NULL) {                          \
+                releaseDummyRelation(&onesubpartrel);             \
+            }                                                     \
+            if (onepart != NULL) {                                \
+                partitionClose(onepartrel, onepart, lmode);       \
+            }                                                     \
+            if (onepartrel != NULL) {                             \
+                relation_close(onepartrel, lmodePartTable);       \
+            }                                                     \
+        } else if (RelationIsPartition(onerel)) {                 \
+            releaseDummyRelation(&onerel);                        \
+            if (onepart != NULL) {                                \
+                partitionClose(onepartrel, onepart, lmode);       \
+            }                                                     \
+            if (onepartrel != NULL) {                             \
+                relation_close(onepartrel, lmodePartTable);       \
+            }                                                     \
+        } else {                                                  \
+            relation_close(onerel, lmode);                        \
+        }                                                         \
+        if (cudescrel != NULL)                                    \
+            relation_close(cudescrel, lmode);                     \
+        if (deltarel != NULL)                                     \
+            relation_close(deltarel, lmode);                      \
     } while (0)
 
     // We don't do vaccum when the table is in redistribution.
@@ -2132,7 +2310,12 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * Note we choose to treat permissions failure as a WARNING and keep
      * trying to vacuum the rest of the DB --- is this appropriate?
      */
-    AclResult aclresult = pg_class_aclcheck(RelationGetPgClassOid(onerel, (onepart != NULL)), GetUserId(), ACL_VACUUM);
+    AclResult aclresult;
+    if (OidIsValid(subparentid)) {
+        aclresult = pg_class_aclcheck(onerel->grandparentId, GetUserId(), ACL_VACUUM);
+    } else {
+        aclresult = pg_class_aclcheck(RelationGetPgClassOid(onerel, (onepart != NULL)), GetUserId(), ACL_VACUUM);
+    }
     if (aclresult != ACLCHECK_OK &&
         !(pg_class_ownercheck(RelationGetPgClassOid(onerel, (onepart != NULL)), GetUserId()) ||
             (pg_database_ownercheck(u_sess->proc_cxt.MyDatabaseId, GetUserId()) && !onerel->rd_rel->relisshared) ||
@@ -2224,7 +2407,27 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      */
     onerelid = onerel->rd_lockInfo.lockRelId;
 
-    if (RelationIsPartition(onerel)) {
+    if (OidIsValid(subparentid)) {
+        isFakeRelation = true;
+        partLockRelId = onepartrel->rd_lockInfo.lockRelId;
+        LockRelationIdForSession(&partLockRelId, lmodePartTable);
+
+        Assert(onerelid.relId == relid);
+        Assert(OidIsValid(relationid));
+
+        /* first lock the subpartition */
+        subpartIdentifier = partOidGetPartID(onesubpartrel, relid);
+        subpartIdtf = *subpartIdentifier;
+        LockPartitionVacuumForSession(subpartIdentifier, subparentid, relid, lmode);
+
+        /* then lock the partition */
+        partIdentifier = partOidGetPartID(onepartrel, subparentid);
+        LockPartitionVacuumForSession(partIdentifier, relationid, subparentid, lmode);
+        partIdtf = *partIdentifier;
+
+        pfree_ext(subpartIdentifier);
+        pfree_ext(partIdentifier);
+    } else if (RelationIsPartition(onerel)) {
         isFakeRelation = true;
         partLockRelId = onepartrel->rd_lockInfo.lockRelId;
         LockRelationIdForSession(&partLockRelId, lmodePartTable);
@@ -2255,7 +2458,9 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * automatically rebuilt by cluster_rel so we shouldn't recurse to it.
      */
     if (do_toast && !(vacstmt->options & VACOPT_FULL)) {
-        if (RelationIsPartition(onerel)) {
+        if (OidIsValid(subparentid)) {
+            toast_relid = onesubpart->pd_part->reltoastrelid;
+        } else if (RelationIsPartition(onerel)) {
             toast_relid = onepart->pd_part->reltoastrelid;
         } else {
             toast_relid = onerel->rd_rel->reltoastrelid;
@@ -2297,8 +2502,13 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             securec_check(rc, "\0", "\0");
 
             if (vacstmt->options & VACOPT_FULL) {
-                if (vacuumPartition(vacstmt->flags))
-                    rel = onepartrel;
+                if (vacuumPartition(vacstmt->flags)) {
+                    if (OidIsValid(subparentid)) {
+                        rel = onesubpartrel;
+                    } else {
+                        rel = onepartrel;
+                    }
+                }
 
                 if (rel->rd_rel->relhasclusterkey) {
                     EstIdxMemInfo(rel, NULL, &desc, NULL, NULL);
@@ -2335,9 +2545,18 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     /*
      * Do the actual work --- either FULL or "lazy" vacuum
      */
-    if (RelationIsPartition(onerel)) {
+    if (OidIsValid(subparentid)) {
+        vacstmt->parentpartrel = onepartrel;
+        vacstmt->parentpart = onepart;
+        vacstmt->onepartrel = onesubpartrel;
+        vacstmt->onepart = onesubpart;
+        vacstmt->issubpartition = true;
+    } else if (RelationIsPartition(onerel)) {
         vacstmt->onepartrel = onepartrel;
         vacstmt->onepart = onepart;
+        vacstmt->parentpartrel = NULL;
+        vacstmt->parentpart = NULL;
+        vacstmt->issubpartition = false;
     }
 
     WaitState oldStatus = pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
@@ -2397,12 +2616,22 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             RelationClose(rel);
         }
     } else if ((vacstmt->options & VACOPT_FULL) && (vacstmt->flags & VACFLG_SUB_PARTITION)) {
-        releaseDummyRelation(&onerel);
-        partitionClose(onepartrel, onepart, NoLock);
-        relation_close(onepartrel, NoLock);
+        if (OidIsValid(subparentid)) {
+            releaseDummyRelation(&onerel);
+            partitionClose(onesubpartrel, onesubpart, NoLock);
+            releaseDummyRelation(&onesubpartrel);
+            partitionClose(onepartrel, onepart, NoLock);
+            relation_close(onepartrel, NoLock);
+        } else {
+            releaseDummyRelation(&onerel);
+            partitionClose(onepartrel, onepart, NoLock);
+            relation_close(onepartrel, NoLock);
+        }
         onerel = NULL;
         onepartrel = NULL;
         onepart = NULL;
+        onesubpartrel = NULL;
+        onesubpart = NULL;
 
         if (cudescrel != NULL) {
             relation_close(cudescrel, NoLock);
@@ -2442,6 +2671,7 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             GPIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
             CBIVacuumMainPartition(onerel, vacstmt, lmode, vac_strategy);
+            pgstat_report_vacuum(relid, InvalidOid, false, 0);
         } else {
             pgstat_report_waitstatus_relname(STATE_VACUUM, get_nsp_relname(relid));
             TableRelationVacuum(onerel, vacstmt, vac_strategy);
@@ -2458,9 +2688,17 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
     /* all done with this class, but hold lock until commit */
     if (onerel) {
         if (RelationIsPartition(onerel)) {
-            releaseDummyRelation(&onerel);
-            partitionClose(onepartrel, onepart, NoLock);
-            relation_close(onepartrel, NoLock);
+            if (OidIsValid(subparentid)) {
+                releaseDummyRelation(&onerel);
+                partitionClose(onesubpartrel, onesubpart, NoLock);
+                releaseDummyRelation(&onesubpartrel);
+                partitionClose(onepartrel, onepart, NoLock);
+                relation_close(onepartrel, NoLock);
+            } else {
+                releaseDummyRelation(&onerel);
+                partitionClose(onepartrel, onepart, NoLock);
+                relation_close(onepartrel, NoLock);
+            }
         } else {
             relation_close(onerel, NoLock);
         }
@@ -2488,6 +2726,9 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         vacstmt->flags = VACFLG_SIMPLE_HEAP;
         vacstmt->onepartrel = NULL;
         vacstmt->onepart = NULL;
+        vacstmt->parentpartrel = NULL;
+        vacstmt->parentpart = NULL;
+        vacstmt->issubpartition = false;
         (void)vacuum_rel(toast_relid, vacstmt, false);
     }
 
@@ -2495,6 +2736,9 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
         vacstmt->flags = VACFLG_SIMPLE_HEAP;
         vacstmt->onepartrel = NULL;
         vacstmt->onepart = NULL;
+        vacstmt->parentpartrel = NULL;
+        vacstmt->parentpart = NULL;
+        vacstmt->issubpartition = false;
         (void)vacuum_rel(maplogOid, vacstmt, false);
     }
 
@@ -2509,9 +2753,17 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
 
     if (isFakeRelation) {
         Assert(onerelid.relId == relid && OidIsValid(relationid));
-        UnLockPartitionVacuumForSession(&partIdtf, relationid, relid, lmode);
+        if (OidIsValid(subparentid)) {
+            UnLockPartitionVacuumForSession(&partIdtf, relationid, subparentid, lmode);
 
-        UnlockRelationIdForSession(&partLockRelId, lmodePartTable);
+            UnLockPartitionVacuumForSession(&subpartIdtf, subparentid, relid, lmode);
+
+            UnlockRelationIdForSession(&partLockRelId, lmodePartTable);
+        } else {
+            UnLockPartitionVacuumForSession(&partIdtf, relationid, relid, lmode);
+
+            UnlockRelationIdForSession(&partLockRelId, lmodePartTable);
+        }
     } else {
         UnlockRelationIdForSession(&onerelid, lmode);
     }
@@ -2808,7 +3060,11 @@ void vac_open_part_indexes(VacuumStmt* vacstmt, LOCKMODE lockmode, int* nindexes
     localIndOidList = PartitionGetPartIndexList(vacstmt->onepart);
     localIndNums = list_length(localIndOidList);
     // get global partition indexes
-    globIndOidList = RelationGetSpecificKindIndexList(vacstmt->onepartrel, true);
+    if (!vacstmt->parentpartrel) {
+        globIndOidList = RelationGetSpecificKindIndexList(vacstmt->onepartrel, true);
+    } else {
+        globIndOidList = RelationGetSpecificKindIndexList(vacstmt->parentpartrel, true);
+    }
     globIndNums = list_length(globIndOidList);
 
     tolIndNums = (long)localIndNums + (long)globIndNums;
@@ -2877,9 +3133,16 @@ void CalculatePartitionedRelStats(_in_ Relation partitionRel, _in_ Relation part
     MultiXactId multiXid = InvalidMultiXactId;
     Form_pg_partition partForm;
 
-    Assert(partitionRel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION);
+    Assert(partitionRel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION ||
+           partitionRel->rd_rel->parttype == PARTTYPE_SUBPARTITIONED_RELATION);
 
-    if (partitionRel->rd_rel->relkind == RELKIND_RELATION) {
+    if (partitionRel->rd_rel->parttype == PARTTYPE_SUBPARTITIONED_RELATION) {
+        ScanKeyInit(&partKey[0],
+            Anum_pg_partition_parttype,
+            BTEqualStrategyNumber,
+            F_CHAREQ,
+            CharGetDatum(PART_OBJ_TYPE_TABLE_SUB_PARTITION));
+    } else if (partitionRel->rd_rel->relkind == RELKIND_RELATION) {
         ScanKeyInit(&partKey[0],
             Anum_pg_partition_parttype,
             BTEqualStrategyNumber,
@@ -2999,7 +3262,8 @@ void vac_update_pgclass_partitioned_table(Relation partitionRel, bool hasIndex, 
     TransactionId frozenXid = newFrozenXid;
     MultiXactId multiXid = newMultiXid;
 
-    Assert(partitionRel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION);
+    Assert(partitionRel->rd_rel->parttype == PARTTYPE_PARTITIONED_RELATION ||
+           partitionRel->rd_rel->parttype == PARTTYPE_SUBPARTITIONED_RELATION);
 
     /*
      * We should make CalculatePartitionedRelStats and vac_udpate_relstats in whole,
@@ -3323,6 +3587,9 @@ void merge_cu_relation(void* _info, VacuumStmt* stmt)
         /* non-partition table */
         stmt->onepartrel = NULL;
         stmt->onepart = NULL;
+        stmt->parentpartrel = NULL;
+        stmt->parentpart = NULL;
+        stmt->issubpartition = false;
         lazy_vacuum_rel(rel, stmt, GetAccessStrategy(BAS_VACUUM));
         CommandCounterIncrement();
 
@@ -3954,26 +4221,26 @@ static bool GPIIsInvisibleTuple(ItemPointer itemptr, void* state, Oid partOid, i
     }
     
     // check partition oid of global partition index tuple
-    if (bms_is_member(partOid, pvacStates->invisMap)) {
+    if (OidRBTreeMemberOid(pvacStates->invisiblePartOids, partOid)) {
         return true;
     }
-    if (bms_is_member(partOid, pvacStates->visMap)) {
+    if (OidRBTreeMemberOid(pvacStates->visiblePartOids, partOid)) {
         return false;
     }
     PartStatus partStat = PartitionGetMetadataStatus(partOid, true);
     if (partStat == PART_METADATA_INVISIBLE) {
-        pvacStates->invisMap = bms_add_member(pvacStates->invisMap, partOid);
+        (void)OidRBTreeMemberOid(pvacStates->invisiblePartOids, partOid);
         return true;
     } else {
         // visible include EXIST and NOEXIST
-        pvacStates->visMap = bms_add_member(pvacStates->visMap, partOid);
+        (void)OidRBTreeMemberOid(pvacStates->visiblePartOids, partOid);
         return false;
     }
 }
 
 // clean invisible tuples for global partition index
-static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult **stats, Bitmapset **cleanedParts,
-    Bitmapset *invisibleParts)
+static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult **stats, OidRBTree **cleanedParts,
+    OidRBTree *invisibleParts)
 {
     IndexVacuumInfo ivinfo;
     PGRUsage ru0;
@@ -3989,21 +4256,19 @@ static void GPICleanInvisibleIndex(Relation indrel, IndexBulkDeleteResult **stat
     ivinfo.strategy = vac_strategy;
 
     VacStates* pvacStates = (VacStates*)palloc0(sizeof(VacStates));
-    pvacStates->invisMap = invisibleParts;
-    pvacStates->visMap = NULL;
+    pvacStates->invisiblePartOids = invisibleParts;
+    pvacStates->visiblePartOids = CreateOidRBTree();
     pvacStates->bucketList = NULL;
     if (RELATION_OWN_BUCKET(indrel) && RelationIsCrossBucketIndex(indrel)) {
         pvacStates->bucketList = searchHashBucketByOid(indrel->rd_bucketoid);
     }
     /* Do bulk deletion */
     *stats = index_bulk_delete(&ivinfo, *stats, GPIIsInvisibleTuple, (void*)pvacStates);
-    Bitmapset* pIntersect = bms_intersect(pvacStates->invisMap, pvacStates->visMap);
-    Assert(bms_is_empty(pIntersect));
-    bms_free_ext(pIntersect);
+    Assert(!OidRBTreeHasIntersection(pvacStates->invisiblePartOids, pvacStates->visiblePartOids));
 
-    *cleanedParts = bms_add_members(*cleanedParts, pvacStates->invisMap);
+    OidRBTreeUnionOids(*cleanedParts, pvacStates->invisiblePartOids);
 
-    bms_free(pvacStates->visMap);
+    DestroyOidRBTree(&pvacStates->visiblePartOids);
     pfree_ext(pvacStates);
     ereport(elevel,
         (errmsg("scanned index \"%s\" to remove %lf invisible rows",
@@ -4054,8 +4319,8 @@ static void GPIVacuumMainPartition(
 {
     Relation* iRel = NULL;
     int nindexes;
-    Bitmapset* cleanedParts = NULL;
-    Bitmapset* invisibleParts = NULL;
+    OidRBTree* cleanedParts = CreateOidRBTree();
+    OidRBTree* invisibleParts = CreateOidRBTree();
     Oid parentOid = RelationGetRelid(onerel);
 
     if (vacstmt->options & VACOPT_VERBOSE) {
@@ -4105,8 +4370,8 @@ static void GPIVacuumMainPartition(
         PartitionSetEnabledClean(parentOid, cleanedParts, invisibleParts, false);
     }
 
-    bms_free(cleanedParts);
-    bms_free(invisibleParts);
+    DestroyOidRBTree(&cleanedParts);
+    DestroyOidRBTree(&invisibleParts);
     pfree_ext(indstats);
     pfree_ext(iRel);
 }

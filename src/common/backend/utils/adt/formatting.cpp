@@ -1100,6 +1100,12 @@ typedef enum {
     DCH_Day,
     DCH_Dy,
     DCH_D,
+    DCH_FF1,
+    DCH_FF2,
+    DCH_FF3,
+    DCH_FF4,
+    DCH_FF5,
+    DCH_FF6,
     DCH_FF,
     DCH_FX,
     DCH_HH24,
@@ -1133,6 +1139,7 @@ typedef enum {
     DCH_US,
     DCH_WW,
     DCH_W,
+    DCH_X,
     DCH_Y_YYY,
     DCH_YYYY,
     DCH_YYY,
@@ -1150,6 +1157,12 @@ typedef enum {
     DCH_dd,
     DCH_dy,
     DCH_d,
+    DCH_ff1,
+    DCH_ff2,
+    DCH_ff3,
+    DCH_ff4,
+    DCH_ff5,
+    DCH_ff6,
     DCH_ff,
     DCH_fx,
     DCH_hh24,
@@ -1181,6 +1194,7 @@ typedef enum {
     DCH_us,
     DCH_ww,
     DCH_w,
+    DCH_x,
     DCH_y_yyy,
     DCH_yyyy,
     DCH_yyy,
@@ -1255,7 +1269,13 @@ static const KeyWord DCH_keywords[] = {
     {"Day", 3, DCH_Day, FALSE, FROM_CHAR_DATE_NONE},
     {"Dy", 2, DCH_Dy, FALSE, FROM_CHAR_DATE_NONE},
     {"D", 1, DCH_D, TRUE, FROM_CHAR_DATE_GREGORIAN},
-    {"FF", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE}, /* F */
+    {"FF1", 3, DCH_FF1, TRUE, FROM_CHAR_DATE_NONE}, /* F */
+    {"FF2", 3, DCH_FF2, TRUE, FROM_CHAR_DATE_NONE},
+    {"FF3", 3, DCH_FF3, TRUE, FROM_CHAR_DATE_NONE},
+    {"FF4", 3, DCH_FF4, TRUE, FROM_CHAR_DATE_NONE},
+    {"FF5", 3, DCH_FF5, TRUE, FROM_CHAR_DATE_NONE},
+    {"FF6", 3, DCH_FF6, TRUE, FROM_CHAR_DATE_NONE},
+    {"FF", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE},
     {"FX", 2, DCH_FX, FALSE, FROM_CHAR_DATE_NONE},
     {"HH24", 4, DCH_HH24, TRUE, FROM_CHAR_DATE_NONE}, /* H */
     {"HH12", 4, DCH_HH12, TRUE, FROM_CHAR_DATE_NONE},
@@ -1288,6 +1308,7 @@ static const KeyWord DCH_keywords[] = {
     {"US", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE},      /* U */
     {"WW", 2, DCH_WW, TRUE, FROM_CHAR_DATE_GREGORIAN}, /* W */
     {"W", 1, DCH_W, TRUE, FROM_CHAR_DATE_GREGORIAN},
+    {"X", 1, DCH_X, TRUE, FROM_CHAR_DATE_NONE}, /* X */
     {"Y,YYY", 5, DCH_Y_YYY, TRUE, FROM_CHAR_DATE_GREGORIAN}, /* Y */
     {"YYYY", 4, DCH_YYYY, TRUE, FROM_CHAR_DATE_GREGORIAN},
     {"YYY", 3, DCH_YYY, TRUE, FROM_CHAR_DATE_GREGORIAN},
@@ -1305,7 +1326,13 @@ static const KeyWord DCH_keywords[] = {
     {"dd", 2, DCH_DD, TRUE, FROM_CHAR_DATE_GREGORIAN},
     {"dy", 2, DCH_dy, FALSE, FROM_CHAR_DATE_NONE},
     {"d", 1, DCH_D, TRUE, FROM_CHAR_DATE_GREGORIAN},
-    {"ff", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE}, /* f */
+    {"ff1", 3, DCH_FF1, TRUE, FROM_CHAR_DATE_NONE}, /* f */
+    {"ff2", 3, DCH_FF2, TRUE, FROM_CHAR_DATE_NONE},
+    {"ff3", 3, DCH_FF3, TRUE, FROM_CHAR_DATE_NONE},
+    {"ff4", 3, DCH_FF4, TRUE, FROM_CHAR_DATE_NONE},
+    {"ff5", 3, DCH_FF5, TRUE, FROM_CHAR_DATE_NONE},
+    {"ff6", 3, DCH_FF6, TRUE, FROM_CHAR_DATE_NONE},
+    {"ff", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE},
     {"fx", 2, DCH_FX, FALSE, FROM_CHAR_DATE_NONE},
     {"hh24", 4, DCH_HH24, TRUE, FROM_CHAR_DATE_NONE}, /* h */
     {"hh12", 4, DCH_HH12, TRUE, FROM_CHAR_DATE_NONE},
@@ -1336,6 +1363,7 @@ static const KeyWord DCH_keywords[] = {
     {"us", 2, DCH_US, TRUE, FROM_CHAR_DATE_NONE},      /* u */
     {"ww", 2, DCH_WW, TRUE, FROM_CHAR_DATE_GREGORIAN}, /* w */
     {"w", 1, DCH_W, TRUE, FROM_CHAR_DATE_GREGORIAN},
+    {"x", 1, DCH_X, TRUE, FROM_CHAR_DATE_NONE}, /* x */
     {"y,yyy", 5, DCH_Y_YYY, TRUE, FROM_CHAR_DATE_GREGORIAN}, /* y */
     {"yyyy", 4, DCH_YYYY, TRUE, FROM_CHAR_DATE_GREGORIAN},
     {"yyy", 3, DCH_YYY, TRUE, FROM_CHAR_DATE_GREGORIAN},
@@ -1443,7 +1471,7 @@ static const int DCH_index[KeyWord_INDEX_SIZE] = {
     DCH_CC,
     DCH_DAY,
     -1,
-    DCH_FF,
+    DCH_FF1,
     -1,
     DCH_HH24,
     DCH_IDDD,
@@ -1461,7 +1489,7 @@ static const int DCH_index[KeyWord_INDEX_SIZE] = {
     DCH_US,
     -1,
     DCH_WW,
-    -1,
+    DCH_X,
     DCH_Y_YYY,
     -1,
     -1,
@@ -1475,7 +1503,7 @@ static const int DCH_index[KeyWord_INDEX_SIZE] = {
     DCH_cc,
     DCH_day,
     -1,
-    DCH_ff,
+    DCH_ff1,
     -1,
     DCH_hh24,
     DCH_iddd,
@@ -1493,7 +1521,7 @@ static const int DCH_index[KeyWord_INDEX_SIZE] = {
     DCH_us,
     -1,
     DCH_ww,
-    -1,
+    DCH_x,
     DCH_y_yyy,
     -1,
     -1,
@@ -3251,6 +3279,7 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 s += strlen(s);
                 break;
             case DCH_MS: /* millisecond */
+            case DCH_FF3:
 #ifdef HAVE_INT64_TIMESTAMP
                 rc = sprintf_s(s, len, "%03d", (int)(in->fsec / INT64CONST(1000)));
 #else
@@ -3262,7 +3291,52 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                     str_numth(s, s, S_TH_TYPE(n->suffix));
                 s += strlen(s);
                 break;
+            case DCH_FF1: /* millisecond */
+#ifdef HAVE_INT64_TIMESTAMP
+                rc = sprintf_s(s, len, "%01d", (int)(in->fsec / INT64CONST(100000)));
+#else
+                rc = sprintf_s(s, len, "%01d", (int)(in->fsec * 1000000 / 100000));
+#endif
+                securec_check_ss(rc, "\0", "\0");
+                if (S_THth(n->suffix))
+                    str_numth(s, s, S_TH_TYPE(n->suffix));
+                s += strlen(s);
+                break;
+            case DCH_FF2: /* millisecond */
+#ifdef HAVE_INT64_TIMESTAMP
+                rc = sprintf_s(s, len, "%02d", (int)(in->fsec / INT64CONST(10000)));
+#else
+                rc = sprintf_s(s, len, "%02d", (int)(in->fsec * 1000000 / 10000));
+#endif
+                securec_check_ss(rc, "\0", "\0");
+                if (S_THth(n->suffix))
+                    str_numth(s, s, S_TH_TYPE(n->suffix));
+                s += strlen(s);
+                break;
+            case DCH_FF4: /* millisecond */
+#ifdef HAVE_INT64_TIMESTAMP
+                rc = sprintf_s(s, len, "%04d", (int)(in->fsec / INT64CONST(100)));
+#else
+                rc = sprintf_s(s, len, "%04d", (int)(in->fsec * 1000000 / 100));
+#endif
+                securec_check_ss(rc, "\0", "\0");
+                if (S_THth(n->suffix))
+                    str_numth(s, s, S_TH_TYPE(n->suffix));
+                s += strlen(s);
+                break;
+            case DCH_FF5: /* millisecond */
+#ifdef HAVE_INT64_TIMESTAMP
+                rc = sprintf_s(s, len, "%05d", (int)(in->fsec / INT64CONST(10)));
+#else
+                rc = sprintf_s(s, len, "%05d", (int)(in->fsec * 1000000 / 10));
+#endif
+                securec_check_ss(rc, "\0", "\0");
+                if (S_THth(n->suffix))
+                    str_numth(s, s, S_TH_TYPE(n->suffix));
+                s += strlen(s);
+                break;
             case DCH_US: /* microsecond */
+            case DCH_FF6:
 #ifdef HAVE_INT64_TIMESTAMP
                 rc = sprintf_s(s, len, "%06d", (int)in->fsec);
 #else
@@ -3643,6 +3717,16 @@ static void DCH_to_char(FormatNode* node, bool is_interval, TmToChar* in, char* 
                 if (S_THth(n->suffix))
                     str_numth(s, s, S_TH_TYPE(n->suffix));
                 s += strlen(s);
+                break;
+            case DCH_X:
+                /*
+                * Convert 'X' and 'x' to '.' when "sql_compatibility == A_FORMAT".
+                */
+                if (u_sess->attr.attr_sql.sql_compatibility == A_FORMAT) {
+                    rc = strcpy_s(s, len, ".");
+                    securec_check(rc, "\0", "\0");
+                    s += strlen(s);
+                }
                 break;
             case DCH_J:
                 rc = sprintf_s(s, len, "%d", date2j(tm->tm_year, tm->tm_mon, tm->tm_mday));
@@ -7535,53 +7619,62 @@ static const parse_field parse_field_map[] = {
     parse_field_d,     /* DCH_Day   */
     parse_field_d,     /* DCH_Dy    */
     parse_field_d_int, /* DCH_D     */
-    parse_field_usff,  /* DCH_FF    */
-    NULL,              /* DCH_FX    */
-    parse_field_hh24,  /* DCH_HH24  */
-    parse_field_hh12,  /* DCH_HH12  */
-    parse_field_hh12,  /* DCH_HH    */
-    parse_field_iddd,  /* DCH_IDDD  */
+    NULL,              /* DCH_FF1   */
+    NULL,              /* DCH_FF2   */
+    NULL,              /* DCH_FF3   */
+    NULL,              /* DCH_FF4   */
+    NULL,              /* DCH_FF5   */
+    NULL,              /* DCH_FF6   */
 
     /* -----  20~29  ----- */
+    parse_field_usff,    /* DCH_FF    */
+    NULL,                /* DCH_FX    */
+    parse_field_hh24,    /* DCH_HH24  */
+    parse_field_hh12,    /* DCH_HH12  */
+    parse_field_hh12,    /* DCH_HH    */
+    parse_field_iddd,    /* DCH_IDDD  */
     parse_field_id,      /* DCH_ID    */
     parse_field_iw,      /* DCH_IW    */
     parse_field_yyyy,    /* DCH_IYYY  */
     parse_field_yyy,     /* DCH_IYY   */
-    parse_field_yy,      /* DCH_IY    */
-    parse_field_y,       /* DCH_I     */
-    parse_field_j,       /* DCH_J     */
-    parse_field_mi,      /* DCH_MI    */
-    parse_field_mm,      /* DCH_MM    */
-    parse_field_mm_full, /* DCH_MONTH */
 
     /* -----  30~39  ----- */
+    parse_field_yy,        /* DCH_IY    */
+    parse_field_y,         /* DCH_I     */
+    parse_field_j,         /* DCH_J     */
+    parse_field_mi,        /* DCH_MI    */
+    parse_field_mm,        /* DCH_MM    */
+    parse_field_mm_full,   /* DCH_MONTH */
     parse_field_mm_short,  /* DCH_MON   */
     parse_field_ms,        /* DCH_MS    */
     parse_field_mm_full,   /* DCH_Month */
     parse_field_mm_short,  /* DCH_Mon   */
+
+    /* -----  40~49  ----- */
     parse_field_ampm_long, /* DCH_P_M   */
     parse_field_ampm,      /* DCH_PM    */
     parse_field_q,         /* DCH_Q     */
     parse_field_RM,        /* DCH_RM    */
     parse_field_rrrr,      /* DCH_RRRR  */
     parse_field_rr,        /* DCH_RR    */
-
-    /* -----  40~49  ----- */
-    parse_field_sssss, /* DCH_SSSSS */
-    parse_field_ss,    /* DCH_SS    */
-    parse_field_syyyy, /* DCH_SYYYY */
-    NULL,              /* DCH_TZ    */
-    parse_field_usff,  /* DCH_US    */
-    parse_field_iw,    /* DCH_WW    */
-    parse_field_w,     /* DCH_W     */
-    parse_field_y_yyy, /* DCH_Y_YYY */
-    parse_field_yyyy,  /* DCH_YYYY  */
-    parse_field_yyy,   /* DCH_YYY   */
+    parse_field_sssss,     /* DCH_SSSSS */
+    parse_field_ss,        /* DCH_SS    */
+    parse_field_syyyy,     /* DCH_SYYYY */
+    NULL,                  /* DCH_TZ    */
 
     /* -----  50~59  ----- */
+    parse_field_usff,      /* DCH_US    */
+    parse_field_iw,        /* DCH_WW    */
+    parse_field_w,         /* DCH_W     */
+    NULL,                  /* DCH_X     */
+    parse_field_y_yyy,     /* DCH_Y_YYY */
+    parse_field_yyyy,      /* DCH_YYYY  */
+    parse_field_yyy,       /* DCH_YYY   */
     parse_field_yy,        /* DCH_YY    */
     parse_field_y,         /* DCH_Y     */
     parse_field_adbc_long, /* DCH_a_d   */
+
+    /* -----  60~69  ----- */
     parse_field_ampm_long, /* DCH_a_m   */
     parse_field_adbc,      /* DCH_ad    */
     parse_field_ampm,      /* DCH_am    */
@@ -7589,20 +7682,26 @@ static const parse_field parse_field_map[] = {
     parse_field_adbc,      /* DCH_bc    */
     parse_field_cc,        /* DCH_cc    */
     parse_field_d,         /* DCH_day   */
+    parse_field_ddd,       /* DCH_ddd   */
+    parse_field_dd,        /* DCH_dd    */
+    parse_field_d,         /* DCH_dy    */
 
-    /* -----  60~69  ----- */
-    parse_field_ddd,   /* DCH_ddd   */
-    parse_field_dd,    /* DCH_dd    */
-    parse_field_d,     /* DCH_dy    */
+    /* -----  70~79  ----- */
     parse_field_d_int, /* DCH_d     */
+    NULL,              /* DCH_ff1   */
+    NULL,              /* DCH_ff2   */
+    NULL,              /* DCH_ff3   */
+    NULL,              /* DCH_ff4   */
+    NULL,              /* DCH_ff5   */
+    NULL,              /* DCH_ff6   */
     parse_field_usff,  /* DCH_ff    */
     NULL,              /* DCH_fx    */
     parse_field_hh24,  /* DCH_hh24  */
-    parse_field_hh12,  /* DCH_hh12  */
-    parse_field_hh12,  /* DCH_hh    */
-    parse_field_iddd,  /* DCH_iddd  */
 
-    /* -----  70~79  ----- */
+    /* -----  80~89  ----- */
+    parse_field_hh12,    /* DCH_hh12  */
+    parse_field_hh12,    /* DCH_hh    */
+    parse_field_iddd,    /* DCH_iddd  */
     parse_field_id,      /* DCH_id    */
     parse_field_iw,      /* DCH_iw    */
     parse_field_yyyy,    /* DCH_iyyy  */
@@ -7610,11 +7709,11 @@ static const parse_field parse_field_map[] = {
     parse_field_yy,      /* DCH_iy    */
     parse_field_y,       /* DCH_i     */
     parse_field_j,       /* DCH_j     */
-    parse_field_mi,      /* DCH_mi    */
-    parse_field_mm,      /* DCH_mm    */
-    parse_field_mm_full, /* DCH_month */
 
-    /* -----  80~89  ----- */
+    /* -----  90~99  ----- */
+    parse_field_mi,        /* DCH_mi    */
+    parse_field_mm,        /* DCH_mm    */
+    parse_field_mm_full,   /* DCH_month */
     parse_field_mm_short,  /* DCH_mon   */
     parse_field_ms,        /* DCH_ms    */
     parse_field_ampm_long, /* DCH_p_m   */
@@ -7622,24 +7721,26 @@ static const parse_field parse_field_map[] = {
     parse_field_q,         /* DCH_q     */
     parse_field_rm,        /* DCH_rm    */
     parse_field_rrrr,      /* DCH_rrrr  */
+
+    /* ----  100~110  ---- */
     parse_field_rr,        /* DCH_rr    */
     parse_field_sssss,     /* DCH_sssss */
     parse_field_ss,        /* DCH_ss    */
+    parse_field_syyyy,     /* DCH_syyyy */
+    NULL,                  /* DCH_tz    */
+    parse_field_usff,      /* DCH_us    */
+    parse_field_iw,        /* DCH_ww    */
+    parse_field_w,         /* DCH_w     */
+    NULL,                  /* DCH_x     */
+    parse_field_y_yyy,     /* DCH_y_yyy */
 
-    /* -----  90~99  ----- */
-    parse_field_syyyy, /* DCH_syyyy */
-    NULL,              /* DCH_tz    */
-    parse_field_usff,  /* DCH_us    */
-    parse_field_iw,    /* DCH_ww    */
-    parse_field_w,     /* DCH_w     */
-    parse_field_y_yyy, /* DCH_y_yyy */
+    /* -----  110~  ----- */
     parse_field_yyyy,  /* DCH_yyyy  */
     parse_field_yyy,   /* DCH_yyy   */
     parse_field_yy,    /* DCH_yy    */
     parse_field_y,     /* DCH_y     */
 
-    /* -----  100~  ----- */
-    NULL /* _DCH_last_ */
+    NULL               /* _DCH_last_ */
 };
 
 /*

@@ -82,7 +82,7 @@ typedef struct HBktTblScanDescData {
     Relation rs_rd;
 
     struct ScanState* scanState;
-    List* hBktList;  /* hash bucket list that used to scan */
+    oidvector* hBktList;  /* hash bucket list that used to scan */
     int      curr_slot;
     Relation currBktRel;
     TableScanDesc currBktScan;
@@ -170,7 +170,7 @@ typedef struct HBktIdxScanDescData {
     Relation idx_rd;  /* index relation descriptor */
     bool isUpsert;
     struct ScanState* scanState;
-    List* hBktList;
+    oidvector* hBktList;
     int      curr_slot;
     Relation currBktHeapRel;
     Relation currBktIdxRel;

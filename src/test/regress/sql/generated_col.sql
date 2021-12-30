@@ -266,7 +266,7 @@ INSERT INTO gtest23q VALUES (2, 5);  -- error
 
 DROP TABLE gtest23q;
 
--- domains
+-- domains (domain is not yet supported.)
 CREATE DOMAIN gtestdomain1 AS int CHECK (VALUE < 10);
 CREATE TABLE gtest24 (a int PRIMARY KEY, b gtestdomain1 GENERATED ALWAYS AS (a * 2) STORED);
 INSERT INTO gtest24 (a) VALUES (4);  -- ok
@@ -478,7 +478,7 @@ begin
 	return b;
 end;
 $$ language plpgsql;
-call gen_test(100);
+select gen_test(100);
 drop function gen_test; 
 DROP TABLE t1;
 

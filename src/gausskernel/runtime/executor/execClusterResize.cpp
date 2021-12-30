@@ -641,9 +641,28 @@ void BlockUnsupportedDDL(const Node* parsetree)
                         }
                     } break;
                     case AT_AddNodeList:
-                    case AT_DeleteNodeList:
-                        break;
+                    case AT_DeleteNodeList: {
+#ifndef ENABLE_MULTIPLE_NODES
+                        ereport(ERROR,
+                            (errmodule(MOD_FUNCTION),
+                            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Unsupported feature"),
+                            errdetail("The capability is not supported for openGauss."),
+                            errcause("%s is not supported for openGauss",
+                                cmd->subtype == AT_DeleteNodeList ? "DeleteNode" : "AddNode"),
+                            erraction("NA")));
+#endif
+                    } break;
                     case AT_UpdateSliceLike: {
+#ifndef ENABLE_MULTIPLE_NODES
+                        ereport(ERROR,
+                            (errmodule(MOD_FUNCTION),
+                            errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("Unsupported feature"),
+                            errdetail("The capability is not supported for openGauss."),
+                            errcause("UpdateSliceLike is not supported for openGauss"),
+                            erraction("NA")));
+#endif
                         if (!ClusterResizingInProgress() && IS_PGXC_COORDINATOR) {
                             ereport(ERROR,
                                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),

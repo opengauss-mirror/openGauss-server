@@ -411,6 +411,7 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path)
     if (root->isPartIteratorPlanning) {
         plan->ispwj = true;
         plan->paramno = root->curIteratorParamIndex;
+        plan->subparamno = root->curSubPartIteratorParamIndex;
     } else {
         plan->ispwj = false;
         plan->paramno = -1;
@@ -903,6 +904,10 @@ void disuse_physical_tlist(Plan* plan, Path* path)
                        path->parent->rtekind == RTE_SUBQUERY);
                 break;
             }
+            /* Stream plan would be reduced when it's executed on coordinator, while path wouldn't. */
+            if (is_execute_on_coordinator(plan) && IsA(path, StreamPath)) {
+                path = ((StreamPath*)path)->subpath;
+            }
         }
         /* fall throuth */
         case T_SeqScan:
@@ -913,11 +918,16 @@ void disuse_physical_tlist(Plan* plan, Path* path)
         case T_TidScan:
         case T_FunctionScan:
         case T_ValuesScan:
-        case T_CteScan:
         case T_WorkTableScan:
+        case T_CteScan:
         case T_ForeignScan:
         case T_ExtensiblePlan:
         case T_BaseResult: {
+            if (IsA(plan, WorkTableScan) && (((WorkTableScan *)plan)->forStartWith)) {
+                /* In StartWith-ConnectBy cases we keep the whole worktable scan results
+                 * for the upcoming processing steps. */
+                break;
+            }
             List* tarList = NULL;
             if (path->parent != NULL)
                 tarList = build_relation_tlist(path->parent);
@@ -1812,7 +1822,7 @@ static void add_distribute_info(PlannerInfo* root, Plan* scanPlan, Index relInde
     }
     RangeTblEntry* rte = root->simple_rte_array[relIndex];
 
-    if (is_sys_table(rte->relid) || rte->relkind == RELKIND_SEQUENCE) {
+    if (is_sys_table(rte->relid) || RELKIND_IS_SEQUENCE(rte->relkind)) {
         execNodes = ng_convert_to_exec_nodes(&bestPath->distribution, bestPath->locator_type, RELATION_ACCESS_READ);
         scanPlan->exec_type = EXEC_ON_COORDS;
     } else if (IsToastNamespace(get_rel_namespace(rte->relid))) {
@@ -2553,7 +2563,17 @@ static Scan* create_indexscan_plan(
                         continue; /* implied by index predicate */
             }
         }
-        qpqual = lappend(qpqual, rinfo);
+        
+        /* 
+         * Add index scan filter condition only when the rinfo is not built by type conversion.
+         * Our system supports some type convertions to match the index type. When this conversion
+         * happened, the rinfo will be deep copied from another rinfo parsed from user's input. To
+         * distinguish them, we mark rinfo->converted = true. Obviously, the rinfo(s) built by conversion
+         * should not be added into qpqual again. (refer to function: ConvertTypeForIdxMatch for conversion process)
+         */
+        if (rinfo->converted == false) {
+            qpqual = lappend(qpqual, rinfo);
+        }
     }
 
     /* Sort clauses into best execution order */
@@ -2944,6 +2964,7 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
             btindexscan->scan.itrs = root->curItrs;
             btindexscan->scan.pruningInfo = bitmapqual->parent->pruning_result;
             btindexscan->scan.plan.paramno = root->curIteratorParamIndex;
+            btindexscan->scan.plan.subparamno = root->curSubPartIteratorParamIndex;
             btindexscan->scan.partScanDirection = ForwardScanDirection;
         }
 
@@ -3433,30 +3454,10 @@ static Plan* create_ctescan_plan(PlannerInfo* root, Path* best_path, List* tlist
     foreach (lc, cteroot->parse->cteList) {
         cte = (CommonTableExpr*)lfirst(lc);
 
-        /*
-         * MPP with recursive support.
-         *
-         * Recursive CTE is initialized in subplan list, so we should only count
-         * the recursive CTE, the none-recursive CTE is fold in early stage of
-         * query rewrite.
-         */
-        if (STREAM_RECURSIVECTE_SUPPORTED && !cte->cterecursive) {
-            continue;
-        }
-
         if (strcmp(cte->ctename, rte->ctename) == 0)
             break;
 
-        /*
-         * In stream case, we store each ctescan plan reference separately, so the
-         * ndx ('plan id' index) for root->initplans should be increased by the num
-         * of refconts
-         */
-        if (STREAM_RECURSIVECTE_SUPPORTED) {
-            ndx = ndx + cte->cterefcount;
-        } else {
-            ndx++;
-        }
+        ndx++;
     }
     if (lc == NULL) { /* shouldn't happen */
         ereport(ERROR,
@@ -3566,6 +3567,7 @@ static Plan* create_ctescan_plan(PlannerInfo* root, Path* best_path, List* tlist
     scan_clauses = extract_actual_clauses(scan_clauses, false);
 
     scan_plan = make_ctescan(tlist, scan_clauses, scan_relid, plan_id, cte_param_id);
+    scan_plan->cteRef = cte;
 
 #ifdef STREAMPLAN
     cte_plan = (Plan*)list_nth(root->glob->subplans, ctesplan->plan_id - 1);
@@ -3663,6 +3665,14 @@ static Plan* create_ctescan_plan(PlannerInfo* root, Path* best_path, List* tlist
 #endif
 
     copy_path_costsize(&scan_plan->scan.plan, best_path);
+
+    if (IsCteScanProcessForStartWith(scan_plan)) {
+        CteScan *cteplan = (CteScan *)scan_plan;
+        RecursiveUnion *ruplan = (RecursiveUnion *)cte_plan;
+
+        Plan *plan = (Plan *)AddStartWithOpProcNode(root, cteplan, ruplan);
+        return plan;
+    }
 
     return (Plan*)scan_plan;
 }
@@ -3768,6 +3778,12 @@ static WorkTableScan* create_worktablescan_plan(PlannerInfo* root, Path* best_pa
         scan_plan->scan.plan.exec_nodes = ng_get_single_node_group_exec_node();
     }
 #endif
+
+    /* Mark current worktablescan is working for startwith */
+    if (IsRteForStartWith(root, rte)) {
+        rte->swConverted = true;
+        scan_plan->forStartWith = true;
+    }
 
     copy_path_costsize(&scan_plan->scan.plan, best_path);
 
@@ -4383,8 +4399,9 @@ static MergeJoin* create_mergejoin_plan(PlannerInfo* root, MergePath* best_path,
          * matter which way we imagine this column to be ordered.)  But a
          * non-redundant inner pathkey had better match outer's ordering too.
          */
-        if ((onewpathkey && inewpathkey) && (!OpFamilyEquals(opathkey->pk_opfamily, ipathkey->pk_opfamily) ||
-                                                opathkey->pk_eclass->ec_collation != ipathkey->pk_eclass->ec_collation))
+        if ((onewpathkey && inewpathkey && opathkey) &&
+            (!OpFamilyEquals(opathkey->pk_opfamily, ipathkey->pk_opfamily) ||
+                opathkey->pk_eclass->ec_collation != ipathkey->pk_eclass->ec_collation))
             ereport(ERROR,
                 (errmodule(MOD_OPT),
                     errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
@@ -6084,6 +6101,7 @@ static PartIterator* create_partIterator_plan(
     /* Construct partition iterator param */
     PartIteratorParam* piParam = makeNode(PartIteratorParam);
     piParam->paramno = assignPartIteratorParam(root);
+    piParam->subPartParamno = assignPartIteratorParam(root);
     partItr->param = piParam;
 
     /*
@@ -6091,6 +6109,7 @@ static PartIterator* create_partIterator_plan(
      * it will be used by scan plan which is offspring of this iterator plan node.
      */
     root->curIteratorParamIndex = piParam->paramno;
+    root->curSubPartIteratorParamIndex = piParam->subPartParamno;
     root->isPartIteratorPlanning = true;
     root->curItrs = pIterpath->itrs;
 
@@ -6102,12 +6121,15 @@ static PartIterator* create_partIterator_plan(
 
     Bitmapset* extparams = (Bitmapset*)copyObject(partItr->plan.extParam);
     partItr->plan.extParam = bms_add_member(extparams, piParam->paramno);
+    partItr->plan.extParam = bms_add_member(extparams, piParam->subPartParamno);
 
     Bitmapset* allparams = (Bitmapset*)copyObject(partItr->plan.allParam);
     partItr->plan.allParam = bms_add_member(allparams, piParam->paramno);
+    partItr->plan.allParam = bms_add_member(allparams, piParam->subPartParamno);
 
     root->isPartIteratorPlanning = false;
     root->curIteratorParamIndex = 0;
+    root->curSubPartIteratorParamIndex = 0;
 
 #ifdef STREAMPLAN
     inherit_plan_locator_info(&(partItr->plan), partItr->plan.lefttree);
@@ -6756,17 +6778,21 @@ Plan* create_direct_scan(PlannerInfo* root, List* tlist, RangeTblEntry* realResu
 
         partItr->param = piParam;
         piParam->paramno = assignPartIteratorParam(root);
+        piParam->subPartParamno = assignPartIteratorParam(root);
 
         extparams = (Bitmapset*)copyObject(partItr->plan.extParam);
         partItr->plan.extParam = bms_add_member(extparams, piParam->paramno);
+        partItr->plan.extParam = bms_add_member(extparams, piParam->subPartParamno);
 
         allparams = (Bitmapset*)copyObject(partItr->plan.allParam);
         partItr->plan.allParam = bms_add_member(allparams, piParam->paramno);
+        partItr->plan.allParam = bms_add_member(allparams, piParam->subPartParamno);
 
         scan->isPartTbl = true;
         scan->partScanDirection = ForwardScanDirection;
         scan->itrs = rel->partItrs;
         scan->plan.paramno = piParam->paramno;
+        scan->plan.subparamno = piParam->subPartParamno;
         scan->pruningInfo = copyPruningResult(rel->pruning_result);
 
 #ifdef STREAMPLAN
@@ -8087,6 +8113,15 @@ Limit* make_limit(PlannerInfo* root, Plan* lefttree, Node* limitOffset, Node* li
     if (enable_parallel && lefttree->dop > 1)
         lefttree = parallel_limit_sort(root, lefttree, limitOffset, limitCount, offset_est, count_est);
 
+    /*
+     * In case of Limit + star with CteScan, we need add Result node to elimit additional internal entry
+     * not match in some case, e.g. limit it top-plan node in current subquery
+     */
+    if (IsA(lefttree, CteScan) && IsCteScanProcessForStartWith((CteScan *)lefttree)) {
+        List *tlist = lefttree->targetlist;
+        lefttree = (Plan *)make_result(root, tlist, NULL, lefttree, NULL);
+    }
+
 #ifdef STREAMPLAN
     inherit_plan_locator_info((Plan*)node, lefttree);
 #endif
@@ -8836,7 +8871,6 @@ ModifyTable* make_modifytable(CmdType operation, bool canSetTag, List* resultRel
         node->updateTlist = upsertClause->updateTlist;
         node->exclRelTlist = upsertClause->exclRelTlist;
         node->exclRelRTIndex = upsertClause->exclRelIndex;
-        node->partKeyUpsert = upsertClause->partKeyUpsert;
     } else {
         node->upsertAction = UPSERT_NONE;
         node->updateTlist = NIL;
@@ -9121,7 +9155,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
             mergeTargetRelation,
             mergeSourceTargetList,
             mergeActionList,
-            upsertClause,
+            upsertClause
             isDfsStore);
         return pgxc_make_modifytable(root, (Plan*)mtplan);
 #endif
@@ -9229,6 +9263,7 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel)
                 scan->isPartTbl = true;
                 scan->partScanDirection = ForwardScanDirection;
                 scan->plan.paramno = root->curIteratorParamIndex;
+                scan->plan.subparamno = root->curSubPartIteratorParamIndex;
                 scan->itrs = root->curItrs;
                 scan->pruningInfo = rel->pruning_result;
             } break;

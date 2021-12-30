@@ -344,7 +344,7 @@ select relname, parttype, partstrategy, boundaries from pg_partition
  sys_p4                  | p        | i            | {"Fri Jun 22 00:00:00 2040"}
 (9 rows)
 
-ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p32767;
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p1048575;
 insert into interval_normal_date values ('2040-06-22');
 select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
@@ -356,14 +356,14 @@ select relname, parttype, partstrategy, boundaries from pg_partition
  my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
  my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
  my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
- sys_p1                  | p        | i            | {"Sat Jun 23 00:00:00 2040"}
+ sys_p1048575            | p        | i            | {"Fri Jun 22 00:00:00 2040"}
  sys_p1_1                | p        | r            | {"Wed Apr 01 00:00:00 2020"}
  sys_p1_2                | p        | r            | {"Tue Jun 02 00:00:00 2020"}
  sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
- sys_p32767              | p        | i            | {"Fri Jun 22 00:00:00 2040"}
+ sys_p4                  | p        | i            | {"Sat Jun 23 00:00:00 2040"}
 (10 rows)
 
-ALTER TABLE interval_normal_date RENAME PARTITION sys_p1 To sys_p32780;
+ALTER TABLE interval_normal_date RENAME PARTITION sys_p4 To sys_p1048580;
 insert into interval_normal_date values ('2040-06-24');
 select relname, parttype, partstrategy, boundaries from pg_partition
 	where parentid = (select oid from pg_class where relname = 'interval_normal_date')
@@ -375,12 +375,12 @@ select relname, parttype, partstrategy, boundaries from pg_partition
  my_sys_p4               | p        | i            | {"Wed Jun 03 00:00:00 2020"}
  my_sys_p5               | p        | i            | {"Sat Mar 02 00:00:00 2030"}
  my_sys_p6               | p        | i            | {"Thu Jun 21 00:00:00 2040"}
- sys_p14                 | p        | i            | {"Mon Jun 25 00:00:00 2040"}
+ sys_p1048575            | p        | i            | {"Fri Jun 22 00:00:00 2040"}
+ sys_p1048580            | p        | i            | {"Sat Jun 23 00:00:00 2040"}
  sys_p1_1                | p        | r            | {"Wed Apr 01 00:00:00 2020"}
  sys_p1_2                | p        | r            | {"Tue Jun 02 00:00:00 2020"}
  sys_p3                  | p        | i            | {"Thu Jun 04 00:00:00 2020"}
- sys_p32767              | p        | i            | {"Fri Jun 22 00:00:00 2040"}
- sys_p32780              | p        | i            | {"Sat Jun 23 00:00:00 2040"}
+ sys_p4                  | p        | i            | {"Mon Jun 25 00:00:00 2040"}
 (11 rows)
 
 --clean up

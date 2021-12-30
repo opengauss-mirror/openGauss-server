@@ -848,6 +848,11 @@ static void LogUHeapUndoActions(UHeapUndoActionWALInfo *walInfo, Relation rel)
 
     XLogRegisterData((char *)&flags, sizeof(uint8));
 
+    if (walInfo->potential_freespace > BLCKSZ) {
+        ereport(PANIC, (errcode(ERRCODE_DATA_CORRUPTED),
+            errmsg("potential_freespace invalid: %u", walInfo->potential_freespace)));
+    }
+
     if (walInfo->needInit) {
         UHeapPageHeaderData *uheappage = (UHeapPageHeaderData *)page;
         XLogRegisterData((char *)&uheappage->pd_xid_base, sizeof(TransactionId));

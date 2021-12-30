@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -78,7 +79,7 @@ typedef struct PartKeyRange {
 } PartKeyRange;
 extern IndexesUsableType eliminate_partition_index_unusable(Oid IndexOid, PruningResult* inputPruningResult,
     PruningResult** indexUsablePruningResult, PruningResult** indexUnusablePruningResult);
-PruningResult* getFullPruningResult(Relation relation);
+
 void destroyPruningResult(PruningResult* pruningResult);
 void partitionPruningFromBoundary(PruningContext *context, PruningResult* pruningResult);
 void generateListFromPruningBM(PruningResult* result);
@@ -87,6 +88,7 @@ PruningResult* partitionPruningForExpr(PlannerInfo* root, RangeTblEntry* rte, Re
 PruningResult* partitionPruningForRestrictInfo(
     PlannerInfo* root, RangeTblEntry* rte, Relation rel, List* restrictInfoList);
 PruningResult* singlePartitionPruningForRestrictInfo(Oid partitionOid, Relation rel);
+PruningResult* SingleSubPartitionPruningForRestrictInfo(Oid subPartitionOid, Relation rel, Oid partOid);
 extern PruningResult* copyPruningResult(PruningResult* srcPruningResult);
 extern Oid getPartitionOidFromSequence(Relation relation, int partSeq);
 extern int varIsInPartitionKey(int attrNo, int2vector* partKeyAttrs, int partKeyNum);
@@ -97,5 +99,6 @@ static inline PartitionMap* GetPartitionMap(PruningContext *context)
 {
     return context->GetPartitionMap(context->relation);
 }
+extern SubPartitionPruningResult* GetSubPartitionPruningResult(List* selectedSubPartitions, int partSeq);
 
 #endif /* PRUNING_H_ */
