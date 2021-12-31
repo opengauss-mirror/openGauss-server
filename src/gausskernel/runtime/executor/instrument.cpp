@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Copyright (c) 2001-2012, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/gausskernel/runtime/executor/instrument.cpp
@@ -897,6 +898,10 @@ Instrumentation* ThreadInstrumentation::allocInstrSlot(int plan_node_id, int par
             break;
         case T_RecursiveUnion:
             pname = "Recursive Union";
+            plan_type = UTILITY_OP;
+            break;
+        case T_StartWithOp:
+            pname = "StartWithOp";
             plan_type = UTILITY_OP;
             break;
         case T_BitmapAnd:

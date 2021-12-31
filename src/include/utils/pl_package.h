@@ -22,7 +22,11 @@
  *
  * ---------------------------------------------------------------------------------------
  */
+#ifndef PL_PACKAGE_H
+#define PL_PACKAGE_H
 #include "utils/plpgsql.h"
+
+
 
 extern bool check_search_path_interface(List *schemas, HeapTuple proc_tup);
 
@@ -47,4 +51,25 @@ extern int plpgsql_getCustomErrorCode(void);
 
 extern PLpgSQL_row* build_row_from_class(Oid class_oid);
 
+extern int GetLineNumber(const char* procedureStr, int loc);
+
+extern int GetProcedureLineNumberInPackage(const char* procedureStr, int loc);
+
+extern void InsertError(Oid objId);
+
+extern int CompileWhich();
+
+extern void InsertErrorMessage(const char* message, int yyloc, bool isQueryString = false, int lines = 0);
+
+extern void DropErrorByOid(int objtype, Oid objoid);
+
 extern bool IsOnlyCompilePackage();
+
+extern HeapTuple getCursorTypeTup(const char* word);
+
+extern List* GetPackageListName(const char* pkgName, const Oid nspOid);
+
+extern HeapTuple getPLpgsqlVarTypeTup(char* word);
+
+extern HeapTuple FindRowVarColType(List* nameList);
+#endif

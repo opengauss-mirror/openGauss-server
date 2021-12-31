@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -41,8 +42,7 @@
 #include "access/heapam.h"
 
 #define MAX_PARTITIONKEY_NUM 4
-#define MAX_PARTITION_NUM 32767    /* update LEN_PARTITION_PREFIX as well ! */
-#define MAX_LH_PARTITION_NUM 64    /* update LEN_LIST/HASH_PARTITION_PREFIX as well ! */
+#define MAX_PARTITION_NUM 1048575    /* update LEN_PARTITION_PREFIX as well ! */
 #define INTERVAL_PARTITION_NAME_PREFIX "sys_p"
 #define INTERVAL_PARTITION_NAME_PREFIX_FMT "sys_p%u"
 #define INTERVAL_PARTITION_NAME_SUFFIX_LEN 5  /* max length of partitio num */
@@ -54,7 +54,7 @@
  *     NAMEDATALEN (64) - 1  -  LENGTH ( "MAX_PARTITION_NUM" )  -  1
  * NOTICE: please update LEN_PARTITION_PREFIX if you modify macro MAX_PARTITION_NUM 
  */
-#define LEN_PARTITION_PREFIX  57
+#define LEN_PARTITION_PREFIX  55
 
 /*
  * A suppositional sequence number for partition.
@@ -93,13 +93,30 @@ extern Oid partitionNameGetPartitionOid (Oid partitionedTableOid,
                                          bool nowWait,
                                          PartitionNameGetPartidCallback callback, 
                                          void *callback_arg,
-                                         LOCKMODE callbackobj_lockMode);
+                                         LOCKMODE callbackobj_lockMode,
+                                         Oid *partOidForSubPart = NULL);
 extern Oid partitionValuesGetPartitionOid(Relation rel, List *partKeyValueList, LOCKMODE lockMode, bool topClosed,
                                           bool missingOk, bool noWait);
 extern List *searchPartitionIndexesByblid(Oid blid);
 extern List *searchPgPartitionByParentId(char parttype, Oid parentId);
+extern List* searchPgSubPartitionByParentId(char parttype, List *parentOids);
 extern void freePartList(List *l);
+extern void freeSubPartList(List* plist);
 extern HeapTuple searchPgPartitionByParentIdCopy(char parttype, Oid parentId);
+
+extern List* relationGetPartitionOidList(Relation rel);
+extern List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode = AccessShareLock);
+extern List* RelationGetSubPartitionOidListList(Relation rel);
+extern List* relationGetPartitionList(Relation relation, LOCKMODE lockmode);
+extern List* indexGetPartitionOidList(Relation indexRelation);
+extern List* indexGetPartitionList(Relation indexRelation, LOCKMODE lockmode);
+extern Relation SubPartitionGetRelation(Relation heap, Partition indexpart, LOCKMODE lockmode);
+extern Relation SubPartitionOidGetParentRelation(Relation rel, Oid subPartOid, LOCKMODE lockmode);
+extern List* RelationGetSubPartitionList(Relation relation, LOCKMODE lockmode);
+extern void  releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode, bool validCheck = true);
+extern void  releaseSubPartitionList(Relation relation, List** partList, LOCKMODE lockmode);
+extern void releasePartitionOidList(List** partList);
+extern void ReleaseSubPartitionOidList(List** partList);
 
 #endif
 

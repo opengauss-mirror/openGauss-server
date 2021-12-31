@@ -474,7 +474,8 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade, int bucket_id, bo
 {
     XLogRecPtr EndPos;
 
-    if (g_instance.archive_obs_cxt.in_switchover == true) {
+    if (g_instance.archive_obs_cxt.in_switchover == true || 
+        g_instance.streaming_dr_cxt.isInSwitchover == true) {
         LWLockAcquire(HadrSwitchoverLock, LW_EXCLUSIVE);
     }
     
@@ -534,7 +535,9 @@ XLogRecPtr XLogInsert(RmgrId rmid, uint8 info, bool isupgrade, int bucket_id, bo
     XLogResetInsertion();
     
     /* Switchover Barrier log will not release the lock */
-    if (g_instance.archive_obs_cxt.in_switchover == true && !isSwitchoverBarrier) {
+    if ((g_instance.archive_obs_cxt.in_switchover == true || 
+        g_instance.streaming_dr_cxt.isInSwitchover == true) 
+        && !isSwitchoverBarrier) {
         LWLockRelease(HadrSwitchoverLock);
     }
 

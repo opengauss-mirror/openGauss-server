@@ -215,6 +215,8 @@ extern bool is_not_strict_agg(Oid funcOid);
 extern bool is_pgxc_class_table(Oid tableoid);
 extern Oid get_valid_relname_relid(const char* relnamespace, const char* relname);
 extern bool get_func_iswindow(Oid funcid);
+extern char get_func_prokind(Oid funcid);
+extern char get_typecategory(Oid typid);
 
 #define type_is_array(typid) (get_element_type(typid) != InvalidOid)
 /* type_is_array_domain accepts both plain arrays and domains over arrays */

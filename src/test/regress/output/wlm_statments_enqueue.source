@@ -4,10 +4,10 @@ WARNING:  memory_limit is not available currently!
 CREATE WORKLOAD GROUP  wlgroup_15 USING RESOURCE POOL respool_temp15 WITH(ACT_STATEMENTS=1);
 CREATE APP WORKLOAD GROUP MAPPING GSQL WITH (WORKLOAD_GPNAME=wlgroup_15);
 SELECT * FROM pg_resource_pool;
-  respool_name  | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign 
-----------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------
- default_pool   |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f
- respool_temp15 |           0 |           -1 | DefaultClass:Medium |                 2 |      10 | 2GB          |        0 |         0 | None        | installation | f
+  respool_name  | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign | max_worker 
+----------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------+------------
+ default_pool   |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f          |           
+ respool_temp15 |           0 |           -1 | DefaultClass:Medium |                 2 |      10 | 2GB          |        0 |         0 | None        | installation | f          |          1
 (2 rows)
 
 SELECT * FROM pg_workload_group;
@@ -28,10 +28,10 @@ CREATE USER test_wlm_role WITH login resource pool 'respool_temp15' password 'ab
 ALTER RESOURCE POOL respool_temp15 WITH(ACTIVE_STATEMENTS=1,MAX_DOP=20,MEMORY_LIMIT='5GB',IO_PRIORITY='High',IO_limits=10);
 WARNING:  memory_limit is not available currently!
 SELECT * FROM pg_resource_pool;
-  respool_name  | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign 
-----------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------
- default_pool   |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f
- respool_temp15 |           0 |           -1 | DefaultClass:Medium |                 1 |      20 | 5GB          |        0 |        10 | High        | installation | f
+  respool_name  | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign | max_worker 
+----------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------+------------
+ default_pool   |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f          |           
+ respool_temp15 |           0 |           -1 | DefaultClass:Medium |                 1 |      20 | 5GB          |        0 |        10 | High        | installation | f          |          1
 (2 rows)
 
 \! @abs_bindir@/gsql -r -p @portstring@ -d regression -U test_wlm_role -W 'abc123ABC' -c "CREATE TABLE t1 (id int);"
@@ -183,9 +183,9 @@ DROP USER test_wlm_role;
 DROP RESOURCE POOL respool_temp15;
 DROP RESOURCE POOL session_rp;
 SELECT * FROM pg_resource_pool;
- respool_name | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign 
---------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------
- default_pool |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f
+ respool_name | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign | max_worker 
+--------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------+------------
+ default_pool |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f          |           
 (1 row)
 
 SELECT * FROM pg_workload_group;

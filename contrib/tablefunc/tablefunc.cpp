@@ -707,7 +707,6 @@ static HTAB* load_categories_hash(char* cats_sql, MemoryContext per_query_ctx)
             MemoryContextSwitchTo(SPIcontext);
         }
     }
-
     if (SPI_finish() != SPI_OK_FINISH)
         /* internal error */
         elog(ERROR, "load_categories_hash: SPI_finish() failed");

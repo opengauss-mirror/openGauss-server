@@ -45,6 +45,22 @@ CREATE FUNCTION set_ttdummy (int4)
         RETURNS int4
         AS '@libdir@/regress@DLSUFFIX@'
         LANGUAGE C STRICT;
+-- function index with default param
+create or replace function foo(a text,b bool default false)
+returns text as $$
+begin
+return a;
+end;
+$$ language plpgsql strict immutable;
+create table tb2(id int, c1 text);
+create index on tb2 (foo(c1));
+select * from tb2;
+ id | c1 
+----+----
+(0 rows)
+
+DROP TABLE tb2;
+DROP FUNCTION foo(a text,b bool);
 -- Things that shouldn't work:
 CREATE FUNCTION test1 (int) RETURNS int LANGUAGE SQL
     AS 'SELECT ''not an integer'';';

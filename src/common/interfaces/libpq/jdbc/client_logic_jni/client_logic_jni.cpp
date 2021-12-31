@@ -251,8 +251,9 @@ bool ClientLogicJNI::deprocess_value(const char *data_2_process, int data_type, 
     }
 
     size_t converted_len = strlen(data_2_process);
+    ProcessStatus process_status = ONLY_VALUE;
     DecryptDataRes success = ValuesProcessor::deprocess_value(m_stub_conn, (unsigned char *)data_2_process,
-        converted_len, data_type, 0, proccessed_data, length_output, false);
+        converted_len, data_type, 0, proccessed_data, length_output, process_status);
     if (success != DEC_DATA_SUCCEED) {
         status->set_error(JNI_SYSTEM_ERROR_CODES::CLIENT_LOGIC_FAILED);
         return false;
@@ -265,18 +266,43 @@ bool ClientLogicJNI::deprocess_value(const char *data_2_process, int data_type, 
     return true;
 }
 
-bool ClientLogicJNI::process_record_data(const char *data_2_process, const int *modid, int oid,
-    const char *column_label, unsigned char **proccessed_data, bool *is_client_logic, size_t &length_output,
-    DriverError *status)
+/**
+ * get the number of oids in a record , zero means no
+ * @param oid
+ * @param column_name
+ * @return
+ */
+size_t ClientLogicJNI::get_record_data_oid_length(int oid, const char *column_name)
+{
+    return m_stub_conn->client_logic->get_rec_origial_ids_length(oid, column_name);
+}
+
+/**
+ * gets a reference to an array on integers with the ids a record type might have
+ * The length of the array is returned by get_record_data_oid_length
+ * @param oid
+ * @param column_name
+ * @return
+ */
+const int* ClientLogicJNI::get_record_data_oids(int oid, const char *column_name)
+{
+    return m_stub_conn->client_logic->get_rec_origial_ids(oid, column_name);
+}
+
+bool ClientLogicJNI::process_record_data(const char *data_2_process, const int *original_oids,
+    unsigned char **proccessed_data, bool *is_client_logic, size_t &length_output, DriverError *status)
 {
     if (status == NULL || data_2_process == NULL || proccessed_data == NULL) {
         return false;
     }
     size_t converted_len = strlen(data_2_process);
-    if (!RecordProcessor::DeProcessRecord(m_stub_conn, data_2_process, converted_len, modid, 0, proccessed_data,
-        length_output, is_client_logic)) {
+    if (!RecordProcessor::DeProcessRecord(m_stub_conn, data_2_process, converted_len, original_oids, 0,
+        proccessed_data, length_output, is_client_logic)) {
         status->set_error(JNI_SYSTEM_ERROR_CODES::CLIENT_LOGIC_FAILED);
         return false;
+    }
+    if (*proccessed_data == NULL) {
+        *proccessed_data = (unsigned char *)strdup(data_2_process);
     }
     return true;
 }
@@ -354,22 +380,37 @@ bool ClientLogicJNI::replace_statement_params(const char *statement_name, const 
     if (statement_name == NULL || param_values == NULL || status == NULL) {
         return false;
     }
-    int *param_lengths = NULL;
-    param_lengths = new (std::nothrow) int[parameter_count];
+
+    int *param_lengths = new (std::nothrow) int[parameter_count];
     if (param_lengths == NULL) {
         return false;
     }
     for (size_t i = 0; i < parameter_count; ++i) {
         param_lengths[i] = (int)strlen(param_values[i]);
     }
+
+    Oid *param_types = NULL;
+    if (parameter_count > 0) {
+        param_types = (Oid *)malloc(parameter_count * sizeof(Oid));
+        if (param_types == NULL) {
+            delete[] param_lengths;
+            return false;
+        }
+        check_memset_s(memset_s(param_types, parameter_count * sizeof(Oid), 0, parameter_count * sizeof(Oid)));
+    }
+
     clean_stmnt();
     m_stmnt = new (std::nothrow)
-        StatementData(m_stub_conn, statement_name, parameter_count, NULL, param_values, param_lengths, 0);
+        StatementData(m_stub_conn, statement_name, parameter_count, param_types, param_values, param_lengths, 0);
     if (m_stmnt == NULL) {
+        delete[] param_lengths;
+        libpq_free(param_types);
         return false;
     }
     bool success = Processor::run_pre_exec(m_stmnt);
+    m_post_query_needed = true;
     delete[] param_lengths;
+    libpq_free(param_types);
     if (!success) {
         status->set_error(JNI_SYSTEM_ERROR_CODES::PRE_QUERY_EXEC_FAILED);
     }
@@ -531,6 +572,7 @@ bool ClientLogicJNI::replace_message_impl(PGconn *conn, const char *original_mes
     }
     return isProcessedMessage;
 }
+
 /* *
  * maintains one active query per connection.
  * it is required to keep the original query until a new query arrives for replace error message to function.
@@ -546,6 +588,17 @@ const char *ClientLogicJNI::get_new_query(const char *query)
     }
     return current_query;
 }
+
+/**
+ * Reloads the client logic cache only if the local timestamp
+ * is earlier than the maximum timestmp on the server
+ */
+void ClientLogicJNI::reload_cache_if_needed() const
+{
+    JNI_LOG_DEBUG("in reload_cache_if_needed");
+    m_stub_conn->client_logic->m_cached_column_manager->reload_cache_if_needed(m_stub_conn);
+}
+
 /* *
  * Cleans up the current query pointer
  */

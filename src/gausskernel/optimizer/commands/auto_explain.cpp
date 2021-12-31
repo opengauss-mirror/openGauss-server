@@ -36,8 +36,13 @@ static instr_time plan_time;
     (u_sess->attr.attr_storage.log_min_duration_statement >= 0 && u_sess->exec_cxt.nesting_level == 0)
 #define auto_explain_plan() \
 	(!u_sess->attr.attr_sql.under_explain && u_sess->attr.attr_resource.enable_auto_explain)
+#ifdef ENABLE_MULTIPLE_NODES
 #define is_valid_query(queryDesc) \
-	(queryDesc!=NULL && queryDesc->sourceText != NULL && strcmp(queryDesc->sourceText, "DUMMY") != 0 && IS_PGXC_COORDINATOR)
+    (queryDesc!=NULL && queryDesc->sourceText != NULL && strcmp(queryDesc->sourceText, "DUMMY") != 0 && IS_PGXC_COORDINATOR)
+#else
+#define is_valid_query(queryDesc) \
+    (queryDesc!=NULL && queryDesc->sourceText != NULL && strcmp(queryDesc->sourceText, "DUMMY") != 0)
+#endif
 void  auto_explain_init(void);
 void  _PG_fini(void);
 

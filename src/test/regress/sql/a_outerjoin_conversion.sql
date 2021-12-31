@@ -1,3 +1,6 @@
+create database pl_test_outerjoin DBCOMPATIBILITY 'pg';
+\c pl_test_outerjoin;
+
 create schema plus_outerjoin;
 set current_schema='plus_outerjoin';
 create table t11(c1 int, c2 int, c3 int);
@@ -319,11 +322,13 @@ explain(costs off)
 delete from t15 using t11 where exists (select t11.c2 from t11, t15 where t15.c2(+) = t11.c3);
 
 -----used in procedure------
-CREATE OR REPLACE PROCEDURE plus_join_test_1 (var1 in int, var2 out int)
+CREATE OR REPLACE function plus_join_test_1 (var1 in int) return int
 AS
+var2 int;
 BEGIN
     var2 :=var1+1 ;
     select t11.c1 into var2 from t11, t12 where  t11.c1 = t12.c2(+) and t11.c2(+) = var2 order by 1;
+    return var2;
 END;
 /
 select plus_join_test_1(1);
@@ -375,3 +380,4 @@ drop table t15;
 drop table t_a;
 drop table t_b;
 drop schema plus_outerjoin;
+\c regression;

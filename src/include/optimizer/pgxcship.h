@@ -118,4 +118,6 @@ extern bool func_oid_check_reject(Oid oid);
 extern bool func_oid_check_restricted(Oid oid);
 extern bool func_oid_check_pass(Oid oid);
 
+extern ExecNodes* GetExecNodesByNodeName(char* node_name);
+extern bool PgxcIsSingleShardQueryEnabled(Query* query);
 #endif

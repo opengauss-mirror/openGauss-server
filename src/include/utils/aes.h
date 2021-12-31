@@ -37,12 +37,6 @@
 
 #define AES_TRANSFORM_LEN 2
 
-#define CleanupBuffer(buffer, bufflen) \
-    do {                               \
-        int rc = memset_s(buffer, bufflen, 0, bufflen);    \
-        securec_check_c(rc, "", "");      \
-    } while (0)
-
 #define AES_OUTPUT_LEN(inputStrLen) \
     (((inputStrLen + AES_GROUP_LEN - 1) / AES_GROUP_LEN) * AES_GROUP_LEN * AES_TRANSFORM_LEN + 1)
 #define AES_ENCRYPT_LEN(inputlen) \

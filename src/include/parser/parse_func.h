@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/parser/parse_func.h
  *
@@ -60,6 +61,7 @@ extern Oid LookupFuncNameTypeNames(List* funcname, List* argtypes, bool noError)
 extern Oid LookupFuncNameOptTypeNames(List* funcname, List* argtypes, bool noError);
 extern Oid LookupPackageNames(List* pkgname);
 extern Oid LookupAggNameTypeNames(List* aggname, List* argtypes, bool noError);
+extern Oid LookupTypeNameOid(const TypeName* typname);
 
 extern void check_pg_get_expr_args(ParseState* pstate, Oid fnoid, List* args);
 extern int GetPriority(Oid typeoid);

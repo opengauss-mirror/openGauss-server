@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -94,6 +95,7 @@ typedef FormData_pg_object* Form_pg_object;
 #define OBJECT_TYPE_FOREIGN_TABLE 'f'
 #define OBJECT_TYPE_INDEX 'i'
 #define OBJECT_TYPE_SEQUENCE 's'
+#define OBJECT_TYPE_LARGE_SEQUENCE 'l'
 #define OBJECT_TYPE_VIEW 'v'
 #define OBJECT_TYPE_CONTQUERY 'o'
 #define OBJECT_TYPE_PROC 'P'

@@ -91,7 +91,7 @@ void report_invalid_record(XLogReaderState *state, const char *fmt, ...)
  *
  * Returns NULL if the xlogreader couldn't be allocated.
  */
-XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data)
+XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_data, Size alignedSize)
 {
     XLogReaderState *state = NULL;
     errno_t errorno = EOK;
@@ -112,11 +112,16 @@ XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_d
      * isn't guaranteed to have any particular alignment, whereas malloc()
      * will provide MAXALIGN'd storage.
      */
-    state->readBuf = (char *)palloc_extended(XLOG_BLCKSZ, MCXT_ALLOC_NO_OOM);
-    if (state->readBuf == NULL) {
+    state->readBufOrigin = (char *)palloc_extended(XLOG_BLCKSZ + alignedSize, MCXT_ALLOC_NO_OOM);
+    if (state->readBufOrigin == NULL) {
         pfree(state);
         state = NULL;
         return NULL;
+    }
+    if (alignedSize == 0) {
+        state->readBuf = state->readBufOrigin;
+    } else {
+        state->readBuf = (char *)TYPEALIGN(alignedSize, state->readBufOrigin);
     }
 
     state->read_page = pagereadfunc;
@@ -126,7 +131,8 @@ XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_d
     /* readSegNo, readOff, readLen, readPageTLI initialized to zeroes above */
     state->errormsg_buf = (char *)palloc_extended(MAX_ERRORMSG_LEN + 1, MCXT_ALLOC_NO_OOM);
     if (state->errormsg_buf == NULL) {
-        pfree(state->readBuf);
+        pfree(state->readBufOrigin);
+        state->readBufOrigin = NULL;
         state->readBuf = NULL;
         pfree(state);
         state = NULL;
@@ -141,7 +147,8 @@ XLogReaderState *XLogReaderAllocate(XLogPageReadCB pagereadfunc, void *private_d
     if (!allocate_recordbuf(state, 0)) {
         pfree(state->errormsg_buf);
         state->errormsg_buf = NULL;
-        pfree(state->readBuf);
+        pfree(state->readBufOrigin);
+        state->readBufOrigin = NULL;
         state->readBuf = NULL;
         pfree(state);
         state = NULL;
@@ -162,7 +169,8 @@ void XLogReaderFree(XLogReaderState *state)
         pfree(state->readRecordBuf);
         state->readRecordBuf = NULL;
     }
-    pfree(state->readBuf);
+    pfree(state->readBufOrigin);
+    state->readBufOrigin = NULL;
     state->readBuf = NULL;
 
     /* state need to be reset NULL by caller */
@@ -387,7 +395,6 @@ XLogRecord *XLogReadRecord(XLogReaderState *state, XLogRecPtr RecPtr, char **err
             /* Wait for the next page to become available */
             readOff = ReadPageInternal(state, targetPagePtr, Min(total_len - gotlen + SizeOfXLogShortPHD, XLOG_BLCKSZ),
                                        readoldversion);
-
             if (readOff < 0)
                 goto err;
 
@@ -507,7 +514,6 @@ err:
 
     if (state->errormsg_buf[0] != '\0')
         *errormsg = state->errormsg_buf;
-
     return NULL;
 }
 
@@ -1068,7 +1074,7 @@ bool ValidXLogPageHeader(XLogReaderState *state, XLogRecPtr recptr, XLogPageHead
  * find the first valid address after some address when dumping records for
  * debugging purposes.
  */
-XLogRecPtr XLogFindNextRecord(XLogReaderState *state, XLogRecPtr RecPtr)
+XLogRecPtr XLogFindNextRecord(XLogReaderState *state, XLogRecPtr RecPtr, XLogRecPtr *endPtr)
 {
     XLogReaderState saved_state = *state;
     XLogRecPtr tmpRecPtr;
@@ -1104,7 +1110,7 @@ XLogRecPtr XLogFindNextRecord(XLogReaderState *state, XLogRecPtr RecPtr)
         targetPagePtr = tmpRecPtr - targetRecOff;
 
         /* Read the page containing the record */
-        readLen = ReadPageInternal(state, targetPagePtr, targetRecOff, true);
+        readLen = ReadPageInternal(state, targetPagePtr, Max(targetRecOff, (int)SizeOfXLogLongPHD), true);
         if (readLen < 0) {
             goto out;
         }
@@ -1160,6 +1166,9 @@ XLogRecPtr XLogFindNextRecord(XLogReaderState *state, XLogRecPtr RecPtr)
         /* past the record we've found, break out */
         if (XLByteLE(RecPtr, state->ReadRecPtr)) {
             found = state->ReadRecPtr;
+            if (endPtr != NULL) {
+                *endPtr = state->EndRecPtr;
+            }
             goto out;
         }
     }
@@ -1355,6 +1364,10 @@ bool DecodeXLogRecord(XLogReaderState *state, XLogRecord *record, char **errorms
 
                 if (state->isTde) {
                     blk->tdeinfo = (TdeInfo*)palloc_extended(sizeof(TdeInfo), MCXT_ALLOC_NO_OOM);
+                    if (blk->tdeinfo == NULL) {
+                        report_invalid_record(state, "Failed to allocate memory for blk->tdeinfo");
+                        goto err;
+                    }
                     DECODE_XLOG_ONE_ITEM(*(blk->tdeinfo), TdeInfo);
                 }
 
@@ -1610,7 +1623,8 @@ tryAgain:
     return XLOG_BLCKSZ;
 }
 
-XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc)
+XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *maxLsnCrc, uint32 *maxLsnLen, 
+    TimeLineID *returnTli)
 {
     DIR *xlogDir = NULL;
     struct dirent *dirEnt = NULL;
@@ -1683,6 +1697,9 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
         return InvalidXLogRecPtr;
     }
 
+    if (returnTli != NULL) {
+        *returnTli = tli;
+    }
     /* Initializing the ReaderState */
     rc = memset_s(&readPrivate, sizeof(XLogPageReadPrivate), 0, sizeof(XLogPageReadPrivate));
     securec_check_c(rc, "\0", "\0");
@@ -1745,6 +1762,9 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
         }
         curLsn = InvalidXLogRecPtr;
         *maxLsnCrc = record->xl_crc;
+        if (maxLsnLen != NULL) {
+            *maxLsnLen = record->xl_tot_len;
+        }
     } while (true);
 
     maxLsn = xlogReader->ReadRecPtr;
@@ -1776,6 +1796,161 @@ XLogRecPtr FindMaxLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *
     }
     return maxLsn;
 }
+
+XLogRecPtr FindMinLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *minLsnCrc)
+{
+    DIR *xlogDir = NULL;
+    struct dirent *dirEnt = NULL;
+    XLogReaderState *xlogReader = NULL;
+    XLogPageReadPrivate readPrivate = {
+        .datadir = NULL,
+        .tli = 0
+    };
+    XLogRecord *record = NULL;
+    TimeLineID tli = 0;
+    XLogRecPtr minLsn = InvalidXLogRecPtr;
+    XLogRecPtr startLsn = InvalidXLogRecPtr;
+    XLogRecPtr curLsn = InvalidXLogRecPtr;
+    char xlogDirStr[MAXPGPATH];
+    char minXLogFileName[MAXPGPATH] = {0};
+    char *errorMsg = NULL;
+    bool findValidXLogFile = false;
+    uint32 xlogReadLogid = -1;
+    uint32 xlogReadLogSeg = -1;
+    errno_t rc = EOK;
+
+    rc = snprintf_s(xlogDirStr, MAXPGPATH, MAXPGPATH - 1, "%s/%s", workingPath, XLOGDIR);
+#ifndef FRONTEND
+    securec_check_ss(rc, "", "");
+#else
+    securec_check_ss_c(rc, "", "");
+#endif
+
+    xlogDir = opendir(xlogDirStr);
+    if (!xlogDir) {
+        rc = snprintf_s(returnMsg, msgLen, msgLen - 1,
+                        "open xlog dir %s failed when find min lsn \n", xlogDirStr);
+#ifndef FRONTEND
+        securec_check_ss(rc, "", "");
+#else
+        securec_check_ss_c(rc, "", "");
+#endif
+        return InvalidXLogRecPtr;
+    }
+
+    /* Find smallest xlog file */
+    while ((dirEnt = readdir(xlogDir)) != NULL) {
+        if (strlen(dirEnt->d_name) == 24 && strspn(dirEnt->d_name, "0123456789ABCDEF") == 24) {
+            if (strlen(minXLogFileName) == 0 || strcmp(minXLogFileName, dirEnt->d_name) > 0) {
+                rc = strncpy_s(minXLogFileName, MAXPGPATH, dirEnt->d_name, strlen(dirEnt->d_name) + 1);
+#ifndef FRONTEND
+                securec_check(rc, "", "");
+#else
+                securec_check_c(rc, "", "");
+#endif
+                minXLogFileName[strlen(dirEnt->d_name)] = '\0';
+            }
+        }
+    }
+
+    (void)closedir(xlogDir);
+
+    if (sscanf_s(minXLogFileName, "%08X%08X%08X", &tli, &xlogReadLogid, &xlogReadLogSeg) != 3) {
+        rc = snprintf_s(returnMsg, msgLen, msgLen - 1,
+                        "failed to translate name to xlog: %s\n", minXLogFileName);
+#ifndef FRONTEND
+        securec_check_ss(rc, "", "");
+#else
+        securec_check_ss_c(rc, "", "");
+#endif
+        return InvalidXLogRecPtr;
+    }
+
+    /* Initializing the ReaderState */
+    rc = memset_s(&readPrivate, sizeof(XLogPageReadPrivate), 0, sizeof(XLogPageReadPrivate));
+    securec_check_c(rc, "\0", "\0");
+    readPrivate.tli = tli;
+    readPrivate.datadir = workingPath;
+    xlogReader = XLogReaderAllocate(&SimpleXLogPageRead, &readPrivate);
+    if (xlogReader == NULL) {
+        rc = snprintf_s(returnMsg, msgLen, msgLen - 1, "reader allocate failed.\n");
+#ifndef FRONTEND
+        securec_check_ss(rc, "", "");
+#else
+        securec_check_ss_c(rc, "", "");
+#endif
+        return InvalidXLogRecPtr;
+    }
+
+    /* Start to find the min lsn from a valid xlogfile */
+    startLsn = (xlogReadLogSeg * XLOG_SEG_SIZE) + ((XLogRecPtr)xlogReadLogid * XLogSegmentsPerXLogId * XLogSegSize);
+    while (!XLogRecPtrIsInvalid(startLsn)) {
+        curLsn = XLogFindNextRecord(xlogReader, startLsn);
+        if (XLogRecPtrIsInvalid(curLsn)) {
+            if (xlogreadfd > 0) {
+                close(xlogreadfd);
+                xlogreadfd = -1;
+            }
+            startLsn = startLsn + XLOG_SEG_SIZE;
+            continue;
+        } else {
+            findValidXLogFile = true;
+            break;
+        }
+    }
+    if (findValidXLogFile == false) {
+        rc = snprintf_s(returnMsg, msgLen, msgLen - 1,
+            "no valid record in pg_xlog.\n");
+#ifndef FRONTEND
+        securec_check_ss(rc, "", "");
+#else
+        securec_check_ss_c(rc, "", "");
+#endif
+        /* Free all opened resources */
+        if (xlogReader != NULL) {
+            XLogReaderFree(xlogReader);
+            xlogReader = NULL;
+        }
+        if (xlogreadfd > 0) {
+            close(xlogreadfd);
+            xlogreadfd = -1;
+        }
+        return InvalidXLogRecPtr;
+    }
+
+    minLsn = curLsn;
+    if (XLogRecPtrIsInvalid(minLsn)) {
+        rc = snprintf_s(returnMsg, msgLen, msgLen - 1, "%s", errorMsg);
+#ifndef FRONTEND
+        securec_check_ss(rc, "", "");
+#else
+        securec_check_ss_c(rc, "", "");
+#endif
+    } else {
+        rc = snprintf_s(returnMsg, msgLen, msgLen - 1,
+            "find min lsn rec (%X/%X) success.\n", (uint32)(minLsn >> 32), (uint32)minLsn);
+#ifndef FRONTEND
+        securec_check_ss(rc, "", "");
+#else
+        securec_check_ss_c(rc, "", "");
+#endif
+    }
+    record = XLogReadRecord(xlogReader, curLsn, &errorMsg);
+    *minLsnCrc = record->xl_crc;
+
+    /* Free all opened resources */
+    if (xlogReader != NULL) {
+        XLogReaderFree(xlogReader);
+        xlogReader = NULL;
+    }
+    if (xlogreadfd > 0) {
+        close(xlogreadfd);
+        xlogreadfd = -1;
+    }
+
+    return minLsn;
+}
+
 
 /* Judging the file of input lsn is existed. */
 bool XlogFileIsExisted(const char *workingPath, XLogRecPtr inputLsn, TimeLineID timeLine)

@@ -805,7 +805,6 @@ static CommConnType CommProxyGetPollType()
 CommConnType CommGetConnType(int sockfd)
 {
     /* Return false if com_proxy is not set */
-    //if (!g_instance.attr.attr_network.enable_comm_proxy) {
     if (!IsCommProxyEnabled()) {
         return CommConnKernel;
     }
@@ -1061,11 +1060,7 @@ void CommProxyStartUp()
          **/
     
     /* parse comm_proxy_attr to get ltran/comm numbers and bind cpu */
-#ifndef ENABLE_UT
     if (ParseCommProxyAttr(&g_comm_proxy_config) == false) {
-#else
-    if (ParseCommProxyAttr(&g_comm_proxy_config, NULL) == false) {
-#endif
         ereport(ERROR, (errmodule(MOD_COMM_PROXY),
             errcode(ERRCODE_SYSTEM_ERROR),
             errmsg("Parse comm_proxy_attr error."),

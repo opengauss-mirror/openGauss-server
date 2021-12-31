@@ -802,6 +802,7 @@ audit_enabled = on
 #audit_function_exec = 0
 #audit_copy_exec = 0
 #audit_set_parameter = 1		# whether audit set parameter operation
+
 #Choose which style to print the explain info, normal,pretty,summary,run
 #explain_perf_mode = normal
 #------------------------------------------------------------------------------
@@ -816,10 +817,6 @@ audit_enabled = on
 #------------------------------------------------------------------------------
 
 
-#------------------------------------------------------------------------------
-# ADIO 
-#------------------------------------------------------------------------------
-#enable_adio_function = off
 #enable_fast_allocate = off
 #prefetch_quantity = 32MB
 #backwrite_quantity = 8MB

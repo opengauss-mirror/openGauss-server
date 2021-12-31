@@ -192,7 +192,16 @@ static void parse_func(Node* expr)
 static bool get_function_id(int vartype, const char* funcname, Oid *funcid, Oid *rettype,
                             Oid schemaid = SchemaNameGetSchemaOid("pg_catalog", true))
 {
-    CatCList   *catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+    CatCList   *catlist = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
+    }
+#else
+    catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+#endif
     if (catlist != NULL) {
         for (int i = 0; i < catlist->n_members; ++i) {
             HeapTuple    proctup = &catlist->members[i]->tuple;

@@ -1386,7 +1386,9 @@ create_recovery_conf(time_t backup_id,
         timestamp = (char *)pg_malloc(RESTORE_ARRAY_LEN);
         time2iso(timestamp, RESTORE_ARRAY_LEN, backup->end_time);
         oldtime = rt->time_string;
-        rt->time_string = timestamp;
+        if (rt->time_string) {
+            rt->time_string = timestamp;
+        }
         construct_restore_cmd(fp, rt, restore_command_provided, target_immediate);
         rt->time_string = oldtime;
         free(timestamp);

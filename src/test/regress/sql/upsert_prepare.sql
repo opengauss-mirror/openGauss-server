@@ -59,8 +59,6 @@ create view up_view as select *from up_neg_01;
 create materialized view mat_view as select *from up_neg_01;
 create table pkt (a int primary key, b int, c int);
 create table fkt (a int primary key, b int references pkt, c int);
-create table up_neg_11(c1 int, c2 int) partition by range(c1)(partition p1 values less than(10), partition p2 values less than(maxvalue));
-create unique index index_up_neg_11 on up_neg_11(c2);
 
 
 -- procedure test

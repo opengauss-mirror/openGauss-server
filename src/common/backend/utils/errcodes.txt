@@ -481,7 +481,7 @@ HV091    E    ERRCODE_FDW_INVALID_DESCRIPTOR_FIELD_IDENTIFIER                fdw
 HV00B    E    ERRCODE_FDW_INVALID_HANDLE                                     fdw_invalid_handle
 HV00C    E    ERRCODE_FDW_INVALID_OPTION_INDEX                               fdw_invalid_option_index
 HV00D    E    ERRCODE_FDW_INVALID_OPTION_NAME                                fdw_invalid_option_name
-HV00E    E    ERRCODE_FDW_INVALID_OPTOIN_DATA                                fdw_invalid_option_data
+HV00E    E    ERRCODE_FDW_INVALID_OPTION_DATA                                fdw_invalid_option_data
 HV090    E    ERRCODE_FDW_INVALID_STRING_LENGTH_OR_BUFFER_LENGTH             fdw_invalid_string_length_or_buffer_length
 HV00A    E    ERRCODE_FDW_INVALID_STRING_FORMAT                              fdw_invalid_string_format
 HV009    E    ERRCODE_FDW_INVALID_USE_OF_NULL_POINTER                        fdw_invalid_use_of_null_pointer
@@ -594,6 +594,7 @@ D0012    E    ERRCODE_MAX_DEBUG_SESSIONS_REACHED                             max
 D0013    E    ERRCODE_MAX_BREAKPOINTS_REACHED                                maximum_number_of_breakpoints_reached
 D0014    E    ERRCODE_INITIALIZE_FAILED                                      initialization_failed
 D0015    E    ERRCODE_PLDEBUGGER_TIMEOUT                                     pldebugger_wait_timeout
+D0016    E    ERRCODE_FORALL_DML_ERROR                                       forall_dml_error
 
 # Section: Class RB - RBTree Error 
 RB001    E    ERRCODE_RBTREE_INVALID_NODE_STATE                              rbtree_invalid_node_state

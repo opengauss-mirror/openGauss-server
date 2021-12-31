@@ -1,5 +1,7 @@
 -- GPC test cases are kept but not really useful since centralized fastcheck disables gpc.
 -- setups
+create database pl_test DBCOMPATIBILITY 'pg';
+\c pl_test;
 create schema schema_hint_iud;
 set current_schema = schema_hint_iud;
 set rewrite_rule = 'magicset, partialpush, uniquecheck, disablerep, intargetlist, predpushforce';
@@ -187,3 +189,5 @@ deallocate all;
 
 -- cleanup
 drop schema schema_hint_iud cascade;
+\c regression;
+drop database IF EXISTS pl_test;

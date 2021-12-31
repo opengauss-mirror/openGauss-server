@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -145,17 +146,11 @@ static void knl_g_wal_init(knl_g_wal_context *const wal_cxt)
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
 {
     Assert(bgwriter_cxt != NULL);
-    bgwriter_cxt->bgwriter_procs = NULL;
-    bgwriter_cxt->bgwriter_num = 0;
-    bgwriter_cxt->curr_bgwriter_num = 0;
-    bgwriter_cxt->candidate_buffers = NULL;
-    bgwriter_cxt->candidate_free_map = NULL;
     bgwriter_cxt->unlink_rel_hashtbl = NULL;
     bgwriter_cxt->rel_hashtbl_lock = NULL;
     bgwriter_cxt->invalid_buf_proc_latch = NULL;
-    bgwriter_cxt->bgwriter_actual_total_flush = 0;
-    bgwriter_cxt->get_buf_num_candidate_list = 0;
-    bgwriter_cxt->get_buf_num_clock_sweep = 0;
+    bgwriter_cxt->unlink_rel_fork_hashtbl = NULL;
+    bgwriter_cxt->rel_one_fork_hashtbl_lock = NULL;
 }
 
 static void knl_g_tests_init(knl_g_tests_context* tests_cxt)
@@ -283,6 +278,8 @@ void knl_g_cachemem_create()
                                                                              false);
     }
     g_instance.plan_cache = New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) GlobalPlanCache();
+    g_instance.global_session_pkg =
+        New(INSTANCE_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR)) PLGlobalPackageRuntimeCache();
 }
 static void knl_g_comm_init(knl_g_comm_context* comm_cxt)
 {
@@ -333,6 +330,7 @@ static void knl_g_executor_init(knl_g_executor_context* exec_cxt)
     exec_cxt->function_id_hashtbl = NULL;
 #ifndef ENABLE_MULTIPLE_NODES
     exec_cxt->nodeName = "Local Node";
+    exec_cxt->global_application_name = "";
 #endif
 }
 
@@ -342,8 +340,13 @@ static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
 #ifdef ENABLE_MOT
     xlog_cxt->redoCommitCallback = NULL;
 #endif
-
+    xlog_cxt->shareStorageXLogCtl = NULL;
+    xlog_cxt->shareStorageXLogCtlOrigin = NULL;
+    errno_t rc = memset_s(&xlog_cxt->shareStorageopCtl, sizeof(ShareStorageOperateCtl), 0, 
+        sizeof(ShareStorageOperateCtl));
+    securec_check(rc, "\0", "\0");
     pthread_mutex_init(&xlog_cxt->remain_segs_lock, NULL);
+    xlog_cxt->shareStorageLockFd = -1;
 }
 
 static void KnlGUndoInit(knl_g_undo_context *undoCxt)
@@ -466,7 +469,6 @@ static void knl_g_pid_init(knl_g_pid_context* pid_cxt)
     errno_t rc;
     rc = memset_s(pid_cxt, sizeof(knl_g_pid_context), 0, sizeof(knl_g_pid_context));
     pid_cxt->PageWriterPID = NULL;
-    pid_cxt->CkptBgWriterPID = NULL;
     pid_cxt->CommReceiverPIDS = NULL;
     securec_check(rc, "\0", "\0");
 }
@@ -537,27 +539,26 @@ static void knl_g_numa_init(knl_g_numa_context* numa_cxt)
     numa_cxt->allocIndex = 0;
 }
 
-static void knl_g_archive_obs_init(knl_g_archive_obs_context *archive_obs_cxt)
+static void knl_g_archive_obs_init(knl_g_archive_context *archive_cxt)
 {
-    errno_t rc = memset_s(archive_obs_cxt, sizeof(knl_g_archive_obs_context), 0, sizeof(knl_g_archive_obs_context));
+    errno_t rc = memset_s(archive_cxt, sizeof(knl_g_archive_context), 0, sizeof(knl_g_archive_context));
     securec_check(rc, "\0", "\0");
-    Assert(archive_obs_cxt != NULL);
-    archive_obs_cxt->barrierLsn = 0;
-    archive_obs_cxt->obs_slot_num = 0;
-    archive_obs_cxt->obs_recovery_slot_num = 0;
-    archive_obs_cxt->sync_walsender_term = 0;
-    archive_obs_cxt->in_switchover = false;
-    archive_obs_cxt->in_service_truncate = false;
-    archive_obs_cxt->slot_tline = 0;
-    SpinLockInit(&archive_obs_cxt->barrier_lock);
+    Assert(archive_cxt != NULL);
+    archive_cxt->barrierLsn = 0;
+    archive_cxt->archive_slot_num = 0;
+    archive_cxt->archive_recovery_slot_num = 0;
+    archive_cxt->in_switchover = false;
+    archive_cxt->in_service_truncate = false;
+    archive_cxt->slot_tline = 0;
+    SpinLockInit(&archive_cxt->barrier_lock);
 }
 
-static void knl_g_archive_obs_thread_info_init(knl_g_archive_obs_thread_info *archive_obs_thread_info) 
+static void knl_g_archive_thread_info_init(knl_g_archive_thread_info *archive_thread_info) 
 {
-    errno_t rc = memset_s(archive_obs_thread_info, sizeof(knl_g_archive_obs_thread_info), 0, 
-        sizeof(knl_g_archive_obs_thread_info));
+    errno_t rc = memset_s(archive_thread_info, sizeof(knl_g_archive_thread_info), 0, 
+        sizeof(knl_g_archive_thread_info));
     securec_check(rc, "\0", "\0");
-    Assert(archive_obs_thread_info != NULL);
+    Assert(archive_thread_info != NULL);
 }
 
 #ifdef ENABLE_MOT
@@ -609,6 +610,14 @@ static void knl_g_spi_plan_init(knl_g_spi_plan_context* spi_plan_cxt)
 static void knl_g_roach_init(knl_g_roach_context* roach_cxt)
 {
     roach_cxt->isRoachRestore = false;
+}
+
+static void knl_g_streaming_dr_init(knl_g_streaming_dr_context* streaming_dr_cxt)
+{
+    streaming_dr_cxt->isInStreaming_dr = false;
+    streaming_dr_cxt->isInSwitchover = false;
+    streaming_dr_cxt->isInteractionCompleted = false;
+    streaming_dr_cxt->switchoverBarrierLsn = InvalidXLogRecPtr;
 }
 
 void knl_instance_init()
@@ -685,7 +694,7 @@ void knl_instance_init()
 
     knl_g_wal_init(&g_instance.wal_cxt);
     knl_g_archive_obs_init(&g_instance.archive_obs_cxt);
-    knl_g_archive_obs_thread_info_init(&g_instance.archive_obs_thread_info);
+    knl_g_archive_thread_info_init(&g_instance.archive_thread_info);
     knl_g_hypo_init(&g_instance.hypo_cxt);
     knl_g_segment_init(&g_instance.segment_cxt);
 
@@ -696,6 +705,10 @@ void knl_instance_init()
     knl_g_pldebug_init(&g_instance.pldebug_cxt);
     knl_g_spi_plan_init(&g_instance.spi_plan_cxt);
     knl_g_roach_init(&g_instance.roach_cxt);
+    knl_g_streaming_dr_init(&g_instance.streaming_dr_cxt);
+	
+    errno_t rc = memset_s(g_instance.stopBarrierId, MAX_BARRIER_ID_LENGTH, 0, sizeof(g_instance.stopBarrierId));
+    securec_check(rc, "\0", "\0");
 }
 
 void add_numa_alloc_info(void* numaAddr, size_t length)

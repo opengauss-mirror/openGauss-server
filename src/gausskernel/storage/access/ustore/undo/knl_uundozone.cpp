@@ -820,7 +820,7 @@ UndoZone *UndoZoneGroup::SwitchZone(int zid, UndoPersistence upersistence)
     return uzone;
 }
 
-UndoZone* UndoZoneGroup::GetUndoZone(int zid)
+UndoZone* UndoZoneGroup::GetUndoZone(int zid, bool needInit)
 {
     WHITEBOX_TEST_STUB(UNDO_GET_ZONE_FAILED, WhiteboxDefaultErrorEmit);
 
@@ -828,7 +828,7 @@ UndoZone* UndoZoneGroup::GetUndoZone(int zid)
         ereport(PANIC, (errmsg(UNDOFORMAT("zone id %d invalid."), zid)));
     }
     UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zid];
-    if (uzone == NULL && t_thrd.xlog_cxt.InRecovery) {
+    if (uzone == NULL && (t_thrd.xlog_cxt.InRecovery || needInit)) {
         /* False equals to 0, which means zone is used; true is 1, which means zone is unused. */
         bool isZoneFree = bms_is_member(zid, g_instance.undo_cxt.uZoneBitmap[UNDO_PERMANENT]);
         if (!isZoneFree) {

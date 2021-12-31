@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -256,6 +257,8 @@ NON_EXEC_STATIC void JobScheduleMain()
 
         /* since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
+
+        t_thrd.log_cxt.call_stack = NULL;
 
         /* Prevents interrupts while cleaning up */
         HOLD_INTERRUPTS();
@@ -659,6 +662,48 @@ static inline bool IsExecuteOnCurrentNode(const char* executeNodeName)
 }
 
 /*
+ * @brief SkipSchedulerJob
+ *  Skip process DBE_SCHEDULER jobs, contains various checks.
+ *  1. whether the job is enabled
+ *  2. whether the job is expired(end_date < current timestamp OR end_date is NULL)
+ * @param values    pg_job attr values
+ * @param nulls     pg_job attr nulls
+ * @return true     skip current job
+ * @return false    do not skip current job
+ */
+static bool SkipSchedulerJob(Datum *values, bool *nulls, Timestamp curtime)
+{
+    Assert(values != NULL);
+    Assert(nulls != NULL);
+    /* do not handle non-scheduler jobs */
+    if (nulls[Anum_pg_job_job_name]) {
+        return false;
+    }
+
+    /* expired job, need to drop even it is disabled */
+    if (DatumGetBool(DirectFunctionCall2(timestamp_ge, curtime, values[Anum_pg_job_end_date - 1]))) {
+        return false;
+    }
+
+    /* disabled jobs */
+    if (!nulls[Anum_pg_job_enable - 1] && !DatumGetBool(values[Anum_pg_job_enable - 1])) {
+        return true; /* skip here to avoid further overhead */
+    }
+
+    /* immediate job (expired after one successful run) */
+    if (nulls[Anum_pg_job_interval - 1]) {
+        return false;
+    } else {
+        char* interval_str = TextDatumGetCString(values[Anum_pg_job_interval - 1]);
+        if (pg_strcasecmp(interval_str, "null") == 0) {
+            pfree_ext(interval_str);
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
  * Description: Find expire jobs and insert to job queue for execute.
  *
  * Returns: void
@@ -689,6 +734,11 @@ static void ScanExpireJobs()
         int64 jobID = pg_job->job_id;
 
         get_job_values(jobID, tuple, pg_job_tbl, values, nulls);
+
+        /* dbms schedule creates a job but dont enable it */
+        if (SkipSchedulerJob(values, nulls, curtime)) {
+            continue;
+        }
 
         /* handle cases - ALL_NODE/ALL_CN/ALL_DN/CCN specific node */
         if (!IsExecuteOnCurrentNode(pg_job->node_name.data)) {

@@ -576,6 +576,7 @@ XLogRedoAction XLogReadBufferForRedoBlockExtend(RedoBufferTag *redoblock, ReadBu
                 /* If lsn check fails, return invalidate buffer */
                 if (!DoLsnCheck(redobufferinfo, willinit, last_lsn, pblk)) {
                     redobufferinfo->buf = InvalidBuffer;
+                    redobufferinfo->pageinfo = {0};
                     UnlockReleaseBuffer(buf);
                     return BLK_NOTFOUND;
                 }
@@ -624,7 +625,7 @@ XLogRedoAction XLogReadBufferForRedoExtended(XLogReaderState *record, uint8 bloc
     }
 
     if (record->isTde) {
-        tde = StandbyTdeTableEncryptionInsert(record->blocks[block_id].tdeinfo, blockinfo.rnode);
+        tde = InsertTdeInfoToCache(blockinfo.rnode, record->blocks[block_id].tdeinfo);
         pfree_ext(record->blocks[block_id].tdeinfo);
     }
 
@@ -817,7 +818,7 @@ static Buffer XLogReadBufferExceedFileRange(const RelFileNode &rnode, ForkNumber
         return InvalidBuffer;
 
     if (IsSegmentFileNode(rnode)) {
-        SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, true);
+        SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, true, true);
         /* 1. ensure the data file created */
         spc_datafile_create(spc, pblk->relNode, forknum);
         /* 2. extend to the aimed size */
@@ -966,7 +967,7 @@ Buffer XLogReadBufferExtendedForSegpage(const RelFileNode &rnode, ForkNumber for
 
     Buffer buffer;
     BlockNumber spc_nblocks = 0;
-    SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, true);
+    SegSpace *spc = spc_open(rnode.spcNode, rnode.dbNode, true, true);
     spc_datafile_create(spc, rnode.relNode, forknum);
 
     spc_nblocks = spc_size(spc, rnode.relNode, forknum);

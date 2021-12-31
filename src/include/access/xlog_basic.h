@@ -304,7 +304,7 @@ struct XLogReaderState {
      */
     char* readBuf;
     uint32 readLen;
-
+    char* readBufOrigin;
     /* last read segment, segment offset, TLI for data currently in readBuf */
     XLogSegNo readSegNo;
     uint32 readOff;
@@ -359,6 +359,7 @@ typedef struct XLogPageHeaderData {
      * continuation data isn't necessarily aligned.
      */
     uint32 xlp_rem_len; /* total len of remaining data for record */
+    uint32 xlp_total_len;
 } XLogPageHeaderData;
 
 #define SizeOfXLogShortPHD MAXALIGN(sizeof(XLogPageHeaderData))
@@ -415,6 +416,51 @@ typedef struct XLogPhyBlock {
     BlockNumber block;
     XLogRecPtr  lsn;
 } XLogPhyBlock;
+
+const uint16 PAD_SIZE = 500;
+typedef struct ShareStorageXLogCtl_ {
+    uint16 magic;
+    uint16 length;
+    uint32 version;
+    uint64 systemIdentifier;
+    XLogRecPtr insertHead;
+    XLogRecPtr insertTail;
+    uint64 checkNumber;   // new member add after checkNumber
+    uint64 xlogFileSize;
+    // reserved fields
+    uint32 term;
+    uint32 pad1;
+    uint64 pad2;
+    uint64 pad3;
+    uint32 pad4;
+    pg_crc32c crc;
+    uint8 pad[PAD_SIZE];  // just make sizeof(ShareStorageXLogCtl) >= 512
+} ShareStorageXLogCtl;
+#define SizeOfShareStorageXLogCtl (offsetof(ShareStorageXLogCtl, pad))
+typedef struct ShareStorageXLogCtlAlloc_ {
+    ShareStorageXLogCtl ctlInfo;
+    void *originPointer;
+}ShareStorageXLogCtlAllocBlock;
+static const int ShareStorageBufSize = (1 << 20);  // 1MB
+static const int ShareStorageAlnSize = (1 << 26);  // 64MB
+const uint16 SHARE_STORAGE_CTL_MAGIC = 0x6C69;
+const uint32 CURRENT_SHARE_STORAGE_CTL_VERSION = 0;
+const uint64 SHARE_STORAGE_CTL_CHCK_NUMBER = 0x444F5241444F0630;
+typedef struct ShareStorageOpereate_ {
+    void (*ReadCtlInfo)(ShareStorageXLogCtl*);
+    void (*WriteCtlInfo)(const ShareStorageXLogCtl*);
+    int (*readXlog)(XLogRecPtr startLsn, char* buf, int readLen);
+    int (*WriteXlog)(XLogRecPtr startLsn, char* buf, int writeLen);
+    void (*fsync)();
+} ShareStorageOperateIf;
+typedef struct ShareStorageOperateCtl_ {
+    bool isInit;
+    int fd;
+    const char* xlogFilePath;
+    uint64 xlogFileSize;
+    uint32 blkSize;
+    const ShareStorageOperateIf *opereateIf;
+} ShareStorageOperateCtl;
 
 #endif /* XLOG_BASIC_H */
 

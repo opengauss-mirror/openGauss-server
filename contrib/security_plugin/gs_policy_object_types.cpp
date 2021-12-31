@@ -22,6 +22,7 @@
  *
  * -------------------------------------------------------------------------
  */
+#include "parser/parse_func.h"
 #include "postgres.h"
 #include "access/htup.h"
 #include "access/heapam.h"
@@ -31,10 +32,12 @@
 #include "catalog/pg_proc.h"
 #include "commands/user.h"
 #include "gs_policy_object_types.h"
+#include "gs_policy_plugin.h"
 #include "utils/syscache.h"
 #include "utils/lsyscache.h"
 #include "utils/builtins.h"
 #include "utils/acl.h"
+#include "catalog/objectaddress.h"
 
 /*
  * get_relation_schema
@@ -792,4 +795,143 @@ bool verify_proc_params(const func_params* func_params, const func_types* proc_t
         }
     }
     return true;
+}
+
+void load_function_label(const Query *query, bool audit_exist)
+{
+    if (audit_exist && query->rtable != NIL) {
+        ListCell *lc = NULL;
+        foreach (lc, query->rtable) {
+            RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+            if (rte->rtekind == RTE_REMOTE_DUMMY) {
+                continue;
+            } else if (rte && rte->rtekind == RTE_FUNCTION && rte->funcexpr) {
+                FuncExpr *fe = (FuncExpr *)rte->funcexpr;
+                PolicyLabelItem func_label;
+                get_function_name(fe->funcid, &func_label);
+                set_result_set_function(func_label);
+            }
+        }
+    }
+}
+
+/*
+ * ListCell could be RangeVar nodes, FuncWithArgs nodes,
+ * or plain names (as Value strings) according to objtype
+ */
+void gen_policy_labelitem(PolicyLabelItem &item, const ListCell *rel, int objtype)
+{
+    if (rel == NULL) {
+        return;
+    }
+
+    switch (objtype) {
+        case O_VIEW:
+        case O_TABLE: {
+            Oid relid = RangeVarGetRelid((RangeVar *)rel, NoLock, false);
+            if (!OidIsValid(relid)) {
+                return;
+            }
+
+            item = PolicyLabelItem(0, relid, objtype, "");
+            break;
+        }
+        case O_FUNCTION: {
+            FuncWithArgs *func = (FuncWithArgs *)(rel);
+            Oid funcid = LookupFuncNameTypeNames(func->funcname, func->funcargs, false);
+            if (!OidIsValid(funcid)) {
+                return;
+            }
+            item = PolicyLabelItem(0, funcid, objtype, "");
+            break;
+        }
+        case O_SCHEMA: {
+            char *nspname = strVal(rel);
+            item = PolicyLabelItem(nspname, NULL, NULL, objtype);
+            break;
+        }
+        default:
+            break;
+    }
+
+    return;
+}
+
+void gen_policy_label_for_commentstmt(PolicyLabelItem &item, const CommentStmt *commentstmt)
+{
+    ObjectAddress address;
+    Relation relation;
+    address = get_object_address(commentstmt->objtype, commentstmt->objname, commentstmt->objargs, &relation,
+        ShareUpdateExclusiveLock, false);
+    switch (commentstmt->objtype) {
+        case OBJECT_COLUMN: {
+            item = PolicyLabelItem(0, address.objectId, O_COLUMN, strVal(lfirst(list_tail(commentstmt->objname))));
+            break;
+        }
+        case OBJECT_TABLE: {
+            item = PolicyLabelItem(0, address.objectId, O_TABLE, "");
+            break;
+        }
+        case OBJECT_FUNCTION: {
+            item = PolicyLabelItem(0, address.objectId, O_FUNCTION, "");
+            break;
+        }
+        case OBJECT_SCHEMA: {
+            item = PolicyLabelItem(address.objectId, 0, O_SCHEMA, "");
+        }
+        default:
+            break;
+    }
+    if (relation != NULL) {
+        relation_close(relation, NoLock);
+    }
+}
+
+int get_objtype(int object_type)
+{
+    int objtype = O_UNKNOWN;
+    switch (object_type) {
+        case OBJECT_ROLE:
+            objtype = O_ROLE;
+            break;
+        case OBJECT_USER:
+            objtype = O_USER;
+            break;
+        case OBJECT_SCHEMA:
+            objtype = O_SCHEMA;
+            break;
+        case OBJECT_SEQUENCE:
+            objtype = O_SEQUENCE;
+            break;
+        case OBJECT_DATABASE:
+            objtype = O_DATABASE;
+            break;
+        case OBJECT_FOREIGN_SERVER:
+            objtype = O_SERVER;
+            break;
+        case OBJECT_FOREIGN_TABLE:
+        case OBJECT_STREAM:
+        case OBJECT_TABLE:
+            objtype = (object_type == OBJECT_TABLE) ? O_TABLE : O_FOREIGNTABLE;
+            break;
+        case OBJECT_COLUMN:
+            objtype = O_COLUMN;
+            break;
+        case OBJECT_FUNCTION:
+            objtype = O_FUNCTION;
+            break;
+        case OBJECT_CONTQUERY:
+        case OBJECT_VIEW:
+            objtype = O_VIEW;
+            break;
+        case OBJECT_INDEX:
+            objtype = O_INDEX;
+            break;
+        case OBJECT_TABLESPACE:
+            objtype = O_TABLESPACE;
+            break;
+        default:
+            break;
+    }
+    return objtype;
 }

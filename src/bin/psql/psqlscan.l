@@ -1849,7 +1849,6 @@ evaluate_backtick(void)
 			cmd_output.len--;
 		appendBinaryPQExpBuffer(output_buf, cmd_output.data, cmd_output.len);
 	}
-
 	termPQExpBuffer(&cmd_output);
 }
 
@@ -2227,6 +2226,7 @@ analyze_state(const char* text,PsqlScanStateData* state)
             state->gram_state[IDEN_IS] = true;
             state->gram_state[IDEN_RETURN] = true;
             state->gram_state[IDEN_RETURNS] = true;
+			state->include_ora_comment = true;
             state->count_to_read = -1;
             break;
 		case IDEN_RETURN:

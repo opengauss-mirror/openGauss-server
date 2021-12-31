@@ -179,8 +179,10 @@ select * from test_debug2();
 
 
 -- test for implicit variables
-CREATE OR REPLACE PROCEDURE test_debug3(a in integer, b out integer)
+CREATE OR REPLACE function test_debug3(a in integer) return integer
 AS
+declare
+b int;
 BEGIN
     CASE a
         WHEN 1 THEN
@@ -189,8 +191,10 @@ BEGIN
             b := 999;
     END CASE;
     raise info 'pi_return : %',pi_return ;
+    return b;
     EXCEPTION WHEN others THEN
         b := 101;
+    return b;
 END;
 /
 
@@ -210,8 +214,10 @@ select * from test_debug3(1);
 
 
 -- test for step into
-CREATE OR REPLACE PROCEDURE test_debug4(a in integer, b out integer)
+CREATE OR REPLACE FUNCTION test_debug4(a in integer) return integer
 AS
+declare
+b int;
 BEGIN
     CASE a
         WHEN 1 THEN
@@ -220,9 +226,11 @@ BEGIN
         ELSE
             b := 999;
     END CASE;
+    return b;
     raise info 'pi_return : %',pi_return ;
     EXCEPTION WHEN others THEN
         b := 101;
+    return b;
 END;
 /
 
@@ -236,7 +244,17 @@ select * from debug_info;
 
 select * from test_debug4(1);
 
+-- test with client error in exception
+select * from test_debug4(1);
+
 -- test with breakpoint
+select * from test_debug4(1);
+
+-- test with finish without encountered breakpoint
+select * from test_debug4(1);
+
+-- test with finish with encountered breakpoint and inner error
+insert into test values(generate_series(1,10)); -- this will make test_debug() raise more-than-one-row exception
 select * from test_debug4(1);
 
 select dbe_pldebugger.turn_off(oid) from pg_proc where proname = 'test_debug3';
@@ -260,5 +278,118 @@ select * from turn_on_debugger('test_debug_recursive');
 
 select * from test_debug_recursive (1, 1);
 
-drop schema pl_debugger cascade;
+-- test set_var
+CREATE OR REPLACE PROCEDURE test_setvar(x int) AS
+DECLARE
+    vint int8;
+    vnum NUMERIC(24,6);
+    vfloat float;
+    vtext text;
+    vvarchar VARCHAR2(500);
+    vrow test%rowtype;
+    vrec record;
+    vrefcursor refcursor;
+    vconst constant smallint;
+    vpoint point;
+BEGIN
+    RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+        vint, vnum, vfloat, vtext, vvarchar, vrow, vrefcursor;
+    COMMIT;
+    SELECT * FROM test ORDER BY 1 LIMIT 1 INTO vrow; -- do set var here
+    RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+        vint, vnum, vfloat, vtext, vvarchar, vrow, vrefcursor;
+    ROLLBACK;
+    RAISE INFO E'vint:%\nvnum:%\nvfloat:%\nvtext:%\nvvarchar:%\nvrow:%\nvrefcursor:%',
+        vint, vnum, vfloat, vtext, vvarchar, vrow, vrefcursor;
+END
+/
 
+truncate debug_info;
+
+select * from turn_on_debugger('test_setvar');
+
+select * from dbe_pldebugger.local_debug_server_info();
+
+select * from debug_info;
+
+call test_setvar(0);
+
+-- test package
+
+create or replace PACKAGE z_pk2
+AS
+ a int := 10;
+ type t1 is record(c1 varchar2, c2 int);
+ type t2 is table of t1;
+ type t3 is varray(10) of int; 
+END z_pk2;
+/
+
+create or replace PACKAGE z_pk
+AS
+  function pro1(p1 int,p2 int ,p3 VARCHAR2(5)) return int;
+  PROCEDURE pro2(p1 int,p2 out int,p3 inout varchar(20));
+  b int := 2;
+  type t1 is record(c1 varchar2, c2 int);
+  type t2 is table of t1;
+  type t3 is varray(10) of int; 
+END z_pk;
+/
+
+create or replace PACKAGE BODY z_pk
+AS
+  
+  function pro1(p1 int,p2 int ,p3 VARCHAR2(5)) return int
+  as
+  aa t1;
+  bb z_pk2.t1;
+  cc z_pk2.t2;
+  dd z_pk2.t3;
+  p4 int;
+  BEGIN
+      select 'aa',2 into aa;
+      select 'bb',2 into bb;
+      cc(1) = ('aa',1);
+      dd(1) = 10; 
+      p4 := 0;
+      if p3 = '+' then 
+          p4 := p1 + p2 + z_pk2.a;
+       end if;
+       
+       if p3 = '-' then 
+          p4 := p1 - p2;
+       end if;
+       
+       if p3 = '*' then 
+          p4 := p1 * p2;
+       end if;
+       
+       if p3 = '/' then 
+          p4 := p1 / p2;
+       end if;    
+  return p4;
+  END;
+
+  PROCEDURE pro2(p1 int,p2 out int,p3 inout varchar(20))
+  AS
+  BEGIN
+      p2 := p1;
+      p3 := p1 ||'___a';
+      --select dsuser.test_func_p1(1,5);
+  END;
+  
+END z_pk; 
+
+/
+
+truncate debug_info;
+
+select * from turn_on_debugger('pro1');
+
+select * from dbe_pldebugger.local_debug_server_info();
+
+select * from debug_info;
+
+select z_pk.pro1(1,2,'+');
+
+drop schema pl_debugger cascade;

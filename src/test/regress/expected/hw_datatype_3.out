@@ -701,10 +701,10 @@ SELECT '' AS to_char_7, to_char(dates, 'HH24--text--MI--text')
    FROM smalldatetime_test order by 2;
  to_char_7 |      to_char       
 -----------+--------------------
-           | 03--text--04--text
-           | 03--text--06--text
-           | 03--text--06--text
-           | 11--text--06--text
+           | 03--te.t--04--te.t
+           | 03--te.t--06--te.t
+           | 03--te.t--06--te.t
+           | 11--te.t--06--te.t
 (4 rows)
 
 SELECT '' AS to_char_8, to_char(dates, 'YYYYTH YYYYth Jth')
@@ -1087,9 +1087,9 @@ select (1<2) * 1::int8;
 (1 row)
 
 select (1<2) / 1::int1;
- ?column? 
-----------
-        1
+        ?column?        
+------------------------
+ 1.00000000000000000000
 (1 row)
 
 select (1<2) / 1::int2;
@@ -1183,9 +1183,9 @@ select 1::int8 * (1<2);
 (1 row)
 
 select 1::int1 / (1<2);
- ?column? 
-----------
-        1
+        ?column?        
+------------------------
+ 1.00000000000000000000
 (1 row)
 
 select 1::int2 / (1<2);
@@ -1206,49 +1206,49 @@ select 1::int8 / (1<2);
         1
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_01(P1 INT1) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_01(1<2);
+CREATE OR REPLACE FUNCTION SP_BOOL_01(P1 INT1) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_01(1<2);
  sp_bool_01 
 ------------
  
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_02(P1 INT2) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_02(1<2);
+CREATE OR REPLACE FUNCTION SP_BOOL_02(P1 INT2) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_02(1<2);
  sp_bool_02 
 ------------
  
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_03(P1 INT4) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_03(1<2);
+CREATE OR REPLACE FUNCTION SP_BOOL_03(P1 INT4) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_03(1<2);
  sp_bool_03 
 ------------
  
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_04(P1 INT8) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_04(1<2);
+CREATE OR REPLACE FUNCTION SP_BOOL_04(P1 INT8) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_04(1<2);
  sp_bool_04 
 ------------
  
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_05(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_05(1::INT1);
+CREATE OR REPLACE FUNCTION SP_BOOL_05(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_05(1::INT1);
  sp_bool_05 
 ------------
  
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_06(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_06(1::INT2);
+CREATE OR REPLACE FUNCTION SP_BOOL_06(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_06(1::INT2);
  sp_bool_06 
 ------------
  
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_07(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_07(1::INT4);
+CREATE OR REPLACE FUNCTION SP_BOOL_07(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_07(1::INT4);
  sp_bool_07 
 ------------
  
 (1 row)
 
-CREATE OR REPLACE FUNCTION SP_BOOL_08(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; CALL SP_BOOL_08(1::INT8);
+CREATE OR REPLACE FUNCTION SP_BOOL_08(P1 BOOL) RETURNS VOID AS $$BEGIN NULL; END;$$ LANGUAGE PLPGSQL; SELECT SP_BOOL_08(1::INT8);
  sp_bool_08 
 ------------
  

@@ -104,8 +104,8 @@ inline static uint4 PageCompressChunkSize(SMgrRelation reln)
  */
 typedef struct _MdfdVec {
     File mdfd_vfd;               /* fd number in fd.c's pool */
-    File mdfd_vfd_pca;    /* page compression address file 's fd number in fd.cpp's pool */
-    File mdfd_vfd_pcd;    /* page compression data file 's fd number in fd.cpp's pool */
+    File mdfd_vfd_pca;    /* page compression address file 's fd number in fd.c's pool */
+    File mdfd_vfd_pcd;    /* page compression data file 's fd number in fd.c's pool */
     BlockNumber mdfd_segno;      /* segment number, from 0 */
     struct _MdfdVec *mdfd_chain; /* next segment, or NULL */
 } MdfdVec;
@@ -125,32 +125,42 @@ static void register_unlink_segment(RelFileNodeBackend rnode, ForkNumber forknum
 static int sync_pcmap(PageCompressHeader *pcMap, uint32 wait_event_info);
 
 
-bool check_unlink_rel_hashtbl(RelFileNode rnode)
+bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum)
 {
     HTAB* relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    HTAB* relfilenode_fork_hashtbl = g_instance.bgwriter_cxt.unlink_rel_fork_hashtbl;
+    ForkRelFileNode entry_key;
     bool found = false;
 
     LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
     (void)hash_search(relfilenode_hashtbl, &(rnode), HASH_FIND, &found);
     LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+
+    if (!found) {
+        entry_key.rnode = rnode;
+        entry_key.forkNum = forknum;
+        LWLockAcquire(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock, LW_SHARED);
+        (void)hash_search(relfilenode_fork_hashtbl, &(entry_key), HASH_FIND, &found);
+        LWLockRelease(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock);
+    }
     return found;
 }
 
-static int OpenPcaFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
+static int OpenPcaFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo)
 {
     Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
     char dst[MAXPGPATH];
     CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCA_FILE);
-    uint32 flags = O_RDWR | PG_BINARY | oflags;
+    uint32 flags = O_RDWR | PG_BINARY;
     return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCA_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
 }
 
-static int OpenPcdFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
+static int OpenPcdFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo)
 {
     Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
     char dst[MAXPGPATH];
     CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCD_FILE);
-    uint32 flags = O_RDWR | PG_BINARY | oflags;
+    uint32 flags = O_RDWR | PG_BINARY;
     return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCD_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
 }
 
@@ -158,7 +168,7 @@ static void RegisterCompressDirtySegment(SMgrRelation reln, ForkNumber forknum, 
 {
     PageCompressHeader *pcMap = GetPageCompressMemoryMap(seg->mdfd_vfd_pca, PageCompressChunkSize(reln));
     if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
             return;
         }
@@ -166,7 +176,7 @@ static void RegisterCompressDirtySegment(SMgrRelation reln, ForkNumber forknum, 
                                                                             FilePathName(seg->mdfd_vfd_pca))));
     }
     if (FileSync(seg->mdfd_vfd_pcd, WAIT_EVENT_DATA_FILE_SYNC) < 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
             return;
         }
@@ -198,7 +208,7 @@ static void register_dirty_segment(SMgrRelation reln, ForkNumber forknum, const 
             RegisterCompressDirtySegment(reln, forknum, seg);
         } else {
             if (FileSync(seg->mdfd_vfd, WAIT_EVENT_DATA_FILE_SYNC) < 0) {
-                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                     ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m", FilePathName(seg->mdfd_vfd))));
                     return;
                 }
@@ -239,7 +249,7 @@ static void allocate_chunk_check(PageCompressAddr *pcAddr, uint32 chunk_size, Bl
 {
     /* check allocated chunk number */
     Assert(chunk_size == BLCKSZ / 2 || chunk_size == BLCKSZ / 4 || chunk_size == BLCKSZ / 8 ||
-           chunk_size == BLCKSZ / 16);
+        chunk_size == BLCKSZ / 16);
     if (pcAddr->allocated_chunks > BLCKSZ / chunk_size) {
         ereport(ERROR, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunks %u of block %u in file \"%s\"",
                                                                 pcAddr->allocated_chunks, blocknum,
@@ -453,15 +463,37 @@ void mdunlink(const RelFileNodeBackend& rnode, ForkNumber forkNum, bool isRedo, 
     }
 }
 
-void set_max_segno_delrel(int max_segno, RelFileNode rnode)
+void set_max_segno_delrel(int max_segno, RelFileNode rnode, ForkNumber forknum)
 {
     HTAB *relfilenode_hashtbl = g_instance.bgwriter_cxt.unlink_rel_hashtbl;
+    HTAB* relfilenode_fork_hashtbl = g_instance.bgwriter_cxt.unlink_rel_fork_hashtbl;
     DelFileTag *entry = NULL;
+    ForkRelFileNode entry_key;
+    DelForkFileTag *fork_entry = NULL;
     bool found = false;
+
+    LWLockAcquire(g_instance.bgwriter_cxt.rel_hashtbl_lock, LW_SHARED);
     entry = (DelFileTag*)hash_search(relfilenode_hashtbl, &(rnode), HASH_FIND, &found);
     if (found) {
-        entry->maxSegNo = max_segno;
+        if (max_segno > entry->maxSegNo) {
+            entry->maxSegNo = max_segno;
+        }
     }
+    LWLockRelease(g_instance.bgwriter_cxt.rel_hashtbl_lock);
+
+    if (!found) {
+        entry_key.rnode = rnode;
+        entry_key.forkNum = forknum;
+        LWLockAcquire(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock, LW_SHARED);
+        fork_entry = (DelForkFileTag*)hash_search(relfilenode_fork_hashtbl, &(entry_key), HASH_FIND, &found);
+        if (found) {
+            if (max_segno > fork_entry->maxSegNo) {
+                fork_entry->maxSegNo = max_segno;
+            }
+        }
+        LWLockRelease(g_instance.bgwriter_cxt.rel_one_fork_hashtbl_lock);
+    }
+    return;
 }
 
 static int ResetPcMap(char *path, const RelFileNodeBackend& rnode)
@@ -636,7 +668,7 @@ static void mdunlinkfork(const RelFileNodeBackend& rnode, ForkNumber forkNum, bo
         }
 
         nSegments = segno;
-        set_max_segno_delrel(nSegments, rnode.node);
+        set_max_segno_delrel(nSegments, rnode.node, forkNum);
 
         /*
          * Now that we've canceled requests for all segments up to nsegments,
@@ -805,7 +837,6 @@ static void mdextend_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber block
     /* write checksum */
     pcAddr->checksum = AddrChecksum32(blocknum, pcAddr);
 
-
     if (pg_atomic_read_u32(&pcMap->nblocks) < blocknum % RELSEG_SIZE + 1) {
         pg_atomic_write_u32(&pcMap->nblocks, blocknum % RELSEG_SIZE + 1);
     }
@@ -875,7 +906,7 @@ void mdextend(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum,
      * for the new page's buffer.
      */
     if ((nbytes = FilePWrite(v->mdfd_vfd, buffer, BLCKSZ, seekpos, WAIT_EVENT_DATA_FILE_EXTEND)) != BLCKSZ) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1,
                     (errmsg("could not extend file \"%s\": %m, this relation has been removed",
                     FilePathName(v->mdfd_vfd))));
@@ -917,7 +948,7 @@ static int MdOpenRetryOpenFile(char* path, const RelFileNodeForkNum &filenode, E
         if (behavior == EXTENSION_RETURN_NULL && FILE_POSSIBLY_DELETED(errno)) {
             return -1;
         }
-        if (check_unlink_rel_hashtbl(filenode.rnode.node)) {
+        if (check_unlink_rel_hashtbl(filenode.rnode.node, filenode.forknumber)) {
             ereport(DEBUG1, (errmsg("\"%s\": %m, this relation has been removed", path)));
             return -1;
         }
@@ -1652,6 +1683,9 @@ SMGR_READ_STATUS mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber block
                                         reln->smgr_rnode.node.relNode, reln->smgr_rnode.backend);
 
     v = _mdfd_getseg(reln, forknum, blocknum, false, EXTENSION_FAIL);
+    if (v == NULL) {
+        return SMGR_RD_NO_BLOCK;
+    }
 
     seekpos = (off_t)BLCKSZ * (blocknum % ((BlockNumber)RELSEG_SIZE));
 
@@ -1758,8 +1792,7 @@ static void mdwrite_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
     bool mmapSync = false;
     MdfdVec *v = _mdfd_getseg(reln, forknum, blocknum, skipFsync, EXTENSION_FAIL);
 
-
-    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
         ereport(DEBUG1, (errmsg("could not write block %u in file \"%s\": %m, this relation has been removed",
             blocknum, FilePathName(v->mdfd_vfd))));
         /* this file need skip sync */
@@ -1816,7 +1849,7 @@ static void mdwrite_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
 
     uint8 need_chunks = prealloc_chunk > nchunks ? prealloc_chunk : nchunks;
     ExtendChunksOfBlock(pcMap, pcAddr, need_chunks, v);
-
+    
     // write chunks of compressed page
     for (auto i = 0; i < nchunks; ++i) {
         auto buffer_pos = work_buffer + chunk_size * i;
@@ -1853,23 +1886,25 @@ static void mdwrite_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
         mmapSync = true;
         pcAddr->nchunks = nchunks;
     }
-    
+
     /* write checksum */
     if (mmapSync) {
         pcMap->sync = false;
         pcAddr->checksum = AddrChecksum32(blocknum, pcAddr);
     }
 
-    if (work_buffer != buffer) {
+    /* write checksum */
+    pcAddr->checksum = AddrChecksum32(blocknum, pcAddr);
+
+    mmapSync = false;
+    if (work_buffer != NULL && work_buffer != buffer) {
         pfree(work_buffer);
     }
-
 
     if (!skipFsync && !SmgrIsTemp(reln)) {
         register_dirty_segment(reln, forknum, v);
     }
 }
-
 
 /*
  *  mdwrite() -- Write the supplied block at the appropriate location.
@@ -1886,7 +1921,7 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
 
     /* This assert is too expensive to have on normally ... */
 #ifdef CHECK_WRITE_VS_EXTEND
-    if (!check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+    if (!check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
         Assert(blocknum < mdnblocks(reln, forknum));
     }
 #endif
@@ -1978,7 +2013,7 @@ void mdwrite(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const 
         return;
     }
     if (nbytes != BLCKSZ) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("could not write block %u in file \"%s\": %m, this relation has been removed",
                     blocknum, FilePathName(v->mdfd_vfd))));
             /* this file need skip sync */
@@ -2060,7 +2095,7 @@ BlockNumber mdnblocks(SMgrRelation reln, ForkNumber forknum)
              */
             v->mdfd_chain = _mdfd_openseg(reln, forknum, segno, O_CREAT);
             if (v->mdfd_chain == NULL) {
-                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                     ereport(DEBUG1, (errmsg("\"%s\": %m, this relation has been removed",
                                 _mdfd_segpath(reln, forknum, segno))));
                     return 0;
@@ -2126,6 +2161,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                 pg_atomic_write_u32(&pcMap->allocated_chunks, 0);
                 MemSet((char *)pcMap + SIZE_OF_PAGE_COMPRESS_HEADER_DATA, 0,
                        SIZE_OF_PAGE_COMPRESS_ADDR_FILE(chunk_size) - SIZE_OF_PAGE_COMPRESS_HEADER_DATA);
+
                 pcMap->sync = false;
                 if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
                     ereport(data_sync_elevel(ERROR),
@@ -2133,7 +2169,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                              errmsg("could not msync file \"%s\": %m", FilePathName(v->mdfd_vfd_pca))));
                 }
                 if (FileTruncate(v->mdfd_vfd_pcd, 0, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                         ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
                                                 FilePathName(v->mdfd_vfd_pcd))));
                         FileClose(ov->mdfd_vfd_pcd);
@@ -2145,7 +2181,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                 }
             } else {
                 if (FileTruncate(v->mdfd_vfd, 0, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                         ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
                                                 FilePathName(v->mdfd_vfd))));
                         FileClose(ov->mdfd_vfd);
@@ -2226,7 +2262,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                 }
                 off_t compressedOffset = (off_t)max_used_chunkno * chunk_size;
                 if (FileTruncate(v->mdfd_vfd_pcd, compressedOffset, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                         ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
                                                 FilePathName(v->mdfd_vfd))));
                         break;
@@ -2236,7 +2272,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                 }
             } else {
                 if (FileTruncate(v->mdfd_vfd, (off_t)last_seg_blocks * BLCKSZ, WAIT_EVENT_DATA_FILE_TRUNCATE) < 0) {
-                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                    if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                         ereport(DEBUG1, (errmsg("could not truncate file \"%s\": %m, this relation has been removed",
                                                 FilePathName(v->mdfd_vfd))));
                         break;
@@ -2266,7 +2302,7 @@ static bool CompressMdImmediateSync(SMgrRelation reln, ForkNumber forknum, MdfdV
 {
     PageCompressHeader* pcMap = GetPageCompressMemoryMap(v->mdfd_vfd_pca, PageCompressChunkSize(reln));
     if (sync_pcmap(pcMap, WAIT_EVENT_COMPRESS_ADDRESS_FILE_SYNC) != 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m, this relation has been removed",
                                     FilePathName(v->mdfd_vfd_pca))));
             return false;
@@ -2275,7 +2311,7 @@ static bool CompressMdImmediateSync(SMgrRelation reln, ForkNumber forknum, MdfdV
                 (errcode_for_file_access(), errmsg("could not msync file \"%s\": %m", FilePathName(v->mdfd_vfd_pca))));
     }
     if (FileSync(v->mdfd_vfd_pcd, WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC) < 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m, this relation has been removed",
                                     FilePathName(v->mdfd_vfd_pcd))));
             return false;
@@ -2310,7 +2346,7 @@ void mdimmedsync(SMgrRelation reln, ForkNumber forknum)
             }
         } else {
             if (FileSync(v->mdfd_vfd, WAIT_EVENT_DATA_FILE_IMMEDIATE_SYNC) < 0) {
-                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                     ereport(DEBUG1, (errmsg("could not fsync file \"%s\": %m, this relation has been removed",
                                             FilePathName(v->mdfd_vfd))));
                     break;
@@ -2424,6 +2460,9 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
 
     /* open the file */
     fd = DataFileIdOpenFile(fullpath, filenode, O_RDWR | PG_BINARY | oflags, FILE_RW_PERMISSION);
+
+    pfree(fullpath);
+
     if (fd < 0) {
         return NULL;
     }
@@ -2433,19 +2472,18 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
         FileClose(fd);
         fd = -1;
-        fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
+        fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno);
         if (fd_pca < 0) {
             pfree(fullpath);
             return NULL;
         }
-        fd_pcd = OpenPcdFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
+        fd_pcd = OpenPcdFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno);
         if (fd_pcd < 0) {
             pfree(fullpath);
             return NULL;
         }
         SetupPageCompressMemoryMap(fd_pca, reln->smgr_rnode.node, filenode);
     }
-    pfree(fullpath);
 
     /* allocate an mdfdvec entry for it */
     v = _fdvec_alloc();
@@ -2538,7 +2576,7 @@ static MdfdVec *_mdfd_getseg(SMgrRelation reln, ForkNumber forknum, BlockNumber 
                 if (behavior == EXTENSION_RETURN_NULL && FILE_POSSIBLY_DELETED(errno)) {
                     return NULL;
                 }
-                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+                if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
                     ereport(DEBUG1, (errmsg("could not open file \"%s\" (target block %u): %m",
                                     _mdfd_segpath(reln, forknum, nextsegno), blkno)));
                     return NULL;
@@ -2573,7 +2611,7 @@ static BlockNumber _mdnblocks(SMgrRelation reln, ForkNumber forknum, const MdfdV
     }
     len = FileSeek(seg->mdfd_vfd, 0L, SEEK_END);
     if (len < 0) {
-        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node)) {
+        if (check_unlink_rel_hashtbl(reln->smgr_rnode.node, forknum)) {
             ereport(DEBUG1, (errmsg("could not seek to end of file \"%s\": %m, this relation has been removed",
                     FilePathName(seg->mdfd_vfd))));
             return 0;
@@ -2714,6 +2752,7 @@ static int sync_pcmap(PageCompressHeader *pcMap, uint32 wait_event_info)
     }
     int returnCode;
     uint32 nblocks, allocated_chunks, last_synced_nblocks, last_synced_allocated_chunks;
+
     nblocks = pg_atomic_read_u32(&pcMap->nblocks);
     allocated_chunks = pg_atomic_read_u32(&pcMap->allocated_chunks);
     last_synced_nblocks = pg_atomic_read_u32(&pcMap->last_synced_nblocks);
@@ -2728,6 +2767,7 @@ static int sync_pcmap(PageCompressHeader *pcMap, uint32 wait_event_info)
             pg_atomic_write_u32(&pcMap->last_synced_allocated_chunks, allocated_chunks);
         }
     }
+
     pcMap->sync = true;
     return returnCode;
 }

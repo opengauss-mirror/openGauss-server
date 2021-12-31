@@ -159,6 +159,7 @@ typedef struct StatementStatContext {
     char* schema_name;      /* search path */
     char* application_name; /* workload identifier */
     StatLevel level;        /* which level metrics to be collected base on GUC */
+    StatLevel dynamic_track_level;              /* which dynamic level metrics to be collected */
 
     // variant, collect at commit handler
     uint64 unique_query_id;     /* from knl_u_unique_sql_context's unique_sql_id */
@@ -211,6 +212,7 @@ extern bool instr_stmt_need_track_plan();
 extern void instr_stmt_report_returned_rows(uint64 returned_rows);
 extern void instr_stmt_report_soft_parse(uint64 soft_parse);
 extern void instr_stmt_report_hard_parse(uint64 hard_parse);
+extern void instr_stmt_dynamic_change_level();
 
 #endif
 

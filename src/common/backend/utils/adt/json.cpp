@@ -63,7 +63,7 @@ static void parse_array(JsonLexContext *lex, JsonSemAction *sem);
 static void report_parse_error(JsonParseContext ctx, JsonLexContext *lex);
 static void report_invalid_token(JsonLexContext *lex);
 static int report_json_context(JsonLexContext *lex);
-static char *extract_mb_char(char *s);
+static char *extract_mb_char(const char *s);
 static void composite_to_json(Datum composite, StringInfo result, bool use_line_feeds);
 static void array_dim_to_json(StringInfo result, int dim, int ndims, int *dims, Datum *vals, bool *nulls,
     int *valcount, TYPCATEGORY tcategory, Oid typoutputfunc, bool use_line_feeds);
@@ -327,7 +327,7 @@ static void parse_object_field(JsonLexContext *lex, JsonSemAction *sem)
     char *fname = NULL;    /* keep compiler quiet */
     json_ofield_action ostart = sem->object_field_start;
     json_ofield_action oend = sem->object_field_end;
-    bool isnull;
+    bool isnull = false;
     char **fnameaddr = NULL;
     JsonTokenType tok;
 
@@ -686,7 +686,7 @@ static inline void json_lex_string(JsonLexContext *lex)
                                  errdetail("Unicode high surrogate must not follow a high surrogate."),
                                  report_json_context(lex)));
                         }
-                        hi_surrogate = (ch & 0x3ff) << 10;
+                        hi_surrogate = ((uint32)ch & 0x3ff) << 10;
                         continue;
                     } else if (ch >= 0xdc00 && ch <= 0xdfff) {
                         if (hi_surrogate == -1) {
@@ -696,7 +696,7 @@ static inline void json_lex_string(JsonLexContext *lex)
                                  errdetail("Unicode low surrogate must follow a high surrogate."),
                                  report_json_context(lex)));
                         }
-                        ch = 0x10000 + hi_surrogate + (ch & 0x3ff);
+                        ch = 0x10000 + hi_surrogate + ((uint32)ch & 0x3ff);
                         hi_surrogate = -1;
                     }
                     if (hi_surrogate != -1) {
@@ -1122,7 +1122,7 @@ static int report_json_context(JsonLexContext *lex)
 /*
  * Extract a single, possibly multi-byte char from the input string.
  */
-static char *extract_mb_char(char *s)
+static char *extract_mb_char(const char *s)
 {
     char *res = NULL;
     int len;
@@ -1148,7 +1148,7 @@ static void datum_to_json(Datum val, bool is_null, StringInfo result,
 {
     char *outputstr = NULL;
     text *jsontext = NULL;
-    bool numeric_error;
+    bool numeric_error = false;
     JsonLexContext dummy_lex;
 
     check_stack_depth();
@@ -1268,7 +1268,7 @@ static void array_to_json_internal(Datum array, StringInfo result, bool use_line
     Datum *elements = NULL;
     bool *nulls = NULL;
     int16 typlen;
-    bool typbyval;
+    bool typbyval = false;
     char typalign, typdelim;
     Oid typioparam;
     Oid typoutputfunc;
@@ -1353,11 +1353,11 @@ static void composite_to_json(Datum composite, StringInfo result, bool use_line_
 
     for (i = 0; i < tupdesc->natts; i++) {
         Datum val;
-        bool isnull;
+        bool isnull = false;
         char *attname = NULL;
         TYPCATEGORY tcategory;
         Oid typoutput;
-        bool typisvarlena;
+        bool typisvarlena = false;
         Oid castfunc = InvalidOid;
 
         if (tupdesc->attrs[i]->attisdropped) {
@@ -1414,7 +1414,7 @@ static void add_json(Datum val, bool is_null, StringInfo result, Oid val_type, b
 {
     TYPCATEGORY tcategory;
     Oid typoutput;
-    bool typisvarlena;
+    bool typisvarlena = false;
     Oid castfunc = InvalidOid;
 
     if (val_type == InvalidOid) {
@@ -1527,7 +1527,7 @@ Datum to_json(PG_FUNCTION_ARGS)
     StringInfo result;
     TYPCATEGORY tcategory;
     Oid typoutput;
-    bool typisvarlena;
+    bool typisvarlena = false;
     Oid castfunc = InvalidOid;
 
     if (val_type == InvalidOid) {
@@ -1578,7 +1578,7 @@ Datum json_agg_transfn(PG_FUNCTION_ARGS)
     Datum val;
     TYPCATEGORY tcategory;
     Oid typoutput;
-    bool typisvarlena;
+    bool typisvarlena = false;
     Oid castfunc = InvalidOid;
 
     if (val_type == InvalidOid) {

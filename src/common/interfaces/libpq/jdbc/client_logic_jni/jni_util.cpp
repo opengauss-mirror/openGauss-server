@@ -85,7 +85,7 @@ void place_jlong_in_target_array(JNIEnv *env, const jlong value, const int index
  * sets integer value in JNI result array
  * @param env java environment
  * @param value long value
- * @param index2Store index in teh array to set
+ * @param index2Store index in the array to set
  * @param arrayObject Java array class
  */
 void place_int_in_target_array(JNIEnv *env, const int value, const int index2Store, jobjectArray arrayObject)
@@ -98,6 +98,26 @@ void place_int_in_target_array(JNIEnv *env, const int value, const int index2Sto
     env->SetIntArrayRegion(jintArrayValues, 0, 1, valuesArr);
     env->SetObjectArrayElement(arrayObject, index2Store, jintArrayValues);
 }
+
+/**
+ * Places array of ints in a field of a target array
+ * @param env java environment
+ * @param values the int array
+ * @param values_length the length of the int array
+ * @param index2Store the index in the target array to store the int array
+ * @param arrayObject the target array object
+ */
+void place_ints_in_target_array(JNIEnv *env, const int *values, size_t values_length, const int index2Store,
+    jobjectArray arrayObject)
+{
+    if (env == NULL || arrayObject == NULL || values == NULL) {
+        return;
+    }
+    jintArray jintArrayValues = env->NewIntArray(values_length);
+    env->SetIntArrayRegion(jintArrayValues, 0, values_length, values);
+    env->SetObjectArrayElement(arrayObject, index2Store, jintArrayValues);
+}
+
 /*
  * sets string value in JNI result array
  * @param env java environment

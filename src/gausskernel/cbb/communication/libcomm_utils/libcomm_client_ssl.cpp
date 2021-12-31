@@ -294,7 +294,6 @@ int LibCommClientSSLLoadCertFile(LibCommConn * conn, bool have_homedir, const Pa
         fnBuf[0] = '\0';
     }
 
-    LIBCOMM_ELOG(LOG, "LibCommClientSSLLoadCertFile fnBuf:%s\n", fnBuf);
     if (fnBuf[0] == '\0') {
         /* no home directory, proceed without a client cert */
         *have_cert = false;
@@ -306,7 +305,7 @@ int LibCommClientSSLLoadCertFile(LibCommConn * conn, bool have_homedir, const Pa
          */
         if (errno != ENOENT && errno != ENOTDIR) {
             LIBCOMM_ELOG(ERROR, "could not open certificate file \"%s\": %s\n",
-                fnBuf, pqStrerror(errno, setBuf, sizeof(setBuf)));
+                conn->sslcert, pqStrerror(errno, setBuf, sizeof(setBuf)));
             return -1;
         }
         *have_cert = false;
@@ -319,27 +318,28 @@ int LibCommClientSSLLoadCertFile(LibCommConn * conn, bool have_homedir, const Pa
         if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
             char *err = LibCommErrMessage();
             LIBCOMM_ELOG(ERROR, "Error: The file \"%s\" permission should be u=rw(600) or less. mode:%3x err:%s\n",
-                fnBuf, buf.st_mode, err);
+                conn->sslcert, buf.st_mode, err);
             LibCommErrFree(err);
             return -1;
         }
         if (SSL_CTX_use_certificate_chain_file(g_libCommClientSSLContext, fnBuf) !=  1) {
             char *err = LibCommErrMessage();
             LIBCOMM_ELOG(ERROR,
-                "Error: LibCommClientSSLLoadCertFile SSL_CTX_use_certificate_chain_file.fnBuf:%s err:%s\n",
-                fnBuf, err);
+                "Error: LibCommClientSSLLoadCertFile SSL_CTX_use_certificate_chain_file.sslcert:%s err:%s\n",
+                conn->sslcert, err);
             LibCommErrFree(err);
             return -1;
         }
         if (SSL_use_certificate_file(conn->ssl, fnBuf, SSL_FILETYPE_PEM) != 1) {
             char *err = LibCommErrMessage();
-            LIBCOMM_ELOG(ERROR, "Error: LibCommClientSSLLoadCertFile SSL_use_certificate_file fnBuf:%s err:%s.\n",
-                fnBuf, err);
+            LIBCOMM_ELOG(ERROR, "Error: LibCommClientSSLLoadCertFile SSL_use_certificate_file sslcert:%s err:%s.\n",
+                conn->sslcert, err);
             LibCommErrFree(err);
             return -1;
         }
         *have_cert = true;
     }
+    LIBCOMM_ELOG(LOG, "LibCommClientSSLLoadCertFile sslcrl %s", conn->sslcert);
     return 0;
 }
 static int LibCommClientSSLLoadKeyFile(LibCommConn* conn, bool have_homedir, const PathData *homedir, bool have_cert) {
@@ -363,16 +363,16 @@ static int LibCommClientSSLLoadKeyFile(LibCommConn* conn, bool have_homedir, con
     } else {
         fnBuf[0] = '\0';
     }
-    LIBCOMM_ELOG(LOG, "LibCommClientSSLLoadKeyFile fnBuf:%s\n", fnBuf);
+
     if (have_cert && fnBuf[0] != '\0') {
         /* read the client key from file */
         if (stat(fnBuf, &buf) != 0) {
-            LIBCOMM_ELOG(ERROR,"certificate present, but not private key file \"%s\"\n", fnBuf);
+            LIBCOMM_ELOG(ERROR,"certificate present, but not private key file \"%s\"\n", conn->sslkey);
             return -1;
         }
 #ifndef WIN32
         if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
-            LIBCOMM_ELOG(ERROR, "The file \"%s\" permission should be u=rw(600) or lespermissions.\n", fnBuf);
+            LIBCOMM_ELOG(ERROR, "The file \"%s\" permission should be u=rw(600) or lespermissions.\n", conn->sslkey);
             return -1;
         }
 #endif
@@ -380,7 +380,7 @@ static int LibCommClientSSLLoadKeyFile(LibCommConn* conn, bool have_homedir, con
         nRet = SSL_use_PrivateKey_file(conn->ssl, fnBuf, SSL_FILETYPE_PEM);
         if (nRet != 1) {
             char* err = LibCommErrMessage();
-            LIBCOMM_ELOG(ERROR, "could not load private key file \"%s\": %s\n", fnBuf, err);
+            LIBCOMM_ELOG(ERROR, "could not load private key file \"%s\": %s\n", conn->sslkey, err);
             LibCommErrFree(err);
             return -1;
         }
@@ -388,17 +388,18 @@ static int LibCommClientSSLLoadKeyFile(LibCommConn* conn, bool have_homedir, con
     /* verify that the cert and key go together */
     if (have_cert && SSL_check_private_key(conn->ssl) != 1) {
         char* err = LibCommErrMessage();
-        LIBCOMM_ELOG(ERROR,"certificate does not match private key file \"%s\": %s\n", fnBuf, err);
+        LIBCOMM_ELOG(ERROR,"certificate does not match private key file \"%s\": %s\n", conn->sslkey, err);
         LibCommErrFree(err);
         return -1;
     }
     /* set up the allowed cipher list */
     if (!set_client_ssl_ciphers()) {
         char* err = LibCommErrMessage();
-        LIBCOMM_ELOG(ERROR,"SSL_ctxSetCipherList \"%s\": %s\n", fnBuf, err);
+        LIBCOMM_ELOG(ERROR,"SSL_ctxSetCipherList \"%s\": %s\n", conn->sslkey, err);
         LibCommErrFree(err);
         return -1;
     }
+    LIBCOMM_ELOG(LOG, "LibCommClientSSLLoadKeyFile sslkey %s", conn->sslkey);
     return 0;
 }
 #define MAX_CERTIFICATE_DEPTH_SUPPORTED 20 /* The max certificate depth supported. */
@@ -420,18 +421,18 @@ static int LibCommClientSSLLoadRootCertFile(LibCommConn* conn, bool have_homedir
     } else {
         fnBuf[0] = '\0';
     }
-    LIBCOMM_ELOG(LOG, "LibCommClientSSLLoadRootCertFile fnBuf:%s\n", fnBuf);
+
     if (fnBuf[0] != '\0' && stat(fnBuf, &buf) == 0) {
         if (SSL_CTX_load_verify_locations(g_libCommClientSSLContext, fnBuf, NULL) != 1) {
             char* err = LibCommErrMessage();
-            LIBCOMM_ELOG(ERROR, "could not read root certificate file \"%s\": %s\n", fnBuf, err);
+            LIBCOMM_ELOG(ERROR, "could not read root certificate file \"%s\": %s\n", conn->sslrootcert, err);
             LibCommErrFree(err);
             return -1;
         }
         /* check root cert file permission */ 
 #ifndef WIN32
         if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
-            LIBCOMM_ELOG(ERROR, "The ca file \"%s\" permission should be u=rw(600) or less.\n", fnBuf);
+            LIBCOMM_ELOG(ERROR, "The ca file \"%s\" permission should be u=rw(600) or less.\n", conn->sslrootcert);
             return -1;
         }
 #endif
@@ -452,7 +453,7 @@ static int LibCommClientSSLLoadRootCertFile(LibCommConn* conn, bool have_homedir
                     (void)X509_STORE_set_flags(SSL_CTX_get_cert_store(g_libCommClientSSLContext),
                         X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL);
                 } else {
-                    LIBCOMM_ELOG(ERROR,"could not load SSL certificate revocation list (file \"%s\")\n",fnBuf);
+                    LIBCOMM_ELOG(ERROR,"could not load SSL certificate revocation list (file \"%s\")\n", conn->sslcrl);
                     return -1;
                 }
             }
@@ -488,11 +489,12 @@ static int LibCommClientSSLLoadRootCertFile(LibCommConn* conn, bool have_homedir
                 LIBCOMM_ELOG(ERROR,
                     "root certificate file \"%s\" does not exist\n"
                         "Either provide the file or change sslmode to disable server certificate verification.\n",
-                    fnBuf);
+                    conn->sslcrl);
             }
             return -1;
         }
     }
+    LIBCOMM_ELOG(LOG, "LibCommClientSSLLoadRootCertFile end");
     return 0;
 }
 static int LibCommClientSSLSetFiles(LibCommConn* conn) {
@@ -541,7 +543,7 @@ static int LibCommClientSSLCreate() {
         return 0;
     }
 
-    LIBCOMM_ELOG(LOG, "g_libCommClientSSLContext start\n");
+    LIBCOMM_ELOG(LOG, "g_libCommClientSSLContext start");
     if (OPENSSL_init_ssl(0, NULL) != 1) {
         char *err = LibCommErrMessage();
         LIBCOMM_ELOG(ERROR,"Failed to initialize ssl library:%s", err);
@@ -555,7 +557,7 @@ static int LibCommClientSSLCreate() {
     g_libCommClientSSLContext = SSL_CTX_new(TLSv1_2_method());
     if (g_libCommClientSSLContext == NULL) {
         char *err = LibCommErrMessage();
-        LIBCOMM_ELOG(ERROR,"could not create SSL context: %s, errno:%s\n", err, strerror(errno));
+        LIBCOMM_ELOG(ERROR,"could not create SSL context: %s, errno:%s", err, strerror(errno));
         LibCommErrFree(err);
 #pragma GCC diagnostic pop
         return -1;
@@ -566,7 +568,7 @@ static int LibCommClientSSLCreate() {
      */
     SSL_CTX_set_mode(g_libCommClientSSLContext, SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
 
-    LIBCOMM_ELOG(LOG, "LibCommClientSSLCreate end!\n");
+    LIBCOMM_ELOG(LOG, "LibCommClientSSLCreate end!");
     return 0;
 }
 
@@ -668,24 +670,7 @@ static bool LibCommClientVerifyPeerNameMatchesCertificate(LibCommConn *conn)
     pfree_ext(peer_cn);
     return result;
 }
-static void ShowCerts(SSL * ssl)
-{
-    X509 *cert;
-    char *line;
-    cert = SSL_get_peer_certificate(ssl);
-    if (cert != NULL) {
-        LIBCOMM_ELOG(LOG, "X509 subject:\n");
-        line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
-        LIBCOMM_ELOG(LOG, "certificate: %s\n", line);
-        free(line);
-        line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
-        LIBCOMM_ELOG(LOG, "Issued by: %s\n", line);
-        free(line);
-        X509_free(cert);
-    } else {
-        LIBCOMM_ELOG(LOG, "No certificate information.\n");
-    }
-}
+
 LibcommPollingStatusType LibCommClientSSLOpen(LibCommConn *conn) {
     ERR_clear_error();
     int r = SSL_do_handshake(conn->ssl);
@@ -713,20 +698,18 @@ LibcommPollingStatusType LibCommClientSSLOpen(LibCommConn *conn) {
             }
             case SSL_ERROR_SSL: {
                 char* buf = LibCommErrMessage();
-                LIBCOMM_ELOG(ERROR, "SSL error: %s %m %d\n", buf, errno);
+                LIBCOMM_ELOG(ERROR, "SSL error: %s errno: %d\n", buf, errno);
                 LibCommErrFree(buf);
                 LibCommClientSSLClose(conn);
                 return LIBCOMM_POLLING_FAILED;
             }
 
             default:
-                LIBCOMM_ELOG(ERROR, "unrecognized SSL error code: %d %m\n", err);
+                LIBCOMM_ELOG(ERROR, "unrecognized SSL error code: %d\n", err);
                 LibCommClientSSLClose(conn);
                 return LIBCOMM_POLLING_FAILED;
         }
     }
-    LIBCOMM_ELOG(LOG, "Connected with %s encryption\n", SSL_get_cipher(conn->ssl));
-    ShowCerts(conn->ssl);
     /*
      * We already checked the server certificate in initialize_SSL() using
      * SSL_CTX_set_verify(), if root.crt exists.
@@ -899,28 +882,28 @@ LibcommPollingStatusType LibCommClientSecureOpen(LibCommConn *conn, bool isUnidi
 loop:
         status = LibCommClientSSLOpen(conn);
         if (status == LIBCOMM_POLLING_OK) {
-            LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen SSL handshake done, ready to send startup packet\n");
+            LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen SSL handshake done, ready to send startup packet");
         } else if (status == LIBCOMM_POLLING_FAILED) {
             LIBCOMM_ELOG(ERROR, "LibCommClientSecureOpen keep going\n");
             return LIBCOMM_POLLING_FAILED;
         } else if (status == LIBCOMM_POLLING_READING) {
-            LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen LIBCOMM_POLLING_READING\n");
+            LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen LIBCOMM_POLLING_READING");
             if (LibCommClientWaitTimed(1, 0, conn, time(NULL) + timeout)) {
-                LIBCOMM_ELOG(WARNING, "LibCommClientWaitTimed 1 0 failed\n");
+                LIBCOMM_ELOG(WARNING, "LibCommClientWaitTimed 1 0 failed");
             }
             goto loop;
         } else if (status == LIBCOMM_POLLING_WRITING) {
-            LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen LIBCOMM_POLLING_WRITING\n");
+            LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen LIBCOMM_POLLING_WRITING");
             if (LibCommClientWaitTimed(0, 1, conn, time(NULL) + timeout)) {
-                LIBCOMM_ELOG(WARNING, "LibCommClientWaitTimed 0 1 failed\n");
+                LIBCOMM_ELOG(WARNING, "LibCommClientWaitTimed 0 1 failed");
             }
             goto loop;
         } else if (status == LIBCOMM_POLLING_SYSCALL) {
-            LIBCOMM_ELOG(WARNING, "LibCommClientSecureOpen LIBCOMM_POLLING_SYSCALL\n");
+            LIBCOMM_ELOG(WARNING, "LibCommClientSecureOpen LIBCOMM_POLLING_SYSCALL");
             return LIBCOMM_POLLING_SYSCALL;
         }
     }
-    LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen %d\n", status);
+    LIBCOMM_ELOG(LOG, "LibCommClientSecureOpen %d", status);
     return status;
 }
 
@@ -1266,13 +1249,13 @@ int LibCommClientCheckPermissionCipherFile(const char* parent_dir, LibCommConn *
     if (!S_ISREG(cipherbuf.st_mode) ||
         (cipherbuf.st_mode & (S_IRWXG | S_IRWXO)) ||
         ((cipherbuf.st_mode & S_IRWXU) == S_IRWXU)) {
-        LIBCOMM_ELOG(WARNING, "The file \"%s\" permission should be u=rw(600) or less.\n", cipher_file);
+        LIBCOMM_ELOG(WARNING, "The file \"server%s\" permission should be u=rw(600) or less.\n", CIPHER_KEY_FILE);
         return -1;
     }
     if (!S_ISREG(randbuf.st_mode) ||
         (randbuf.st_mode & (S_IRWXG | S_IRWXO)) ||
         ((randbuf.st_mode & S_IRWXU) == S_IRWXU)) {
-        LIBCOMM_ELOG(WARNING, "The file \"%s\" permission should be u=rw(600) or less.\n", rand_file);
+        LIBCOMM_ELOG(WARNING, "The file \"server%s\" permission should be u=rw(600) or less.\n", RAN_KEY_FILE);
         return -1;
     }
 #endif
@@ -1378,8 +1361,7 @@ int LibCommClientReadBlock(LibCommConn *conn, void* data, int size, int flags)
     ts.tv_sec = 0;
     ts.tv_nsec = 1000000;
 
-    // In our application, if we do not get an integrated message, we must continue receiving.
-    //
+    /* In our application, if we do not get an integrated message, we must continue receiving. */
     while (nbytes != size) {
         int rc = 0;
 #ifdef USE_SSL

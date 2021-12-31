@@ -35,6 +35,7 @@
 #include "commands/tablecmds.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
+#include "parser/parse_hint.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/lmgr.h"
 #include "storage/smgr/smgr.h"
@@ -127,14 +128,29 @@ Size MatviewShmemSize(void)
 inline PlannedStmt* GetPlanStmt(Query* query, ParamListInfo params)
 {
     PlannedStmt* plan;
-#ifdef ENABLE_MULTIPLE_NODES
-    plan = pg_plan_query(query, 0, NULL);
-#else
+
     int outerdop = u_sess->opt_cxt.query_dop;
-    u_sess->opt_cxt.query_dop = 1;
-    plan = pg_plan_query(query, 0, params);
-    u_sess->opt_cxt.query_dop = outerdop;
-#endif
+    bool enable_indexonlyscan = u_sess->attr.attr_sql.enable_indexonlyscan;
+
+    PG_TRY();
+    {
+        u_sess->opt_cxt.query_dop = 1;
+        u_sess->attr.attr_sql.enable_indexonlyscan = false;
+        RemoveQueryHintByType(query, HINT_KEYWORD_INDEXONLYSCAN);
+
+        plan = pg_plan_query(query, 0, params);
+
+        u_sess->opt_cxt.query_dop = outerdop;
+        u_sess->attr.attr_sql.enable_indexonlyscan = enable_indexonlyscan;
+    }
+    PG_CATCH();
+    {
+        u_sess->opt_cxt.query_dop = outerdop;
+        u_sess->attr.attr_sql.enable_indexonlyscan = enable_indexonlyscan;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+
     return plan;
 }
 
@@ -1880,18 +1896,8 @@ Oid create_matview_map(Oid matviewoid)
         DistributeBy *distributeby = NULL;
         PGXCSubCluster* subcluster = NULL;
         distributeby = makeNode(DistributeBy);
-        distributeby->disttype = DISTTYPE_HASH;
-        List *colNames = NIL;
-
-        for (int i = 0; i < tupdesc->natts; i++) {
-            Form_pg_attribute attr = tupdesc->attrs[i];
-            if(IsTypeDistributable(attr->atttypid)) {
-                Value *colValue = makeString(pstrdup(attr->attname.data));
-                colNames = lappend(colNames, colValue);
-                break;
-            }
-        }
-        distributeby->colname = colNames;
+        distributeby->disttype = DISTTYPE_ROUNDROBIN;
+        distributeby->colname = NULL;
 
         /* handle node group infos */
         Oid group_id = ng_get_baserel_groupoid(matviewoid, RELKIND_RELATION);
@@ -2032,8 +2038,11 @@ void insert_into_mlog_table(Relation rel, Oid mlogid, HeapTuple tuple, ItemPoint
     Datum values[MlogAttributeNum + relAttnum];
     bool isnulls[MlogAttributeNum + relAttnum];
 
+    mlog_table = try_relation_open(mlogid, RowExclusiveLock);
+    if (!RelationIsValid(mlog_table)) {
+        return;
+    }
 
-    mlog_table = heap_open(mlogid, RowExclusiveLock);
     List *indexoidlist = RelationGetIndexList(mlog_table);
     if (indexoidlist == NULL) {
         ereport(ERROR,
@@ -2222,6 +2231,13 @@ static void check_set_op_component(Node *node) {
 static void check_simple_query(Query *query, List **refDistkeyList,
                                        List **rangeTables, Oid *groupid) {
     RangeTblEntry *rte = NULL;
+
+    if (query->cteList != NULL) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("Feature not supported"),
+                errdetail("with or start with clause")));
+    }
 
     if (query->returningList != NULL) {
         ereport(ERROR,

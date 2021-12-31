@@ -568,7 +568,7 @@ BlockNumber getPageCountForFt(void *additionalData);
                         errmsg(msg, RelationGetRelationName(relation))));                \
     else                                                                                 \
         ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmodule(MOD_DFS),      \
-                        errmsg("could not open relation with OID %u", foreignTableId))); \
+                        errmsg("could not open relation with OID  %u", foreignTableId))); \
 } while (0)
 
 #endif /* DFS_QUERY_H */

@@ -139,6 +139,7 @@ public:
         m_search_path_list.set_user_schema(user_name);
     }
     void clear();    
+    void reload_cache_if_needed(PGconn *conn);
 
 private:
     bool clear_global_settings();    
@@ -166,6 +167,11 @@ private:
                                     tables from the server */
     DatabaseType m_compat_type; /* server SQL compatibility */
     NameData m_current_database_name;
+
+    double m_change_epoch = 0; /* time stamp of the latest client logic configuration fetched from the server */
+    void update_last_change_epoch(const char *time_since_epoc);
+    double get_local_max_time_stamp() const;
+    double get_server_max_time_stamp(const PGconn* const conn) const;
 
 private:
     static const int m_FQDN_MAX_SIZE = NAMEDATALEN * 4;

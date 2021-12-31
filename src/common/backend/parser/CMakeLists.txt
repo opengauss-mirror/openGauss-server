@@ -49,6 +49,7 @@ set(TGT_parser_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/parse_node.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parse_oper.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parse_param.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/parse_startwith.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parse_relation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parse_target.cpp

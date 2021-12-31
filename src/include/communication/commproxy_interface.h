@@ -356,11 +356,7 @@ extern bool IsCommProxyStartUp();
 extern void CommProxyStartUp();
 
 extern void ParseThreadPoolAttr(ThreadAttr *thread_attr);
-#ifndef ENABLE_UT
 extern bool ParseCommProxyAttr(CommProxyConfig* config);
-#else
-extern bool ParseCommProxyAttr(CommProxyConfig* config, char* path);
-#endif
 
 extern int CommLibNetPrepareEnv();
 extern int CommCheckLtranProcess();
@@ -1337,6 +1333,7 @@ inline void* comm_repalloc(void* pointer, size_t size)
 
 extern void CommStartProxyer(ThreadId *thread_id, ThreadPoolCommunicator *comm);
 extern void CommStartProxyStatThread(CommController *controller);
+extern void SetupCommProxySignalHook();
 
 extern void init_commsock_recv_delay(CommSockDelay *delay);
 extern void reset_commsock_recv_delay(CommSockDelay *delay);
@@ -1425,7 +1422,6 @@ extern bool LibnetAddConnectWaitEntry(int epfd, int sock, int forRead, int forWr
 extern unsigned long int g_static_pkt_cnt_by_length[TotalChannel][MAX_PKT_TRANS_CNT];
 extern int g_static_pkt_cnt_idx[TotalChannel];
 extern void comm_update_packet_static(size_t len, int type);
-extern void comm_reset_packet_static();
 
 #define WalSenderEnter 0
 #define WalSenderWakeup 1
@@ -1433,7 +1429,7 @@ extern void comm_reset_packet_static();
 extern unsigned long int g_static_walsender_wakeup[WalSenderCnt][MAX_PKT_TRANS_CNT];
 extern int g_static_walsender_cnt_idx[WalSenderCnt];
 
-extern void comm_reset_walsender_static();
+
 extern void comm_update_walsender_static(int type, int len);
 
 #define WalRcvWriterWrite 0
@@ -1444,7 +1440,6 @@ extern void comm_update_walsender_static(int type, int len);
 extern unsigned long int g_static_walrcvwriter_iostat[WalRcvWriterStat][WalRcvWriterStatMax];
 extern int g_static_walrcvwriter_idx[WalRcvWriterStat];
 
-extern void comm_reset_walrcvwriter_static();
 extern void comm_update_walrcvwriter_static(int type, int len);
 
 extern bool CommGetIpPortFromSockAddr(struct sockaddr *addr, char *ip, int *port);

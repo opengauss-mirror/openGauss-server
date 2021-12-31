@@ -1739,6 +1739,9 @@ void GenerateUniqueSQLInfo(const char* sql, Query* query)
     query->uniqueSQLId = u_sess->unique_sql_cxt.unique_sql_id;
     u_sess->slow_query_cxt.slow_query.unique_sql_id = u_sess->unique_sql_cxt.unique_sql_id;
 
+    /* dynamic enable statement tracking */
+    instr_stmt_dynamic_change_level();
+
     if (!OidIsValid(u_sess->unique_sql_cxt.unique_sql_cn_id)) {
         Oid node_oid = get_pgxc_nodeoid(g_instance.attr.attr_common.PGXCNodeName);
         u_sess->unique_sql_cxt.unique_sql_cn_id = get_pgxc_node_id(node_oid);
@@ -1818,6 +1821,9 @@ static void SetLocalUniqueSQLId(List* query_list)
                 }
 #endif
                 instr_stmt_report_query(u_sess->unique_sql_cxt.unique_sql_id);
+
+                /* dynamic enable statement tracking */
+                instr_stmt_dynamic_change_level();
 
                 /* for BE message, only can have one SQL each time,
                  * so set top to true, then n_calls can be Updated

@@ -17,18 +17,18 @@ CREATE TABLE [ IF NOT EXISTS ] partition_table_name
     | LIKE source_table [ like_option [...] ] }
     [, ... ]
 ] )
-[ WITH ( {storage_parameter = value} [, ... ] ) ]
-[ COMPRESS | NOCOMPRESS ]
-[ TABLESPACE tablespace_name ]
-[ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
-[ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
-PARTITION BY { 
-	{VALUES (partition_key)} | 
-	{RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ... ] ) ] ] ( partition_less_than_item [, ... ] )} |
-	{RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ... ] ) ] ] ( partition_start_end_item [, ... ] )} |
-	{LIST | HASH (partition_key) (PARTITION partition_name [VALUES (list_values_clause)] opt_table_space )}
-	NOTICE: LIST/HASH partition is only avaliable in CENTRALIZED mode!
-} [ { ENABLE | DISABLE } ROW MOVEMENT ];
+    [ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ COMPRESS | NOCOMPRESS ]
+    [ TABLESPACE tablespace_name ]
+    [ DISTRIBUTE BY { REPLICATION | { [ HASH ] ( column_name ) } } ]
+    [ TO { GROUP groupname | NODE ( nodename [, ... ] ) } ]
+    PARTITION BY { 
+        {VALUES (partition_key)} | 
+        {RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] ( partition_less_than_item [, ... ] )} |
+        {RANGE (partition_key) [ INTERVAL ('interval_expr') [ STORE IN ( tablespace_name [, ...] ) ] ] ( partition_start_end_item [, ... ] )} |
+        {LIST | HASH (partition_key) (PARTITION partition_name [ VALUES (list_values_clause) ] opt_table_space ) }
+        NOTICE: LIST/HASH partition is only avaliable in CENTRALIZED mode!
+    } [ { ENABLE | DISABLE } ROW MOVEMENT ];
 
 where column_constraint can be:
 [ CONSTRAINT constraint_name ]

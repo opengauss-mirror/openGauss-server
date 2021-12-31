@@ -380,6 +380,18 @@ insert into gtt_test12(c0) values('8x');
 alter table only gtt_test12 alter c0 set data type CLOB;
 reindex index gtt_test12_c0_c1_key;
 
+--ok
+CREATE GLOBAL TEMPORARY TABLE gtt_test13(c0 boolean , CHECK(CAST(+ ((CAST(('-1856250347' COLLATE "C") AS INT))::INT) AS BOOLEAN)), UNIQUE(c0), PRIMARY KEY(c0));
+DELETE FROM ONLY gtt_test13 RETURNING (CAST(gtt_test13.c0 AS VARCHAR) COLLATE "C");
+--ERROR
+ALTER TABLE  gtt_test13 ALTER c0  SET DATA TYPE boolean, NO FORCE ROW LEVEL SECURITY, ADD CONSTRAINT 箓 FOREIGN KEY (c0) REFERENCES gtt_test13(c0) ON DELETE SET NULL, ALTER c0 SET STATISTICS 4564, VALIDATE CONSTRAINT asdf, ALTER c0 DROP DEFAULT, REPLICA IDENTITY FULL, ALTER c0  SET(n_distinct=-0.5);
+--ok
+INSERT INTO gtt_test13(c0) VALUES(FALSE), (((((((-5) NOT IN (225, 1090628722))::BOOLEAN)::VARCHAR COLLATE "C"))LIKE((upper((((('0.3956822016071504' COLLATE "C"))||(31)) COLLATE "C")) COLLATE "C")))), (CAST(NOT (NOT ((242)::BOOLEAN)) AS BOOLEAN)), (FALSE);
+DELETE FROM ONLY gtt_test13;
+UPDATE gtt_test13 SET c0 = (NOT (gtt_test13.c0)) WHERE gtt_test13.c0;
+INSERT INTO gtt_test13(c0) VALUES(FALSE), (FALSE) ON DUPLICATE KEY UPDATE  NOTHING;
+TRUNCATE gtt_test13 CONTINUE IDENTITY;
+
 reset search_path;
 
 drop schema gtt_function cascade;

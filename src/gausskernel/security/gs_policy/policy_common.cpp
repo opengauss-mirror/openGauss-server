@@ -202,7 +202,17 @@ static bool verify_function_name(Oid namespaceId, const char *funcname)
     }
 
     bool is_found = false;
-    CatCList *catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+
+    CatCList   *catlist = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
+    }
+#else
+    catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+#endif
     if (catlist != NULL) {
         for (int i = 0; i < catlist->n_members && !is_found; ++i) {
             HeapTuple    proctup = &catlist->members[i]->tuple;

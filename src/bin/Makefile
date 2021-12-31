@@ -46,6 +46,7 @@ SUBDIRS = \
 	pg_rewind \
 	pg_dump \
 	psql \
+	gs_loader \
 	pg_config \
 	pg_controldata \
 	pg_resetxlog \

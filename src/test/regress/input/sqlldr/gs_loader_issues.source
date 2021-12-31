@@ -1,0 +1,142 @@
+-- issue: DTS2021091619762 when > should not support
+create table sqlldr_p4(sequence int,name VARCHAR2(20),con VARCHAR2(20))
+    partition by range(sequence)
+    (
+     partition p1 values less than (10),
+     partition p2 values less than (20),
+     partition p3 values less than (30),
+     partition p4 values less than (40),
+     partition p5 values less than (MAXVALUE)
+    );
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_DTS2021091619762.ctl data=@abs_srcdir@/data/gs_loader_issue_DTS2021091619762.csv port=@portstring@ db=regression passwd=gauss@123 rows=1000000 bindsize=1000000
+drop table sqlldr_p4;
+
+-- issue: DTS2021090116724 discard not valid
+CREATE TABLE sqlldr_issue_001(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_001.ctl data=@abs_srcdir@/data/gs_loader_issue_001.csv port=@portstring@ db=regression passwd=gauss@123 discard=@abs_srcdir@/data/gs_loader_issue_001.dsc rows=1000000 bindsize=1000000
+select * from sqlldr_issue_001 order by 1,2,3;
+\! cat @abs_srcdir@/data/gs_loader_issue_001.dsc
+drop table sqlldr_issue_001;
+
+-- issue: DTS2021091020369 multi POSITION in one line
+CREATE TABLE sqlldr_tb21(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    phonenumber number
+);
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_002.ctl data=@abs_srcdir@/data/gs_loader_issue_002.csv port=@portstring@ db=regression passwd=gauss@123 rows=1000000 bindsize=1000000
+select * from sqlldr_tb21 order by 1,2,3;
+select count(*) COUNT from sqlldr_tb21;
+select max(ID) MAX from sqlldr_tb21;
+drop table sqlldr_tb21;
+
+-- issue: DTS2021090720669 permission denied file report error
+CREATE TABLE sqlldr_issue_permission(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+
+\! chmod -r @abs_srcdir@/data/gs_loader_issue_permission.csv
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_permission.ctl data=@abs_srcdir@/data/gs_loader_issue_permission.csv port=@portstring@ db=regression passwd=gauss@123
+\! chmod +r @abs_srcdir@/data/gs_loader_issue_permission.csv
+
+\! chmod -r @abs_srcdir@/data/gs_loader_issue_permission.ctl
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_permission.ctl data=@abs_srcdir@/data/gs_loader_issue_permission.csv port=@portstring@ db=regression passwd=gauss@123
+\! chmod +r @abs_srcdir@/data/gs_loader_issue_permission.ctl
+
+-- issue: DTS2021091621098 constant ""/''
+CREATE TABLE sqlldr_issue_001(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_003.ctl data=@abs_srcdir@/data/gs_loader_issue_001.csv port=@portstring@ db=regression passwd=gauss@123 rows=1000000 bindsize=1000000
+select * from sqlldr_issue_001 order by 1,2,3;
+drop table sqlldr_issue_001;
+
+-- teardown
+drop table sqlldr_issue_permission;
+
+-- issue: DTS2021092327751 error for options in control file 
+CREATE TABLE sqlldr_issue_options(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_options.ctl data=@abs_srcdir@/data/gs_loader_issue_options.csv port=@portstring@ db=regression passwd=gauss@123
+select * from sqlldr_issue_options;
+
+-- teardown
+drop table sqlldr_issue_options;
+
+-- issue: DTS2021092920305 error for options in control file 
+CREATE TABLE sqlldr_issue_options(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_options2.ctl data=@abs_srcdir@/data/gs_loader_issue_options.csv port=@portstring@ db=regression passwd=gauss@123
+select * from sqlldr_issue_options;
+
+-- teardown
+drop table sqlldr_issue_options;
+
+-- issue: DTS2021092425716 error for badfile in control file 
+CREATE TABLE sqlldr_issue_badfile(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_badfile.ctl data=@abs_srcdir@/data/gs_loader_issue_badfile.csv port=@portstring@ db=regression passwd=gauss@123
+select * from sqlldr_issue_badfile;
+
+-- teardown
+drop table sqlldr_issue_badfile;
+
+-- issue: DTS2021092327796 error for infile in control file 
+CREATE TABLE sqlldr_issue_infile(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_infile.ctl data=@abs_srcdir@/data/gs_loader_issue_infile.csv port=@portstring@ db=regression passwd=gauss@123
+select * from sqlldr_issue_infile;
+
+-- teardown
+drop table sqlldr_issue_infile;
+
+-- issue: DTS2021101915706 suport login -U -h -W -p
+CREATE TABLE sqlldr_issue_login(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_login.ctl data=@abs_srcdir@/data/gs_loader_issue_login.csv -p @portstring@ -d regression passwd=gauss@123
+select * from sqlldr_issue_login;
+
+-- teardown
+drop table sqlldr_issue_login;
+
+-- issue: DTS2021101425838 hide password
+CREATE TABLE sqlldr_issue_hide_passwd(
+    ID INTEGER,
+    NAME VARCHAR2(20),
+    CON VARCHAR2(20)
+);
+
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_issue_hide_passwd.ctl data=@abs_srcdir@/data/gs_loader_issue_hide_passwd.csv -p @portstring@ -d regression -W gauss@123
+select * from sqlldr_issue_hide_passwd;
+
+-- teardown
+drop table sqlldr_issue_hide_passwd;

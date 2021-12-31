@@ -49,7 +49,7 @@ BEGIN
         
         IF e_stack_act NOT LIKE E'referenced column: create_snapshot_internal\n'
             'SQL statement "SELECT db4ai.create_snapshot_internal(s_id, i_schema, i_name, i_commands, i_comment, CURRENT_USER)"\n'
-            'PL/pgSQL function db4ai.create_snapshot(name,name,text[],name,text) line 269 at PERFORM%'
+            'PL/pgSQL function db4ai.create_snapshot(name,name,text[],name,text) line 279 at PERFORM%'
         THEN
             RAISE EXCEPTION 'direct call to db4ai.create_snapshot_internal(bigint,name,name,text[],text,name) is not allowed'
             USING HINT = 'call public interface db4ai.create_snapshot instead';
@@ -192,7 +192,9 @@ DECLARE
     s_mode VARCHAR(3);              -- current snapshot mode
     s_vers_del CHAR;                -- snapshot version delimiter, default '@'
     s_vers_sep CHAR;                -- snapshot version separator, default '.'
-    separation_of_powers TEXT;      --current separation of rights
+    separation_of_powers TEXT;      -- current separation of rights
+    current_compatibility_mode TEXT;-- current compatibility mode
+    none_represent INT;             -- 0 or NULL
     qual_name TEXT;                 -- qualified snapshot name
     command_str TEXT;               -- command string
     pattern TEXT;                   -- command pattern for matching
@@ -256,8 +258,16 @@ BEGIN
         RAISE EXCEPTION 'i_name must not contain ''%'' characters', s_vers_del;
     END IF;
 
+    current_compatibility_mode := current_setting('sql_compatibility');
+    IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
+        none_represent := 0;
+    ELSE
+        none_represent := NULL;
+    END IF;
+
+
     -- PG BUG: array_ndims('{}') or array_dims(ARRAY[]::INT[]) returns NULL
-    IF i_commands IS NULL OR array_length(i_commands, 1) IS NULL OR array_length(i_commands, 2) IS NOT NULL THEN
+    IF i_commands IS NULL OR array_length(i_commands, 1) = none_represent OR array_length(i_commands, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_commands array malformed'
         USING HINT = 'pass SQL commands as TEXT[] literal, e.g. ''{SELECT *, FROM public.t, DISTRIBUTE BY HASH(id)''';
     END IF;
@@ -280,7 +290,7 @@ BEGIN
                     quoted BOOLEAN := FALSE;  -- inside quoted identifier
                     cur_ch VARCHAR;           -- current character in tokenizer
                     idx INTEGER := 0;         -- loop counter, cannot use FOR .. iterator
-                    start INTEGER := 1;
+                    start_pos INTEGER := 1;
                     stmt TEXT := command_str;
                 BEGIN
 
@@ -316,7 +326,7 @@ BEGIN
                             IF quoted OR nested > 0 THEN
                                 CONTINUE;
                             ELSIF pattern IS NULL OR length(pattern) = 0 THEN
-                                start := idx;
+                                start_pos := idx;
                                 CONTINUE;
                             END IF;
                         WHEN ';' THEN
@@ -330,25 +340,25 @@ BEGIN
 -- END splitter code for testing
 
                         IF pattern = 'FROM' THEN
-                            from_cmd := substr(stmt, start + 1);
-                            proj_cmd := left(stmt, start - 1);
+                            from_cmd := substr(stmt, start_pos + 1);
+                            proj_cmd := left(stmt, start_pos - 1);
                             stmt := from_cmd;
                             nested := 0;
                             quoted := FALSE;
-                            idx := idx - start;
-                            start := 1;
+                            idx := idx - start_pos;
+                            start_pos := 1;
                             RAISE NOTICE E'SELECT SPLITTING1\n%\n%\n%', stmt, proj_cmd, from_cmd;
                         ELSIF pattern = 'DISTRIBUTE' THEN
                             RAISE NOTICE E'SELECT SPLITTING2\n%\n%\n%', stmt, proj_cmd, from_cmd;
                             CONTINUE;
                         ELSIF pattern = 'DISTRIBUTEBY' THEN
-                            dist_cmd := substr(stmt, start + 1);
-                            from_cmd := left(stmt, start - 1);
+                            dist_cmd := substr(stmt, start_pos + 1);
+                            from_cmd := left(stmt, start_pos - 1);
                             RAISE NOTICE E'SELECT SPLITTING3\n%\n%\n%\n%', stmt, proj_cmd, from_cmd, dist_cmd;
                             EXIT;
                         END IF;
                         pattern := '';
-                        start := idx;
+                        start_pos := idx;
                     END LOOP;
                 END;
             ELSE

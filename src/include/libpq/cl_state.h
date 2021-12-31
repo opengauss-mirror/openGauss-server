@@ -75,6 +75,7 @@ public:
     void insert_function(const char *fname,  CachedProc *proc);
     const ICachedRec* get_cl_rec(const Oid typid, const char* pname) const;
     const int* get_rec_origial_ids(const Oid tpyid, const char* pname) const;
+    size_t get_rec_origial_ids_length(const Oid typid, const char* pname) const;
     PGconn* m_conn;
     bool enable_client_encryption;
     bool disable_once;
@@ -102,6 +103,7 @@ public:
     GucParams tmpGucParams;
     updateGucValues val_to_update;
     RawValuesList *rawValuesForReplace;
+    RawValuesList raw_values_for_post_query;
     ICachedColumnManager* m_cached_column_manager;
     char **called_functions_list;
     size_t called_functions_list_size;

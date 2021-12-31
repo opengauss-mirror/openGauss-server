@@ -12,10 +12,10 @@ CREATE RESOURCE POOL respool_temp_default WITH(mem_percent=10, mem_percent=20);
 ERROR:  redundant options: "mem_percent"
 CREATE RESOURCE POOL respool_temp_default;
 SELECT * FROM pg_resource_pool order by respool_name;
-     respool_name     | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign 
-----------------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------
- default_pool         |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f
- respool_temp_default |           0 |           -1 | DefaultClass:Medium |                10 |       1 | 8GB          |        0 |         0 | None        | installation | f
+     respool_name     | mem_percent | cpu_affinity |    control_group    | active_statements | max_dop | memory_limit | parentid | io_limits | io_priority |  nodegroup   | is_foreign | max_worker 
+----------------------+-------------+--------------+---------------------+-------------------+---------+--------------+----------+-----------+-------------+--------------+------------+------------
+ default_pool         |         100 |           -1 | DefaultClass:Medium |                -1 |       1 | 8GB          |        0 |         0 | None        | installation | f          |           
+ respool_temp_default |           0 |           -1 | DefaultClass:Medium |                10 |       1 | 8GB          |        0 |         0 | None        | installation | f          |          1
 (2 rows)
 
 \! export GAUSSHOME=@abs_bindir@/.. && @abs_bindir@/gs_cgroup -S class1 -c > /dev/null 2>&1

@@ -14,7 +14,7 @@ test: analyze_commands
 test: single_node_ddl
 test: single_node_sqlbypass
 #test: mediavarchar.cppn
-test: array_funcs first_last_agg
+#test: array_funcs first_last_agg
 test: get_instr_unique_sql
 
 # run tablespace by itself, and first, because it forces a checkpoint;
@@ -25,7 +25,8 @@ test: single_node_tablespace
 # ----------
 # The first group of parallel tests
 # ----------
-test: single_node_boolean single_node_char single_node_name single_node_varchar single_node_text single_node_int2 single_node_int4 single_node_int8 single_node_oid single_node_float4 single_node_float8 single_node_bit single_node_numeric single_node_txid single_node_uuid single_node_enum single_node_money single_node_nvarchar
+test: single_node_boolean single_node_char single_node_name single_node_varchar single_node_text single_node_int2 single_node_int4 single_node_int8 single_node_oid single_node_float4 single_node_float8 single_node_bit single_node_numeric single_node_txid single_node_uuid single_node_enum single_node_money
+#test: single_node_nvarchar
 
 # Depends on things setup during char, varchar and text
 #test: single_node_strings
@@ -49,7 +50,8 @@ test: single_node_inet single_node_macaddr single_node_tstypes single_node_comme
 #test: single_node_geometry single_node_horology
 #test: single_node_regex
 test: single_node_regex_temp
-test: single_node_oidjoins single_node_type_sanity single_node_opr_sanity
+test: single_node_type_sanity
+#test: single_node_oidjoins single_node_opr_sanity
 
 # ----------
 # These four each depend on the previous one
@@ -163,7 +165,8 @@ test: single_node_sequence
 
 # run and check forbidden functions are still forbidden to use in single node
 test: single_node_forbidden
-test: single_node_mergeinto merge_1
+test: single_node_mergeinto
+#test: merge_1
 
 # Trigger tests
 test: single_node_triggers
@@ -192,7 +195,7 @@ test: hw_partition_hash_exchange
 test: hw_partition_list_truncate hw_partition_hash_truncate
 
 # To check min_max fuc support IP
-test: min_max_support_IP
+#test: min_max_support_IP
 
 # interval partition
 test: hw_partition_interval
@@ -350,7 +353,8 @@ test: hw_dba_enable_partition hw_tablespace
 test: hw_procedure_define
 #test: hw_anonymous_block
 #test: hw_procedure#
-test: hw_grant_all hw_dynamic_sql hw_func_return_out
+test: hw_grant_all hw_func_return_out
+#test: hw_dynamic_sql
 test: hw_package_function
 
 #show plan
@@ -405,7 +409,7 @@ test: xc_groupby xc_distkey xc_having
 #test: hw_rewrite_lazyagg hw_light
 test: xc_temp xc_FQS
 #test: xc_remote hw_pbe
-test: hw_pbe
+#test: hw_pbe
 test: xc_FQS_join xc_copy
 #test: xc_alter_table
 test: xc_constraints xc_limit xc_sort
@@ -490,7 +494,8 @@ test: interval tinterval macaddr tstypes comments
 # execute two copy tests parallel, to check that copy itself
 # is concurrent safe.(duplicate)
 # ----------
-test: copyselect copy_error_log copy_support_transform copy_from_support_parallel
+test: copyselect copy_error_log copy_support_transform
+#test: copy_from_support_parallel
 #test: copy_eol
 
 # ----------
@@ -504,7 +509,7 @@ test: copyselect copy_error_log copy_support_transform copy_from_support_paralle
 # Another group of parallel tests
 # ----------
 test: create_function_3 vacuum
-test: drop_if_exists
+#test: drop_if_exists
 #test: constraints
 
 #test: errors subplan_base
@@ -537,7 +542,8 @@ test: hw_function_p_3 hw_function_p_4
 test: create_c_function
 test: cstore_replication_table_delete
 
-test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part5 hw_cursor_part6 hw_cursor_part7 hw_cursor_part8
+test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part7
+#test: hw_cursor_part8 hw_cursor_part5 hw_cursor_part6
 test: vec_append_part1 vec_append_part2 vec_append_part3
 test: vec_cursor_part1 vec_cursor_part2
 test: vec_delete_part1 vec_delete_part2
@@ -567,7 +573,8 @@ test: matview_single
 # ----------
 # Another group of parallel tests
 # ----------
-test: hll_hash hll_func hll_para hll_mpp hll_cstore hll_misc
+test: hll_hash hll_func hll_para hll_mpp hll_cstore
+#test: hll_misc
 
 test: function_get_table_def
 
@@ -585,7 +592,7 @@ test: hw_pwd_reuse
 
 test: performance_enhance
 test: explain_fqs
-test: explain_pbe
+#test: explain_pbe
 # temp__3 create_table copy vec_prepare_001 vec_prepare_002 vec_prepare_003 int4 int8 are duplicated
 test: temp__3
 
@@ -615,7 +622,8 @@ test: hw_to_timestamp hw_view_privilege
 test: hw_identifier
 #test: hw_hashint1 hw_smalldatetime_hash hw_rawtype_hash
 #test: hw_nvarchar2_hash cmpr_smallint cmpr_prefix_150left cmpr_uint32_oid
-test: oidjoins opr_sanity_2 regex
+test: opr_sanity_2 regex
+#test: oidjoins
 #test: opr_sanity_1
 
 test: pmk
@@ -677,7 +685,7 @@ test: copy2 temp
 test: truncate
 #test: temp_table
 
-test: b_compatibility
+#test: b_compatibility
 test: hw_compatibility
 test: hw_groupingsets hw_row_grouping_set
 test: char_truncation_common char_truncation_cast
@@ -755,7 +763,7 @@ test: udf_crem create_c_function
 
 # procedure, Function Test
 #test: create_procedure postgres_fdw
-test: create_procedure
+#test: create_procedure
 test: create_function
 test: pg_compatibility
 
@@ -763,7 +771,7 @@ test: pg_compatibility
 # test: gs_basebackup
 
 # autonomous transaction Test
-test: autonomous_test
+#test: autonomous_test
 
 #test jdbc pbe for bypass
 test: bypass_pbe
@@ -777,7 +785,7 @@ test: hw_partition_hash_dml
 test: hw_partition_hash_dql
 test: hw_partition_list_dml
 test: hw_partition_list_dql
-test: hw_cipher_sm4
+#test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: hw_pwd_encryption_sm3
 # ----------
@@ -832,12 +840,13 @@ test: hw_package
 test: procedure_privilege_test
 test: cast_privileges_test
 #test: hw_dbms_sql1
-test: hw_cipher_sm4
+#test: hw_cipher_sm4
 test: hw_cipher_aes128
 test: sequence_cache_test
 test: pg_buffercache_pages
 
 test: test_astore_multixact
-test: row_compression/pg_table_size row_compression/pg_tablespace_size row_compression/unsupported_feature row_compression/normal_test
+test: row_compression/pg_table_size row_compression/unsupported_feature row_compression/normal_test
+#test: row_compression/pg_tablespace_size
 # publication and subscription
 test: publication subscription

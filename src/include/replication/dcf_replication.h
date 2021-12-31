@@ -31,6 +31,7 @@
 
 #ifndef ENABLE_MULTIPLE_NODES
 #include "dcf_interface.h"
+#include "cjson/cJSON.h"
 
 #define DCF_MAX_IP_LEN 64
 #define DCF_QUERY_IDLE 30000 /* 30ms RTT */
@@ -132,6 +133,8 @@ extern bool IsForceUpdate(TimestampTz preSendTime, TimestampTz curSendTime);
 extern void SetDcfNeedSyncConfig(void);
 extern bool DcfArchiveRoachForPitrMaster(XLogRecPtr targetLsn);
 extern void DcfSendArchiveXlogResponse(ArchiveTaskStatus *archive_task_status);
+extern bool GetNodeInfos(cJSON **nodeInfos);
+bool GetDCFNodeInfo(const cJSON *nodeJsons, int nodeID, char *role, int roleLen, char *ip, int ipLen, int *port);
 #endif
 
 #endif 

@@ -24,7 +24,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = pl_gram.o pl_handler.o pl_comp.o pl_package.o pl_exec.o pl_funcs.o pl_scanner.o plsql_packages.o pl_debugger.o pl_debugger_api.o pl_sql_validator.o 
+OBJS = pl_gram.o pl_handler.o pl_comp.o pl_package.o pl_exec.o pl_funcs.o pl_scanner.o plsql_packages.o pl_debugger.o pl_debugger_api.o pl_sql_validator.o pl_global_package_runtime_cache.o 
 
 DATA = plpgsql.control plpgsql--1.0.sql plpgsql--unpackaged--1.0.sql
 

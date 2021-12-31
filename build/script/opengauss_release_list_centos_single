@@ -975,6 +975,7 @@
 ./include/postgresql/server/utils/aset.h
 ./include/postgresql/server/utils/catcache.h
 ./include/postgresql/server/utils/atomic_arm.h
+./include/postgresql/server/utils/oidrbtree.h
 ./include/postgresql/server/datatype/timestamp.h
 ./include/postgresql/server/access/rmgr.h
 ./include/postgresql/server/access/xlogreader.h
@@ -986,6 +987,7 @@
 ./include/postgresql/server/access/attnum.h
 ./include/postgresql/server/access/tupmacs.h
 ./include/postgresql/server/access/xlogrecord.h
+./include/postgresql/server/tde_key_management/data_common.h
 ./include/postgresql/server/tcop/dest.h
 ./include/postgresql/server/catalog/pg_type.h
 ./include/postgresql/server/catalog/pg_attribute.h

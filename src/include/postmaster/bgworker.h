@@ -62,6 +62,8 @@ typedef struct BgWorkerErrorData {
 } BgWorkerErrorData;
 
 typedef struct BackgroundWorker {
+    SHM_QUEUE           links; /* list link if process is in a list */
+    uint64              bgw_id;
     ThreadId            bgw_notify_pid;    /* SIGUSR1 this backend on start/stop */
     BgwHandleStatus     bgw_status;        /* Status of this bgworker */
     uint64              bgw_status_dur;    /* duration in this status */
@@ -70,17 +72,25 @@ typedef struct BackgroundWorker {
     slist_node          rw_lnode;          /* list link */
 } BackgroundWorker;
 
+typedef struct BGW_HDR {
+    pg_atomic_uint64 bgw_id_seq;
+    BackgroundWorker* bgws;
+    BackgroundWorker* free_bgws;
+} BGW_HDR;
+
 typedef struct BackgroundWorkerArgs {
     BgWorkerContext  *bgwcontext;
     BackgroundWorker *bgworker;
+    uint64            bgworkerId;
 } BackgroundWorkerArgs;
 
 /* Register a new bgworker during shared_preload_libraries */
-extern void RegisterBackgroundWorker(BackgroundWorker *worker);
-extern void LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit);
+extern bool RegisterBackgroundWorker(BackgroundWorker *worker);
+extern int LaunchBackgroundWorkers(int nworkers, void *bgshared, bgworker_main bgmain, bgworker_exit bgexit);
 extern void BackgroundWorkerMain(void);
 extern bool IsBgWorkerProcess(void);
 extern void BgworkerListSyncQuit();
 extern void BgworkerListWaitFinish(int *nparticipants);
+extern void InitBgworkerGlobal(void);
 
 #endif   /* BGWORKER_H */

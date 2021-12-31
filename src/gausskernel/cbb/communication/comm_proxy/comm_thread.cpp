@@ -37,7 +37,6 @@
  * Function & Variables declerations
  * --------------------------------------------------------------------------------------
  */
-static void SetupCommSignalHook();
 static void CommProxyBaseInit();
 static void* CommProxyMainFunc(void* ptr);
 static void* CommProxyStatMainFunc(void* ptr);
@@ -89,7 +88,7 @@ void CommStartProxyStatThread(CommController *controller)
  * Internal Functions
  * --------------------------------------------------------------------------------------
  */
-static void SetupCommSignalHook()
+void SetupCommProxySignalHook()
 {
 #if defined(GAUSSDB_KERNEL__NO)
 
@@ -151,7 +150,7 @@ static void CommProxyBaseInit()
 
     pg_timezone_initialize();
 
-    SetupCommSignalHook();
+    SetupCommProxySignalHook();
 
     return;
 }
@@ -202,6 +201,10 @@ static void* CommProxyMainFunc(void* ptr)
 
     /* ServerLoop of RX */
     for (;;) {
+        if (g_comm_controller->m_proxy_recv_loop_cnt == 0 ||
+            g_comm_controller->m_proxy_send_loop_cnt == 0) {
+            break;
+            }
         ProcessProxyWork(comm);
     }
 
@@ -234,6 +237,9 @@ static void* CommProxyStatMainFunc(void* ptr)
     int nums = controller->m_communicator_nums[0];
     const int one_second = 1000*1000;
     for (;;) {
+        if (nums == 0) {
+            break;
+        }
         pg_usleep(one_second);
         for (int i = 0; i < nums; i++) {
             ThreadPoolCommunicator *comm = controller->m_communicators[0][i];
@@ -255,4 +261,3 @@ static void* CommProxyStatMainFunc(void* ptr)
 
     return NULL;
 }
-

@@ -22,7 +22,6 @@ import re
 import json
 import select
 import logging
-from DAO.driver_execute import DriverExecute
 from DAO.gsql_execute import GSqlExecute
 
 ENABLE_MULTI_NODE = False
@@ -134,8 +133,8 @@ def filter_low_benefit(pos_list, candidate_indexes, multi_iter_mode, workload):
             else:
                 cost_list_pos = pos_list[key] + 1
             sql_optimzed += 1 - workload[pos].cost_list[cost_list_pos] / workload[pos].cost_list[0]
-        negative_ratio = (index.insert_sql_num + index.delete_sql_num +
-                          index.update_sql_num) / index.total_sql_num
+        negative_ratio = ((index.insert_sql_num + index.delete_sql_num +
+                          index.update_sql_num) / index.total_sql_num) if index.total_sql_num else 0
         # filter the candidate indexes that do not meet the conditions of optimization
         if sql_optimzed / len(index.positive_pos) < 0.1:
             remove_list.append(key)
@@ -210,13 +209,15 @@ def display_recommend_result(workload, candidate_indexes, index_cost_total, mult
         sql_info['columns'] = index.columns
         sql_info['statement'] = statement
         sql_info['dmlCount'] = round(index.total_sql_num)
-        sql_info['selectRatio'] = round(index.select_sql_num * 100 / index.total_sql_num, 2)
-        sql_info['insertRatio'] = round(index.insert_sql_num * 100 / index.total_sql_num, 2)
-        sql_info['deleteRatio'] = round(index.delete_sql_num * 100 / index.total_sql_num, 2)
-        sql_info['updateRatio'] = round(100 - sql_info['selectRatio'] - sql_info['insertRatio']
-                                        - sql_info['deleteRatio'], 2)
+        sql_info['selectRatio'] = round((index.select_sql_num * 100 /
+                                        index.total_sql_num) if index.total_sql_num else 0, 2)
+        sql_info['insertRatio'] = round((index.insert_sql_num * 100 /
+                                        index.total_sql_num) if index.total_sql_num else 0, 2)
+        sql_info['deleteRatio'] = round((index.delete_sql_num * 100 /
+                                        index.total_sql_num) if index.total_sql_num else 0, 2)
+        sql_info['updateRatio'] = round((100 - sql_info['selectRatio'] - sql_info['insertRatio']
+                                        - sql_info['deleteRatio']) if index.total_sql_num else 0, 2)
         display_info['recommendIndexes'].append(sql_info)
-    return display_info
 
 
 def load_workload(file_path):
@@ -514,12 +515,13 @@ def display_last_recommend_result(integrate_indexes, history_invalid_indexes, in
                 print(statement)
     # save integrate indexes result
     integrate_indexes_file = os.path.join(os.path.dirname(input_path), 'index_result.json')
-    for table, indexes in integrate_indexes['currentIndexes'].items():
-        integrate_indexes['historyIndexes'][table] = \
-            integrate_indexes['historyIndexes'].get(table, list())
-        integrate_indexes['historyIndexes'][table].extend(indexes)
-        integrate_indexes['historyIndexes'][table] = \
-            list(set(integrate_indexes['historyIndexes'][table]))
+    if integrate_indexes.get('currentIndexes'):
+        for table, indexes in integrate_indexes['currentIndexes'].items():
+            integrate_indexes['historyIndexes'][table] = \
+                integrate_indexes['historyIndexes'].get(table, list())
+            integrate_indexes['historyIndexes'][table].extend(indexes)
+            integrate_indexes['historyIndexes'][table] = \
+                list(set(integrate_indexes['historyIndexes'][table]))
     with open(integrate_indexes_file, 'w') as file:
         json.dump(integrate_indexes['historyIndexes'], file)
 
@@ -579,6 +581,7 @@ def simple_index_advisor(input_path, max_index_num, integrate_indexes, db):
     workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
     ori_indexes_name = set()
+    history_invalid_indexes = {}
     workload_table_name = dict()
     display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
     candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
@@ -587,7 +590,9 @@ def simple_index_advisor(input_path, max_index_num, integrate_indexes, db):
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
         db.estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
-        return ori_indexes_name, workload_table_name, display_info
+        if DRIVER:
+            db.close_conn()
+        return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
 
     print_header_boundary(" Determine optimal indexes ")
     ori_total_cost = db.estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
@@ -600,14 +605,13 @@ def simple_index_advisor(input_path, max_index_num, integrate_indexes, db):
         db.close_conn()
     if len(candidate_indexes) == 0:
         print("No optimal indexes generated!")
-        return ori_indexes_name, workload_table_name, display_info
+        return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
     candidate_indexes = [item for item in candidate_indexes if item.benefit > 0]
     candidate_indexes = sorted(enumerate(candidate_indexes),
                                key=lambda item: item[1].benefit, reverse=True)
     global MAX_INDEX_NUM
     MAX_INDEX_NUM = max_index_num
     # match the last recommendation result
-    history_invalid_indexes = {}
     display_recommend_result(workload, candidate_indexes, index_cost_total, False, display_info,
                              integrate_indexes, history_invalid_indexes)
     return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
@@ -653,18 +657,21 @@ def greedy_determine_opt_config(workload, atomic_config_total, candidate_indexes
 def complex_index_advisor(input_path, integrate_indexes, db):
     workload, workload_count = workload_compression(input_path)
     print_header_boundary(" Generate candidate indexes ")
+    history_invalid_indexes = {}
     ori_indexes_name = set()
     workload_table_name = dict()
     display_info = {'workloadCount': workload_count, 'recommendIndexes': []}
     candidate_indexes = generate_candidate_indexes(workload, workload_table_name, db)
+    if DRIVER:
+        db.init_conn_handle()
     if len(candidate_indexes) == 0:
         print("No candidate indexes generated!")
         db.estimate_workload_cost_file(workload, ori_indexes_name=ori_indexes_name)
-        return ori_indexes_name, workload_table_name, display_info
+        if DRIVER:
+            db.close_conn()
+        return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
 
     print_header_boundary(" Determine optimal indexes ")
-    if DRIVER:
-        db.init_conn_handle()
     atomic_config_total = generate_atomic_config(workload)
     if atomic_config_total and len(atomic_config_total[0]) != 0:
         raise ValueError("The empty atomic config isn't generated!")
@@ -679,9 +686,8 @@ def complex_index_advisor(input_path, integrate_indexes, db):
                                              candidate_indexes, index_cost_total[0])
     if len(opt_config) == 0:
         print("No optimal indexes generated!")
-        return ori_indexes_name, workload_table_name, display_info
+        return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
     # match the last invalid recommendation result
-    history_invalid_indexes = {}
     display_recommend_result(workload, opt_config, index_cost_total, True, display_info,
                              integrate_indexes, history_invalid_indexes)
     return ori_indexes_name, workload_table_name, display_info, history_invalid_indexes
@@ -733,7 +739,6 @@ def main():
                                          args.max_index_storage)
 
     JSON_TYPE = args.json
-    DRIVER = args.driver
     MAX_INDEX_NUM = args.max_index_num or 10
     ENABLE_MULTI_NODE = args.multi_node
     MAX_INDEX_STORAGE = args.max_index_storage
@@ -741,18 +746,23 @@ def main():
         raise ValueError('Enter the \'-W\' parameter for user '
                          + args.U + ' when executing the script.')
     # Initialize the connection
-    try:
-        import psycopg2
-    except ImportError:
-        logging.warning('Driver import failed, use gsql to connect to the database.')
-        args.driver = None
     if args.driver:
-        db = DriverExecute(args.d, args.U, args.W, args.h, args.p, args.schema,
-                           args.multi_node, args.max_index_storage)
+        try:
+            from DAO.driver_execute import DriverExecute
+            db = DriverExecute(args.d, args.U, args.W, args.h, args.p, args.schema,
+                               args.multi_node, args.max_index_storage)
+        except ImportError:
+            logging.warning('Python driver import failed, '
+                            'the gsql mode will be selected to connect to the database.')
+            db = GSqlExecute(args.d, args.U, args.W, args.h, args.p, args.schema,
+                             args.multi_node, args.max_index_storage)
+            db.init_conn_handle()
+            args.driver = None
     else:
         db = GSqlExecute(args.d, args.U, args.W, args.h, args.p, args.schema,
                          args.multi_node, args.max_index_storage)
         db.init_conn_handle()
+    DRIVER = args.driver
     integrate_indexes = get_last_indexes_result(args.f)
     if args.multi_iter_mode:
         workload_indexes, tables, detail_info, history_invalid_indexes = \

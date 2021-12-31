@@ -6529,7 +6529,26 @@ fi
 with_jdk=''
 if [ ! -z "${with_3rdpartydir}" ]; then
     platstr=$(sh src/get_PlatForm_str.sh)
+    cpuarch=$(uname -m)
     for d in "openjdk8" "huaweijdk8"; do
+        $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/platform/${d}/${cpuarch}" >&5
+        if [ ! -d "${with_3rdpartydir}/platform/${d}/${cpuarch}" ]; then
+            $as_echo "$as_me:$LINENO: result: no" >&5
+            continue
+        fi
+
+        for d2 in $(ls "${with_3rdpartydir}/platform/${d}/${cpuarch}" | sort -r  2>/dev/null); do
+            if [ -f "${with_3rdpartydir}/platform/${d}/${cpuarch}/${d2}/jre/bin/java" ]; then
+                with_jdk="${with_3rdpartydir}/platform/${d}/${cpuarch}/${d2}"
+                break;
+            fi
+        done
+
+        if [ ! -z "$with_jdk" ]; then
+            $as_echo "$as_me:$LINENO: result: yes" >&5
+            break;
+        fi
+
         $as_echo "$as_me:$LINENO: checking for jdk in ${with_3rdpartydir}/platform/${platstr}/${d}" >&5
         if [ ! -d "${with_3rdpartydir}/platform/${platstr}/${d}" ]; then
             $as_echo "$as_me:$LINENO: result: no" >&5

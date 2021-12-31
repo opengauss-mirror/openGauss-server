@@ -176,7 +176,7 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     long secs;
     int usecs;
     double read_rate, write_rate;
-    bool scan_all = false;
+    bool scan_all = false;     /* actually scanned all such pages? */
     TransactionId freezeTableLimit = 0;
     BlockNumber new_rel_pages;
     double new_rel_tuples;
@@ -276,6 +276,9 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
         /* clean part info before vacuum delta and desc table */
         vacstmt->onepartrel = NULL;
         vacstmt->onepart = NULL;
+        vacstmt->parentpartrel = NULL;
+        vacstmt->parentpart = NULL;
+        vacstmt->issubpartition = false;
         vacstmt->flags = VACFLG_SIMPLE_HEAP;
 
         Oid toast_relid = InvalidOid;
@@ -434,6 +437,11 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             }
         }
     }
+    if (vacrelstats->scanned_pages < vacrelstats->rel_pages || vacrelstats->hasKeepInvisbleTuples) {
+        scan_all = false;
+    } else {
+        scan_all = true;
+    }
 
     /*
      * Try to truncate tail blocks if they are all empty.
@@ -487,21 +495,14 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
     if (new_rel_allvisible > new_rel_pages)
         new_rel_allvisible = new_rel_pages;
 
-    new_frozen_xid = u_sess->cmd_cxt.FreezeLimit;
-    if (vacrelstats->scanned_pages < vacrelstats->rel_pages || vacrelstats->hasKeepInvisbleTuples) {
-        new_frozen_xid = InvalidTransactionId;
-    }
-
-    new_min_multi = u_sess->cmd_cxt.MultiXactFrzLimit;
-    if (vacrelstats->scanned_pages < vacrelstats->rel_pages || vacrelstats->hasKeepInvisbleTuples) {
-        new_min_multi = InvalidMultiXactId;
-    }
+    new_frozen_xid = scan_all ? u_sess->cmd_cxt.FreezeLimit : InvalidTransactionId;
+    new_min_multi = scan_all ? u_sess->cmd_cxt.MultiXactFrzLimit : InvalidMultiXactId;
 
     if (RelationIsPartition(onerel)) {
         Assert(vacstmt->onepart != NULL);
 
-        vac_update_partstats(vacstmt->onepart, new_rel_pages, new_rel_tuples,
-                             new_rel_allvisible, new_frozen_xid, new_min_multi);
+        vac_update_partstats(vacstmt->onepart, new_rel_pages, new_rel_tuples, new_rel_allvisible, new_frozen_xid,
+                             new_min_multi);
         /*
          * when vacuum partition, do not change the relhasindex field in pg_class
          * for partitioned table, as some partition may be altered as "all local
@@ -509,8 +510,13 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
          * will lead to misbehave when update other index usable partitions ---the horrible
          * misdguge as hot update even if update indexes columns.
          */
-        vac_update_pgclass_partitioned_table(
-            vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid, new_min_multi);
+        if (!vacstmt->parentpartrel) {
+            vac_update_pgclass_partitioned_table(
+                vacstmt->onepartrel, vacstmt->onepartrel->rd_rel->relhasindex, new_frozen_xid, new_min_multi);
+        } else {
+            vac_update_pgclass_partitioned_table(
+                vacstmt->parentpartrel, vacstmt->parentpartrel->rd_rel->relhasindex, new_frozen_xid, new_min_multi);
+        }
 
         // update stats of local partition indexes
         for (int idx = 0; idx < nindexes - nindexesGlobal; idx++) {
@@ -1711,7 +1717,7 @@ static int lazy_vacuum_heap(Relation onerel, LVRelStats* vacrelstats, int tupind
         npages++;
     }
 
-    ereport(LOG,
+    ereport(elevel,
         (errmsg("vacuum %u/%u/%u, \"%s\": removed %d row versions in %d pages",
             onerel->rd_node.spcNode, onerel->rd_node.dbNode, onerel->rd_node.relNode,
             RelationGetRelationName(onerel), tupindex, npages),

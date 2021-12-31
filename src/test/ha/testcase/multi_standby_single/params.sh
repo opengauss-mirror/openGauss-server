@@ -20,10 +20,10 @@ function test_1()
 
   timeout 5 gsql -d $db -p $dn1_primary_port -c "DROP TABLE if exists test1; create table test1(id int);"
   if [ $? -gt 0 ]; then
-    echo "ddl block success!"
-  else
-    echo "ddl block failure $failed_keyword"
+    echo "synchronous_standby_names error ignored failure $failed_keyword"
     exit 1
+  else
+    echo "synchronous_standby_names error ignored!"
   fi
 
   echo "1 sync standby, 1 potential"
@@ -54,14 +54,6 @@ function test_1()
     exit 1
   fi
   gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = 'jane'"
-  start_cluster
-  check_asynchronous_commit "datanode1" 4
-  
-  echo "test synchronous_standby_names = ''"
-  kill_cluster
-  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_commit = on"
-  gs_guc set -Z datanode -D $primary_data_dir -c "synchronous_standby_names = ''"
-  gs_guc set -Z datanode -D $primary_data_dir -c "most_available_sync = on"
   start_cluster
   check_asynchronous_commit "datanode1" 4
 }

@@ -47,13 +47,14 @@ Datum euc_jis_2004_to_utf8(PG_FUNCTION_ARGS)
     CHECK_ENCODING_CONVERSION_ARGS(PG_EUC_JIS_2004, PG_UTF8);
 
     LocalToUtf(src,
+        len,
         dest,
         LUmapEUC_JIS_2004,
+        lengthof(LUmapEUC_JIS_2004),
         LUmapEUC_JIS_2004_combined,
-        sizeof(LUmapEUC_JIS_2004) / sizeof(pg_local_to_utf),
-        sizeof(LUmapEUC_JIS_2004_combined) / sizeof(pg_local_to_utf_combined),
-        PG_EUC_JIS_2004,
-        len);
+        lengthof(LUmapEUC_JIS_2004_combined),
+        NULL,
+        PG_EUC_JIS_2004);
 
     PG_RETURN_VOID();
 }
@@ -67,13 +68,14 @@ Datum utf8_to_euc_jis_2004(PG_FUNCTION_ARGS)
     CHECK_ENCODING_CONVERSION_ARGS(PG_UTF8, PG_EUC_JIS_2004);
 
     UtfToLocal(src,
+        len,
         dest,
         ULmapEUC_JIS_2004,
+        lengthof(ULmapEUC_JIS_2004),
         ULmapEUC_JIS_2004_combined,
-        sizeof(ULmapEUC_JIS_2004) / sizeof(pg_utf_to_local),
-        sizeof(ULmapEUC_JIS_2004_combined) / sizeof(pg_utf_to_local_combined),
-        PG_EUC_JIS_2004,
-        len);
+        lengthof(ULmapEUC_JIS_2004_combined),
+        NULL,
+        PG_EUC_JIS_2004);
 
     PG_RETURN_VOID();
 }

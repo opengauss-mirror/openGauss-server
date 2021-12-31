@@ -1,3 +1,5 @@
+create database pl_test_cursor_part1 DBCOMPATIBILITY 'pg';
+\c pl_test_cursor_part1;
 create schema hw_cursor_part1;
 set current_schema = hw_cursor_part1;
 create table company(name varchar(100), loc varchar(100), no integer);
@@ -821,7 +823,7 @@ IS
  END; 
  /
 NOTICE:  ef1 ok
-CONTEXT:  SQL statement "CALL proc_sys_ref1(c1,c2)"
+CONTEXT:  SQL statement "CALL proc_sys_ref1(C1,c2)"
 PL/pgSQL function inline_code_block line 5 at SQL statement
 NOTICE:  ok
 NOTICE:  ok
@@ -1003,3 +1005,5 @@ drop cascades to function pro_base_003(refcursor,refcursor)
 drop cascades to table pro_base_001
 drop cascades to table tb1
 drop cascades to function i_inout(refcursor)
+\c regression;
+drop database IF EXISTS pl_test_cursor_part1;

@@ -402,24 +402,7 @@ static int comm_ssl_set_fd(SSL_INFO* port, int fd)
     SSL_set_bio(port->ssl, bio, bio);
     return 1;
 }
-static void ShowCerts(SSL * ssl)
-{
-    X509 *cert;
-    char *line;
-    cert = SSL_get_peer_certificate(ssl);
-    if (cert != NULL) {
-        LIBCOMM_ELOG(LOG, "X509 subject:\n");
-        line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
-        LIBCOMM_ELOG(LOG, "certificate: %s\n", line);
-        free(line);
-        line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
-        LIBCOMM_ELOG(LOG, "Issued by: %s\n", line);
-        free(line);
-        X509_free(cert);
-    } else {
-        LIBCOMM_ELOG(LOG, "No certificate information.\n");
-    }
-}
+
 /*
  * Brief        : int open_server_SSL(SSL_INFO *port)
  * Description  : Attempt to negotiate SSL connection.
@@ -508,8 +491,7 @@ aloop:
         }
         return -2;
     }
-    LIBCOMM_ELOG(LOG, "after SSL_accept with %s encryption\n", SSL_get_cipher(port->ssl));
-    ShowCerts(port->ssl);
+    LIBCOMM_ELOG(LOG, "after SSL_accept with encryption");
     port->count = 0;
 
     /* Get client certificate, if available. */
@@ -813,8 +795,6 @@ static void comm_ssl_comm_init_server_ssl_pwd(SSL_CTX* sslContext)
     pfree_ext(parentdir);
 
     SSL_CTX_set_default_passwd_cb_userdata(sslContext, (char*)g_instance.attr.attr_network.server_key);
-    LIBCOMM_ELOG(LOG, "In comm_ssl_comm_init_server_ssl_pwd, SSL_CTX_set_default_passwd_cb_userdata server_key:%s",
-        (char*)g_instance.attr.attr_network.server_key);
 }
 
 void comm_initialize_SSL()
@@ -872,14 +852,14 @@ void comm_initialize_SSL()
         if((buffer = getcwd(NULL,0)) == NULL){
             LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, getcwd error");
         } else{
-            LIBCOMM_ELOG(LOG, "In comm_initialize_SSL, getcwd buffer:%s", buffer);
             free(buffer);
         }
 
         /* Load and verify server's certificate and private key */
         if (SSL_CTX_use_certificate_chain_file(g_instance.attr.attr_network.SSL_server_context, \
                                                g_instance.attr.attr_security.ssl_cert_file) != 1) {
-            LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not load server certificate file");
+            LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not load server certificate file %s",
+                g_instance.attr.attr_security.ssl_cert_file);
             Assert(0);
             return;
         }
@@ -898,7 +878,8 @@ void comm_initialize_SSL()
 #endif
 
         if (stat(g_instance.attr.attr_security.ssl_key_file, &buf) != 0) {
-            LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not access private key file");
+            LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not access private key file %s",
+                g_instance.attr.attr_security.ssl_key_file);
             Assert(0);
             return;
         }
@@ -914,24 +895,24 @@ void comm_initialize_SSL()
 #if !defined(WIN32) && !defined(__CYGWIN__)
         if (!S_ISREG(buf.st_mode) || 
             (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
-            LIBCOMM_ELOG(WARNING, "private key file \"%s\" has group or world access"
-                         "Permissions should be u=rw (0600) or less.",
-                         g_instance.attr.attr_security.ssl_key_file);
+            LIBCOMM_ELOG(WARNING,
+                "private key file \"%s\" has group or world access Permissions should be u=rw (0600) or less.",
+                g_instance.attr.attr_security.ssl_key_file);
         }
 #endif
 
         if (SSL_CTX_use_PrivateKey_file(g_instance.attr.attr_network.SSL_server_context, \
                                         g_instance.attr.attr_security.ssl_key_file, \
                                         SSL_FILETYPE_PEM) != 1) {
-            LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not load private key file %s",
-                         g_instance.attr.attr_security.ssl_key_file);
+            LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not load private key file \"%s\"",
+                g_instance.attr.attr_security.ssl_key_file);
             Assert(0);
             return;
         }
 
         if (SSL_CTX_check_private_key(g_instance.attr.attr_network.SSL_server_context) != 1) {
             LIBCOMM_ELOG(LOG, "In comm_initialize_SSL, check of private key(%s) failed",
-                         g_instance.attr.attr_security.ssl_key_file);
+                g_instance.attr.attr_security.ssl_key_file);
         }
     }
 
@@ -939,8 +920,9 @@ void comm_initialize_SSL()
 #if !defined(WIN32) && !defined(__CYGWIN__)
     if (stat(g_instance.attr.attr_security.ssl_ca_file, &buf) == 0){
         if (!S_ISREG(buf.st_mode) || (buf.st_mode & (S_IRWXG | S_IRWXO)) || ((buf.st_mode & S_IRWXU) == S_IRWXU)) {
-            LIBCOMM_ELOG(WARNING, "ca certificate file \"%s\" has group or world access"
-                        "Permissions should be u=rw (0600) or less.", g_instance.attr.attr_security.ssl_ca_file);
+            LIBCOMM_ELOG(WARNING,
+                "ca certificate file \"%s\" has group or world access Permissions should be u=rw (0600) or less.",
+                g_instance.attr.attr_security.ssl_ca_file);
             Assert(0);
             return;
         }
@@ -997,7 +979,7 @@ void comm_initialize_SSL()
         root_cert_list = SSL_load_client_CA_file(g_instance.attr.attr_security.ssl_ca_file);
         if (root_cert_list == NULL) {
             LIBCOMM_ELOG(LOG, "In comm_initialize_SSL, could not load root certificate file %s",
-                         g_instance.attr.attr_security.ssl_ca_file);
+                g_instance.attr.attr_security.ssl_ca_file);
         }
     }
 
@@ -1010,7 +992,7 @@ void comm_initialize_SSL()
                 (void)X509_STORE_set_flags(cvstore, X509_V_FLAG_CRL_CHECK);
             } else {
                 LIBCOMM_ELOG(WARNING, "In comm_initialize_SSL, could not load SSL certificate revocation list file %s",
-                             g_instance.attr.attr_security.ssl_crl_file);
+                    g_instance.attr.attr_security.ssl_crl_file);
             }
         }
     }

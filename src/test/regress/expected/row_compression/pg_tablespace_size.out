@@ -2,28 +2,28 @@ CREATE TABLESPACE normal_tablespace RELATIVE LOCATION 'normal_tablespace';
 SELECT pg_tablespace_size('normal_tablespace');
  pg_tablespace_size 
 --------------------
-               4096
+                 10
 (1 row)
 
 CREATE TABLE normal_table(id int) TABLESPACE normal_tablespace;
 SELECT pg_tablespace_size('normal_tablespace');
  pg_tablespace_size 
 --------------------
-               8192
+                 36
 (1 row)
 
 CREATE TABLESPACE compress_tablespace RELATIVE LOCATION 'compress_tablespace';
 SELECT pg_tablespace_size('compress_tablespace');
  pg_tablespace_size 
 --------------------
-               4096
+                 10
 (1 row)
 
 CREATE TABLE compressed_table_1024(id int) WITH(compresstype=2, compress_chunk_size=1024) TABLESPACE compress_tablespace;
 SELECT pg_tablespace_size('compress_tablespace');
  pg_tablespace_size 
 --------------------
-            5601088
+            5592972
 (1 row)
 
 DROP TABLE normal_table;

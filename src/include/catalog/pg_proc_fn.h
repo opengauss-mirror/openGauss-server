@@ -52,11 +52,15 @@ extern Oid ProcedureCreate(const char *procedureName,
 
 extern bool function_parse_error_transpose(const char *prosrc);
 
+extern bool isSameArgList(CreateFunctionStmt* stmt1, CreateFunctionStmt* stmt2);
 
-extern bool isSameArgList(List* argList1, List* argList2);
-
+extern bool isSameParameterList(List* parameterList1, List* parameterList2);
 extern char* getFuncName(List* funcNameList);
 
+extern oidvector* MakeMd5HashArgTypes(oidvector* paramterTypes);
+
 extern oidvector* ProcedureGetArgTypes(HeapTuple tuple);
+
+extern Datum ProcedureGetAllArgTypes(HeapTuple tuple, bool* isNull);
 #endif   /* PG_PROC_FN_H */
 

@@ -42,11 +42,7 @@ CommRingBuffer::CommRingBuffer()
 
 CommRingBuffer::~CommRingBuffer()
 {
-    Assert(m_buffer->m_comm_buffer == NULL);
     Assert(m_buffer == NULL);
-
-    pthread_mutex_destroy(&m_mutex);
-    pthread_cond_destroy(&m_cv);
 }
 
 void CommRingBuffer::Init(int fd, CommQueueChannel type)
@@ -314,6 +310,7 @@ int CommRingBuffer::PutDataToBuffer(const char *s, size_t len)
     uint32_t r_pos;
     uint32_t w_pos;
     uint32_t w_newpos;
+    errno_t errorno = EOK;
 
     RingBufferGroup *ring_buffer = NULL;
 
@@ -333,16 +330,22 @@ int CommRingBuffer::PutDataToBuffer(const char *s, size_t len)
 
     size_t tail_len = 0;
     if (w_pos < r_pos) {
-        memcpy_s(ring_buffer->m_comm_buffer + w_pos, write_len, s, write_len);
+        errorno = memcpy_s(ring_buffer->m_comm_buffer + w_pos, write_len, s, write_len);
+        securec_check(errorno, "\0", "\0");
         w_newpos = w_pos + write_len;
     } else {
         tail_len = ring_buffer->m_comm_buffer_size - w_pos;
         if (write_len <= tail_len) {
-            memcpy_s(ring_buffer->m_comm_buffer + w_pos, write_len, s, write_len);
+            errorno = memcpy_s(ring_buffer->m_comm_buffer + w_pos, write_len, s, write_len);
+            securec_check(errorno, "\0", "\0");
             w_newpos = w_pos + write_len;
         } else {
-            memcpy_s(ring_buffer->m_comm_buffer + w_pos, tail_len, s, tail_len);
-            memcpy_s(ring_buffer->m_comm_buffer, write_len - tail_len, s + tail_len, write_len - tail_len);
+            if (tail_len != 0) {
+                errorno = memcpy_s(ring_buffer->m_comm_buffer + w_pos, tail_len, s, tail_len);
+                securec_check(errorno, "\0", "\0");
+            }
+            errorno = memcpy_s(ring_buffer->m_comm_buffer, write_len - tail_len, s + tail_len, write_len - tail_len);
+            securec_check(errorno, "\0", "\0");
             w_newpos = write_len - tail_len;
         }
     }
@@ -730,7 +733,17 @@ void CommRingBuffer::WaitBufferEmpty()
     }
 
     while (!CheckBufferEmpty()) {
-        if (g_comm_controller->FdGetCommSockDesc(m_fd)->m_status == CommSockStatusClosedByPeer) {
+        CommSockDesc* comm_sock = g_comm_controller->FdGetCommSockDesc(m_fd);
+        if (comm_sock == NULL) {
+            ereport(ERROR, (errmodule(MOD_COMM_PROXY),
+                errcode(ERRCODE_SYSTEM_ERROR),
+                errmsg("CommSockDesc is null in WaitBufferEmpty, fd:%d.", m_fd),
+                errdetail("N/A"),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
+        }
+
+        if (comm_sock->m_status == CommSockStatusClosedByPeer) {
             return;
         }
         /* if send queue is not empty, wait 100us */
@@ -1048,7 +1061,18 @@ int CommPacketBuffer::PutDataToBuffer(const char *s, size_t len)
     AutoContextSwitch commContext(g_instance.comm_cxt.comm_global_mem_cxt);
 
     Packet* pack = NULL;
-    ThreadPoolCommunicator *comm = g_comm_controller->FdGetCommSockDesc(m_fd)->m_communicator;
+    CommSockDesc* comm_sock = g_comm_controller->FdGetCommSockDesc(m_fd);
+    if (comm_sock == NULL || comm_sock->m_communicator == NULL ||
+        comm_sock->m_communicator->m_packet_buf[ChannelTX] == NULL) {
+        ereport(ERROR, (errmodule(MOD_COMM_PROXY),
+            errcode(ERRCODE_SYSTEM_ERROR),
+            errmsg("CommSockDesc or m_communicator or m_packet_buf is null in PutDataToBuffer, fd:%d.", m_fd),
+            errdetail("N/A"),
+            errcause("System error."),
+            erraction("Contact Huawei Engineer.")));
+    }
+
+    ThreadPoolCommunicator* comm = comm_sock->m_communicator;
     int fd = m_fd;
 
     /* if length > MAX_LENGTH, we need loop to send  */
@@ -1183,7 +1207,17 @@ void CommPacketBuffer::WaitBufferEmpty()
         ClearQueuePacket();
     } else {
         while (m_data_queue->empty() != 0) {
-            if (g_comm_controller->FdGetCommSockDesc(m_fd)->m_status == CommSockStatusClosedByPeer) {
+            CommSockDesc* comm_sock = g_comm_controller->FdGetCommSockDesc(m_fd);
+            if (comm_sock == NULL) {
+                ereport(ERROR, (errmodule(MOD_COMM_PROXY),
+                    errcode(ERRCODE_SYSTEM_ERROR),
+                    errmsg("CommSockDesc is null in WaitBufferEmpty, fd:%d.", m_fd),
+                    errdetail("N/A"),
+                    errcause("System error."),
+                    erraction("Contact Huawei Engineer.")));
+            }
+
+            if (comm_sock->m_status == CommSockStatusClosedByPeer) {
                 ClearQueuePacket();
                 return;
             }
@@ -1209,5 +1243,17 @@ void CommPacketBuffer::BackPktBuff(Packet* pack)
     }
 
     ClearPacket(&pack);
-    g_comm_controller->FdGetCommSockDesc(m_fd)->m_communicator->m_packet_buf[m_type]->push(pack);
+
+    CommSockDesc* comm_sock = g_comm_controller->FdGetCommSockDesc(m_fd);
+    if (comm_sock == NULL || comm_sock->m_communicator == NULL ||
+        comm_sock->m_communicator->m_packet_buf[m_type] == NULL) {
+        ereport(ERROR, (errmodule(MOD_COMM_PROXY),
+            errcode(ERRCODE_SYSTEM_ERROR),
+            errmsg("Can't find CommSockDesc or m_communicator is null or m_packet_buf is null in BackPktBuff, "
+                "fd:%d, type:%d.", m_fd, m_type),
+            errdetail("N/A"),
+            errcause("System error."),
+            erraction("Contact Huawei Engineer.")));
+    }
+    comm_sock->m_communicator->m_packet_buf[m_type]->push(pack);
 }

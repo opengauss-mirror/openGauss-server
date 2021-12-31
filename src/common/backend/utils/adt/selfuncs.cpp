@@ -12,6 +12,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -6784,9 +6785,13 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
         Oid staoid = relid;
 
         if (OidIsValid(rte->partitionOid)) {
-            Assert(rte->isContainPartition && rte->ispartrel);
+            Assert(rte->ispartrel);
+            if (rte->isContainPartition) {
+                staoid = rte->partitionOid;
+            } else if (rte->isContainSubPartition) {
+                staoid = rte->subpartitionOid;
+            }
             stakind = STARELKIND_PARTITION;
-            staoid = rte->partitionOid;
         }
 
         if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP) {
@@ -8037,7 +8042,6 @@ double estimate_hash_num_distinct(PlannerInfo* root, List* hashkey, Path* inner_
 
     Assert(IsA(inner_path, StreamPath) || IsA(inner_path, HashPath) || IsLocatorReplicated(inner_path->locator_type));
 
-    // if (IsLocatorReplicated(vardata->rel->locator_type) || IsLocatorReplicated(inner_path->locator_type))
     if (IsLocatorReplicated(inner_path->locator_type)) {
         /* Inner is broadcast or replication, we should use global distinct. */
         ndistinct = global_ndistinct;

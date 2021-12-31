@@ -266,8 +266,14 @@ bool get_function_name(long long funcid, PolicyLabelItem *name);
 int get_privilege_type(const char *name);
 int get_privilege_object_type(const char *name);
 const char *get_privilege_object_name(int type);
+void load_function_label(const Query *query, bool audit_exist);
 
 bool name_list_to_string(List *names, gs_stl::gs_string *name, int max_const_count = -1 /* unlimited */);
 bool name_list_to_label(PolicyLabelItem *item, List *names, char *name = NULL, size_t name_size = 0);
+
+/* build PolicyLabelItem helper function*/
+void gen_policy_labelitem(PolicyLabelItem &item, const ListCell *rel, int objtype);
+void gen_policy_label_for_commentstmt(PolicyLabelItem &item, const CommentStmt *commentstmt);
+int get_objtype(int object_type);
 
 #endif /* GS_POLICY_OBJECT_TYPES_H_ */

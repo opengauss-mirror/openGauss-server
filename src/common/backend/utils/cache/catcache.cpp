@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -23,8 +24,10 @@
 #include "access/transam.h"
 #include "access/tuptoaster.h"
 #include "access/valid.h"
+#include "catalog/pg_description.h"
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
+#include "catalog/pg_proc_fn.h"
 #include "catalog/pg_type.h"
 #include "catalog/pg_attribute.h"
 #include "catalog/heap.h"
@@ -376,7 +379,11 @@ static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, Heap
         case 4:
             v4 = (cc_keyno[3] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
                                                           : fastgetattr(tuple, cc_keyno[3], cc_tupdesc, &isNull);
+#ifndef ENABLE_MULTIPLE_NODES
+            Assert(!isNull || (cache->cc_reloid == ProcedureRelationId));
+#else
             Assert(!isNull);
+#endif
         case 3:
             v3 = (cc_keyno[2] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
                                                           : fastgetattr(tuple, cc_keyno[2], cc_tupdesc, &isNull);
@@ -385,7 +392,14 @@ static uint32 CatalogCacheComputeTupleHashValue(CatCache* cache, int nkeys, Heap
         case 2:
             v2 = (cc_keyno[1] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
                                                           : fastgetattr(tuple, cc_keyno[1], cc_tupdesc, &isNull);
+#ifndef ENABLE_MULTIPLE_NODES
+            if (unlikely(cache->cc_indexoid == ProcedureNameAllArgsNspIndexId && isNull)) {
+                v2 = 0;
+            }
+            Assert(!isNull || (cache->cc_reloid == ProcedureRelationId));
+#else
             Assert(!isNull);
+#endif
             /* FALLTHROUGH */
         case 1:
             v1 = (cc_keyno[0] == ObjectIdAttributeNumber) ? ObjectIdGetDatum(HeapTupleGetOid(tuple))
@@ -1024,7 +1038,11 @@ static void CatalogCacheInitializeCache(CatCache* cache)
         cache->cc_skey[i].sk_strategy = BTEqualStrategyNumber;
         cache->cc_skey[i].sk_subtype = InvalidOid;
         /* Currently, there are no catcaches on collation-aware data types */
-        cache->cc_skey[i].sk_collation = InvalidOid;
+        if (keytype == TEXTOID) {
+            cache->cc_skey[i].sk_collation = DEFAULT_COLLATION_OID;
+        } else {
+            cache->cc_skey[i].sk_collation = InvalidOid;
+        }
     }
 
     /*
@@ -1063,12 +1081,26 @@ void InitCatCachePhase2(CatCache* cache, bool touch_index)
         LockRelationOid(cache->cc_indexoid, AccessShareLock);
 
         idesc = RelationIdGetRelation(cache->cc_indexoid);
+#ifndef ENABLE_MULTIPLE_NODES
+        if (!(t_thrd.proc->workingVersionNum < 92470 && cache->cc_indexoid == ProcedureNameAllArgsNspIndexId)) {
+            if (!RelationIsValid(idesc)) {
+                elog(LOG, "CatalogCacheCompute:%d", t_thrd.proc->workingVersionNum);
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("could not open index with OID %u", cache->cc_indexoid)));
+            }
+        } else {
+            UnlockRelationOid(cache->cc_reloid, AccessShareLock);
+            UnlockRelationOid(cache->cc_indexoid, AccessShareLock);
+            return;
+        }
+#else
         if (!RelationIsValid(idesc)) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                     errmsg("could not open index with OID %u", cache->cc_indexoid)));
         }
-
+#endif
         index_close(idesc, AccessShareLock);
         UnlockRelationOid(cache->cc_reloid, AccessShareLock);
     }
@@ -1284,6 +1316,7 @@ HeapTuple SearchCatCacheInternal(CatCache* cache, int nkeys, Datum v1, Datum v2,
     return SearchCatCacheMiss(cache, nkeys, hashValue, hashIndex, v1, v2, v3, v4, level);
 }
 
+HeapTuple CreateHeapTuple4BuiltinFuncDesc(const Builtin_func* func, TupleDesc desc);
 HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc);
 
 /*
@@ -1300,7 +1333,7 @@ static HeapTuple SearchBuiltinProcByNameArgNsp(CatCache* cache, int nkeys, Datum
     oidvector* argtypes = NULL;
     const FuncGroup* gfuncs = NULL;
 
-    Assert(nkeys == 3);
+    Assert(nkeys == 3 || nkeys == 4);
 
     funcname = NameStr(*(DatumGetName(arguments[0])));
     gfuncs = SearchBuiltinFuncByName(funcname);
@@ -1687,6 +1720,31 @@ uint32 GetCatCacheHashValue(CatCache* cache, Datum v1, Datum v2, Datum v3, Datum
     return CatalogCacheComputeHashValue(cache, cache->cc_nkeys, v1, v2, v3, v4);
 }
 
+HeapTuple CreateHeapTuple4BuiltinFuncDesc(const Builtin_func* func, TupleDesc desc)
+{
+    int i;
+    HeapTuple tup;
+    bool nulls[Natts_pg_description];
+    Datum values[Natts_pg_description];
+
+    for (i = 0; i < Natts_pg_description; i++)
+    {
+        nulls[i] = false;
+        values[i] = (Datum)0;
+    }
+    values[Anum_pg_description_objoid - 1] = ObjectIdGetDatum(func->foid);
+    values[Anum_pg_description_classoid - 1] = ObjectIdGetDatum(ProcedureRelationId);
+    values[Anum_pg_description_objsubid - 1] = Int32GetDatum(0);
+    values[Anum_pg_description_description - 1] = CStringGetTextDatum(func->descr);
+
+    /* create tuple */
+    tup = heap_form_tuple(desc, values, nulls);
+
+    HeapTupleHeaderSetXminFrozen(tup->t_data);
+    tup->t_data->t_infomask |= HEAP_XMAX_INVALID;
+    return tup;
+}
+
 /*
  * the function is used only in split the buildin functions from pg_proc systable
  * param desc: desc isn't NULL when it is called for build builtin function
@@ -1983,6 +2041,33 @@ HeapTuple CreateHeapTuple4BuiltinFunc(const Builtin_func* func, TupleDesc desc)
         nulls[Anum_pg_proc_proallargtypes - 1] = true;
     }
 
+    if (allParameterTypes != PointerGetDatum(NULL)) {
+        /*
+         * do this when the number of all paramters is too large
+         */
+        if (allParamCount <= FUNC_MAX_ARGS_INROW) {
+            values[Anum_pg_proc_allargtypes - 1] = PointerGetDatum(allParameterTypes);
+            nulls[Anum_pg_proc_allargtypesext - 1] = true;
+        } else {
+            /*
+             * The OIDVECTOR and INT2VECTOR datatypes are storage-compatible with
+             * generic arrays, but they support only one-dimensional arrays with no
+             * nulls (and no null bitmap).
+             */
+            oidvector* dummy = MakeMd5HashArgTypes((oidvector*)allParameterTypes);
+
+            values[Anum_pg_proc_allargtypes - 1] = PointerGetDatum(dummy);
+            values[Anum_pg_proc_allargtypesext - 1] = PointerGetDatum(allParameterTypes);
+        }
+    } else if (parameterTypes != PointerGetDatum(NULL)) {
+        values[Anum_pg_proc_allargtypes - 1] = values[Anum_pg_proc_proargtypes - 1];
+        values[Anum_pg_proc_allargtypesext - 1] = values[Anum_pg_proc_proargtypesext - 1];
+        nulls[Anum_pg_proc_allargtypesext - 1] = nulls[Anum_pg_proc_proargtypesext - 1];
+    } else {
+        nulls[Anum_pg_proc_allargtypes - 1] = true;
+        nulls[Anum_pg_proc_allargtypesext - 1] = true;
+    }
+
     if (parameterModes != PointerGetDatum(NULL)) {
         values[Anum_pg_proc_proargmodes - 1] = parameterModes;
     } else {
@@ -2245,8 +2330,7 @@ List* SearchBuiltinProcCacheList(CatCache* cache, int nkey, Datum* arguments, Li
 
 TupleDesc CreateTupDesc4BuiltinFuncWithOid()
 {
-    TupleDesc tupdesc = CreateTemplateTupleDesc(38, false, TAM_HEAP);
-
+    TupleDesc tupdesc = CreateTemplateTupleDesc(40, false, TAM_HEAP);
     TupleDescInitEntry(tupdesc, (AttrNumber)1, "proname", NAMEOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)2, "pronamespace", OIDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)3, "proowner", OIDOID, -1, 0);
@@ -2284,8 +2368,9 @@ TupleDesc CreateTupDesc4BuiltinFuncWithOid()
     TupleDescInitEntry(tupdesc, (AttrNumber)35, "proisprivate", BOOLOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)36, "proargtypesext", OIDVECTOREXTENDOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber)37, "prodefaultargposext", INT2VECTOREXTENDOID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber)38, "oid", OIDOID, -1, 0);
-
+    TupleDescInitEntry(tupdesc, (AttrNumber)38, "allargtypes", OIDVECTOROID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)Anum_pg_proc_allargtypesext, "allargtypesext", OIDVECTOREXTENDOID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)40, "oid", OIDOID, -1, 0);
     return tupdesc;
 }
 
@@ -2337,6 +2422,27 @@ void InsertBuiltinFuncInBootstrap()
             heap_freetuple(tup);
         }
     }
+}
+
+void InsertBuiltinFuncDescInBootstrap()
+{
+    HeapTuple tup = NULL;
+    const Builtin_func* func = NULL;
+    Relation rel = heap_open(DescriptionRelationId, RowExclusiveLock);
+    for (int i = 0; i < g_nfuncgroups; i++) {
+        const FuncGroup* fg = &g_func_groups[i];
+        for (int j = 0; j < fg->fnums; j++) {
+            func = &fg->funcs[j];
+            if (func->descr == NULL) {
+                continue;
+            }
+            tup = CreateHeapTuple4BuiltinFuncDesc(func, RelationGetDescr(rel));
+            simple_heap_insert(rel, tup);
+            CatalogUpdateIndexes(rel, tup);
+            heap_freetuple(tup);
+        }
+    }
+    heap_close(rel, NoLock);
 }
 
 /*
@@ -2903,7 +3009,8 @@ void PrepareToInvalidateCacheTuple(
 
         if (ccp->cc_reloid != reloid)
             continue;
-
+        if (ccp->cc_indexoid == ProcedureNameAllArgsNspIndexId && t_thrd.proc->workingVersionNum < 92470)
+            continue;
         /* Just in case cache hasn't finished initialization yet... */
         if (ccp->cc_tupdesc == NULL)
             CatalogCacheInitializeCache(ccp);

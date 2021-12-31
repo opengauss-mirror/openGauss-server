@@ -39,6 +39,7 @@
 #include "utils/biginteger.h"
 #include "utils/gs_bitmap.h"
 #include "utils/guc.h"
+#include "utils/guc_sql.h"
 #include "utils/int8.h"
 #include "utils/numeric.h"
 #include "utils/sortsupport.h"
@@ -335,6 +336,22 @@ Datum numeric_out(PG_FUNCTION_ARGS)
     char* str = NULL;
     int scale = 0;
 
+    if (u_sess->attr.attr_sql.for_print_tuple && !u_sess->attr.attr_sql.numeric_out_for_format) {
+        char *result = NULL;
+        /* to prevent stack overflow*/
+        u_sess->attr.attr_sql.numeric_out_for_format = true;
+        double var = DatumGetFloat8(DirectFunctionCall1(numeric_float8, NumericGetDatum(num)));
+        u_sess->attr.attr_sql.numeric_out_for_format = false;
+        if (strcmp(u_sess->attr.attr_common.pset_num_format, "")) {
+            result = apply_num_format(var);
+        } else if (u_sess->attr.attr_common.pset_num_width > 0) {
+            result = apply_num_width(var);
+        }
+        if (result != NULL) {
+            PG_RETURN_CSTRING(result);
+        }
+    }
+
     /*
      * Handle NaN
      */
@@ -459,7 +476,6 @@ char *numeric_normalize(Numeric num)
     NumericVar  x;
     char       *str = NULL;
     int         orig, last;
-
     /*
      * Handle NaN
      */
@@ -481,7 +497,6 @@ char *numeric_normalize(Numeric num)
     }
     return str;
 }
-
 
 /*
  *		numeric_recv			- converts external binary format to numeric
@@ -4173,6 +4188,40 @@ static void set_var_from_var(const NumericVar* value, NumericVar* dest)
     dest->digits = newbuf + 1;
 }
 
+static void remove_tail_zero(char *ascii)
+{
+    if (!HIDE_TAILING_ZERO || ascii == NULL) {
+        return;
+    }
+    int len = 0;
+    bool is_decimal = false;
+    while (ascii[len] != '\0') {
+        if (ascii[len] == '.') {
+            is_decimal = true;
+        }
+        len++;
+    }
+    if (!is_decimal) {
+        return;
+    }
+    len--;
+    while (ascii[len] == '0') {
+        ascii[len] = '\0';
+        len--;
+    }
+    if (ascii[len] == '.') {
+        ascii[len] = '\0';
+        len--;
+    }
+    if (len == -1) {
+        len++;
+        ascii[len] = '0';
+        len++;
+        ascii[len] = '\0';
+    }
+    return;
+}
+
 /*
  * get_str_from_var() -
  *
@@ -4303,6 +4352,7 @@ static char* get_str_from_var(NumericVar* var)
      * terminate the string and return it
      */
     *cp = '\0';
+    remove_tail_zero(str);
     return str;
 }
 
@@ -18711,6 +18761,13 @@ Numeric convert_int64_to_numeric(int64 data, uint8 scale)
     return result;
 }
 
+static inline uint16 GetNHeader(NumericVar var)
+{
+    return (var.sign == NUMERIC_NEG ? (NUMERIC_SHORT | NUMERIC_SHORT_SIGN_MASK) : NUMERIC_SHORT) |
+        ((uint32)var.dscale << NUMERIC_SHORT_DSCALE_SHIFT) | (var.weight < 0 ? NUMERIC_SHORT_WEIGHT_SIGN_MASK : 0) |
+        ((uint32)var.weight & NUMERIC_SHORT_WEIGHT_MASK);
+}
+
 /*
  * @Description: This function convert big integer128 to
  *               short numeric
@@ -18869,10 +18926,7 @@ Numeric convert_int128_to_numeric(int128 data, int scale)
         securec_check(rc, "\0", "\0");
     }
 
-    result->choice.n_short.n_header =
-        (var.sign == NUMERIC_NEG ? (NUMERIC_SHORT | NUMERIC_SHORT_SIGN_MASK) : NUMERIC_SHORT) |
-        (var.dscale << NUMERIC_SHORT_DSCALE_SHIFT) | (var.weight < 0 ? NUMERIC_SHORT_WEIGHT_SIGN_MASK : 0) |
-        (var.weight & NUMERIC_SHORT_WEIGHT_MASK);
+    result->choice.n_short.n_header = GetNHeader(var);
 
     /* Check for overflow of int64 fields */
     Assert(NUMERIC_NDIGITS(result) == (unsigned int)(pre_digits + post_digits));
@@ -18968,4 +19022,197 @@ int32 get_ndigit_from_numeric(Numeric num)
     }
 
     return result;
+}
+
+
+/*
+ * Convert int16 value to numeric.
+ */
+void int128_to_numericvar(int128 val, NumericVar* var)
+{
+    uint128 uval, newuval;
+    NumericDigit* ptr = NULL;
+    int ndigits;
+
+    /* int128 can require at most 39 decimal digits; add one for safety */
+    alloc_var(var, 40 / DEC_DIGITS);
+    if (val < 0) {
+        var->sign = NUMERIC_NEG;
+        uval = -val;
+    } else {
+        var->sign = NUMERIC_POS;
+        uval = val;
+    }
+    var->dscale = 0;
+    if (val == 0) {
+        var->ndigits = 0;
+        var->weight = 0;
+        return;
+    }
+    ptr = var->digits + var->ndigits;
+    ndigits = 0;
+    do {
+        ptr--;
+        ndigits++;
+        newuval = uval / NBASE;
+        *ptr = uval - newuval * NBASE;
+        uval = newuval;
+    } while (uval);
+    var->digits = ptr;
+    var->ndigits = ndigits;
+    var->weight = ndigits - 1;
+}
+
+/*
+ * Convert numeric to int16, rounding if needed.
+ *
+ * If overflow, return false (no error is raised).  Return true if okay.
+ */
+static bool numericvar_to_int128(const NumericVar* var, int128* result)
+{
+    NumericDigit* digits = NULL;
+    int ndigits;
+    int weight;
+    int i;
+    int128 val;
+    bool neg = false;
+    NumericVar rounded;
+
+    /* Round to nearest integer */
+    init_var(&rounded);
+    set_var_from_var(var, &rounded);
+    round_var(&rounded, 0);
+
+    /* Check for zero input */
+    strip_var(&rounded);
+    ndigits = rounded.ndigits;
+    if (ndigits == 0) {
+        *result = 0;
+        free_var(&rounded);
+        return true;
+    }
+
+    /*
+     * For input like 10000000000, we must treat stripped digits as real. So
+     * the loop assumes there are weight+1 digits before the decimal point.
+     */
+    weight = rounded.weight;
+    Assert(weight >= 0 && ndigits <= weight + 1);
+
+    /*
+     * Construct the result. To avoid issues with converting a value
+     * corresponding to INT128_MIN (which can't be represented as a positive 64
+     * bit two's complement integer), accumulate value as a negative number.
+     */
+    digits = rounded.digits;
+    neg = (rounded.sign == NUMERIC_NEG);
+    val = -digits[0];
+    for (i = 1; i <= weight; i++) {
+        if (unlikely(pg_mul_s128_overflow(val, NBASE, &val))) {
+            free_var(&rounded);
+            return false;
+        }
+
+        if (i < ndigits) {
+            if (unlikely(pg_sub_s128_overflow(val, digits[i], &val))) {
+                free_var(&rounded);
+                return false;
+            }
+        }
+    }
+
+    free_var(&rounded);
+
+    if (!neg) {
+        if (unlikely(val == PG_INT128_MIN))
+            return false;
+        val = -val;
+    }
+    *result = val;
+
+    return true;
+}
+
+Datum int16_numeric(PG_FUNCTION_ARGS)
+{
+    int128 val = PG_GETARG_INT128(0);
+    Numeric res;
+    NumericVar result;
+
+    init_var(&result);
+
+    int128_to_numericvar(val, &result);
+
+    res = make_result(&result);
+
+    free_var(&result);
+
+    PG_RETURN_NUMERIC(res);
+}
+
+int128 numeric_int16_internal(Numeric num)
+{
+    int128 result = 0;
+    NumericVar x;
+    uint16 numFlags = NUMERIC_NB_FLAGBITS(num);
+
+    if (NUMERIC_FLAG_IS_NANORBI(numFlags)) {
+        /* Handle Big Integer */
+        if (NUMERIC_FLAG_IS_BI(numFlags))
+            num = makeNumericNormal(num);
+        /* XXX would it be better to return NULL? */
+        else
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot convert NaN to int128")));
+    }
+
+    /* Convert to variable format and thence to int8 */
+    init_var_from_num(num, &x);
+
+    if (!numericvar_to_int128(&x, &result))
+        ereport(ERROR, (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE), errmsg("int128 out of range")));
+
+    return result;
+}
+
+Datum numeric_int16(PG_FUNCTION_ARGS)
+{
+    Numeric num = PG_GETARG_NUMERIC(0);
+    int128 result = numeric_int16_internal(num);
+    PG_RETURN_INT128(result);
+}
+
+Datum numeric_bool(PG_FUNCTION_ARGS)
+{
+    Numeric num = PG_GETARG_NUMERIC(0);
+    bool result = false;
+    char* tmp = DatumGetCString(DirectFunctionCall1(numeric_out, NumericGetDatum(num)));
+
+    if (strcmp(tmp, "0") != 0) {
+        result = true;
+    }
+
+    pfree_ext(tmp);
+
+    PG_RETURN_BOOL(result);
+}
+
+Datum bool_numeric(PG_FUNCTION_ARGS)
+{
+    int val = 1;
+    if (PG_GETARG_BOOL(0) == false) {
+        val = 0;
+    }
+
+    Numeric res;
+    NumericVar result;
+
+    init_var(&result);
+
+    int64_to_numericvar((int64)val, &result);
+
+    res = make_result(&result);
+
+    free_var(&result);
+
+    PG_RETURN_NUMERIC(res);
 }

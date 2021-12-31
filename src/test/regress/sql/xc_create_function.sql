@@ -4,6 +4,9 @@
 
 -- Create a couple of functions used by Postgres-XC tests
 -- A function to create table on specified nodes
+create database pl_test_xc_func DBCOMPATIBILITY 'pg';
+\c pl_test_xc_func;
+
 create or replace function create_table_nodes(tab_schema varchar, distribution varchar, cmd_suffix varchar)
 returns void language plpgsql as $$
 declare
@@ -130,17 +133,19 @@ declare
 query_string text;
 begin
 for i in 1..rownums loop
-query_string := query_string ||' ; create table multi_query_table_'||i||'(id int /*number;*/,info numeric(20,3)) /*;info*/ ; /*empty*/ ;insert into multi_query_table_'||i||' values(1,1.1);';
+query_string := ' ; create table multi_query_table_'||i||'(id int /*number;*/,info numeric(20,3)) /*;info*/ ; /*empty*/ ;insert into multi_query_table_'||i||' values(1,1.1);';
 end loop;
 execute immediate query_string;
 return true;
 end;
 $$ language plpgsql;
-call multi_query_func(2);
+select multi_query_func(1);
 select * from multi_query_table_1;
-select * from multi_query_table_2;
-drop table multi_query_table_1,multi_query_table_2;
+drop table multi_query_table_1;
 
 /
 declare i integer :=5; begin << label1 >> while i>0 loop i := i-1; end loop label1; end;end;declare begin drop table if exists anonymous_block_tbl;create table anonymous_block_tbl(col_integer integer); end; end;
 /
+
+\c regression;
+drop database IF EXISTS pl_test_xc_func;

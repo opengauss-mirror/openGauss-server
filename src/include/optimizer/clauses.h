@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/optimizer/clauses.h
  *
@@ -63,7 +64,7 @@ extern double tlist_returns_set_rows(List* tlist);
 extern bool contain_subplans(Node* clause);
 
 extern bool contain_mutable_functions(Node* clause);
-extern bool contain_volatile_functions(Node* clause);
+extern bool contain_volatile_functions(Node* clause, bool deep = false);
 extern bool contain_specified_function(Node* clause, Oid funcid);
 extern bool contain_nonstrict_functions(Node* clause, bool check_agg = false);
 extern bool contain_leaky_functions(Node* clause);
@@ -91,7 +92,6 @@ extern Node* eval_const_expressions_params(PlannerInfo* root, Node* node, ParamL
 extern Node* estimate_expression_value(PlannerInfo* root, Node* node, EState* estate = NULL);
 
 extern Query* inline_set_returning_function(PlannerInfo* root, RangeTblEntry* rte);
-extern Query* search_cte_by_parse_tree(Query* parse, RangeTblEntry* rte, bool under_recursive_tree);
 extern bool filter_cstore_clause(PlannerInfo* root, Expr* clause);
 /* evaluate_expr used to be a  static function */
 extern Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result_collation);

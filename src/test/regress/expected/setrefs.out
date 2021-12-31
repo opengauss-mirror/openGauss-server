@@ -22,7 +22,7 @@ GROUP BY ROLLUP(PARTY_FIRSTNAME);
 (1 row)
 
 explain  (costs off, verbose on)
-WITH WITH_001 AS (
+WITH WITH_001 AS materialized (
     SELECT CAST(associate_expns_type_cd AS varchar) c1
     FROM associate_benefit_expense
     GROUP BY CUBE(c1))
@@ -63,6 +63,44 @@ GROUP BY ROLLUP(PARTY_FIRSTNAME);
                            ->  CStore Scan on public.offers_20050701
                                  Output: offers_20050701.party_firstname
 (30 rows)
+
+explain  (costs off, verbose on)
+WITH WITH_001 AS (
+    SELECT CAST(associate_expns_type_cd AS varchar) c1
+    FROM associate_benefit_expense
+    GROUP BY CUBE(c1))
+SELECT PARTY_FIRSTNAME
+FROM WITH_001,offers_20050701
+WHERE WITH_001.c1 LIKE '%c_'
+GROUP BY ROLLUP(PARTY_FIRSTNAME);
+                                                                                  QUERY PLAN                                                                                   
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: offers_20050701.party_firstname
+   ->  Vector Sort Aggregate
+         Output: offers_20050701.party_firstname
+         Group By Key: offers_20050701.party_firstname
+         Group By Key: ()
+         ->  Vector Sort
+               Output: offers_20050701.party_firstname
+               Sort Key: offers_20050701.party_firstname
+               ->  Vector Nest Loop
+                     Output: offers_20050701.party_firstname
+                     ->  CStore Scan on public.offers_20050701
+                           Output: offers_20050701.party_firstname
+                     ->  Vector Materialize
+                           Output: ((associate_benefit_expense.associate_expns_type_cd)::character varying)
+                           ->  Vector Sort Aggregate
+                                 Output: ((associate_benefit_expense.associate_expns_type_cd)::character varying)
+                                 Group By Key: ((associate_benefit_expense.associate_expns_type_cd)::character varying)
+                                 Group By Key: ()
+                                 Filter: ((associate_benefit_expense.associate_expns_type_cd)::text ~~ '%c_'::text)
+                                 ->  Vector Sort
+                                       Output: ((associate_benefit_expense.associate_expns_type_cd)::character varying), associate_benefit_expense.associate_expns_type_cd
+                                       Sort Key: ((associate_benefit_expense.associate_expns_type_cd)::character varying)
+                                       ->  CStore Scan on public.associate_benefit_expense
+                                             Output: (associate_benefit_expense.associate_expns_type_cd)::character varying, associate_benefit_expense.associate_expns_type_cd
+(25 rows)
 
 drop table if exists associate_benefit_expense,offers_20050701;
 create table position_grade(

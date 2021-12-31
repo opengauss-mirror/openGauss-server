@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/commands/tablecmds.h
  *
@@ -144,10 +145,11 @@ extern Const* GetPartitionValue(List* pos, Form_pg_attribute* attrs, List* value
 extern Node* GetTargetValue(Form_pg_attribute attrs, Const* src, bool isinterval);
 extern void ATExecEnableDisableRls(Relation rel, RelationRlsStatus changeType, LOCKMODE lockmode);
 extern bool isQueryUsingTempRelation(Query *query);
-extern void addToastTableForNewPartition(Relation relation, Oid newPartId);
+extern void addToastTableForNewPartition(Relation relation, Oid newPartId, bool isForSubpartition = false);
 extern void fastDropPartition(Relation rel, Oid partOid, const char* stmt, Oid intervalPartOid = InvalidOid);
 extern void ExecutePurge(PurgeStmt* stmt);
 extern void ExecuteTimeCapsule(TimeCapsuleStmt* stmt);
 extern void truncate_check_rel(Relation rel);
 extern void CheckDropViewValidity(ObjectType stmtType, char relKind, const char* relname);
+extern int getPartitionElementsIndexByOid(Relation partTableRel, Oid partOid);
 #endif /* TABLECMDS_H */

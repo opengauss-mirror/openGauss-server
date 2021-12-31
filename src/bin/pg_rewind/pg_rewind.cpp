@@ -171,8 +171,9 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     state.build_info.build_mode = INC_BUILD;
     UpdateDBStateFile(gaussdb_state_file, &state);
     pg_log(PG_PROGRESS,
-        "set gaussdb state file when rewind:"
-        "db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(INC_BUILD).\n");
+        "set gaussdb state file when %s build:"
+        "db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(INC_BUILD).\n",
+        (build_mode == CROSS_CLUSTER_INC_BUILD? "cross_cluster_incremental" : "incremental"));
 
     /* Connect to remote server */
     rv = libpqConnect(connstr_source);
@@ -186,6 +187,7 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
                "The source DN primary can't connect to dummy standby. Please repairing the dummy standby first.\n");
         libpqDisconnect();
         pg_free(sysidentifier);
+        sysidentifier = NULL;
         exit(1);
     }
 
@@ -197,12 +199,14 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     PG_CHECKBUILD_AND_RETURN();
     digestControlFile(&ControlFile_target, (const char*)buffer);
     pg_free(buffer);
+    buffer = NULL;
     PG_CHECKBUILD_AND_RETURN();
 
     buffer = fetchFile("global/pg_control", &size);
     PG_CHECKBUILD_AND_RETURN();
     digestControlFile(&ControlFile_source, buffer);
     pg_free(buffer);
+    buffer = NULL;
     PG_CHECKBUILD_AND_RETURN();
     pg_log(PG_PROGRESS, "get pg_control success\n");
 
@@ -319,8 +323,12 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
     securec_check_ss_c(nRet, "", "");
     get_xlog_location(xlog_location);
     pg_log(PG_PROGRESS, "Starting copy xlog, start point: %s\n", xlog_start);
-    StartLogStreamer(xlog_start, timeline, sysidentifier, (const char*)xlog_location, term);
-
+    bool startSuccess = StartLogStreamer(xlog_start, timeline, sysidentifier, (const char*)xlog_location, term);
+    if (!startSuccess) {
+        pg_fatal("start log streamer failed: %s\n", strerror(errno));
+        return BUILD_FATAL;
+    }
+    
     /* Create build_complete.start file first */
     canonicalize_path(start_file);
     if ((fd = open(start_file, O_WRONLY | O_CREAT | O_EXCL, 0600)) < 0) {
@@ -471,7 +479,8 @@ BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char*
         datadir_target = NULL;
     }
 
-    pg_log(PG_PROGRESS, "dn incremental build completed.\n");
+    pg_log(PG_PROGRESS, "dn %s build completed.\n", 
+        (build_mode == CROSS_CLUSTER_INC_BUILD? "cross_cluster_incremental" : "incremental"));
     return BUILD_SUCCESS;
 }
 

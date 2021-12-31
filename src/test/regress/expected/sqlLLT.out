@@ -1,3 +1,5 @@
+create database pl_test_llt DBCOMPATIBILITY 'pg';
+\c pl_test_llt
 --int1
 create table source(a int);
 insert into source values(1);
@@ -3192,9 +3194,9 @@ select to_timestamp('I','rm');
 (1 row)
 
 select to_date(19980101100000);
-         to_date          
---------------------------
- Thu Jan 01 10:00:00 1998
+  to_date   
+------------
+ 01-01-1998
 (1 row)
 
 create schema alter_llt1;
@@ -3331,8 +3333,7 @@ ERROR:  UNLISTEN statement is not yet supported.
 NOTIFY virtual;
 ERROR:  NOFITY statement is not yet supported.
 CREATE LANGUAGE plperl;
-ERROR:  Error: environment variable "$libdir/plperl" contain invaild symbol "$".
-
+ERROR:  new language is not yet supported.
 CREATE OPERATOR FAMILY name USING
 ALTER OPERATOR FAMILY integer_ops USING btree ADD
 OPERATOR 1 < (int4, int2) ,
@@ -3346,3 +3347,5 @@ ERROR:  text search dictionary "my_dict" does not exist
 drop table t1 CASCADE;
 NOTICE:  drop cascades to function test(t1)
 drop table test_raw cascade;
+\c regression;
+drop database IF EXISTS pl_test_llt;

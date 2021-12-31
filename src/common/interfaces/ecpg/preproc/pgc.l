@@ -400,7 +400,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 <xc>{op_chars}	{ ECHO; }
 <xc>\*+			{ ECHO; }
 
-<xc><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated /* comment"); }
+<xc><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated /* comment"); break;}
 
 <SQL>{xbstart}	{
 					token_start = yytext;
@@ -422,7 +422,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 <xb>{xbinside}	{ addlit(yytext, yyleng); }
 <xh>{quotecontinue}	|
 <xb>{quotecontinue}	{ /* ignore */ }
-<xb><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated bit string literal"); }
+<xb><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated bit string literal"); break;}
 
 <SQL>{xhstart}	{
 					token_start = yytext;
@@ -438,7 +438,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 				return XCONST;
 			}
 
-<xh><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated hexadecimal string literal"); }
+<xh><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated hexadecimal string literal"); break;}
 <SQL>{xnstart} {
 				/* National character.
 				 * Transfer it as-is to the backend.
@@ -516,7 +516,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 			   /* This is only needed for \ just before EOF */
 			   addlitchar(yytext[0]);
 			}
-<xq,xqc,xe,xn,xus><<EOF>>	{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated quoted string"); }
+<xq,xqc,xe,xn,xus><<EOF>>	{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated quoted string"); break;}
 <SQL>{dolqfailed}	{
 				/* throw back all but the initial "$" */
 				yyless(1);
@@ -556,7 +556,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 				/* single quote or dollar sign */
 				addlitchar(yytext[0]);
 			}
-<xdolq><<EOF>>		{ base_yyerror("unterminated dollar-quoted string"); }
+<xdolq><<EOF>>		{ base_yyerror("unterminated dollar-quoted string"); break;}
 <SQL>{xdstart}		{
 						state_before = YYSTATE;
 						BEGIN(xd);
@@ -592,7 +592,7 @@ cppline			{space}*#([^i][A-Za-z]*|{if}|{ifdef}|{ifndef}|{import})(.*\\{space})*.
 					}
 <xd,xui>{xddouble}		{ addlitchar('"'); }
 <xd,xui>{xdinside}		{ addlit(yytext, yyleng); }
-<xd,xdc,xui><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated quoted identifier"); }
+<xd,xdc,xui><<EOF>>		{ mmerror(PARSE_ERROR, ET_FATAL, "unterminated quoted identifier"); break;}
 <C,SQL>{xdstart}	{
 						state_before = YYSTATE;
 						BEGIN(xdc);

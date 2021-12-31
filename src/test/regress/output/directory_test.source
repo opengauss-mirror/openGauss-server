@@ -16,7 +16,13 @@ WARNING:  could not get "/home/dummydirreplace" status, directory does not exist
 CREATE DIRECTORY ErrorQuote AS '/home''DIR';
 ERROR:  directory path contains illegal string: "'"
 CREATE DIRECTORY RelativePath AS '../DIR/subdir';
-ERROR:  directory path contains illegal string: "."
+ERROR:  directory path cannot be relative
+DETAIL:  N/A
+CREATE OR REPLACE DIRECTORY RelativePath AS 'DIR';
+ERROR:  directory path cannot be relative
+DETAIL:  N/A
+CREATE OR REPLACE DIRECTORY DummyDir AS '/home/dummy.dir';
+WARNING:  could not get "/home/dummy.dir" status, directory does not exist, must make sure directory existance before using
 SELECT * FROM PG_DIRECTORY;
 --?.*
 --?.*
@@ -54,8 +60,6 @@ SELECT * FROM PG_DIRECTORY;
 REVOKE ALL ON DIRECTORY DummyDir FROM ROSE;
 --alter owner to
 ALTER DIRECTORY DummyDir OWNER TO LEON;
-ERROR:  permission denied to change owner of directory
-HINT:  new owner must be superuser to alter a directory.
 ALTER DIRECTORY DummyDir OWNER TO JACK;
 --drop directory
 DROP DIRECTORY NormalDir;
@@ -109,13 +113,151 @@ DROP DIRECTORY data_dir;
 CREATE USER CARRIE sysadmin PASSWORD 'Gauss@123';
 SET SESSION AUTHORIZATION CARRIE PASSWORD 'Gauss@123';
 CREATE DIRECTORY data_dir AS '@abs_srcdir@/data';
-ERROR:  permission denied to create directory "data_dir"
-HINT:  must be initial user to create a directory.
+ERROR:  permission denied to create directory
+HINT:  must be initial user to create a directory
 DROP DIRECTORY data_dir;
-ERROR:  permission denied to drop directory "data_dir"
-HINT:  must be initial user to drop a directory.
+ERROR:  directory "data_dir" does not exist
 RESET SESSION AUTHORIZATION;
 SET enable_access_server_directory = ON;
 ERROR:  parameter "enable_access_server_directory" cannot be changed now
 DROP USER CARRIE;
 DROP SCHEMA test_directory;
+-- gs_role_directory_create, gs_role_directory_drop
+RESET ROLE;
+CREATE USER test_user1 PASSWORD '1234567i*';
+CREATE USER test_user2 PASSWORD '1234567i*';
+CREATE USER test_user3 PASSWORD '1234567i*';
+CREATE USER test_sysadmin SYSADMIN PASSWORD '1234567i*';
+CREATE USER test_create PASSWORD '1234567i*' IN ROLE gs_role_directory_create;
+CREATE USER test_drop PASSWORD '1234567i*' IN ROLE gs_role_directory_drop;
+CREATE DIRECTORY test_dir1 AS '@testtablespace@/dir1';
+WARNING:  could not get "@testtablespace@/dir1" status, directory does not exist, must make sure directory existance before using
+GRANT DROP ON DIRECTORY test_dir1 TO test_user1 WITH GRANT OPTION;
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ERROR:  permission denied to create directory
+HINT:  must be initial user to create a directory
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+ERROR:  permission denied to change owner of directory
+HINT:  must be initial user to change owner of a directory
+DROP DIRECTORY test_dir1;
+ERROR:  permission denied to drop directory "test_dir1"
+HINT:  must be initial user to drop a directory
+SET ROLE test_sysadmin PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ERROR:  permission denied to create directory
+HINT:  must be initial user to create a directory
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+ERROR:  permission denied to change owner of directory
+HINT:  must be initial user to change owner of a directory
+DROP DIRECTORY test_dir1;
+ERROR:  permission denied to drop directory "test_dir1"
+HINT:  must be initial user to drop a directory
+SET ROLE test_create PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ERROR:  permission denied to create directory
+HINT:  must be initial user to create a directory
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+ERROR:  permission denied to change owner of directory
+HINT:  must be initial user to change owner of a directory
+DROP DIRECTORY test_dir1;
+ERROR:  permission denied to drop directory "test_dir1"
+HINT:  must be initial user to drop a directory
+SET ROLE test_drop PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ERROR:  permission denied to create directory
+HINT:  must be initial user to create a directory
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+ERROR:  permission denied to change owner of directory
+HINT:  must be initial user to change owner of a directory
+DROP DIRECTORY test_dir1;
+ERROR:  permission denied to drop directory "test_dir1"
+HINT:  must be initial user to drop a directory
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_access_server_directory=on" >/dev/null 2>&1
+SET ROLE test_user1 PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ERROR:  permission denied to create directory
+HINT:  must be sysadmin or a member of the gs_role_directory_create role to create a directory
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+ERROR:  must be owner of directory test_dir1
+DETAIL:  N/A
+DROP DIRECTORY test_dir1;
+RESET ROLE;
+CREATE DIRECTORY test_dir1 AS '@testtablespace@/dir1';
+WARNING:  could not get "@testtablespace@/dir1" status, directory does not exist, must make sure directory existance before using
+GRANT DROP ON DIRECTORY test_dir1 TO test_user1 WITH GRANT OPTION;
+SELECT has_directory_privilege('test_user1','test_dir1','DROP');
+ has_directory_privilege 
+-------------------------
+ t
+(1 row)
+
+SELECT has_directory_privilege('test_dir1','DROP');
+ has_directory_privilege 
+-------------------------
+ t
+(1 row)
+
+SELECT has_directory_privilege('test_user1',(select oid from pg_directory where dirname='test_dir1'),'DROP');
+ has_directory_privilege 
+-------------------------
+ t
+(1 row)
+
+SELECT has_directory_privilege((select oid from pg_directory where dirname='test_dir1'),'DROP');
+ has_directory_privilege 
+-------------------------
+ t
+(1 row)
+
+SELECT has_directory_privilege((select oid from pg_authid where rolname='test_user1'),'test_dir1','DROP');
+ has_directory_privilege 
+-------------------------
+ t
+(1 row)
+
+SELECT has_directory_privilege((select oid from pg_authid where rolname='test_user1'),(select oid from pg_directory where dirname='test_dir1'),'DROP');
+ has_directory_privilege 
+-------------------------
+ t
+(1 row)
+
+SET ROLE test_user1 PASSWORD '1234567i*';
+GRANT DROP ON DIRECTORY test_dir1 TO test_user2;
+SET ROLE test_user2 PASSWORD '1234567i*';
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+ERROR:  permission denied to create directory
+HINT:  must be sysadmin or a member of the gs_role_directory_create role to create a directory
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+ERROR:  must be owner of directory test_dir1
+DETAIL:  N/A
+DROP DIRECTORY test_dir1;
+RESET ROLE;
+CREATE DIRECTORY test_dir1 AS '@testtablespace@/dir1';
+WARNING:  could not get "@testtablespace@/dir1" status, directory does not exist, must make sure directory existance before using
+SET ROLE test_create PASSWORD '1234567i*';
+ALTER DIRECTORY test_dir1 OWNER TO test_user3;
+ERROR:  must be owner of directory test_dir1
+DETAIL:  N/A
+DROP DIRECTORY test_dir1;
+ERROR:  permission denied for directory test_dir1
+DETAIL:  N/A
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+WARNING:  could not get "@testtablespace@/dir2" status, directory does not exist, must make sure directory existance before using
+ALTER DIRECTORY test_dir2 OWNER TO test_user3;
+ERROR:  must be member of role "test_user3"
+DROP DIRECTORY test_dir2;
+CREATE DIRECTORY test_dir2 AS '@testtablespace@/dir2';
+WARNING:  could not get "@testtablespace@/dir2" status, directory does not exist, must make sure directory existance before using
+SET ROLE test_drop PASSWORD '1234567i*';
+CREATE DIRECTORY test_di3 AS '@testtablespace@/dir3';
+ERROR:  permission denied to create directory
+HINT:  must be sysadmin or a member of the gs_role_directory_create role to create a directory
+DROP DIRECTORY test_dir1;
+DROP DIRECTORY test_dir2;
+\! rm -rf @testtablespace@/dir1
+\! rm -rf @testtablespace@/dir2
+\! @abs_bindir@/gs_guc reload -Z datanode -D @abs_srcdir@/tmp_check/datanode1 -c "enable_access_server_directory=off" >/dev/null 2>&1
+RESET ROLE;
+DROP USER test_user1,test_user2,test_user3;
+DROP USER test_sysadmin,test_create,test_drop;

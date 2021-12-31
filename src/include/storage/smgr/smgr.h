@@ -224,5 +224,6 @@ extern Datum smgrne(PG_FUNCTION_ARGS);
 
 extern void partition_create_new_storage(Relation rel, Partition part, const RelFileNodeBackend& filenode);
 extern ScalarToDatum GetTransferFuncByTypeOid(Oid attTypeOid);
-extern bool check_unlink_rel_hashtbl(RelFileNode rnode);
+extern bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum);
+
 #endif /* SMGR_H */

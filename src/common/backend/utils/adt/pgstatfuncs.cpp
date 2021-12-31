@@ -195,6 +195,14 @@ extern Datum pg_stat_get_buf_written_backend(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_buf_fsync_backend(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_buf_alloc(PG_FUNCTION_ARGS);
 
+typedef enum XactAction {
+    XACTION_INSERT = 0,
+    XACTION_UPDATE,
+    XACTION_DELETE,
+    XACTION_HOTUPDATE,
+    XACTION_OTHER
+} XactAction;
+static void pg_stat_update_xact_tuples(Oid relid, PgStat_Counter *result, XactAction action);
 extern Datum pg_stat_get_xact_numscans(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_xact_tuples_returned(PG_FUNCTION_ARGS);
 extern Datum pg_stat_get_xact_tuples_fetched(PG_FUNCTION_ARGS);
@@ -815,31 +823,55 @@ Datum pg_stat_get_live_tuples(PG_FUNCTION_ARGS)
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
+    List* sublist = NIL;
+    ListCell* subcell = NULL;
 
     /* for user-define table, fetch live tuples from datanode*/
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_live_tuples", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
-        tabkey.statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
-        tabkey.statFlag = relid;
+    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(reltuple)) {
+        PG_RETURN_INT64(result);
+    }
+    Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
+    if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
         stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+        foreach (stat_cell, stat_list) {
+            Oid subparentid = lfirst_oid(stat_cell);
+            sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+            tabkey.statFlag = subparentid;
+            foreach (subcell, sublist) {
+                tabkey.tableid = lfirst_oid(subcell);
+                tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+                if (tabentry != NULL)
+                    result += (int64)(tabentry->n_live_tuples);
+            }
+            list_free_ext(sublist);
+        }
+        list_free_ext(stat_list);
+    } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
+        char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
+        if (relation->relkind == RELKIND_INDEX) {
+            objtype = PART_OBJ_TYPE_INDEX_PARTITION;
+        }
+        stat_list = getPartitionObjectIdList(relid, objtype);
+        tabkey.statFlag = relid;
+        foreach (stat_cell, stat_list) {
+            tabkey.tableid = lfirst_oid(stat_cell);
+            tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+            if (tabentry != NULL)
+                result += (int64)(tabentry->n_live_tuples);
+        }
+        list_free_ext(stat_list);
     } else {
         tabkey.statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, relid);
-    }
-
-    foreach (stat_cell, stat_list) {
-        tabkey.tableid = lfirst_oid(stat_cell);
+        tabkey.tableid = relid;
         tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-        if (PointerIsValid(tabentry))
+        if (tabentry != NULL)
             result += (int64)(tabentry->n_live_tuples);
     }
-
-    list_free(stat_list);
+    ReleaseSysCache(reltuple);
 
     PG_RETURN_INT64(result);
 }
@@ -852,31 +884,54 @@ Datum pg_stat_get_dead_tuples(PG_FUNCTION_ARGS)
     int64 result = 0;
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
+    List* sublist = NIL;
+    ListCell* subcell = NULL;
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_dead_tuples", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
-        tabkey.statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
-        tabkey.statFlag = relid;
+    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(reltuple)) {
+        PG_RETURN_INT64(result);
+    }
+    Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
+    if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
         stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+        foreach (stat_cell, stat_list) {
+            Oid subparentid = lfirst_oid(stat_cell);
+            sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+            tabkey.statFlag = subparentid;
+            foreach (subcell, sublist) {
+                tabkey.tableid = lfirst_oid(subcell);
+                tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+                if (tabentry != NULL)
+                    result += (int64)(tabentry->n_dead_tuples);
+            }
+            list_free_ext(sublist);
+        }
+        list_free_ext(stat_list);
+    } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
+        char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
+        if (relation->relkind == RELKIND_INDEX) {
+            objtype = PART_OBJ_TYPE_INDEX_PARTITION;
+        }
+        stat_list = getPartitionObjectIdList(relid, objtype);
+        tabkey.statFlag = relid;
+        foreach (stat_cell, stat_list) {
+            tabkey.tableid = lfirst_oid(stat_cell);
+            tabentry = pgstat_fetch_stat_tabentry(&tabkey);
+            if (tabentry != NULL)
+                result += (int64)(tabentry->n_dead_tuples);
+        }
+        list_free_ext(stat_list);
     } else {
         tabkey.statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, relid);
-    }
-
-    foreach (stat_cell, stat_list) {
-        tabkey.tableid = lfirst_oid(stat_cell);
+        tabkey.tableid = relid;
         tabentry = pgstat_fetch_stat_tabentry(&tabkey);
-
-        if (PointerIsValid(tabentry))
+        if (tabentry != NULL)
             result += (int64)(tabentry->n_dead_tuples);
     }
-
-    if (PointerIsValid(stat_list))
-        list_free(stat_list);
+    ReleaseSysCache(reltuple);
 
     PG_RETURN_INT64(result);
 }
@@ -1672,7 +1727,9 @@ static void pgDoFreeRemainSegment(const RemainSegsCtx* remainSegsCtx, uint32 seg
 
     if (remainExtentType == ALLOC_SEGMENT || remainExtentType == DROP_SEGMENT) {
         SMgrRelation srel = smgropen(extentTag->remainExtentHashTag.rnode, InvalidBackendId);
-        smgrdounlink(srel, false);
+        if (smgrexists(srel, extentTag->forkNum)) {
+            smgrdounlink(srel, false);
+        }
         smgrclose(srel);
     } else if (remainExtentType == SHRINK_EXTENT) {
         if (extentTag->remainExtentHashTag.extentType == EXTENT_INVALID || extentTag->forkNum == InvalidForkNumber) {
@@ -1696,27 +1753,76 @@ static void pgRemoveRemainSegInfo(RemainSegsCtx* remainSegsCtx, uint32 segIdx)
     (remainSegsCtx->remainSegsNum)--;
 }
 
+static uint32 pgGetRemainContentLen(RemainSegsCtx* remainSegsCtx)
+{
+    uint32 contentLen = 0;
+    contentLen += sizeof(const uint32);
+    contentLen += sizeof(XLogRecPtr);
+    contentLen += sizeof(uint32);
+    contentLen += remainSegsCtx->remainSegsNum * sizeof(ExtentTag);
+    contentLen += sizeof(const uint32);
+    return contentLen;
+}
+
+static void pgMakeUpRemainSegsContent(const RemainSegsCtx* remainSegsCtx, char* contentBuffer)
+{
+    uint32 usedLen = 0;
+    const uint32 magicNum = REMAIN_SEG_MAGIC_NUM;
+    errno_t errc = memcpy_s(contentBuffer, sizeof(const uint32), &magicNum, sizeof(const uint32));
+    securec_check(errc, "\0", "\0");
+    usedLen += sizeof(uint32);
+
+    errc = memcpy_s(contentBuffer + usedLen, sizeof(XLogRecPtr), &remainSegsCtx->remainStartPoint, sizeof(XLogRecPtr));
+    securec_check(errc, "\0", "\0");
+    usedLen += sizeof(XLogRecPtr);
+
+    errc = memcpy_s(contentBuffer + usedLen, sizeof(uint32), &remainSegsCtx->remainSegsNum, sizeof(uint32));
+    securec_check(errc, "\0", "\0");
+    usedLen += sizeof(uint32);
+
+    if (remainSegsCtx->remainSegsNum) {
+        errc = memcpy_s(contentBuffer + usedLen, remainSegsCtx->remainSegsNum * sizeof(ExtentTag),
+                        remainSegsCtx->remainSegsBuf, remainSegsCtx->remainSegsNum * sizeof(ExtentTag));
+        securec_check(errc, "\0", "\0");
+        usedLen += remainSegsCtx->remainSegsNum * sizeof(ExtentTag);
+    }
+    
+    errc = memcpy_s(contentBuffer + usedLen, sizeof(const uint32), &magicNum, sizeof(const uint32));
+    securec_check(errc, "\0", "\0");
+}
+
 static void pgOutputRemainInfoToFile(RemainSegsCtx* remainSegsCtx)
 {
-    int fd = BasicOpenFile(XLOG_REMAIN_SEGS_FILE_PATH, O_RDWR | O_CREAT | PG_BINARY, S_IRUSR | S_IWUSR);
+    uint32 contentLen = pgGetRemainContentLen(remainSegsCtx);
+    pg_crc32c crc;
+    char* contentBuffer = (char *)palloc_huge(CurrentMemoryContext, (contentLen + sizeof(pg_crc32c)));
+
+    pgMakeUpRemainSegsContent(remainSegsCtx, contentBuffer);
+
+    /* Contents are protected with a CRC */
+    INIT_CRC32C(crc);
+    COMP_CRC32C(crc, contentBuffer, contentLen);
+    FIN_CRC32C(crc);
+    *(pg_crc32c *)(contentBuffer + contentLen) = crc;
+    
+    int fd = BasicOpenFile(XLOG_REMAIN_SEGS_FILE_PATH, O_RDWR | O_CREAT | O_TRUNC | PG_BINARY, S_IRUSR | S_IWUSR);
     if (fd < 0) {
+        pfree_ext(contentBuffer);
         ereport(ERROR, (errcode_for_file_access(), 
                 errmsg("could not create remain segs file \"%s\": %m", XLOG_REMAIN_SEGS_FILE_PATH)));
+        return;
     }
 
-    uint32 magicNum = REMAIN_SEG_MAGIC_NUM;
-    WriteRemainSegsFile(fd, (char *)&magicNum, sizeof(const uint32));
-
-    WriteRemainSegsFile(fd, (char *)&remainSegsCtx->remainStartPoint, sizeof(XLogRecPtr));
-
-    WriteRemainSegsFile(fd, (char *)remainSegsCtx->remainSegsBuf, sizeof(ExtentTag) * remainSegsCtx->remainSegsNum);
-
-    WriteRemainSegsFile(fd, (char *)&magicNum, sizeof(const uint32));
+    WriteRemainSegsFile(fd, contentBuffer, contentLen + sizeof(pg_crc32c));
 
     if (close(fd)) {
+        pfree_ext(contentBuffer);
         ereport(ERROR, (errcode_for_file_access(), errmsg("could not close remain segs file \"%s\": %m",
                 XLOG_REMAIN_SEGS_FILE_PATH)));
+        return;
     }
+
+    pfree_ext(contentBuffer);
 }
 
 Datum pg_free_remain_segment(PG_FUNCTION_ARGS)
@@ -5631,7 +5737,17 @@ void insert_pg_stat_get_session_wlmstat(Tuplestorestate *tupStore, TupleDesc tup
         if (beentry->st_state == STATE_UNDEFINED || beentry->st_state == STATE_DISABLED) {
             nulls[++i] = true;
         } else {
-            values[++i] = CStringGetTextDatum(beentry->st_activity);
+            char* mask_string = NULL;
+            /* Mask password in query string */
+            mask_string = maskPassword(beentry->st_activity);
+            if (mask_string == NULL) {
+                mask_string = beentry->st_activity;
+            }
+            values[++i] = CStringGetTextDatum(mask_string);
+
+            if (mask_string != beentry->st_activity) {
+                pfree(mask_string);
+            }
         }
 
         /*use backend state to get all workload info*/
@@ -7739,43 +7855,115 @@ Datum pg_stat_get_xact_tuples_fetched(PG_FUNCTION_ARGS)
     PG_RETURN_INT64(result);
 }
 
+static void pg_stat_update_xact_tuples(Oid relid, PgStat_Counter *result, XactAction action)
+{
+    Assert(result != NULL);
+
+    PgStat_TableStatus* tabentry = NULL;
+    PgStat_TableXactStatus* trans = NULL;
+    List* stat_list = NIL;
+    ListCell* stat_cell = NULL;
+    List* sublist = NIL;
+    ListCell* subcell = NULL;
+    Oid t_statFlag = InvalidOid;
+    Oid t_id = InvalidOid;
+
+    int offset1 = 0; /* offset of PgStat_TableCounts */
+    int offset2 = 0; /* offset of PgStat_TableXactStatus */
+    bool hassubtransactions = false;
+    switch (action) {
+        /* for iud, subtransactions' counts aren't in t_tuples yet */
+        case XACTION_INSERT:
+            offset1 = offsetof(PgStat_TableCounts, t_tuples_inserted);
+            offset2 = offsetof(PgStat_TableXactStatus, tuples_inserted);
+            hassubtransactions = true;
+            break;
+        case XACTION_UPDATE:
+            offset1 = offsetof(PgStat_TableCounts, t_tuples_updated);
+            offset2 = offsetof(PgStat_TableXactStatus, tuples_updated);
+            hassubtransactions = true;
+            break;
+        case XACTION_DELETE:
+            offset1 = offsetof(PgStat_TableCounts, t_tuples_deleted);
+            offset2 = offsetof(PgStat_TableXactStatus, tuples_deleted);
+            hassubtransactions = true;
+            break;
+        case XACTION_HOTUPDATE:
+            offset1 = offsetof(PgStat_TableCounts, t_tuples_hot_updated);
+            break;
+        default:
+            return;
+    }
+
+    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(reltuple)) {
+        return;
+    }
+    Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
+
+    if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
+        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+        foreach (stat_cell, stat_list) {
+            Oid subparentid = lfirst_oid(stat_cell);
+            sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+            t_statFlag = subparentid;
+            foreach (subcell, sublist) {
+                t_id = lfirst_oid(subcell);
+                tabentry = find_tabstat_entry(t_id, t_statFlag);
+                if (tabentry != NULL) {
+                    *result += *(PgStat_Counter *)((char *)&tabentry->t_counts + offset1);
+                    if (hassubtransactions) {
+                        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
+                            *result += *(PgStat_Counter *)((char *)trans + offset2);
+                    }
+                }
+            }
+            list_free_ext(sublist);
+        }
+        list_free_ext(stat_list);
+    } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
+        char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
+        if (relation->relkind == RELKIND_INDEX) {
+            objtype = PART_OBJ_TYPE_INDEX_PARTITION;
+        }
+        stat_list = getPartitionObjectIdList(relid, objtype);
+        t_statFlag = relid;
+        foreach (stat_cell, stat_list) {
+            t_id = lfirst_oid(stat_cell);
+            tabentry = find_tabstat_entry(t_id, t_statFlag);
+            if (tabentry != NULL) {
+                *result += *(PgStat_Counter *)((char *)&tabentry->t_counts + offset1);
+                if (hassubtransactions) {
+                    for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
+                        *result += *(PgStat_Counter *)((char *)trans + offset2);
+                }
+            }
+        }
+        list_free_ext(stat_list);
+    } else {
+        t_statFlag = InvalidOid;
+        t_id = relid;
+        tabentry = find_tabstat_entry(t_id, t_statFlag);
+        if (tabentry != NULL) {
+            *result += *(PgStat_Counter *)((char *)&tabentry->t_counts + offset1);
+            if (hassubtransactions) {
+                for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
+                    *result += *(PgStat_Counter *)((char *)trans + offset2);
+            }
+        }
+    }
+    ReleaseSysCache(reltuple);
+}
+
 Datum pg_stat_get_xact_tuples_inserted(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
-    List* stat_list = NIL;
-    ListCell* stat_cell = NULL;
-    uint32 t_statFlag = InvalidOid;
-    PgStat_TableStatus* tabentry = NULL;
-    PgStat_TableXactStatus* trans = NULL;
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_inserted", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else {
-        t_statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, relid);
-    }
-
-    foreach (stat_cell, stat_list) {
-        Oid t_id = lfirst_oid(stat_cell);
-        tabentry = find_tabstat_entry(t_id, t_statFlag);
-
-        if (!PointerIsValid(tabentry))
-            continue;
-
-        result += tabentry->t_counts.t_tuples_inserted;
-
-        /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-            result += trans->tuples_inserted;
-    }
+    pg_stat_update_xact_tuples(relid, &result, XACTION_INSERT);
 
     PG_RETURN_INT64(result);
 }
@@ -7784,39 +7972,11 @@ Datum pg_stat_get_xact_tuples_updated(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
-    List* stat_list = NIL;
-    ListCell* stat_cell = NULL;
-    uint32 t_statFlag = InvalidOid;
-    PgStat_TableStatus* tabentry = NULL;
-    PgStat_TableXactStatus* trans = NULL;
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_updated", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else {
-        t_statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, relid);
-    }
-
-    foreach (stat_cell, stat_list) {
-        Oid t_id = lfirst_oid(stat_cell);
-        tabentry = find_tabstat_entry(t_id, t_statFlag);
-
-        if (!PointerIsValid(tabentry))
-            continue;
-
-        result += tabentry->t_counts.t_tuples_updated;
-
-        /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-            result += trans->tuples_updated;
-    }
+    pg_stat_update_xact_tuples(relid, &result, XACTION_UPDATE);
 
     PG_RETURN_INT64(result);
 }
@@ -7825,39 +7985,11 @@ Datum pg_stat_get_xact_tuples_deleted(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
-    List* stat_list = NIL;
-    ListCell* stat_cell = NULL;
-    uint32 t_statFlag = InvalidOid;
-    PgStat_TableStatus* tabentry = NULL;
-    PgStat_TableXactStatus* trans = NULL;
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_deleted", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else {
-        t_statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, relid);
-    }
-
-    foreach (stat_cell, stat_list) {
-        Oid t_id = lfirst_oid(stat_cell);
-        tabentry = find_tabstat_entry(t_id, t_statFlag);
-
-        if (!PointerIsValid(tabentry))
-            continue;
-
-        result += tabentry->t_counts.t_tuples_deleted;
-
-        /* live subtransactions' counts aren't in t_tuples_inserted yet */
-        for (trans = tabentry->trans; trans != NULL; trans = trans->upper)
-            result += trans->tuples_deleted;
-    }
+    pg_stat_update_xact_tuples(relid, &result, XACTION_DELETE);
 
     PG_RETURN_INT64(result);
 }
@@ -7866,34 +7998,11 @@ Datum pg_stat_get_xact_tuples_hot_updated(PG_FUNCTION_ARGS)
 {
     Oid relid = PG_GETARG_OID(0);
     int64 result = 0;
-    List* stat_list = NIL;
-    ListCell* stat_cell = NULL;
-    uint32 t_statFlag = InvalidOid;
-    PgStat_TableStatus* tabentry = NULL;
 
     if (IS_PGXC_COORDINATOR && GetRelationLocInfo((relid)))
         PG_RETURN_INT64(pgxc_exec_tuples_stat(relid, "pg_stat_get_xact_tuples_hot_updated", EXEC_ON_DATANODES));
 
-    if (isPartitionedObject(relid, RELKIND_RELATION, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
-    } else if (isPartitionedObject(relid, RELKIND_INDEX, true)) {
-        t_statFlag = relid;
-        stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else {
-        t_statFlag = InvalidOid;
-        stat_list = lappend_oid(stat_list, relid);
-    }
-
-    foreach (stat_cell, stat_list) {
-        Oid t_id = lfirst_oid(stat_cell);
-        tabentry = find_tabstat_entry(t_id, t_statFlag);
-
-        if (!PointerIsValid(tabentry))
-            continue;
-
-        result += tabentry->t_counts.t_tuples_hot_updated;
-    }
+    pg_stat_update_xact_tuples(relid, &result, XACTION_HOTUPDATE);
 
     PG_RETURN_INT64(result);
 }
@@ -8080,28 +8189,47 @@ Datum pg_stat_reset_shared(PG_FUNCTION_ARGS)
 /* Reset a a single counter in the current database */
 Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
 {
-    Oid taboid = PG_GETARG_OID(0);
-    Oid p_objectid;
+    Oid relid = PG_GETARG_OID(0);
     List* stat_list = NIL;
     ListCell* stat_cell = NULL;
+    List* sublist = NIL;
+    ListCell* subcell = NULL;
 
     /* no syscache in collector thread, we just deal with all partitions here */
-    if (isPartitionedObject(taboid, RELKIND_INDEX, true)) {
-        p_objectid = taboid;
-        stat_list = getPartitionObjectIdList(taboid, PART_OBJ_TYPE_INDEX_PARTITION);
-    } else if (isPartitionedObject(taboid, RELKIND_RELATION, true)) {
-        p_objectid = taboid;
-        stat_list = getPartitionObjectIdList(taboid, PART_OBJ_TYPE_TABLE_PARTITION);
+    HeapTuple reltuple = SearchSysCache1(RELOID, ObjectIdGetDatum(relid));
+    if (!HeapTupleIsValid(reltuple)) {
+        pgstat_reset_single_counter(InvalidOid, relid, RESET_TABLE);
     } else {
-        p_objectid = InvalidOid;
-        stat_list = lappend_oid(stat_list, taboid);
-    }
+        Form_pg_class relation = (Form_pg_class)GETSTRUCT(reltuple);
 
-    foreach (stat_cell, stat_list) {
-        /* reset every partition it is a partitioned object */
-        pgstat_reset_single_counter(p_objectid, lfirst_oid(stat_cell), RESET_TABLE);
+        if (PARTTYPE_SUBPARTITIONED_RELATION == relation->parttype) {
+            stat_list = getPartitionObjectIdList(relid, PART_OBJ_TYPE_TABLE_PARTITION);
+            foreach (stat_cell, stat_list) {
+                Oid subparentid = lfirst_oid(stat_cell);
+                sublist = getPartitionObjectIdList(subparentid, PART_OBJ_TYPE_TABLE_SUB_PARTITION);
+                foreach (subcell, sublist) {
+                    /* reset every partition it is a subpartitioned object */
+                    pgstat_reset_single_counter(subparentid, lfirst_oid(subcell), RESET_TABLE);
+                }
+                list_free_ext(sublist);
+            }
+            list_free_ext(stat_list);
+        } else if (PARTTYPE_PARTITIONED_RELATION == relation->parttype) {
+            char objtype = PART_OBJ_TYPE_TABLE_PARTITION;
+            if (relation->relkind == RELKIND_INDEX) {
+                objtype = PART_OBJ_TYPE_INDEX_PARTITION;
+            }
+            stat_list = getPartitionObjectIdList(relid, objtype);
+            foreach (stat_cell, stat_list) {
+                /* reset every partition it is a partitioned object */
+                pgstat_reset_single_counter(relid, lfirst_oid(stat_cell), RESET_TABLE);
+            }
+            list_free_ext(stat_list);
+        } else {
+            pgstat_reset_single_counter(InvalidOid, relid, RESET_TABLE);
+        }
+        ReleaseSysCache(reltuple);
     }
-    list_free(stat_list);
 
     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
         Relation rel = NULL;
@@ -8112,7 +8240,7 @@ Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
         char* relname = NULL;
         char* nspname = NULL;
 
-        rel = try_relation_open(taboid, AccessShareLock);
+        rel = try_relation_open(relid, AccessShareLock);
         if (!rel)
             PG_RETURN_NULL();
 
@@ -8129,7 +8257,7 @@ Datum pg_stat_reset_single_table_counters(PG_FUNCTION_ARGS)
         exec_nodes->accesstype = RELATION_ACCESS_READ;
         exec_nodes->primarynodelist = NIL;
         exec_nodes->en_expr = NULL;
-        exec_nodes->en_relid = taboid;
+        exec_nodes->en_relid = relid;
         exec_nodes->nodeList = NIL;
 
         initStringInfo(&buf);
@@ -8669,7 +8797,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             fctx->record[i].forknum = bufHdr->tag.forkNum;
             fctx->record[i].blocknum = bufHdr->tag.blockNum;
             fctx->record[i].usagecount = BUF_STATE_GET_USAGECOUNT(buf_state);
-            fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
+			fctx->record[i].pinning_backends = BUF_STATE_GET_REFCOUNT(buf_state);
 
             if (buf_state & BM_DIRTY)
                 fctx->record[i].isdirty = true;
@@ -8713,7 +8841,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
          * Set all fields except the bufferid to null if the buffer is unused
          * or not valid.
          */
-        if (fctx->record[i].blocknum == InvalidBlockNumber) {
+        if (fctx->record[i].blocknum == InvalidBlockNumber || fctx->record[i].isvalid == false) {
             nulls[1] = true;
             nulls[2] = true;
             nulls[3] = true;
@@ -8745,7 +8873,7 @@ Datum pg_buffercache_pages(PG_FUNCTION_ARGS)
             nulls[8] = false;
             values[9] = BoolGetDatum(fctx->record[i].isvalid);
             nulls[9] = false;
-            values[10] = Int16GetDatum(fctx->record[i].usagecount);
+			values[10] = Int16GetDatum(fctx->record[i].usagecount);
             nulls[10] = false;
             values[11] = Int32GetDatum(fctx->record[i].pinning_backends);
             nulls[11] = false;
@@ -10576,12 +10704,12 @@ void init_pg_comm_status(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const int a
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "rxpck_rate", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "txpck_rate", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "rxkB_rate", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "txkB_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "rxkbyte_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "txkbyte_rate", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "buffer", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "memKB_libcomm", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "memKB_libpq", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "used_PM", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "memkbyte_libcomm", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "memkbyte_libpq", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "used_pm", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "used_sflow", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_11, "used_rflow", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_12, "used_rloop", INT4OID, -1, 0);
@@ -10664,12 +10792,12 @@ void init_pgxc_comm_get_status(PG_FUNCTION_ARGS, FuncCallContext *funcctx, const
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_1, "node_name", TEXTOID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_2, "rxpck_rate", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_3, "txpck_rate", INT4OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "rxkB_rate", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "txkB_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_4, "rxkbyte_rate", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_5, "txkbyte_rate", INT8OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_6, "buffer", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "memKB_libcomm", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "memKB_libpq", INT8OID, -1, 0);
-    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "used_PM", INT4OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_7, "memkbyte_libcomm", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_8, "memkbyte_libpq", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber) ARG_9, "used_pm", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_10, "used_sflow", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_11, "used_rflow", INT4OID, -1, 0);
     TupleDescInitEntry(tupdesc, (AttrNumber) ARG_12, "used_rloop", INT4OID, -1, 0);
@@ -13306,7 +13434,8 @@ typedef enum FuncName {
     INCRE_CKPT_FUNC,
     INCRE_BGWRITER_FUNC,
     DW_SINGLE_FUNC,
-    DW_BATCH_FUNC
+    DW_BATCH_FUNC,
+    CANDIDATE_FUNC
 } FuncName;
 
 HeapTuple form_function_tuple(int col_num, FuncName name)
@@ -13370,6 +13499,15 @@ HeapTuple form_function_tuple(int col_num, FuncName name)
                 nulls[i] = false;
             }
             break;
+        case CANDIDATE_FUNC:
+            for (i = 0; i < col_num; i++) {
+                TupleDescInitEntry(
+                    tupdesc, (AttrNumber)(i + 1), g_pagewirter_view_two_col[i].name,
+                    g_pagewirter_view_two_col[i].data_type, -1, 0);
+                values[i] = g_pagewirter_view_two_col[i].get_val();
+                nulls[i] = false;
+            }
+            break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("unknow func name")));
             break;
@@ -13398,6 +13536,12 @@ Datum local_bgwriter_stat(PG_FUNCTION_ARGS)
     PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
 }
 
+Datum local_candidate_stat(PG_FUNCTION_ARGS)
+{
+    HeapTuple tuple = form_function_tuple(CANDIDATE_VIEW_COL_NUM, CANDIDATE_FUNC);
+    PG_RETURN_DATUM(HeapTupleGetDatum(tuple));
+}
+
 void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
 {
     MemoryContext oldcontext = NULL;
@@ -13411,12 +13555,8 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
     switch (name) {
         case PAGEWRITER_FUNC:
             for (i = 0; i < col_num; i++) {
-                TupleDescInitEntry(tupdesc,
-                    (AttrNumber)(i + 1),
-                    g_pagewriter_view_col[i].name,
-                    g_pagewriter_view_col[i].data_type,
-                    -1,
-                    0);
+                TupleDescInitEntry(tupdesc, (AttrNumber)(i + 1), g_pagewriter_view_col[i].name,
+                    g_pagewriter_view_col[i].data_type, -1, 0);
             }
             break;
         case INCRE_CKPT_FUNC:
@@ -13429,6 +13569,13 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
             for (i = 0; i < col_num; i++) {
                 TupleDescInitEntry(
                     tupdesc, (AttrNumber)(i + 1), g_bgwriter_view_col[i].name, g_bgwriter_view_col[i].data_type, -1, 0);
+            }
+            break;
+        case CANDIDATE_FUNC:
+            for (i = 0; i < col_num; i++) {
+                TupleDescInitEntry(
+                    tupdesc, (AttrNumber)(i + 1), g_pagewirter_view_two_col[i].name,
+                    g_pagewirter_view_two_col[i].data_type, -1, 0);
             }
             break;
         default:
@@ -13448,6 +13595,9 @@ void xc_stat_view(FuncCallContext* funcctx, int col_num, FuncName name)
             break;
         case INCRE_BGWRITER_FUNC:
             funcctx->user_fctx = get_remote_stat_bgwriter(funcctx->tuple_desc);
+            break;
+        case CANDIDATE_FUNC:
+            funcctx->user_fctx = get_remote_stat_candidate(funcctx->tuple_desc);
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), errmsg("unknow func name")));
@@ -13624,6 +13774,64 @@ Datum remote_bgwriter_stat(PG_FUNCTION_ARGS)
     SRF_RETURN_DONE(funcctx);
 #endif
 }
+
+Datum remote_candidate_stat(PG_FUNCTION_ARGS)
+{
+#ifndef ENABLE_MULTIPLE_NODES
+    FuncCallContext* funcctx = NULL;
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+        errmsg("unsupported view in single node mode.")));
+
+    SRF_RETURN_DONE(funcctx);
+#else
+    FuncCallContext* funcctx = NULL;
+    HeapTuple tuple = NULL;
+    Datum values[CANDIDATE_VIEW_COL_NUM];
+    bool nulls[CANDIDATE_VIEW_COL_NUM] = {false};
+    int i;
+    errno_t rc;
+
+    rc = memset_s(values, sizeof(values), 0, sizeof(values));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(nulls, sizeof(nulls), 1, sizeof(nulls));
+    securec_check(rc, "\0", "\0");
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+        xc_stat_view(funcctx, CANDIDATE_VIEW_COL_NUM, CANDIDATE_FUNC);
+
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
+        }
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
+            ExecDropSingleTupleTableSlot(slot);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
+        }
+        for (i = 0; i < CANDIDATE_VIEW_COL_NUM; i++) {
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
+        }
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+
+    SRF_RETURN_DONE(funcctx);
+#endif
+}
+
 
 Datum local_single_flush_dw_stat(PG_FUNCTION_ARGS)
 {
@@ -14143,7 +14351,6 @@ Datum remote_rto_stat(PG_FUNCTION_ARGS)
 
     /* stuff done on every call of the function */
     funcctx = SRF_PERCALL_SETUP();
-
     if (funcctx->user_fctx) {
         Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
         TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
@@ -14290,7 +14497,6 @@ Datum remote_recovery_status(PG_FUNCTION_ARGS)
 
     /* stuff done on every call of the function */
     funcctx = SRF_PERCALL_SETUP();
-
     if (funcctx->user_fctx) {
         Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
         TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
@@ -14303,6 +14509,154 @@ Datum remote_recovery_status(PG_FUNCTION_ARGS)
             SRF_RETURN_DONE(funcctx);
         }
         for (uint32 i = 0; i < RECOVERY_RTO_VIEW_COL; i++) {
+            values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
+        }
+        HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        ExecClearTuple(slot);
+
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+    SRF_RETURN_DONE(funcctx);
+#endif
+}
+
+Datum gs_hadr_local_rto_and_rpo_stat(PG_FUNCTION_ARGS)
+{
+    FuncCallContext* funcctx = NULL;
+    MemoryContext oldcontext = NULL;
+    HadrRTOAndRPOData* entry = NULL;
+
+    /* stuff done only on the first call of the function */
+    if (SRF_IS_FIRSTCALL()) {
+        TupleDesc tupdesc = NULL;
+
+        /* create a function context for cross-call persistence */
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        /*
+         * switch to memory context appropriate for multiple function
+         * calls
+         */
+        oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* need a tuple descriptor representing 6 columns */
+        tupdesc = CreateTemplateTupleDesc(HADR_RTO_RPO_VIEW_COL, false);
+
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "hadr_sender_node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "hadr_receiver_node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "source_ip", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "source_port", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "dest_ip", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "dest_port", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "current_rto", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "target_rto", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "current_rpo", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)10, "target_rpo", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)11, "current_sleep_time", INT8OID, -1, 0);
+        /* complete descriptor of the tupledesc */
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+
+        funcctx->user_fctx = (void*)HadrGetRTOStat(&(funcctx->max_calls));
+
+        (void)MemoryContextSwitchTo(oldcontext);
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    entry = (HadrRTOAndRPOData*)funcctx->user_fctx;
+
+    if (funcctx->call_cntr < funcctx->max_calls) { /* do when there is more left to send */
+        Datum values[HADR_RTO_RPO_VIEW_COL];
+        bool nulls[HADR_RTO_RPO_VIEW_COL] = {false};
+        HeapTuple tuple = NULL;
+
+        errno_t rc = 0;
+        rc = memset_s(values, sizeof(values), 0, sizeof(values));
+        securec_check(rc, "\0", "\0");
+        rc = memset_s(nulls, sizeof(nulls), 0, sizeof(nulls));
+        securec_check(rc, "\0", "\0");
+
+        entry += funcctx->call_cntr;
+
+        values[0] = CStringGetTextDatum(g_instance.attr.attr_common.PGXCNodeName);
+        values[1] = CStringGetTextDatum(entry->id);
+        values[2] = CStringGetTextDatum(entry->source_ip);
+        values[3] = Int32GetDatum(entry->source_port);
+        values[4] = CStringGetTextDatum(entry->dest_ip);
+        values[5] = Int32GetDatum(entry->dest_port);
+        values[6] = Int64GetDatum(entry->current_rto);
+        values[7] = Int64GetDatum(entry->target_rto);
+        values[8] = Int64GetDatum(entry->current_rpo);
+        values[9] = Int64GetDatum(entry->target_rpo);
+        values[10] = Int64GetDatum(entry->current_sleep_time);
+
+        tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
+        SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+    }
+
+    /* do when there is no more left */
+    SRF_RETURN_DONE(funcctx);
+
+}
+
+Datum gs_hadr_remote_rto_and_rpo_stat(PG_FUNCTION_ARGS)
+{
+    FuncCallContext* funcctx = NULL;
+#ifndef ENABLE_MULTIPLE_NODES
+    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("unsupported view in single node mode.")));
+
+    SRF_RETURN_DONE(funcctx);
+#else
+    Datum values[HADR_RTO_RPO_VIEW_COL];
+    bool nulls[HADR_RTO_RPO_VIEW_COL] = {false};
+
+    if (SRF_IS_FIRSTCALL()) {
+        funcctx = SRF_FIRSTCALL_INIT();
+
+        MemoryContext oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+        /* build tupdesc for result tuples. */
+        TupleDesc tupdesc = CreateTemplateTupleDesc(HADR_RTO_RPO_VIEW_COL, false, TAM_HEAP);
+        TupleDescInitEntry(tupdesc, (AttrNumber)1, "hadr_sender_node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)2, "hadr_receiver_node_name", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)3, "source_ip", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)4, "source_port", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)5, "dest_ip", TEXTOID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)6, "dest_port", INT4OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)7, "current_rto", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)8, "target_rto", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)9, "current_rpo", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)10, "target_rpo", INT8OID, -1, 0);
+        TupleDescInitEntry(tupdesc, (AttrNumber)11, "current_sleep_time", INT8OID, -1, 0);
+
+        funcctx->tuple_desc = BlessTupleDesc(tupdesc);
+        funcctx->max_calls = u_sess->pgxc_cxt.NumDataNodes + u_sess->pgxc_cxt.NumCoords;
+
+        /* the main call for get get_rto_stat */
+        funcctx->user_fctx = streaming_hadr_get_recovery_stat(funcctx->tuple_desc);
+        MemoryContextSwitchTo(oldcontext);
+
+        if (funcctx->user_fctx == NULL) {
+            SRF_RETURN_DONE(funcctx);
+        }
+    }
+
+    /* stuff done on every call of the function */
+    funcctx = SRF_PERCALL_SETUP();
+
+    if (funcctx->user_fctx) {
+        Tuplestorestate* tupstore = ((TableDistributionInfo*)funcctx->user_fctx)->state->tupstore;
+        TupleTableSlot* slot = ((TableDistributionInfo*)funcctx->user_fctx)->slot;
+
+        if (!tuplestore_gettupleslot(tupstore, true, false, slot)) {
+            FreeParallelFunctionState(((TableDistributionInfo*)funcctx->user_fctx)->state);
+            ExecDropSingleTupleTableSlot(slot);
+            pfree_ext(funcctx->user_fctx);
+            funcctx->user_fctx = NULL;
+            SRF_RETURN_DONE(funcctx);
+        }
+        for (uint32 i = 0; i < HADR_RTO_RPO_VIEW_COL; i++) {
             values[i] = tableam_tslot_getattr(slot, (i + 1), &nulls[i]);
         }
         HeapTuple tuple = heap_form_tuple(funcctx->tuple_desc, values, nulls);
@@ -14406,6 +14760,7 @@ static void ReadUndoZoneMetaFromShared(int id, TupleDesc *tupleDesc, Tuplestores
     char textBuffer[STAT_UNDO_LOG_SIZE] = {'\0'};
     if (id == INVALID_ZONE_ID) {
         used = UndoSize(UNDO_LOG_SPACE) + UndoSize(UNDO_SLOT_SPACE);
+        endIdx = UNDO_ZONE_COUNT - 1;
     } else {
         used = UndoSize(UNDO_LOG_SPACE);
         startIdx = id;
@@ -14578,7 +14933,7 @@ static void ReadTransSlotMetaFromShared(int id, TupleDesc *tupleDesc, Tuplestore
         securec_check_ss(rc, "\0", "\0");
         values[5] = CStringGetTextDatum(textBuffer);
         rc = snprintf_s(textBuffer, sizeof(textBuffer), sizeof(textBuffer) - 1, "%016lu",
-            g_instance.proc_base->oldestXidInUndo);
+            pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo));
         securec_check_ss(rc, "\0", "\0");
         values[6] = CStringGetTextDatum(textBuffer);
         tuplestore_putvalues(tupstore, *tupleDesc, values, nulls);
@@ -14607,7 +14962,7 @@ void GetTransMetaValues(Datum *values, char *textBuffer,
     securec_check_ss(*rc, "\0", "\0");
     values[5] = CStringGetTextDatum(textBuffer);
     *rc = snprintf_s(textBuffer, STAT_UNDO_LOG_SIZE, STAT_UNDO_LOG_SIZE - 1,
-        "%016lu", g_instance.proc_base->oldestXidInUndo);
+        "%016lu", pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo));
     securec_check_ss(*rc, "\0", "\0");
     values[6] = CStringGetTextDatum(textBuffer);
 }

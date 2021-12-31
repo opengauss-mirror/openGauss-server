@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -27,6 +28,7 @@
 
 #include "access/relscan.h"
 #include "access/tableam.h"
+#include "catalog/pg_partition_fn.h"
 #include "commands/cluster.h"
 #include "executor/exec/execdebug.h"
 #include "executor/node/nodeModifyTable.h"
@@ -380,6 +382,19 @@ TableScanDesc BeginScanRelation(SeqScanState* node, Relation relation, Transacti
     return current_scan_desc;
 }
 
+static PruningResult *GetPartitionPruningResultInInitScanRelation(SeqScan *plan, EState *estate,
+                                                                  Relation current_relation)
+{
+    PruningResult *resultPlan = NULL;
+    if (plan->pruningInfo->expr != NULL) {
+        resultPlan = GetPartitionInfo(plan->pruningInfo, estate, current_relation);
+    } else {
+        resultPlan = plan->pruningInfo;
+    }
+
+    return resultPlan;
+}
+
 /* ----------------------------------------------------------------
  *		InitScanRelation
  *
@@ -459,13 +474,7 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
         /* Generate node->partitions if exists */ 
         if (plan->itrs > 0) {
             Partition part = NULL;
-            PruningResult* resultPlan = NULL;
-
-            if (plan->pruningInfo->expr != NULL) {
-                resultPlan = GetPartitionInfo(plan->pruningInfo, estate, current_relation);
-            } else {
-                resultPlan = plan->pruningInfo;
-            }
+            PruningResult* resultPlan = GetPartitionPruningResultInInitScanRelation(plan, estate, current_relation);
 
             ListCell* cell = NULL;
             List* part_seqs = resultPlan->ls_rangeSelectedPartitions;
@@ -473,10 +482,32 @@ void InitScanRelation(SeqScanState* node, EState* estate, int eflags)
             foreach (cell, part_seqs) {
                 Oid tablepartitionid = InvalidOid;
                 int partSeq = lfirst_int(cell);
+                List* subpartition = NIL;
 
                 tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq);
                 part = partitionOpen(current_relation, tablepartitionid, lockmode);
                 node->partitions = lappend(node->partitions, part);
+                if (resultPlan->ls_selectedSubPartitions != NIL) {
+                    Relation partRelation = partitionGetRelation(current_relation, part);
+                    SubPartitionPruningResult *subPartPruningResult =
+                        GetSubPartitionPruningResult(resultPlan->ls_selectedSubPartitions, partSeq);
+                    if (subPartPruningResult == NULL) {
+                        continue;
+                    }
+                    List *subpart_seqs = subPartPruningResult->ls_selectedSubPartitions;
+                    ListCell *lc = NULL;
+                    foreach (lc, subpart_seqs) {
+                        Oid subpartitionid = InvalidOid;
+                        int subpartSeq = lfirst_int(lc);
+
+                        subpartitionid = getPartitionOidFromSequence(partRelation, subpartSeq);
+                        Partition subpart = partitionOpen(partRelation, subpartitionid, lockmode);
+                        subpartition = lappend(subpartition, subpart);
+                    }
+                    releaseDummyRelation(&(partRelation));
+                    node->subPartLengthList = lappend_int(node->subPartLengthList, list_length(subpartition));
+                    node->subpartitions = lappend(node->subpartitions, subpartition);
+                }
             }
             if (resultPlan->ls_rangeSelectedPartitions != NULL) {
                 node->part_id = resultPlan->ls_rangeSelectedPartitions->length;
@@ -559,12 +590,14 @@ uint16 TraverseVars(List* qual, bool* boolArr, int natts, List* vars, ListCell* 
 
 static inline bool QualtoBool(List* qual, bool* boolArr, int natts)
 {
+    bool flag = false;
     List* vars = NIL;
     ListCell* l = NULL;
     vars = pull_var_clause((Node*)qual, PVC_RECURSE_AGGREGATES, PVC_RECURSE_PLACEHOLDERS);
     if (TraverseVars(qual, boolArr, natts, vars, l) > 0)
-        return true;
-    return false;
+        flag = true;
+    list_free_ext(vars);
+    return flag;
 }
 
 /* create a new flattened tlist from targetlist, if valid then set attributes in boolArr */
@@ -577,6 +610,7 @@ static inline void TLtoBool(List* targetlist, bool* boolArr, AttrNumber natts)
     if ((flatlist != NULL) && (flatlist->length > 0)) {
         FlatTLtoBool(flatlist, boolArr, natts);
     }
+    list_free_ext(flatlist);
 }
 
 /* return total count of non-null attributes */
@@ -860,8 +894,23 @@ void ExecEndSeqScan(SeqScanState* node)
     if (node->isPartTbl) {
         if (PointerIsValid(node->partitions)) {
             Assert(node->ss_currentPartition);
-            releaseDummyRelation(&(node->ss_currentPartition));
-            releasePartitionList(node->ss_currentRelation, &(node->partitions), NoLock);
+            if (PointerIsValid(node->subpartitions)) {
+                releaseDummyRelation(&(node->ss_currentPartition));
+                ListCell* cell = NULL;
+                int idx = 0;
+                foreach (cell, node->partitions) {
+                    Partition part = (Partition)lfirst(cell);
+                    Relation partRel =  partitionGetRelation(node->ss_currentRelation, part);
+                    List* subPartList = (List*)list_nth(node->subpartitions, idx);
+                    releasePartitionList(partRel, &subPartList, NoLock);
+                    releaseDummyRelation(&(partRel));
+                    idx++;
+                }
+                releasePartitionList(node->ss_currentRelation, &(node->partitions), NoLock);
+            } else {
+                releaseDummyRelation(&(node->ss_currentPartition));
+                releasePartitionList(node->ss_currentRelation, &(node->partitions), NoLock);
+            }
         }
     }
 
@@ -964,9 +1013,14 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
 {
     Partition currentpartition = NULL;
     Relation currentpartitionrel = NULL;
+    Partition currentSubPartition = NULL;
+    List* currentSubPartitionList = NULL;
+    Relation currentSubPartitionRel = NULL;
 
     int paramno = -1;
+    int subPartParamno = -1;
     ParamExecData* param = NULL;
+    ParamExecData* SubPrtParam = NULL;
     SeqScan* plan = NULL;
 
     plan = (SeqScan*)node->ps.plan;
@@ -976,21 +1030,42 @@ static void ExecInitNextPartitionForSeqScan(SeqScanState* node)
     param = &(node->ps.state->es_param_exec_vals[paramno]);
     node->currentSlot = (int)param->value;
 
+    subPartParamno = plan->plan.subparamno;
+    SubPrtParam = &(node->ps.state->es_param_exec_vals[subPartParamno]);
+
     /* construct HeapScanDesc for new partition */
     currentpartition = (Partition)list_nth(node->partitions, node->currentSlot);
     currentpartitionrel = partitionGetRelation(node->ss_currentRelation, currentpartition);
 
     releaseDummyRelation(&(node->ss_currentPartition));
-    node->ss_currentPartition = currentpartitionrel;
 
-    /* add qual for redis */
+    if (currentpartitionrel->partMap != NULL) {
+        Assert(SubPrtParam != NULL);
+        currentSubPartitionList = (List *)list_nth(node->subpartitions, node->currentSlot);
+        currentSubPartition = (Partition)list_nth(currentSubPartitionList, (int)SubPrtParam->value);
+        currentSubPartitionRel = partitionGetRelation(currentpartitionrel, currentSubPartition);
+        releaseDummyRelation(&(currentpartitionrel));
 
-    /* update partition scan-related fileds in SeqScanState  */
-    node->ss_currentScanDesc = InitBeginScan(node, currentpartitionrel);
+        node->ss_currentPartition = currentSubPartitionRel;
+        /* add qual for redis */
 
-    ADIO_RUN()
-    {
-        SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentpartitionrel);
+        /* update partition scan-related fileds in SeqScanState  */
+        node->ss_currentScanDesc = InitBeginScan(node, currentSubPartitionRel);
+        ADIO_RUN()
+        {
+            SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentSubPartitionRel);
+        }
+        ADIO_END();
+    } else {
+        node->ss_currentPartition = currentpartitionrel;
+        /* add qual for redis */
+
+        /* update partition scan-related fileds in SeqScanState  */
+        node->ss_currentScanDesc = InitBeginScan(node, currentpartitionrel);
+        ADIO_RUN()
+        {
+            SeqScan_Init(node->ss_currentScanDesc, node->ss_scanaccessor, currentpartitionrel);
+        }
+        ADIO_END();
     }
-    ADIO_END();
 }

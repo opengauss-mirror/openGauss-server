@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -43,6 +44,7 @@
 #include "pgxc/pgxc.h"
 #include "tcop/utility.h"
 #include "utils/builtins.h"
+#include "utils/dbe_scheduler.h"
 #include "utils/fmgroids.h"
 #include "utils/formatting.h"
 #include "utils/lsyscache.h"
@@ -55,6 +57,7 @@
 #include "catalog/pg_job_proc.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_database.h"
+#include "catalog/gs_job_attribute.h"
 #include "fmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
@@ -74,14 +77,28 @@ extern void syn_command_to_other_node_internal(Datum node_name, Datum database, 
     Datum what, Datum next_date, Datum job_interval, bool broken);
 static void elog_job_detail(int4 job_id, char* what, Update_Pgjob_Status status, char* errmsg);
 static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Datum last_start_date, Datum last_end_date,
-    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count, Datum node_name);
-static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* job_interval, Datum start_date,
-    Datum* next_date, MemoryContext current_context);
+    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count, Datum node_name, Datum fail_msg);
 static bool is_internal_perf_job(int64 job_id);
 static bool is_job_aborted(Datum job_status);
 static HeapTuple get_job_tup_from_rel(Relation job_rel, int job_id);
-static char* get_real_search_schema();
 static char* get_job_what(int4 job_id, bool throw_not_found_error = true);
+
+/*
+ * @brief is_scheduler_job_id
+ *  Check if a job is scheduler job by searching its job name.
+ */
+bool is_scheduler_job_id(Relation relation, int64 job_id)
+{
+    bool is_regular_job = true;
+    HeapTuple tuple = NULL;
+    tuple = get_job_tup_from_rel(relation, job_id);
+    if (!HeapTupleIsValid(tuple)) {
+        return false;
+    }
+    (void)heap_getattr(tuple, Anum_pg_job_job_name, relation->rd_att, &is_regular_job);
+
+    return !is_regular_job;
+}
 
 /*
  * @Description: Insert a new record to pg_job_proc.
@@ -102,6 +119,7 @@ static void insert_pg_job_proc(int4 job_id, Datum what)
 
     rc = memset_s(nulls, sizeof(nulls), false, sizeof(nulls));
     securec_check_c(rc, "\0", "\0");
+    nulls[Anum_pg_job_proc_job_name - 1] = true;
 
     rel = heap_open(PgJobProcRelationId, RowExclusiveLock);
 
@@ -117,13 +135,14 @@ static void insert_pg_job_proc(int4 job_id, Datum what)
 
     heap_close(rel, RowExclusiveLock);
 }
+
 /*
  * Encapsulating a function with the job interface will cause the function's schema be 
  * inserted into the pg_job system table. 
  * In order to avoid the situation that the job function in the dbe_task schema can only
  * call functions or procedures under the dbe_task schema, convert the dbe_task to public.
  */
-static char* get_real_search_schema()
+char* get_real_search_schema()
 {
     char *cur_schema = get_namespace_name(SchemaNameGetSchemaOid(NULL));
     if (strcmp(cur_schema, "dbe_task") == 0) {
@@ -214,6 +233,14 @@ static void insert_pg_job(Relation rel, int job_id, Datum next_date, Datum job_i
     values[Anum_pg_job_next_run_date - 1] = next_date;
     values[Anum_pg_job_interval - 1] = job_interval;
     values[Anum_pg_job_failure_count - 1] = Int16GetDatum(0);
+
+    /*
+     * These entries are exclusive for dbms package extensions.
+     */
+    nulls[Anum_pg_job_job_name - 1] = true;
+    nulls[Anum_pg_job_end_date - 1] = true;
+    nulls[Anum_pg_job_enable - 1] = true;
+    nulls[Anum_pg_job_failure_msg - 1] = PointerGetDatum(cstring_to_text(""));
 
     tuple = heap_form_tuple(RelationGetDescr(rel), values, nulls);
 
@@ -422,7 +449,8 @@ void update_pg_job_dbname(Oid jobid, const char* dbname)
  *	@in next_date: Job next time.
  * Returns: void
  */
-static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum start_date, Datum next_date)
+static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum start_date, Datum next_date,
+    const char* failure_msg, bool is_scheduler_job)
 {
     Relation relation = NULL;
     HeapTuple tup = NULL;
@@ -494,7 +522,8 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
                 values[Anum_pg_job_this_run_date - 1],
                 old_value[Anum_pg_job_next_run_date - 1],
                 failure_count, 
-                values[Anum_pg_job_node_name - 1]);
+                values[Anum_pg_job_node_name - 1],
+                visnull[Anum_pg_job_failure_msg - 1] ? 0 : old_value[Anum_pg_job_failure_msg - 1]);
             break;
         }
         case Pgjob_Succ: {
@@ -503,6 +532,7 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
             replaces[Anum_pg_job_last_suc_date - 1] = true;
             replaces[Anum_pg_job_failure_count - 1] = true;
             replaces[Anum_pg_job_next_run_date - 1] = true;
+            replaces[Anum_pg_job_failure_msg - 1] = true;
             values[Anum_pg_job_job_status - 1] = CharGetDatum(is_job_abort ? PGJOB_ABORT_STATUS : PGJOB_SUCC_STATUS);
             values[Anum_pg_job_current_postgres_pid - 1] = Int64GetDatum(-1);
             values[Anum_pg_job_last_start_date - 1] = start_date;
@@ -515,13 +545,15 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
 
             /* Only execute the job once and set status to 'd' if interval is 'null'. */
             if (next_date == 0) {
-                values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_ABORT_STATUS);
+                values[Anum_pg_job_job_status - 1] = is_scheduler_job ? values[Anum_pg_job_job_status - 1] : \
+                                                                        CharGetDatum(PGJOB_ABORT_STATUS);
                 values[Anum_pg_job_next_run_date - 1] = DirectFunctionCall2(to_timestamp,
                     DirectFunctionCall1(textin, CStringGetDatum("4000-1-1")),
                     DirectFunctionCall1(textin, CStringGetDatum("yyyy-mm-dd")));
             } else {
                 values[Anum_pg_job_next_run_date - 1] = next_date;
             }
+            values[Anum_pg_job_failure_msg - 1] = PointerGetDatum(cstring_to_text(""));
 
             update_query = query_with_update_job(job_id,
                 values[Anum_pg_job_job_status - 1],
@@ -532,7 +564,8 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
                 visnull[Anum_pg_job_this_run_date - 1] ? 0 : old_value[Anum_pg_job_this_run_date - 1],
                 values[Anum_pg_job_next_run_date - 1],
                 failure_count,
-                values[Anum_pg_job_node_name - 1]);
+                values[Anum_pg_job_node_name - 1],
+                values[Anum_pg_job_failure_msg - 1]);
             break;
         }
         case Pgjob_Fail: {
@@ -541,6 +574,7 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
             replaces[Anum_pg_job_last_end_date - 1] = true;
             replaces[Anum_pg_job_failure_count - 1] = true;
             replaces[Anum_pg_job_next_run_date - 1] = true;
+            replaces[Anum_pg_job_failure_msg - 1] = true;
             values[Anum_pg_job_job_status - 1] = CharGetDatum(is_job_abort ? PGJOB_ABORT_STATUS : PGJOB_FAIL_STATUS);
             values[Anum_pg_job_current_postgres_pid - 1] = Int64GetDatum(-1);
             values[Anum_pg_job_last_start_date - 1] = start_date;
@@ -552,9 +586,13 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
              * Set job_status as 'd' if failure_count more or equal to 16 or
              * execute the job once if interval is 'null'.
              * Then set next_run_date as default date "4000-1-1".
+             *
+             * Scheduler jobs is an exception, since scheduler has proprietary enable flag which does
+             * not rely on PGJOB_ABORT_STATUS.
              */
             if (next_date == 0) {
-                values[Anum_pg_job_job_status - 1] = CharGetDatum(PGJOB_ABORT_STATUS);
+                values[Anum_pg_job_job_status - 1] = is_scheduler_job ? values[Anum_pg_job_job_status - 1] : \
+                                                                        CharGetDatum(PGJOB_ABORT_STATUS);
                 values[Anum_pg_job_next_run_date - 1] = DirectFunctionCall2(to_timestamp,
                     DirectFunctionCall1(textin, CStringGetDatum("4000-1-1")),
                     DirectFunctionCall1(textin, CStringGetDatum("yyyy-mm-dd")));
@@ -562,11 +600,13 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
                 ereport(WARNING,
                     (errcode(ERRCODE_OPERATE_FAILED),
                         errmsg("job with id % is abnormal, fail exceeds %d times", job_id, JOB_MAX_FAIL_COUNT)));
-
+                values[Anum_pg_job_job_status - 1] = is_scheduler_job ? values[Anum_pg_job_job_status - 1] : \
+                                                                        CharGetDatum(PGJOB_ABORT_STATUS);
                 values[Anum_pg_job_next_run_date - 1] = next_date;
             } else {
                 values[Anum_pg_job_next_run_date - 1] = next_date;
             }
+            values[Anum_pg_job_failure_msg - 1] = PointerGetDatum(cstring_to_text(failure_msg));
 
             update_query = query_with_update_job(job_id,
                 values[Anum_pg_job_job_status - 1],
@@ -577,7 +617,8 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
                 visnull[Anum_pg_job_this_run_date - 1] ? 0 : old_value[Anum_pg_job_this_run_date - 1],
                 values[Anum_pg_job_next_run_date - 1],
                 failure_count,
-                values[Anum_pg_job_node_name - 1]);
+                values[Anum_pg_job_node_name - 1],
+                values[Anum_pg_job_failure_msg - 1]);
             break;
         }
         default: {
@@ -619,17 +660,17 @@ static void update_pg_job_info(int job_id, Update_Pgjob_Status status, Datum sta
     t_thrd.utils_cxt.CurrentResourceOwner = save;
 }
 
-static void check_job_id(int64 job_id)
+static void check_job_id(int64 job_id, int64 job_max_number = JOBID_MAX_NUMBER)
 {
-    if (job_id <= InvalidJobId || job_id > JOBID_MAX_NUMBER) {
+    if (job_id <= InvalidJobId || job_id > job_max_number) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Invalid job_id: %ld", job_id),
-                errdetail("The scope of jobid should between 1 and %d", JOBID_MAX_NUMBER)));
+                errdetail("The scope of jobid should between 1 and %ld", job_max_number)));
     }
 }
 
-static void check_job_status(Datum job_status)
+void check_job_status(Datum job_status)
 {
     char status = DatumGetChar(job_status);
 
@@ -662,6 +703,8 @@ void syn_update_pg_job(PG_FUNCTION_ARGS)
     Datum this_run_date = PG_GETARG_DATUM(6);
     Datum next_run_date = PG_GETARG_DATUM(7);
     Datum failure_count = PG_GETARG_DATUM(8);
+    Datum failure_msg = PG_GETARG_DATUM(9);
+
     Relation relation;
     HeapTuple tup = NULL;
     HeapTuple newtuple = NULL;
@@ -681,6 +724,13 @@ void syn_update_pg_job(PG_FUNCTION_ARGS)
 
     /* Update pg_job system table. */
     relation = heap_open(PgJobRelationId, RowExclusiveLock);
+    if (is_scheduler_job_id(relation, job_id)) {
+        heap_close(relation, RowExclusiveLock);
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Cannot modify job with jobid:%ld.", job_id),
+                        errdetail("Cannot modify scheduler job with current method."), errcause("Forbidden operation."),
+                        erraction("Please use scheduler interface to operate this action.")));
+    }
 
     get_job_values(job_id, tup, relation, old_value, visnull);
 
@@ -701,6 +751,7 @@ void syn_update_pg_job(PG_FUNCTION_ARGS)
     values[Anum_pg_job_current_postgres_pid - 1] = pid;
     values[Anum_pg_job_next_run_date - 1] = next_run_date;
     values[Anum_pg_job_failure_count - 1] = failure_count;
+    values[Anum_pg_job_failure_msg - 1] = failure_msg;
 
     if (!PG_ARGISNULL(3)) {
         replaces[Anum_pg_job_last_start_date - 1] = true;
@@ -778,6 +829,7 @@ static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* 
     ret = snprintf_s(exec_job_interval, interval_len, interval_len - 1, "select %s", job_interval);
     securec_check_ss_c(ret, "\0", "\0");
 
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_OK_CONNECT != SPI_connect()) {
         ereport(ERROR,
             (errcode(ERRCODE_SPI_CONNECTION_FAILURE),
@@ -832,7 +884,28 @@ static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* 
         }
     }
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
+}
+
+/*
+ * @brief get_interval_nextdate
+ *  Get next job run date base on interval string (can either be a INTERVAL type or a calendaring syntax)
+ */
+static Datum get_interval_nextdate(int4 job_id, bool ischeck, const char* interval, Datum start_date, Datum base_date,
+                                   MemoryContext current_context)
+{
+    Datum new_next_date;
+    if (pg_strncasecmp(interval, "freq=", strlen("freq=")) != 0) {
+        get_interval_nextdate_by_spi(job_id, ischeck, interval, start_date, &new_next_date, current_context);
+    } else {
+        /* scheduler job uses timestamp with time zone all the way, so convert it */
+        Datum start_date_tz = DirectFunctionCall1(timestamp_timestamptz, start_date);
+        Datum base_date_tz = DirectFunctionCall1(timestamp_timestamptz, base_date);
+        Datum next_date_tz = evaluate_repeat_interval(CStringGetTextDatum(interval), base_date_tz, start_date_tz);
+        new_next_date = DirectFunctionCall1(timestamptz_timestamp, next_date_tz);
+    }
+    return new_next_date;
 }
 
 /*
@@ -845,8 +918,17 @@ static void get_interval_nextdate_by_spi(int4 job_id, bool ischeck, const char* 
 void execute_job(int4 job_id)
 {
     Datum start_date = 0;
+    Datum base_date = 0;    /* The actual start date of the scheduler job */
     Datum old_next_date = 0;
-    Datum new_next_date = 0;
+    /*
+     * In RELEASE version, some of these variables will be optimized into
+     * registers. Be extra careful with updating the variables inside PG_TRY(),
+     * since PG_CATCH() will always flush and restore those registers to its
+     * original state(right before PG_CATCH()). An unexpected optimization would
+     * change how these codes behaves.
+     */
+    volatile Datum new_next_date = 0;
+    Datum job_name = 0;
     char* what = NULL;
     char* job_interval = NULL;
     char* nspname = NULL;
@@ -854,6 +936,7 @@ void execute_job(int4 job_id)
     Relation job_rel = NULL;
     Datum values[Natts_pg_job];
     bool nulls[Natts_pg_job];
+    bool is_scheduler_job = false;
     ResourceOwner save = t_thrd.utils_cxt.CurrentResourceOwner; /* MessagesContext */
     MemoryContext current_context = CurrentMemoryContext;
     StringInfoData buf;
@@ -863,15 +946,17 @@ void execute_job(int4 job_id)
     job_rel = heap_open(PgJobRelationId, AccessShareLock);
     get_job_values(job_id, job_tup, job_rel, values, nulls);
 
+    is_scheduler_job = !nulls[Anum_pg_job_job_name - 1]; /* scheduler job flag */
+    job_name = is_scheduler_job ? PointerGetDatum(PG_DETOAST_DATUM_COPY(values[Anum_pg_job_job_name - 1])) : Datum(0);
     job_interval = text_to_cstring(DatumGetTextP(values[Anum_pg_job_interval - 1]));
     old_next_date = values[Anum_pg_job_next_run_date - 1];
-    /* Set initial value for the new next_date. */
-    new_next_date = old_next_date;
+    new_next_date = old_next_date;  /* Set initial value for the new next_date. */
     what = get_job_what(job_id);
     start_date = DirectFunctionCall1(timestamptz_timestamp, GetCurrentTimestamp());
-
-    if (!nulls[Anum_pg_job_nspname - 1])
+    base_date = values[Anum_pg_job_start_date - 1];
+    if (!nulls[Anum_pg_job_nspname - 1]) {
         nspname = DatumGetCString(DirectFunctionCall1(nameout, NameGetDatum(values[Anum_pg_job_nspname - 1])));
+    }
 
     heap_close(job_rel, AccessShareLock);
     ReleaseSysCache(job_tup);
@@ -879,7 +964,7 @@ void execute_job(int4 job_id)
     PG_TRY();
     {
         /* Update the job state to 'r' before starting to execute it. */
-        update_pg_job_info(job_id, Pgjob_Run, start_date, 0);
+        update_pg_job_info(job_id, Pgjob_Run, start_date, 0, NULL, is_scheduler_job);
 
         /*
          * Compute next_date if interval is not 'null'.
@@ -890,7 +975,7 @@ void execute_job(int4 job_id)
 
             StartTransactionCommand();
             /* Get new interval by execute 'select interval' for computing new next_date. */
-            get_interval_nextdate_by_spi(job_id, false, job_interval, start_date, &new_next_date, current_context);
+            new_next_date = get_interval_nextdate(job_id, false, job_interval, start_date, base_date, current_context);
             CommitTransactionCommand();
 
             t_thrd.utils_cxt.CurrentResourceOwner = save;
@@ -922,9 +1007,10 @@ void execute_job(int4 job_id)
 
         if (nspname != NULL)
             appendStringInfo(&buf, "set current_schema=%s;", quote_identifier(nspname));
-
-        appendStringInfo(&buf, "%s", what);
-        execute_simple_query(buf.data);
+        if (!execute_backend_scheduler_job(job_name, &buf)) {
+            appendStringInfo(&buf, "%s", what);
+            execute_simple_query(buf.data);
+        }
 
         pfree_ext(buf.data);
         pfree_ext(job_interval);
@@ -939,7 +1025,7 @@ void execute_job(int4 job_id)
 
         t_thrd.utils_cxt.CurrentResourceOwner = save;
         /* Update last_end_date and  job_status='f' and failure_count++ */
-        update_pg_job_info(job_id, Pgjob_Fail, start_date, new_next_date);
+        update_pg_job_info(job_id, Pgjob_Fail, start_date, new_next_date, edata->message, is_scheduler_job);
         elog_job_detail(job_id, what, Pgjob_Fail, edata->message);
 
         (void)MemoryContextSwitchTo(ecxt);
@@ -955,7 +1041,7 @@ void execute_job(int4 job_id)
     PG_END_TRY();
 
     /* Update last_suc_date and  job_status='s' */
-    update_pg_job_info(job_id, Pgjob_Succ, start_date, new_next_date);
+    update_pg_job_info(job_id, Pgjob_Succ, start_date, new_next_date, NULL, is_scheduler_job);
     elog_job_detail(job_id, what, Pgjob_Succ, NULL);
     pfree_ext(what);
 
@@ -972,7 +1058,7 @@ void execute_job(int4 job_id)
  *	@in next_date: Next_date for the job.
  * Returns: void
  */
-static void check_interval_valid(int4 job_id, Relation rel, Datum interval)
+void check_interval_valid(int4 job_id, Relation rel, Datum interval)
 {
     char* job_interval = text_to_cstring(DatumGetTextP(interval));
     MemoryContext current_context = CurrentMemoryContext;
@@ -981,9 +1067,7 @@ static void check_interval_valid(int4 job_id, Relation rel, Datum interval)
     /* Check if param interval is valid or not by execute 'select interval'. */
     PG_TRY();
     {
-        Datum new_next_date;
-
-        get_interval_nextdate_by_spi(job_id, true, job_interval, 0, &new_next_date, CurrentMemoryContext);
+        (void)get_interval_nextdate(job_id, true, job_interval, 0, 0, CurrentMemoryContext);
     }
     PG_CATCH();
     {
@@ -1273,12 +1357,7 @@ static void remove_job_internal(Relation pg_job, int4 job_id, bool ischeck, bool
 {
     HeapTuple tup = NULL;
 
-    if (job_id <= InvalidJobId || job_id > JOBID_MAX_NUMBER) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("Invalid job_id: %d", job_id),
-                errdetail("The scope of jobid should between 1 and %d", JOBID_MAX_NUMBER)));
-    }
+    check_job_id(job_id);
 
     tup = get_job_tup_from_rel(pg_job, job_id);
     if (!HeapTupleIsValid(tup)) {
@@ -1316,26 +1395,60 @@ static void remove_job_internal(Relation pg_job, int4 job_id, bool ischeck, bool
  *  @in local: remove job locally if true
  * Returns: void
  */
-void remove_job_by_oid(const char* objname, Delete_Pgjob_Oid oidFlag, bool local, Oid jobid)
+void remove_job_by_oid(Oid oid, Delete_Pgjob_Oid oidFlag, bool local)
 {
     Relation pg_job_tbl = NULL;
     TableScanDesc scan = NULL;
     HeapTuple tuple = NULL;
+    bool is_regular_job = true;
+    bool object_not_found = true;
+    const char *objname = NULL;
+    Oid jobid = InvalidOid;
+
+    /* Get object names from oid base on oidFlag */
+    switch (oidFlag) {
+        case DbOid:
+            objname = get_database_name(oid);
+            object_not_found = (objname == NULL);
+            break;
+        case UserOid:
+            objname = GetUserNameFromId(oid);
+            object_not_found = (objname == NULL);
+            break;
+        case RelOid:
+            jobid = oid;
+            object_not_found = false;
+            break;
+        default:
+            object_not_found = true;
+    }
+
+    if (object_not_found) {
+        return;
+    }
 
     pg_job_tbl = heap_open(PgJobRelationId, ExclusiveLock);
     scan = heap_beginscan(pg_job_tbl, SnapshotNow, 0, NULL);
 
     while (HeapTupleIsValid(tuple = heap_getnext(scan, ForwardScanDirection))) {
+        /* non-scheduler jobs does not come with a job name */
+        (void)heap_getattr(tuple, Anum_pg_job_job_name, pg_job_tbl->rd_att, &is_regular_job);
         Form_pg_job pg_job = (Form_pg_job)GETSTRUCT(tuple);
-        if ((oidFlag == DbOid && 0 == strcmp(NameStr(pg_job->dbname), objname)) ||
+        if (((oidFlag == DbOid && 0 == strcmp(NameStr(pg_job->dbname), objname)) ||
             (oidFlag == UserOid && 0 == strcmp(NameStr(pg_job->log_user), objname)) ||
-            (oidFlag == RelOid && pg_job->job_id == jobid)) {
+            (oidFlag == RelOid && pg_job->job_id == jobid)) &&
+            (oidFlag != UserOid || is_regular_job)) {
             remove_job_internal(pg_job_tbl, pg_job->job_id, false, local);
         }
     }
 
     heap_endscan(scan);
     heap_close(pg_job_tbl, ExclusiveLock);
+
+    /* always remove scheduler objects when drop role */
+    if (oidFlag == UserOid) {
+        remove_scheduler_objects_from_owner(get_role_name_str(oid));
+    }
 }
 
 /*
@@ -1358,6 +1471,12 @@ Datum job_cancel(PG_FUNCTION_ARGS)
 
     PG_TRY();
     {
+        if (is_scheduler_job_id(relation, job_id)) {
+            ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_STATUS),
+                            errmsg("Cannot remove job with jobid:%ld.", job_id),
+                            errdetail("Cannot remove scheduler job with job_cancel"), errcause("Forbidden operation."),
+                            erraction("Please use scheduler interface to operate this action.")));
+        }
         remove_job_internal(relation, job_id, ischeck, false);
     }
     PG_CATCH();
@@ -1396,12 +1515,7 @@ void RemoveJobById(Oid objectId)
     relation = heap_open(PgJobRelationId, RowExclusiveLock);
     PG_TRY();
     {
-        if (job_id <= InvalidJobId || job_id > JOBID_MAX_NUMBER) {
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                    errmsg("Invalid job_id: %ld", job_id),
-                    errdetail("The scope of jobid should between 1 and %d", JOBID_MAX_NUMBER)));
-        }
+        check_job_id(job_id);
         TableScanDesc scan = NULL;
         char* myrolename = NULL;
         HeapTuple tuple = NULL;
@@ -1506,6 +1620,14 @@ void job_finish(PG_FUNCTION_ARGS)
         return;
     }
     check_job_permission(tup, !is_perf_job);
+    if (is_scheduler_job_id(relation, job_id)) {
+        heap_close(relation, RowExclusiveLock);
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Cannot execute job with jobid:%ld.", job_id),
+                        errdetail("Cannot execute scheduler job with current method."),
+                        errcause("Forbidden operation."),
+                        erraction("Please use scheduler interface.")));
+    }
 
     get_job_values(job_id, tup, relation, oldvalues, oldvisnulls);
 
@@ -1643,7 +1765,6 @@ void job_update(PG_FUNCTION_ARGS)
         return;
     }
 
-
     check_job_id(job_id);
 
     tup = get_job_tup(job_id);
@@ -1655,6 +1776,13 @@ void job_update(PG_FUNCTION_ARGS)
 
     /* Update pg_job system table.*/
     relation = heap_open(PgJobRelationId, RowExclusiveLock);
+    if (is_scheduler_job_id(relation, job_id)) {
+        heap_close(relation, RowExclusiveLock);
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("Cannot update job with jobid:%ld.", job_id),
+                        errdetail("Cannot update scheduler job with current method."), errcause("Forbidden operation."),
+                        erraction("Please use scheduler interface.")));
+    }
 
     if (!PG_ARGISNULL(3)) {
         /* Update pg_job_proc if content is not null.*/
@@ -1793,7 +1921,8 @@ void update_run_job_to_fail()
                 visnull[Anum_pg_job_this_run_date - 1] ? 0 : old_value[Anum_pg_job_this_run_date - 1],
                 values[Anum_pg_job_next_run_date - 1],
                 values[Anum_pg_job_failure_count - 1],
-                values[Anum_pg_job_node_name - 1]);
+                values[Anum_pg_job_node_name - 1],
+                visnull[Anum_pg_job_failure_msg - 1] ? 0 : old_value[Anum_pg_job_failure_msg - 1]);
 
             /*
              * If update job status in local success and only synchronize to other coordinator fail,
@@ -1816,12 +1945,17 @@ void update_run_job_to_fail()
  * CAUTION: the function only tries JOBID_MAX_NUMBER times. So if there have been a lot of jobs in pg_job,
  * the function is likely to fail, although there is still valid id to use.
  */
-static int get_random_job_id() 
+static int get_random_job_id(int64 job_max_number = JOBID_MAX_NUMBER) 
 {
-    int job_id = gs_random() % JOBID_MAX_NUMBER;
+    if (job_max_number < InvalidJobId) {
+        ereport(ERROR, (errmodule(MOD_JOB), errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                        errmsg("Cannot generate job id."), errdetail("N/A"), errcause("Invalid job id range set."),
+                        erraction("Please recheck job status.")));
+    }
+    int job_id = gs_random() % job_max_number;
     HeapTuple tup = NULL;
     uint32 loop_count = 0;
-    while (loop_count < JOBID_MAX_NUMBER) {
+    while (loop_count < job_max_number) {
         if (likely(job_id > 0)) {
             tup = SearchSysCache1(PGJOBID, Int64GetDatum(job_id));
             /* Find a invalid jobid. */
@@ -1831,10 +1965,10 @@ static int get_random_job_id()
             loop_count++;
             ReleaseSysCache(tup);
         }
-        job_id = gs_random() % JOBID_MAX_NUMBER;
+        job_id = gs_random() % job_max_number;
     }
 
-    if (loop_count == JOBID_MAX_NUMBER) {
+    if (loop_count == job_max_number) {
         ereport(LOG,
             (errmodule(MOD_TIMESERIES), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Cannot find a valid job_id randomly, try to search one by one.")));
@@ -1850,16 +1984,16 @@ static int get_random_job_id()
  *	@in pusJobId: Return job id.
  * Returns: int
  */
-int jobid_alloc(uint16* pusJobId)
+int jobid_alloc(uint16* pusJobId, int64 job_max_number)
 {
-    int job_id = get_random_job_id();
+    int job_id = get_random_job_id(job_max_number);
     if (job_id != 0) {
         *pusJobId = job_id;
         return JOBID_ALLOC_OK;
     }
     HeapTuple tup = NULL;
 
-    for (int job_id = 1; job_id <= JOBID_MAX_NUMBER; job_id++) {
+    for (int job_id = 1; job_id <= job_max_number; job_id++) {
         tup = SearchSysCache1(PGJOBID, Int64GetDatum(job_id));
         /* Find a invalid jobid. */
         if (!HeapTupleIsValid(tup)) {
@@ -1995,7 +2129,7 @@ static void elog_job_detail(int4 job_id, char* what, Update_Pgjob_Status status,
  * Returns: char*
  */
 static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Datum last_start_date, Datum last_end_date,
-    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count, Datum node_name)
+    Datum last_suc_date, Datum this_run_date, Datum next_run_date, int2 failure_count, Datum node_name, Datum fail_msg)
 {
     StringInfoData queryString;
 
@@ -2013,25 +2147,58 @@ static char* query_with_update_job(int4 job_id, Datum job_status, int64 pid, Dat
     }
 
     initStringInfo(&queryString);
-    appendStringInfo(&queryString,
-        "select * from update_pgjob(%d, \'%c\', %ld, %s, %s, %s, %s, %s, %d);",
-        job_id,
-        DatumGetChar(job_status),
-        pid,
-        last_start_date == 0 ? "null"
-                             : quote_literal_cstr(DatumGetCString(
-                                   DirectFunctionCall1(timestamp_out, DatumGetTimestamp(last_start_date)))),
-        last_end_date == 0
-            ? "null"
-            : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(last_end_date)))),
-        last_suc_date == 0
-            ? "null"
-            : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(last_suc_date)))),
-        this_run_date == 0
-            ? "null"
-            : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(this_run_date)))),
-        quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_run_date)))),
-        failure_count);
+    if (t_thrd.proc->workingVersionNum >= 92473) {
+        appendStringInfo(&queryString,
+            "select * from update_pgjob(%d, \'%c\', %ld, %s, %s, %s, %s, %s, %d , %s);",
+            job_id,
+            DatumGetChar(job_status),
+            pid,
+            last_start_date == 0 ? "null"
+                                 : quote_literal_cstr(DatumGetCString(
+                                       DirectFunctionCall1(timestamp_out, DatumGetTimestamp(last_start_date)))),
+            last_end_date == 0
+                ? "null"
+                : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out,
+                                                                          DatumGetTimestamp(last_end_date)))),
+            last_suc_date == 0
+                ? "null"
+                : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out,
+                                                                          DatumGetTimestamp(last_suc_date)))),
+            this_run_date == 0
+                ? "null"
+                : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out,
+                                                                          DatumGetTimestamp(this_run_date)))),
+            quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_run_date)))),
+            failure_count,
+            fail_msg == 0
+                ? "null"
+                : quote_literal_cstr(DatumGetCString(fail_msg)));
+    } else {
+        appendStringInfo(&queryString,
+            "select * from update_pgjob(%d, \'%c\', %ld, %s, %s, %s, %s, %s, %d);",
+            job_id,
+            DatumGetChar(job_status),
+            pid,
+            last_start_date == 0 ? "null"
+                                 : quote_literal_cstr(DatumGetCString(
+                                       DirectFunctionCall1(timestamp_out, DatumGetTimestamp(last_start_date)))),
+            last_end_date == 0
+                ? "null"
+                : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out,
+                                                                          DatumGetTimestamp(last_end_date)))),
+            last_suc_date == 0
+                ? "null"
+                : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out,
+                                                                          DatumGetTimestamp(last_suc_date)))),
+            this_run_date == 0
+                ? "null"
+                : quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out,
+                                                                          DatumGetTimestamp(this_run_date)))),
+            quote_literal_cstr(DatumGetCString(DirectFunctionCall1(timestamp_out, DatumGetTimestamp(next_run_date)))),
+            failure_count);
+
+    }
+
 
     elog(LOG, "query with update job: %s", queryString.data);
 

@@ -57,7 +57,7 @@ static List* GetVerifyRelidList(VacuumStmt* stmt);
 static void DoGlobalVerifyRowRel(VacuumStmt* stmt, Oid relid, bool isDatabase);
 static void DoGlobalVerifyColRel(VacuumStmt* stmt, Oid relid, bool isDatabase);
 static void DoVerifyIndexRel(VacuumStmt* stmt, Oid indexRelid);
-static void VerifyPartRel(VacuumStmt* stmt, Relation rel, Oid partOid, bool isRowTable);
+static void VerifyPartRel(VacuumStmt* stmt, Relation rel, Oid partOid, bool isRowTable, bool issubpartition = false);
 static void VerifyPartIndexRels(VacuumStmt* stmt, Relation rel, Relation partitionRel);
 static void VerifyPartIndexRel(VacuumStmt* stmt, Relation rel, Relation partitionRel, Oid indexOid);
 static void VerifyIndexRels(VacuumStmt* stmt, Relation rel, VerifyDesc* checkCudesc = NULL);
@@ -774,14 +774,36 @@ static void DoGlobalVerifyRowRel(VacuumStmt* stmt, Oid relid, bool isDatabase)
                 NULL,
                 NULL,
                 NoLock);
-            VerifyPartRel(stmt, rel, partOid, true);
+            Partition part = partitionOpen(rel, partOid, AccessShareLock);
+            if (PartitionHasSubpartition(part)) {
+                Relation partrel = partitionGetRelation(rel, part);
+                Oid subpartOid;
+                ListCell* cell = NULL;
+                List* partOidList = relationGetPartitionOidList(partrel);
+                foreach (cell, partOidList) {
+                    subpartOid = lfirst_oid(cell);
+                    VerifyPartRel(stmt, rel, subpartOid, true, true);
+                }
+                releaseDummyRelation(&partrel);
+            } else {
+                VerifyPartRel(stmt, rel, partOid, true);
+            }
 
+            partitionClose(rel, part, AccessShareLock);
             relation_close(rel, AccessShareLock);
             return;
         }
     }
 
-    if (RELATION_IS_PARTITIONED(rel)) {
+    if (RelationIsSubPartitioned(rel)) {
+        Oid partOid;
+        ListCell* cell = NULL;
+        List* partOidList = RelationGetSubPartitionOidList(rel);
+        foreach (cell, partOidList) {
+            partOid = lfirst_oid(cell);
+            VerifyPartRel(stmt, rel, partOid, true, true);
+        }
+    } else if (RELATION_IS_PARTITIONED(rel)) {
         Oid partOid;
         ListCell* cell = NULL;
         List* partOidList = relationGetPartitionOidList(rel);
@@ -914,10 +936,23 @@ static void DoVerifyIndexRel(VacuumStmt* stmt, Oid indexRelid)
  * @in isRowTable - judge the table is row table or column table
  * @return: void
  */
-static void VerifyPartRel(VacuumStmt* stmt, Relation rel, Oid partOid, bool isRowTable)
+static void VerifyPartRel(VacuumStmt* stmt, Relation rel, Oid partOid, bool isRowTable, bool issubpartition)
 {
-    Partition part = partitionOpen(rel, partOid, AccessShareLock);
-    Relation partitionRel = partitionGetRelation(rel, part);
+    Partition part = NULL;
+    Relation partitionRel = NULL;
+    Oid subparentid = InvalidOid;
+    Partition parentpart = NULL;
+    Relation parentpartitionRel = NULL;
+    if (!issubpartition) {
+        part = partitionOpen(rel, partOid, AccessShareLock);
+        partitionRel = partitionGetRelation(rel, part);
+    } else {
+        subparentid = partid_get_parentid(partOid);
+        parentpart = partitionOpen(rel, subparentid, AccessShareLock);
+        parentpartitionRel = partitionGetRelation(rel, parentpart);
+        part = partitionOpen(parentpartitionRel, partOid, AccessShareLock);
+        partitionRel = partitionGetRelation(parentpartitionRel, part);
+    }
 
     /* check the main partition table. */
     PG_TRY();
@@ -947,8 +982,15 @@ static void VerifyPartRel(VacuumStmt* stmt, Relation rel, Oid partOid, bool isRo
         }
     }
     PG_END_TRY();
-    partitionClose(rel, part, AccessShareLock);
-    releaseDummyRelation(&partitionRel);
+    if (!issubpartition) {
+        releaseDummyRelation(&partitionRel);
+        partitionClose(rel, part, AccessShareLock);
+    } else {
+        releaseDummyRelation(&partitionRel);
+        partitionClose(parentpartitionRel, part, AccessShareLock);
+        releaseDummyRelation(&parentpartitionRel);
+        partitionClose(rel, parentpart, AccessShareLock);
+    }
     return;
 }
 

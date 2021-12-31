@@ -101,6 +101,15 @@ typedef enum SnapshotSatisfiesMethod {
      */
     SNAPSHOT_NOW,
 
+#ifdef ENABLE_MULTIPLE_NODES
+    /* -------------------------------------------------------------------------
+     * Same as SNAPSHOT_NOW, skip sync in distribute mode.
+     * If we scan pg_class in seqscan, skip sync.
+     * -------------------------------------------------------------------------
+     */
+    SNAPSHOT_NOW_NO_SYNC,
+#endif
+
     /* -------------------------------------------------------------------------
      * A tuple is visible iff the tuple is valid "for itself".
      *

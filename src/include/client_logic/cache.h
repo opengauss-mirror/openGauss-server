@@ -27,9 +27,6 @@
 #include "utils/syscache.h"
 #include "access/htup.h"
 
-HeapTuple search_syscache_cek_name(const char *key_name, Oid namespace_id);
-HeapTuple search_syscache_cmk_name(const char *key_name, Oid namespace_id);
-HeapTuple search_sys_cache_ce_col_name(Oid relid, const char *attname);
 HeapTuple search_sys_cache_copy_ce_col_name(Oid relid, const char *attname);
 bool search_sys_cache_exists_ce_col_name(Oid relid, const char *attname);
 

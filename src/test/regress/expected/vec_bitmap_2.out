@@ -1709,11 +1709,11 @@ select t1.c_city from vector_bitmap_engine.vector_bitmap_table_04 t1 where t1.c_
                Iterations: 3
                ->  Partitioned CStore Index Heap Scan on vector_bitmap_engine.vector_bitmap_table_05 t2
                      Output: t2.wd_varchar
-                     Recheck Cond: ((t2.wd_varchar)::text = ($1)::text)
+                     Recheck Cond: ((t2.wd_varchar)::text = ($2)::text)
                      Filter: ((t2.wd_int < 1000) AND (t2.wd_char ~~ '%a%'::text) AND ((t2.wd_varchar)::text ~~ 'a%'::text))
                      Selected Partitions:  1..3
                      ->  Partitioned CStore Index Ctid Scan on psort_index_05_char
-                           Index Cond: ((t2.wd_varchar)::text = ($1)::text)
+                           Index Cond: ((t2.wd_varchar)::text = ($2)::text)
 (17 rows)
 
 select t1.c_city from vector_bitmap_engine.vector_bitmap_table_04 t1 where t1.c_city like 'a%' and t1.c_city in (select t2.wd_varchar from vector_bitmap_engine.vector_bitmap_table_05 t2 where t2.wd_int < 1000 and t2.wd_char like '%a%') order by 1;

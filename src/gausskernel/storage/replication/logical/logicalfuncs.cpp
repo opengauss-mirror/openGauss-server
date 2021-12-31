@@ -538,3 +538,15 @@ Datum pg_logical_slot_peek_binary_changes(PG_FUNCTION_ARGS)
     Datum ret = pg_logical_slot_get_changes_guts(fcinfo, false, true);
     return ret;
 }
+
+Datum gs_write_term_log(PG_FUNCTION_ARGS)
+{
+    if (RecoveryInProgress()) {
+        PG_RETURN_BOOL(false);
+    }
+    uint32 term_cur = Max(g_instance.comm_cxt.localinfo_cxt.term_from_file,
+        g_instance.comm_cxt.localinfo_cxt.term_from_xlog);
+    write_term_log(term_cur);
+
+    PG_RETURN_BOOL(true);
+}

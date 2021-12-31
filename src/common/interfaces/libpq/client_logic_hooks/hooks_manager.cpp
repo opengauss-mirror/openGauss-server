@@ -92,10 +92,10 @@ bool HooksManager::GlobalSettings::deprocess_column_setting(const unsigned char 
     if (!global_hook_executor) {
         return false;
     }
-    global_hook_executor->deprocess_column_setting(processed_data, processed_data_size, key_store, key_path,
+    bool ret = global_hook_executor->deprocess_column_setting(processed_data, processed_data_size, key_store, key_path,
         key_algo, data, data_size);
     delete_global_hook_executor(global_hook_executor);
-    return true;
+    return ret;
 }
 
 ColumnHookExecutorSptr HooksManager::ColumnSettings::create_column_hook_executor(const char *function_name,

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -129,8 +130,15 @@ enum ModuleId {
     MOD_COMM_PROXY,    /* for cbb comm_proxy */
     MOD_COMM_POOLER,   /* for pooler communication */
     MOD_VACUUM,     /* lazy vacuum */
+    MOD_JOB,        /* job/scheduler job related */
+    MOD_SPI,
+    MOD_NEST_COMPILE,
+    MOD_RESOWNER,
 
-    /* add your module id above */
+    /*
+     * Add your module id above.
+     * Do not forget to fill up module_map[] about module name, and keep their ordering;
+     */
     MOD_MAX
 };
 

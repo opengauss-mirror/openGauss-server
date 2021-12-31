@@ -115,6 +115,7 @@ typedef enum knl_thread_role {
     BARRIER_CREATOR,
     BGWORKER,
     BARRIER_ARCH,
+    SHARE_STORAGE_XLOG_COPYER,
     APPLY_LAUNCHER,
     APPLY_WORKER,
     TS_COMPACTION,
@@ -134,6 +135,8 @@ typedef enum knl_thread_role {
     NO_SUBROLE,
     REDISTRIBUTION_WORKER,
     WAL_NORMAL_SENDER,
+    WAL_HADR_SENDER, /* A cross cluster wal sender to hadr cluster main standby */
+    WAL_SHARE_STORE_SENDER, /* A cross cluster wal sender to share storage cluster standby */
     WAL_STANDBY_SENDER, /* Am I cascading WAL to another standby ? */
     WAL_DB_SENDER,
     TOP_CONSUMER,

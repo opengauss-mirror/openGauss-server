@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-CALL [schema.] func_name ( param_expr );
+CALL [ schema. ] func_name ( param_expr );
 </synopsis>
 </refsynopsisdiv>
 </refentry>

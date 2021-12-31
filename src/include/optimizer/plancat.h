@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/optimizer/plancat.h
  *
@@ -37,6 +38,8 @@ extern int32 getIdxDataWidth(Relation rel, IndexInfo* info, bool vectorized);
 extern bool relation_excluded_by_constraints(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 
 extern List* build_physical_tlist(PlannerInfo* root, RelOptInfo* rel);
+
+extern bool IsRteForStartWith(PlannerInfo *root, RangeTblEntry *rte);
 
 extern bool has_unique_index(RelOptInfo* rel, AttrNumber attno);
 

@@ -1,0 +1,25 @@
+drop database if exists dump_type_db;
+NOTICE:  database "dump_type_db" does not exist, skipping
+create database dump_type_db;
+\c dump_type_db
+drop schema if exists dumptest cascade;
+NOTICE:  schema "dumptest" does not exist, skipping
+create schema dumptest;
+create type dams_arrytype is table of varchar2(4000);
+comment on type dams_arrytype is 'this is a table of type';
+create type s_type_1 is (
+	id integer,
+	name varchar,
+	addr text
+);
+create type dams_arrytype1 is table of s_type_1;
+\! @abs_bindir@/gs_dump dump_type_db -p @portstring@ -f @abs_bindir@/dump_type.tar -F t >/dev/null 2>&1; echo $?
+0
+drop database if exists restore_type_db;
+NOTICE:  database "restore_type_db" does not exist, skipping
+create database restore_type_db;
+\! @abs_bindir@/gs_restore -d restore_type_db -p @portstring@ @abs_bindir@/dump_type.tar >/dev/null 2>&1; echo $?
+0
+\c regression
+drop database if exists restore_type_db;
+drop database if exists dump_type_db;

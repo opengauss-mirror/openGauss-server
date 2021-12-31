@@ -35,7 +35,7 @@
 #define XLOG_READER_MAX_MSGLENTH 1024
 
 /* Get a new XLogReader */
-extern XLogReaderState* XLogReaderAllocate(XLogPageReadCB pagereadfunc, void* private_data);
+extern XLogReaderState* XLogReaderAllocate(XLogPageReadCB pagereadfunc, void* private_data, Size alignedSize = 0);
 
 /* Free an XLogReader */
 extern void XLogReaderFree(XLogReaderState* state);
@@ -59,8 +59,10 @@ extern void XLogRecGetVMPhysicalBlock(const XLogReaderState *record, uint8 block
 /* Invalidate read state */
 extern void XLogReaderInvalReadState(XLogReaderState* state);
 
-extern XLogRecPtr XLogFindNextRecord(XLogReaderState* state, XLogRecPtr RecPtr);
-extern XLogRecPtr FindMaxLSN(char* workingpath, char* returnmsg, int msg_len, pg_crc32* maxLsnCrc);
+extern XLogRecPtr XLogFindNextRecord(XLogReaderState* state, XLogRecPtr RecPtr, XLogRecPtr *endPtr = NULL);
+extern XLogRecPtr FindMaxLSN(char* workingpath, char* returnmsg, int msg_len, pg_crc32* maxLsnCrc, 
+    uint32 *maxLsnLen = NULL, TimeLineID *returnTli = NULL);
+extern XLogRecPtr FindMinLSN(char *workingPath, char *returnMsg, int msgLen, pg_crc32 *minLsnCrc);
 extern void CloseXlogFile(void);
 extern int SimpleXLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqLen,
     XLogRecPtr targetRecPtr, char* readBuf, TimeLineID* pageTLI);
@@ -101,6 +103,7 @@ void report_invalid_record(XLogReaderState* state, const char* fmt, ...)
 bool ValidXLogRecordHeader(
     XLogReaderState* state, XLogRecPtr RecPtr, XLogRecPtr PrevRecPtr, XLogRecord* record, bool randAccess);
 bool ValidXLogRecord(XLogReaderState* state, XLogRecord* record, XLogRecPtr recptr);
+Size SimpleValidatePage(XLogRecPtr targetPagePtr, char* page,  XLogPageReadCB pagereadfunc);
 extern int read_library(char *bufptr, int nlibrary);
 extern char *GetRepOriginPtr(char *xnodes, uint64 xinfo, int nsubxacts, int nmsgs, int nrels, int nlibrary);
 #endif /* XLOGREADER_H */

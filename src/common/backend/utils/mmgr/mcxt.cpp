@@ -665,6 +665,9 @@ static void MemoryContextStatsInternal(MemoryContext context, int level)
 void MemoryContextCheck(MemoryContext context, bool own_by_session)
 {
     MemoryContext child;
+    if (unlikely(context == NULL)) {
+        elog(PANIC, "Switch to Invalid memory context");
+    }
     AssertArg(MemoryContextIsValid(context));
 
     uint64 id = 0;
@@ -975,7 +978,7 @@ static void* MemoryAllocFromContext(MemoryContext context, Size size, const char
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("invalid memory alloc request size %lu", (unsigned long)size)));
+                errmsg("invalid memory alloc request size %lu in %s:%d.", (unsigned long)size, file, line)));
     }
 
     context->isReset = false;
@@ -1036,7 +1039,7 @@ void* MemoryContextAllocZeroDebug(MemoryContext context, Size size, const char* 
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("invalid memory alloc request size %lu", (unsigned long)size)));
+                errmsg("invalid memory alloc request size %lu in %s:%d", (unsigned long)size, file, line)));
     }
 
     context->isReset = false;
@@ -1085,7 +1088,7 @@ void* MemoryContextAllocZeroAlignedDebug(MemoryContext context, Size size, const
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("invalid memory alloc request size %lu", (unsigned long)size)));
+                errmsg("invalid memory alloc request size %lu in %s:%d", (unsigned long)size, file, line)));
     }
 
     context->isReset = false;
@@ -1209,7 +1212,7 @@ void* repalloc_noexcept_Debug(void* pointer, Size size, const char* file, int li
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("invalid memory alloc request size %lu", (unsigned long)size)));
+                errmsg("invalid memory alloc request size %lu in %s:%d", (unsigned long)size, file, line)));
     }
 
     /*
@@ -1262,7 +1265,7 @@ void* repallocDebug(void* pointer, Size size, const char* file, int line)
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("invalid memory alloc request size %lu", (unsigned long)size)));
+                errmsg("invalid memory alloc request size %lu in %s:%d", (unsigned long)size, file, line)));
     }
 
     /*
@@ -1325,7 +1328,7 @@ void* MemoryContextMemalignAllocDebug(MemoryContext context, Size align, Size si
     if (!AllocSizeIsValid(size)) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-                errmsg("invalid memory alloc request size %lu", (unsigned long)size)));
+                errmsg("invalid memory alloc request size %lu in %s:%d", (unsigned long)size, file, line)));
     }
 
     context->isReset = false;
@@ -1369,8 +1372,8 @@ void* MemoryContextAllocHugeDebug(MemoryContext context, Size size, const char* 
     AssertArg(MemoryContextIsValid(context));
 
     if (!AllocHugeSizeIsValid(size)) {
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid memory alloc request size %zu", size)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), 
+                errmsg("invalid memory alloc request size %zu in %s:%d", size, file, line)));
     }
 
     context->isReset = false;
@@ -1413,8 +1416,8 @@ void* repallocHugeDebug(void* pointer, Size size, const char* file, int line)
     void* ret = NULL;
 
     if (!AllocHugeSizeIsValid(size)) {
-        ereport(
-            ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE), errmsg("invalid memory alloc request size %lu", size)));
+        ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+                errmsg("invalid memory alloc request size %lu in %s:%d", size, file, line)));
     }
 
     /*

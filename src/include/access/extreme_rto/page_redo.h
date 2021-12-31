@@ -166,7 +166,7 @@ struct PageRedoWorker {
     bool InArchiveRecovery;
     bool ArchiveRestoreRequested;
     bool InRecovery;
-
+    char* recoveryRestoreCommand;
     uint32 fullSyncFlag;
     RedoParseManager parseManager;
     RedoBufferManager bufferManager;

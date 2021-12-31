@@ -1344,6 +1344,7 @@ static void rebuild_subquery(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
             param->paramtypmod = -1;
             param->paramcollid = listvar->varcollid;
             param->location = -1;
+            param->tableOfIndexType = InvalidOid;
             args_in_opexpr = lappend(args_in_opexpr, param);
 
             OpExpr* opexpr = makeNode(OpExpr);

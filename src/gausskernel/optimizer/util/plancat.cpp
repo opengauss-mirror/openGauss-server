@@ -62,6 +62,8 @@
 #endif
 
 #define ESTIMATE_PARTITION_NUMBER 10
+#define ESTIMATE_PARTITION_NUMBER_THRESHOLD 5
+#define ESTIMATE_PARTPAGES_THRESHOLD 50
 #define DEFAULT_PAGES_NUM (u_sess->attr.attr_sql.enable_global_stats ? 10 * u_sess->pgxc_cxt.NumDataNodes : 10)
 #define DEFAULT_TUPLES_NUM DEFAULT_PAGES_NUM
 
@@ -96,19 +98,118 @@ static BlockNumber ComputeTheTotalPages(Relation relation, int nonzeroPartitionN
     return totalPages;
 }
 
+/*
+ * A modified method for acquireSamplesForPartitionedRelation
+ * We use sampling stratification to get 10 partitions, instead of using the top 10 partitions, meanwhile the relpages
+ * in pg_partition (calculated by lazy vacuum) are used as weight.
+ * And if the valid partitions is not enough (less than or equal to 5), we use the relpages in pg_class (calculated by
+ * analyze or lazy vacuum) as a result.
+ */
+static void acquireSamplesForPartitionedRelationModify(
+    Relation relation, LOCKMODE lmode, RelPageType* samplePages, List** sampledPartitionOids)
+{
+    if (!(RelationIsPartitioned(relation) && RelationIsRelation(relation))) {
+        return;
+    }
+
+    List* partoidlist;
+    if (RelationIsSubPartitioned(relation)) {
+        partoidlist = RelationGetSubPartitionOidList(relation, lmode);
+    } else {
+        partoidlist = relationGetPartitionOidList(relation);
+    }
+    int totalPartitionNumber = list_length(partoidlist);
+    int nonzeroPartitionNumber = 0;
+    BlockNumber partPages = 0;
+    BlockNumber currentPartPages = 0;
+
+    BlockNumber relPages = relation->rd_rel->relpages; /* analyzed pages, stored in pg_class->relpages */
+    BlockNumber relpartPages = 0; /* analyzed sample pages, stored in pg_partition->relpages */
+
+    int stepNum =
+        totalPartitionNumber > ESTIMATE_PARTITION_NUMBER ? totalPartitionNumber / ESTIMATE_PARTITION_NUMBER : 1;
+    int iterations = 0;
+    ListCell* cell = NULL;
+    foreach(cell, partoidlist) {
+        iterations++;
+        if (iterations % stepNum != 0) {
+            continue;
+        }
+
+        Oid partitionOid = DatumGetObjectId(lfirst(cell));
+        if (!OidIsValid(partitionOid)) {
+            continue;
+        }
+
+        if (RelationIsSubPartitioned(relation)) {
+            Oid subparentid = partid_get_parentid(partitionOid);
+            if (!OidIsValid(subparentid) ||
+                !ConditionalLockPartition(relation->rd_id, subparentid, lmode, PARTITION_LOCK) ||
+                !ConditionalLockPartition(subparentid, partitionOid, lmode, PARTITION_LOCK)) {
+                continue;
+            }
+            Partition part = partitionOpen(relation, subparentid, lmode);
+            Relation partrel = partitionGetRelation(relation, part);
+            Partition subpart = partitionOpen(partrel, partitionOid, lmode);
+            currentPartPages = PartitionGetNumberOfBlocksInFork(partrel, subpart, MAIN_FORKNUM, true);
+            /* for empty heap, PartitionGetNumberOfBlocks() return 0 */
+            if (currentPartPages > 0) {
+                if (sampledPartitionOids != NULL)
+                    *sampledPartitionOids = lappend_oid(*sampledPartitionOids, partitionOid);
+
+                partPages += currentPartPages;
+                relpartPages += subpart->pd_part->relpages;
+                nonzeroPartitionNumber++;
+            }
+            partitionClose(partrel, subpart, lmode);
+            releaseDummyRelation(&partrel);
+            partitionClose(relation, part, lmode);
+        } else {
+            if (!ConditionalLockPartition(relation->rd_id, partitionOid, lmode, PARTITION_LOCK)) {
+                continue;
+            }
+
+            Partition part = partitionOpen(relation, partitionOid, lmode);
+            currentPartPages = PartitionGetNumberOfBlocksInFork(relation, part, MAIN_FORKNUM, true);
+            /* for empty heap, PartitionGetNumberOfBlocks() return 0 */
+            if (currentPartPages > 0) {
+                if (sampledPartitionOids != NULL)
+                    *sampledPartitionOids = lappend_oid(*sampledPartitionOids, partitionOid);
+
+                partPages += currentPartPages;
+                relpartPages += part->pd_part->relpages;
+                nonzeroPartitionNumber++;
+            }
+            partitionClose(relation, part, lmode);
+        }
+    }
+
+    if (relpartPages > 0 && nonzeroPartitionNumber > ESTIMATE_PARTITION_NUMBER_THRESHOLD) {
+        *samplePages = partPages * (relPages / (double)relpartPages);
+    } else {
+        *samplePages = relPages;
+    }
+}
+
+int GetTotalPartitionNumber(Relation relation)
+{
+    int totalPartitionNumber = 0;
+    if (relation->partMap->type == PART_TYPE_LIST) {
+        totalPartitionNumber = getNumberOfListPartitions(relation);
+    } else if (relation->partMap->type == PART_TYPE_HASH) {
+        totalPartitionNumber = getNumberOfHashPartitions(relation);
+    } else {
+        totalPartitionNumber = getNumberOfRangePartitions(relation);
+    }
+    return totalPartitionNumber;
+}
+
 static void acquireSamplesForPartitionedRelation(
     Relation relation, LOCKMODE lmode, RelPageType* samplePages, List** sampledPartitionOids)
 {
     if (RelationIsPartitioned(relation)) {
         if (relation->rd_rel->relkind == RELKIND_RELATION) {  
-            int totalRangePartitionNumber = 0;
-            if (relation->partMap->type == PART_TYPE_LIST) {
-                totalRangePartitionNumber = getNumberOfListPartitions(relation);
-            } else if (relation->partMap->type == PART_TYPE_HASH) {
-                totalRangePartitionNumber = getNumberOfHashPartitions(relation);
-            } else {
-                totalRangePartitionNumber = getNumberOfRangePartitions(relation);
-            }
+            int totalRangePartitionNumber = GetTotalPartitionNumber(relation);
             int totalPartitionNumber = totalRangePartitionNumber;
             int partitionNumber = 0;
             int nonzeroPartitionNumber = 0;
@@ -116,6 +217,7 @@ static void acquireSamplesForPartitionedRelation(
             BlockNumber currentPartPages = 0;
             Partition part = NULL;
             int notAvailPartitionCnt = 0;
+            RelPageType subPartitionPages = 0;
 
             for (partitionNumber = 0; partitionNumber < totalPartitionNumber; partitionNumber++) {
                 Oid partitionOid = InvalidOid;
@@ -146,32 +248,52 @@ static void acquireSamplesForPartitionedRelation(
                     }
 #endif
                 }
-                if (!OidIsValid(partitionOid))
-                    continue;
+                if (RelationIsSubPartitioned(relation)) {
+                    Partition partition = partitionOpen(relation, partitionOid, lmode);
+                    Relation subPartitionRelation = partitionGetRelation(relation, partition);
+                    RelPageType curpages = 0;
+                    acquireSamplesForPartitionedRelation(subPartitionRelation, lmode, &curpages, sampledPartitionOids);
+                    releaseDummyRelation(&subPartitionRelation);
+                    partitionClose(relation, partition, lmode);
+                    subPartitionPages += curpages;
+                } else {
+                    if (!OidIsValid(partitionOid))
+                        continue;
 
-                if(!ConditionalLockPartition(relation->rd_id, partitionOid, lmode, PARTITION_LOCK)) {
-                    notAvailPartitionCnt++;
-                    continue;
-                }
+                    if (!ConditionalLockPartition(relation->rd_id, partitionOid, lmode, PARTITION_LOCK)) {
+                        notAvailPartitionCnt++;
+                        continue;
+                    }
 
-                part = partitionOpen(relation, partitionOid, NoLock);
-                currentPartPages = PartitionGetNumberOfBlocksInFork(relation, part, MAIN_FORKNUM, true);
-                partitionClose(relation, part, lmode);
+                    part = partitionOpen(relation, partitionOid, lmode);
+                    currentPartPages = PartitionGetNumberOfBlocksInFork(relation, part, MAIN_FORKNUM, true);
+                    partitionClose(relation, part, lmode);
 
-                /* for empty heap, PartitionGetNumberOfBlocks() return 0 */
-                if (currentPartPages > 0) {
-                    if (sampledPartitionOids != NULL)
-                        *sampledPartitionOids = lappend_oid(*sampledPartitionOids, partitionOid);
+                    /* for empty heap, PartitionGetNumberOfBlocks() return 0 */
+                    if (currentPartPages > 0) {
+                        if (sampledPartitionOids != NULL)
+                            *sampledPartitionOids = lappend_oid(*sampledPartitionOids, partitionOid);
 
-                    partPages += currentPartPages;
-                    if (++nonzeroPartitionNumber == ESTIMATE_PARTITION_NUMBER) {
-                        break;
+                        partPages += currentPartPages;
+                        if (++nonzeroPartitionNumber == ESTIMATE_PARTITION_NUMBER) {
+                            break;
+                        }
                     }
                 }
             }
 
-            *samplePages = ComputeTheTotalPages(
-                relation, nonzeroPartitionNumber, notAvailPartitionCnt, totalPartitionNumber, partPages);
+            if (subPartitionPages != 0) {
+                *samplePages = subPartitionPages;
+            } else {
+                *samplePages = ComputeTheTotalPages(relation, nonzeroPartitionNumber, notAvailPartitionCnt,
+                                                    totalPartitionNumber, partPages);
+            }
+
+            if (*samplePages < relation->rd_rel->relpages / ESTIMATE_PARTPAGES_THRESHOLD) {
+                if (sampledPartitionOids != NULL)
+                    list_free_ext(*sampledPartitionOids);
+                acquireSamplesForPartitionedRelationModify(relation, lmode, samplePages, sampledPartitionOids);
+            }
         }
     }
 }
@@ -479,22 +601,36 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                         } else {
                             /* normal partitioned index, including crossbucket index */
                             ListCell* cell = NULL;
+                            BlockNumber indexPages = 0;
                             BlockNumber partIndexPages = 0;
+                            BlockNumber indexrelPartPages = 0; /* analyzed pages, stored in pg_partition->relpages */
                             int partitionNum = getNumberOfPartitions(relation);
                             foreach (cell, sampledPartitionIds) {
                                 Oid partOid = lfirst_oid(cell);
                                 Oid partIndexOid = getPartitionIndexOid(indexRelation->rd_id, partOid);
                                 Partition partIndex = partitionOpen(indexRelation, partIndexOid, AccessShareLock);
                                 partIndexPages += PartitionGetNumberOfBlocks(indexRelation, partIndex);
+                                indexrelPartPages += partIndex->pd_part->relpages;
                                 partitionClose(indexRelation, partIndex, AccessShareLock);
                             }
                             // if sampled ESTIMATE_PARTITION_NUMBER, infer the pages of index,
                             // else partIndexPages is the actrual pages of index.
+                            indexPages = partIndexPages;
                             if (sampledPartitionIds != NIL) {
                                 if (sampledPartitionIds->length == ESTIMATE_PARTITION_NUMBER)
-                                    partIndexPages *= partitionNum / ESTIMATE_PARTITION_NUMBER;
+                                    indexPages = partIndexPages * (partitionNum / ESTIMATE_PARTITION_NUMBER);
                             }
-                            info->pages = partIndexPages;
+                            if (indexrelPartPages > 0 &&
+                                partitionNum > ESTIMATE_PARTITION_NUMBER &&
+                                partIndexPages < indexRelation->rd_rel->relpages / ESTIMATE_PARTPAGES_THRESHOLD) {
+                                if (sampledPartitionIds->length > ESTIMATE_PARTITION_NUMBER_THRESHOLD) {
+                                    indexPages =
+                                        partIndexPages * (indexRelation->rd_rel->relpages / (double)indexrelPartPages);
+                                } else {
+                                    indexPages = indexRelation->rd_rel->relpages;
+                                }
+                            }
+                            info->pages = indexPages;
                         }
                     }
 #ifdef PGXC
@@ -629,7 +765,8 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
              *	ESTIMATE_PARTITION_NUMBER non-zero-pages partitions
              *	multiply total number of partitions
              */
-            if (RelationIsPartitioned(rel) && !RelationIsColStore(rel) && !RelationIsGlobalIndex(rel)) {
+            if ((RelationIsPartitioned(rel) || RelationIsSubPartitioned(rel)) && !RelationIsColStore(rel) &&
+                !RelationIsGlobalIndex(rel)) {
                 acquireSamplesForPartitionedRelation(rel, AccessShareLock, &curpages, sampledPartitionIds);
             } else if (RelationIsValuePartitioned(rel)) {
                 /*
@@ -755,6 +892,7 @@ void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, dou
                 *allvisfrac = (double)relallvisible / curpages;
             break;
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
             /* Sequences always have a known size */
             *pages = 1;
             *tuples = 1;
@@ -1017,7 +1155,13 @@ static List* get_relation_constraints(PlannerInfo* root, Oid relationObjectId, R
 
                     ntest->arg = (Expr*)makeVar(varno, i, att->atttypid, att->atttypmod, att->attcollation, 0);
                     ntest->nulltesttype = IS_NOT_NULL;
-                    ntest->argisrow = type_is_rowtype(att->atttypid);
+                    
+                    /*
+                     * argisrow=false is correct even for a composite column,
+                     * because attnotnull does not represent a SQL-spec IS NOT
+                     * NULL test in such a case, just IS DISTINCT FROM NULL.
+                     */
+                    ntest->argisrow = false;
                     result = lappend(result, ntest);
                 }
             }
@@ -1188,6 +1332,11 @@ List* build_physical_tlist(PlannerInfo* root, RelOptInfo* rel)
         case RTE_VALUES:
         case RTE_CTE:
         case RTE_RESULT:
+            /* incase of CTE, we need check and set swConverted fields */
+            if (rte->rtekind == RTE_CTE && !rte->swConverted) {
+                rte->swConverted = IsRteForStartWith(root, rte);
+            }
+
             /* Not all of these can have dropped cols, but share code anyway */
             expandRTE(rte, varno, 0, -1, true /* include dropped */, NULL, &colvars);
             foreach (l, colvars) {
@@ -1203,6 +1352,12 @@ List* build_physical_tlist(PlannerInfo* root, RelOptInfo* rel)
 
                 tlist = lappend(tlist, makeTargetEntry((Expr*)var, var->varattno, NULL, false));
             }
+
+            /* in case sw-converted CTE, we need fix the tlist */
+            if (rte->rtekind == RTE_CTE && rte->swConverted) {
+                tlist = FixSwTargetlistResname(root, rte, tlist);
+            }
+
             break;
 
         default:
@@ -1215,6 +1370,54 @@ List* build_physical_tlist(PlannerInfo* root, RelOptInfo* rel)
     }
 
     return tlist;
+}
+
+/*
+ * @Brief: check it the given rte is the rte for StartWith
+ */
+bool IsRteForStartWith(PlannerInfo *root, RangeTblEntry *rte)
+{
+    PlannerInfo *cteroot = NULL;
+    bool result = false;
+
+    /* return false if not a CTE entry */
+    if (rte->rtekind != RTE_CTE) {
+        return false;
+    }
+
+    /* Return true */
+    if (rte->swConverted) {
+        return true;
+    }
+
+    /* check and set fromStartWithConverted */
+    ListCell *lc = NULL;
+    int levelsup = rte->ctelevelsup;
+    cteroot = root;
+    while (levelsup-- > 0) {
+        cteroot = cteroot->parent_root;
+        if (cteroot == NULL) { /* shouldn't happen */
+            ereport(ERROR,
+                (errmodule(MOD_OPT),
+                    errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
+                    errmsg("bad levelsup for CTE \"%s\"", rte->ctename)));
+        }
+    }
+
+    /* search CTE expr and check if it is sw converted case */
+    foreach (lc, cteroot->parse->cteList) {
+        CommonTableExpr* cte = (CommonTableExpr*)lfirst(lc);
+        if (!cte->cterecursive) {
+            continue;
+        }
+
+        if (strcmp(cte->ctename, rte->ctename) == 0 && cte->swoptions != NULL) {
+            result = true;
+            break;
+        }
+    }
+
+    return result;
 }
 
 /*

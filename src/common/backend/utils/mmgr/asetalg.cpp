@@ -598,7 +598,6 @@ void AlignMemoryAllocator::AllocSetDelete(MemoryContext context)
     set->freeSpace = 0;
     set->totalSpace = 0;
 
-    // if (is_shared)
     MemoryContextUnlock(context);
 }
 

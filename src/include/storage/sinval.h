@@ -116,7 +116,8 @@ typedef struct {
 typedef struct {
     int8 id;           /* type field --- must be first */
     Oid dbId;   /* database ID */
-    Oid funcOid; /* function ID */
+    int cacheId;
+    Oid objId; /* function ID or package ID */
 } SharedInvalFuncMsg;
 
 typedef union SharedInvalidationMessage {

@@ -23,9 +23,13 @@
 
 #include "raw_values_list.h"
 #include "raw_value.h"
+#include "../client_logic_common/statement_data.h"
 #include "libpq-int.h"
 
-RawValuesList::RawValuesList() : m_raw_values(NULL), m_raw_values_size(0) {}
+RawValuesList::RawValuesList(const bool should_free_values) : m_raw_values(NULL),
+                                                              m_raw_values_size(0),
+                                                              m_should_free_values(should_free_values) {
+}
 
 RawValuesList::~RawValuesList()
 {
@@ -34,17 +38,23 @@ RawValuesList::~RawValuesList()
 
 void RawValuesList::clear()
 {
-    for (size_t i = 0; i < m_raw_values_size; ++i) {
-        if (m_raw_values[i] != NULL) {
-            delete m_raw_values[i];
-            m_raw_values[i] = NULL;
+    if (m_should_free_values) {
+        for (size_t i = 0; i < m_raw_values_size; ++i) {
+            if (m_raw_values[i] == NULL) {
+                continue;
+            }
+
+            m_raw_values[i]->dec_ref_count();
+            if (m_raw_values[i]->safe_to_delete()) {
+                delete m_raw_values[i];
+                m_raw_values[i] = NULL;
+            }
         }
     }
     free(m_raw_values);
     m_raw_values = NULL;
     m_raw_values_size = 0;
 }
-
 
 bool RawValuesList::add(RawValue *raw_value)
 {
@@ -53,6 +63,9 @@ bool RawValuesList::add(RawValue *raw_value)
         sizeof(*m_raw_values) * (m_raw_values_size + 1));
     if (m_raw_values == NULL) {
         return false;
+    }
+    if (raw_value) {
+        raw_value->inc_ref_count();
     }
     m_raw_values[m_raw_values_size] = raw_value;
     ++m_raw_values_size;
@@ -106,6 +119,9 @@ bool RawValuesList::set(size_t pos, RawValue *raw_value)
     if (m_raw_values[pos] != NULL) {
         return false;
     }
+    if (raw_value) {
+        raw_value->inc_ref_count();
+    }
     m_raw_values[pos] = raw_value;
     return true;
 }
@@ -122,8 +138,11 @@ bool RawValuesList::erase(size_t pos, bool is_delete)
     }
 
     if (m_raw_values[pos]) {
-        delete m_raw_values[pos];
-        m_raw_values[pos] = NULL;
+        m_raw_values[pos]->dec_ref_count();
+        if (m_raw_values[pos]->safe_to_delete()) {
+            delete m_raw_values[pos];
+            m_raw_values[pos] = NULL;
+        }
     }
     std::swap(m_raw_values[pos], m_raw_values[m_raw_values_size - 1]);
     m_raw_values[m_raw_values_size - 1] = NULL;
@@ -170,4 +189,36 @@ void RawValuesList::quicksort_by_location(int lo, int hi)
 void RawValuesList::sort_by_location()
 {
     quicksort_by_location(0, (int)m_raw_values_size - 1);
+}
+
+void RawValuesList::merge_from(const RawValuesList *other)
+{
+    if (!other) {
+        return;
+    }
+    for (size_t i = 0; i < other->size(); i++) {
+        add(other->at(i));
+    }
+}
+
+bool RawValuesList::gen_values_from_statement(const StatementData *statement_data)
+{
+    resize(statement_data->nParams);
+    for (size_t param_num = 0; param_num < statement_data->nParams; ++param_num) {
+        RawValue *raw_value = new (std::nothrow) RawValue(statement_data->conn);
+        if (raw_value == NULL) {
+            fprintf(stderr, "failed to new RawValue object\n");
+            return false;
+        }
+        raw_value->m_is_param = true;
+        raw_value->m_location = param_num; /* func : do not reset this variable. it's confusing. */
+        if (statement_data->paramValues[param_num]) {
+            raw_value->set_data((const unsigned char *)statement_data->paramValues[param_num],
+                statement_data->paramLengths ? statement_data->paramLengths[param_num] :
+                                               strlen(statement_data->paramValues[param_num]));
+        }
+        raw_value->m_data_value_format = statement_data->paramFormats ? statement_data->paramFormats[param_num] : 0;
+        set(param_num, raw_value);
+    }
+    return true;
 }

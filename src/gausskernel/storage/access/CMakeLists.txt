@@ -16,6 +16,7 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/index
     ${CMAKE_CURRENT_SOURCE_DIR}/nbtree 
     ${CMAKE_CURRENT_SOURCE_DIR}/obs
+    ${CMAKE_CURRENT_SOURCE_DIR}/archive
     ${CMAKE_CURRENT_SOURCE_DIR}/psort 
     ${CMAKE_CURRENT_SOURCE_DIR}/redo
     ${CMAKE_CURRENT_SOURCE_DIR}/rmgrdesc
@@ -37,6 +38,7 @@ add_subdirectory(heap)
 add_subdirectory(index)
 add_subdirectory(nbtree)
 add_subdirectory(obs)
+add_subdirectory(archive)
 add_subdirectory(psort)
 add_subdirectory(redo)
 add_subdirectory(rmgrdesc)

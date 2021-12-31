@@ -27,6 +27,7 @@ extern void DefineEnum(CreateEnumStmt* stmt);
 extern void DefineRange(CreateRangeStmt* stmt);
 extern void AlterEnum(AlterEnumStmt* stmt);
 extern Oid DefineCompositeType(RangeVar* typevar, List* coldeflist);
+extern void DefineTableOfType(const TableOfTypeStmt* stmt);
 extern Oid AssignTypeArrayOid(void);
 
 extern void AlterDomainDefault(List* names, Node* defaultRaw);

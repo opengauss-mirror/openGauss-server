@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -132,6 +133,13 @@
 
 static const Oid copy_error_table_col_typid[COPY_ERROR_TABLE_NUM_COL] = {
     VARCHAROID, TIMESTAMPTZOID, VARCHAROID, INT8OID, TEXTOID, TEXTOID};
+
+const char* COPY_SUMMARY_TABLE_SCHEMA = "public";
+const char* COPY_SUMMARY_TABLE = "gs_copy_summary";
+static const int COPY_SUMMARY_TABLE_NUM_COL = 12;
+static Oid copy_summary_table_col_typid[COPY_SUMMARY_TABLE_NUM_COL] = {
+    VARCHAROID, TIMESTAMPTZOID, TIMESTAMPTZOID, INT8OID, INT8OID, INT8OID,
+    INT8OID, INT8OID, INT8OID, INT8OID, INT8OID, TEXTOID};
 
 /*
  * Note that similar macros also exist in executor/execMain.c.  There does not
@@ -316,10 +324,17 @@ extern void PrintFixedHeader(CopyState cstate);
 void CheckIfGDSReallyEnds(CopyState cstate, GDSStream* stream);
 void ProcessCopyErrorLogOptions(CopyState cstate, bool isRejectLimitSpecified);
 void Log_copy_error_spi(CopyState cstate);
+static void LogCopyErrorLogBulk(CopyState cstate);
+static void Log_copy_summary_spi(CopyState cstate);
 extern bool TrySaveImportError(CopyState cstate);
+static void FormAndSaveImportWhenLog(CopyState cstate, Relation errRel, Datum begintime, CopyErrorLogger *elogger);
+static void CheckCopyWhenList(List *when_list);
+static bool IfCopyLineMatchWhenListPosition(CopyState cstate);
+static bool IfCopyLineMatchWhenListField(CopyState cstate);
+static void CopyGetWhenListAttFieldno(CopyState cstate, List *attnamelist);
+static int CopyGetColumnListIndex(CopyState cstate, List *attnamelist, const char* colname);
 
-const char* gds_protocol_version_gaussdb = "1.0";
-
+const char *gds_protocol_version_gaussdb = "1.0";
 /*
  * Send copy start/stop messages for frontend copies.  These have changed
  * in past protocol redesigns.
@@ -1155,7 +1170,7 @@ static void TransformFormatter(CopyState cstate, List* formatter)
         colid++;
         if (pre != NULL) {
             Position* precol = (Position*)lfirst(pre);
-            if (precol->position + precol->fixedlen > col->position)
+            if (precol->position + precol->fixedlen > col->position && cstate->is_load_copy == false)
                 ereport(ERROR,
                     (errcode(ERRCODE_SYNTAX_ERROR),
                         errmsg("pre-field \"%s\" can not be covered by field \"%s\"", precol->colname, col->colname)));
@@ -1440,7 +1455,7 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
             if (cstate->fill_missing_fields)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
             else
-                cstate->fill_missing_fields = defGetBoolean(defel);
+                cstate->fill_missing_fields = defGetMixdInt(defel);
         } else if (strcmp(defel->defname, "noescaping") == 0) {
             if (noescapingSpecified)
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
@@ -1587,6 +1602,26 @@ void ProcessCopyOptions(CopyState cstate, bool is_from, List* options)
         } else if (pg_strcasecmp((defel->defname), "transform") == 0) {
             cstate->trans_expr_list = (List*)(defel->arg);
             GetTransSourceStr(cstate, defel->begin_location, defel->end_location);
+        } else if (pg_strcasecmp((defel->defname), "when_expr") == 0) {
+            cstate->when = (List *)defel->arg;
+            CheckCopyWhenList(cstate->when);
+        } else if (pg_strcasecmp((defel->defname), "skip") == 0) {
+            cstate->skip = defGetInt64(defel);
+            if (cstate->skip < 0) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("SKIP %ld should be >= 0", cstate->skip)));
+            }
+        } else if (pg_strcasecmp((defel->defname), "sequence") == 0) {
+            cstate->sequence_col_list = (List*)(defel->arg);
+        } else if (pg_strcasecmp((defel->defname), "filler") == 0) {
+            cstate->filler_col_list = (List*)(defel->arg);
+        } else if (pg_strcasecmp((defel->defname), "constant") == 0) {
+            cstate->constant_col_list = (List*)(defel->arg);
+        } else if (strcmp(defel->defname, "loader") == 0) {
+            if (cstate->is_load_copy)
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
+            cstate->is_load_copy = defGetBoolean(defel);
+        } else if (pg_strcasecmp((defel->defname), "useeof") == 0) {
+            cstate->is_useeof = defGetBoolean(defel);
         } else if (pg_strcasecmp(defel->defname, optChunkSize) == 0) {
             if (obs_chunksize) {
                 ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("conflicting or redundant options")));
@@ -2076,7 +2111,7 @@ static void ProcessCopyErrorLogSetUps(CopyState cstate)
     if (!cstate->log_errors && !cstate->logErrorsData) {
         return;
     }
-    if (cstate->logErrorsData && !superuser()) {
+    if (cstate->logErrorsData && !superuser() && cstate->is_load_copy == false) {
         ereport(ERROR,
             (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
                 errmsg("must be system admin to execute \"COPY  from log errors data\" ")));
@@ -2129,6 +2164,60 @@ static void ProcessCopyErrorLogSetUps(CopyState cstate)
 
         getTypeOutputInfo(attr[attnum]->atttypid, &out_func_oid, &isvarlena);
         fmgr_info(out_func_oid, &cstate->err_out_functions[attnum]);
+    }
+}
+
+/*
+ * ProcessCopySummaryLogSetUps is used to set up necessary structures used for copy from summary logging.
+ */
+static bool CheckCopySummaryTableDef(int nattrs, Form_pg_attribute *attr)
+{
+    if (nattrs != COPY_SUMMARY_TABLE_NUM_COL) {
+        return false;
+    }
+
+    for (int attnum = 0; attnum < nattrs; attnum++) {
+        if (attr[attnum]->atttypid != copy_summary_table_col_typid[attnum])
+            return false;
+    }
+    return true;
+}
+
+static void ProcessCopySummaryLogSetUps(CopyState cstate)
+{
+    Oid sys_namespaceid = InvalidOid;
+    Oid summary_table_reloid = InvalidOid;
+
+    cstate->copy_beginTime = TimestampTzGetDatum(GetCurrentTimestamp());
+    cstate->skiprows = 0;
+    cstate->loadrows = 0;
+    cstate->errorrows = 0;
+    cstate->whenrows = 0;
+    cstate->allnullrows = 0;
+    cstate->summary_table = NULL;
+
+    if (!cstate->is_from) {
+        return;
+    }
+    /* One thing to know is that gs_copy_summary is in public, */
+    sys_namespaceid = get_namespace_oid(COPY_SUMMARY_TABLE_SCHEMA, false);
+    summary_table_reloid = get_relname_relid(COPY_SUMMARY_TABLE, sys_namespaceid);
+    if (!OidIsValid(summary_table_reloid)) {
+        return;
+    }
+    /* RowExclusiveLock is used for insertion during spi. */
+    cstate->summary_table = relation_open(summary_table_reloid, RowExclusiveLock);
+    int natts = RelationGetNumberOfAttributes(cstate->summary_table);
+    TupleDesc tupDesc = RelationGetDescr(cstate->summary_table);
+    Form_pg_attribute *attr = tupDesc->attrs;
+
+    if (!CheckCopySummaryTableDef(natts, attr)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_OPERATE_FAILED),
+                 errmsg("The column definition of %s.%s table is not as intended.", COPY_SUMMARY_TABLE_SCHEMA,
+                        COPY_SUMMARY_TABLE),
+                 errhint("You may want to use copy_summary_create() to create it instead in order to use COPY FROM "
+                         "summary logging.")));
     }
 }
 
@@ -2282,6 +2371,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
     }
 
     if (is_copy) {
+        ProcessCopySummaryLogSetUps(cstate);
         ProcessCopyErrorLogSetUps(cstate);
     }
 
@@ -2344,7 +2434,7 @@ static CopyState BeginCopy(bool is_from, Relation rel, Node* raw_query, const ch
     /*
      * Check fill_missing_fields conflict
      * */
-    if (cstate->fill_missing_fields) {
+    if (cstate->fill_missing_fields == 1) {
         /* find last valid column */
         int i = num_phys_attrs - 1;
         for (; i >= 0; i--) {
@@ -2507,10 +2597,10 @@ CopyState BeginCopyTo(
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("cannot copy from stream \"%s\"", RelationGetRelationName(rel)),
                     errhint("Try the COPY (SELECT ...) TO variant.")));
-        } else if (rel->rd_rel->relkind == RELKIND_SEQUENCE)
+        } else if (RELKIND_IS_SEQUENCE(rel->rd_rel->relkind))
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy from sequence \"%s\"", RelationGetRelationName(rel))));
+                    errmsg("cannot copy from (large) sequence \"%s\"", RelationGetRelationName(rel))));
         else
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -2804,7 +2894,6 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
         if (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)
             ProcessFileHeader(cstate);
     }
-
     /* Get info about the columns we need to process. */
     cstate->out_functions = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
     foreach (cur, cstate->attnumlist) {
@@ -2925,15 +3014,16 @@ static uint64 CopyTo(CopyState cstate, bool isFirst, bool isLast)
                 Tuple tuple;
                 TableScanDesc scandesc;
                 scandesc = scan_handler_tbl_beginscan(cstate->curPartionRel, GetActiveSnapshot(), 0, NULL);
-
                 while ((tuple = scan_handler_tbl_getnext(scandesc, ForwardScanDirection, cstate->curPartionRel)) != NULL) {
                     CHECK_FOR_INTERRUPTS();
                 
                     /* Deconstruct the tuple ... faster than repeated heap_getattr */
                     tableam_tops_deform_tuple2(tuple, tupDesc, values, nulls, GetTableScanDesc(scandesc, cstate->curPartionRel)->rs_cbuf);
-                    
-                        /* Format and send the data */
-                    CopyOneRowTo(cstate, HeapTupleGetOid((HeapTuple)tuple), values, nulls);
+                    if (((HeapTuple)tuple)->tupTableType == HEAP_TUPLE) {
+                        CopyOneRowTo(cstate, HeapTupleGetOid((HeapTuple)tuple), values, nulls);
+                    } else {
+                        CopyOneRowTo(cstate, InvalidOid, values, nulls);
+                    }
                     processed++;
                 }
 
@@ -3003,16 +3093,31 @@ static uint64 CopyToCompatiblePartions(CopyState cstate)
 
             partionRel = partitionGetRelation(cstate->rel, partition);
 
-            cstate->curPartionRel = partionRel;
-
-            if (NULL == lnext(cell))
-                isLast = true;
-
-            processed += CopyTo(cstate, isFirst, isLast);
-
-            isFirst = false;
-
-            releaseDummyRelation(&partionRel);
+            if (RelationIsSubPartitioned(cstate->rel)) {
+                ListCell* lc = NULL;
+                List* subPartitionList = relationGetPartitionList(partionRel, AccessShareLock);
+                foreach (lc, subPartitionList) {
+                    Partition subPartition = (Partition)lfirst(lc);
+                    Relation subPartionRel = partitionGetRelation(partionRel, subPartition);
+                    cstate->curPartionRel = subPartionRel;
+                    if (NULL == lnext(cell) && NULL == lnext(lc)) {
+                        isLast = true;
+                    }
+                    processed += CopyTo(cstate, isFirst, isLast);
+                    isFirst = false;
+                    releaseDummyRelation(&subPartionRel);
+                }
+                releasePartitionList(partionRel, &subPartitionList, AccessShareLock);
+                releaseDummyRelation(&partionRel);
+            } else {
+                cstate->curPartionRel = partionRel;
+                if (NULL == lnext(cell)) {
+                    isLast = true;
+                }
+                processed += CopyTo(cstate, isFirst, isLast);
+                isFirst = false;
+                releaseDummyRelation(&partionRel);
+            }
         }
 
         if (partitionList != NIL) {
@@ -3831,10 +3936,10 @@ static uint64 CopyFrom(CopyState cstate)
                     (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                         errmsg("cannot copy to stream \"%s\"", RelationGetRelationName(cstate->rel))));
             isForeignTbl = true;
-        } else if (cstate->rel->rd_rel->relkind == RELKIND_SEQUENCE)
+        } else if (RELKIND_IS_SEQUENCE(cstate->rel->rd_rel->relkind))
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                    errmsg("cannot copy to sequence \"%s\"", RelationGetRelationName(cstate->rel))));
+                    errmsg("cannot copy to (large) sequence \"%s\"", RelationGetRelationName(cstate->rel))));
         else
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
@@ -4514,12 +4619,18 @@ static uint64 CopyFrom(CopyState cstate)
                 if (useHeapMultiInsert) {
                     bool toFlush = false;
                     CopyFromBulk bulk = NULL;
+                    Oid targetOid = InvalidOid;
                     /* step 1: query and get the caching buffer */
-                    bulk = findBulk(mgr,
-                        (isPartitionRel ? heapTupleGetPartitionId(resultRelationDesc, tuple)
-                                        : RelationGetRelid(resultRelationDesc)),
-                        bucketid,
-                        &toFlush);
+                    if (isPartitionRel) {
+                        if (RelationIsSubPartitioned(resultRelationDesc)) {
+                            targetOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
+                        } else {
+                            targetOid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                        }
+                    } else {
+                        targetOid = RelationGetRelid(resultRelationDesc);
+                    }
+                    bulk = findBulk(mgr, targetOid, bucketid, &toFlush);
                     /* step 2: check bulk-insert */
                     Assert(hasPartition || (toFlush == false));
                     Assert(!toFlush || InvalidOid != mgr->switchKey.partOid);
@@ -4563,13 +4674,20 @@ static uint64 CopyFrom(CopyState cstate)
                     }
                     
                     if (isPartitionRel && needflush) {
-                        partitionList = list_append_unique_oid(partitionList,
-                                                               heapTupleGetPartitionId(resultRelationDesc, tuple));
+                        Oid targetPartOid = InvalidOid;
+                        if (RelationIsSubPartitioned(resultRelationDesc)) {
+                            targetPartOid = heapTupleGetSubPartitionId(resultRelationDesc, tuple);
+                        } else {
+                            targetPartOid = heapTupleGetPartitionId(resultRelationDesc, tuple);
+                        }
+                        partitionList = list_append_unique_oid(partitionList, targetPartOid);
                     }
                 } else {
                     List* recheckIndexes = NIL;
                     Relation targetRel;
                     ItemPointer pTSelf = NULL;
+                    Relation subPartRel = NULL;
+                    Partition subPart = NULL;
                     if (isPartitionRel) {
                         /* get partititon oid to insert the record */
                         partitionid = heapTupleGetPartitionId(resultRelationDesc, tuple);
@@ -4580,7 +4698,17 @@ static uint64 CopyFrom(CopyState cstate)
                             heaprel,
                             partition,
                             RowExclusiveLock);
+
+                        if (RelationIsSubPartitioned(resultRelationDesc)) {
+                            partitionid = heapTupleGetPartitionId(heaprel, tuple);
+                            searchFakeReationForPartitionOid(estate->esfRelations, estate->es_query_cxt, heaprel,
+                                                             partitionid, subPartRel, subPart, RowExclusiveLock);
+                            heaprel = subPartRel;
+                            partition = subPart;
+                        }
+
                         targetRel = heaprel;
+
                         if (bucketid != InvalidBktId) {
                             searchHBucketFakeRelation(
                                 estate->esfRelations, estate->es_query_cxt, heaprel, bucketid, targetRel);
@@ -4787,7 +4915,10 @@ static uint64 CopyFrom(CopyState cstate)
         HeapSyncHashSearch(cstate->rel->rd_id, HASH_REMOVE);
 
     list_free_ext(partitionList);
-    
+
+    cstate->loadrows = processed;
+    Log_copy_summary_spi(cstate);
+
     return processed;
 }
 
@@ -5355,6 +5486,70 @@ bool IsTypeAcceptEmptyStr(Oid typeOid)
     }
 }
 
+static void CopyInitSpecColInfo(CopyState cstate, List* attnamelist, AttrNumber num_phys_attrs)
+{
+    ListCell* lc = NULL;
+    int attrno;
+
+    if (cstate->sequence_col_list != NULL) {
+        cstate->sequence = (SqlLoadSequInfo **)palloc0(num_phys_attrs * sizeof(SqlLoadSequInfo*));
+        List* sequelist = cstate->sequence_col_list;
+        SqlLoadSequInfo *sequeInfo = NULL;
+
+        foreach (lc, sequelist) {
+            sequeInfo = (SqlLoadSequInfo *)lfirst(lc);
+            attrno = CopyGetColumnListIndex(cstate, attnamelist, sequeInfo->colname);
+            cstate->sequence[attrno - 1] = sequeInfo;
+        }
+    }
+
+    if (cstate->filler_col_list != NULL) {
+        int palloc_size = num_phys_attrs + list_length(cstate->filler_col_list);
+        cstate->filler = (SqlLoadFillerInfo **)palloc0(palloc_size * sizeof(SqlLoadFillerInfo*));
+        List* fillerlist = cstate->filler_col_list;
+        SqlLoadFillerInfo *fillerInfo = NULL;
+
+        foreach (lc, fillerlist) {
+            fillerInfo = (SqlLoadFillerInfo *)lfirst(lc);
+            attrno = fillerInfo->index;
+            cstate->filler[attrno - 1] = fillerInfo;
+        }
+    }
+
+    if (cstate->constant_col_list != NULL) {
+        cstate->constant = (SqlLoadConsInfo **)palloc0(num_phys_attrs * sizeof(SqlLoadConsInfo*));
+        List* conslist = cstate->constant_col_list;
+        SqlLoadConsInfo *consInfo = NULL;
+
+        foreach (lc, conslist) {
+            consInfo = (SqlLoadConsInfo *)lfirst(lc);
+            attrno = CopyGetColumnListIndex(cstate, attnamelist, consInfo->colname);
+            cstate->constant[attrno - 1] = consInfo;
+        }
+    }
+}
+
+static void CopyInitCstateVar(CopyState cstate)
+{
+    /* Initialize state variables */
+    cstate->fe_eof = false;
+    if (cstate->eol_type != EOL_UD)
+        cstate->eol_type = EOL_UNKNOWN;
+    cstate->cur_relname = RelationGetRelationName(cstate->rel);
+    cstate->cur_lineno = 0;
+    cstate->cur_attname = NULL;
+    cstate->cur_attval = NULL;
+    cstate->illegal_chars_error = NIL;
+
+    /* Set up variables to avoid per-attribute overhead. */
+    initStringInfo(&cstate->attribute_buf);
+    initStringInfo(&cstate->sequence_buf);
+    initStringInfo(&cstate->line_buf);
+    cstate->line_buf_converted = false;
+    cstate->raw_buf = (char*)palloc(RAW_BUF_SIZE + 1);
+    cstate->raw_buf_index = cstate->raw_buf_len = 0;
+}
+
 /*
  * Setup to read tuples from a file for COPY FROM.
  *
@@ -5388,21 +5583,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     oldcontext = MemoryContextSwitchTo(cstate->copycontext);
 
     /* Initialize state variables */
-    cstate->fe_eof = false;
-    if (cstate->eol_type != EOL_UD)
-        cstate->eol_type = EOL_UNKNOWN;
-    cstate->cur_relname = RelationGetRelationName(cstate->rel);
-    cstate->cur_lineno = 0;
-    cstate->cur_attname = NULL;
-    cstate->cur_attval = NULL;
-    cstate->illegal_chars_error = NIL;
-
-    /* Set up variables to avoid per-attribute overhead. */
-    initStringInfo(&cstate->attribute_buf);
-    initStringInfo(&cstate->line_buf);
-    cstate->line_buf_converted = false;
-    cstate->raw_buf = (char*)palloc(RAW_BUF_SIZE + 1);
-    cstate->raw_buf_index = cstate->raw_buf_len = 0;
+    CopyInitCstateVar(cstate);
 
     tupDesc = RelationGetDescr(cstate->rel);
     attr = tupDesc->attrs;
@@ -5429,6 +5610,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
         cstate->as_typemods = (AssignTypmod *)palloc0(num_phys_attrs * sizeof(AssignTypmod));
         cstate->transexprs = (ExprState **)palloc0(num_phys_attrs * sizeof(ExprState*));
     }
+    CopyInitSpecColInfo(cstate, attnamelist, num_phys_attrs);
 
 #ifdef ENABLE_MULTIPLE_NODES
     /*
@@ -5590,6 +5772,10 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     if (cstate->trans_expr_list != NULL)
         TransformColExpr(cstate);
 
+    if (cstate->when != NULL) {
+        CopyGetWhenListAttFieldno(cstate, attnamelist);
+    }
+
     (void)MemoryContextSwitchTo(oldcontext);
 
     /* workload client manager */
@@ -5607,6 +5793,32 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist,
     }
 
     return cstate;
+}
+
+static bool CopyReadLineMatchWhenPosition(CopyState cstate)
+{
+    bool done = false;
+    while (1) { /* while for when position retry */
+    
+        cstate->cur_lineno++;
+    
+        /* Actually read the line into memory here */
+        done = CopyReadLine(cstate);
+        if (done) {
+            break;
+        }
+    
+        if (IfCopyLineMatchWhenListPosition(cstate) == true) {
+            break;
+        } else {
+            cstate->whenrows++;
+            if (cstate->log_errors || cstate->logErrorsData) {
+                FormAndSaveImportWhenLog(cstate, cstate->err_table, cstate->copy_beginTime, cstate->logger);
+            }
+        }
+    }
+
+    return done;
 }
 
 /*
@@ -5635,21 +5847,37 @@ bool NextCopyFromRawFields(CopyState cstate, char*** fields, int* nfields)
             return false; /* done */
     }
 
-    cstate->cur_lineno++;
+    while (cstate->skiprows < cstate->skip) {
+        cstate->cur_lineno++;
+        if (CopyReadLine(cstate))
+            return false; /* done */
+        cstate->skiprows++;
+    }
 
-    /* Actually read the line into memory here */
-    done = CopyReadLine(cstate);
+    while (1) { /* while for when field retry */
 
-    /*
-     * EOF at start of line means we're done.  If we see EOF after some
-     * characters, we act as though it was newline followed by EOF, ie,
-     * process the line and then exit loop on next iteration.
-     */
-    if (done && cstate->line_buf.len == 0)
-        return false;
+        done = CopyReadLineMatchWhenPosition(cstate);
 
-    /* Parse the line into de-escaped field values */
-    fldct = cstate->readAttrsFunc(cstate);
+        /*
+        * EOF at start of line means we're done.  If we see EOF after some
+        * characters, we act as though it was newline followed by EOF, ie,
+        * process the line and then exit loop on next iteration.
+        */
+        if (done && cstate->line_buf.len == 0)
+            return false;
+
+        /* Parse the line into de-escaped field values */
+        fldct = cstate->readAttrsFunc(cstate);
+
+        if (IfCopyLineMatchWhenListField(cstate) == true) {
+            break;
+        }
+
+        cstate->whenrows++;
+        if (cstate->log_errors || cstate->logErrorsData) {
+            FormAndSaveImportWhenLog(cstate, cstate->err_table, cstate->copy_beginTime, cstate->logger);
+        }
+    }
 
     *fields = cstate->raw_fields;
     *nfields = fldct;
@@ -5770,6 +5998,7 @@ Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str
     if (str == NULL && flinfo->fn_strict)
         return (Datum)0; /* just return null result */
 
+    SPI_STACK_LOG("push cond", NULL, NULL);
     pushed = SPI_push_conditional();
 
     switch (typioparam) {
@@ -5837,6 +6066,7 @@ Datum InputFunctionCallForBulkload(CopyState cstate, FmgrInfo* flinfo, char* str
                     errmsg("input function %u returned NULL", fcinfo.flinfo->fn_oid)));
     }
 
+    SPI_STACK_LOG("pop cond", NULL, NULL);
     SPI_pop_conditional(pushed);
 
     return result;
@@ -5919,10 +6149,25 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
         int fldct;      // total num of field in file
         int fieldno;    // current field count
         char* string = NULL;
+        bool all_null_flag = true;
 
-        /* read raw fields in the next line */
-        if (!NextCopyFromRawFields(cstate, &field_strings, &fldct))
-            return false;
+        while (all_null_flag) {
+            /* read raw fields in the next line */
+            if (!NextCopyFromRawFields(cstate, &field_strings, &fldct))
+                return false;
+            /* trailing nullcols */
+            if (cstate->fill_missing_fields != -1)
+                break;
+            for (i = 0; i < fldct; i++) {
+                /* treat empty C string as NULL */
+                if (field_strings[i] != NULL && field_strings[i][0] != '\0') {
+                    all_null_flag = false;
+                    break;
+                }
+            }
+            if (all_null_flag)
+                cstate->allnullrows++;
+        }
 
         /* check for overflowing fields. if cstate->ignore_extra_data is true,  ignore overflowing fields */
         if (nfields > 0 && fldct > nfields && !cstate->ignore_extra_data)
@@ -5970,10 +6215,13 @@ bool NextCopyFrom(CopyState cstate, ExprContext* econtext, Datum* values, bool* 
                 continue;
             }
 
-            if (fieldno > fldct || (!cstate->fill_missing_fields && fieldno == fldct))
-                ereport(ERROR,
-                    (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
-                        errmsg("missing data for column \"%s\"", NameStr(attr[m]->attname))));
+            /* 0 off;1 Compatible with the original copy; -1 trailing nullcols */
+            if (cstate->fill_missing_fields != -1){
+                if (fieldno > fldct || (!cstate->fill_missing_fields && fieldno == fldct))
+                    ereport(ERROR, (errcode(ERRCODE_BAD_COPY_FILE_FORMAT),
+                                    errmsg("missing data for column \"%s\"", NameStr(attr[m]->attname))));
+            }
+
             if (fieldno < fldct) {
                 string = field_strings[fieldno++];
 
@@ -6198,6 +6446,52 @@ static void append_defvals(Datum* values, CopyState cstate)
     if (cstate->num_defaults <= 0) {
         return;
     }
+    /* if sql has default column, do with the line_buf and */
+    /* make the col name and value one to one. */
+    ListCell* cur = NULL;
+    char *tmpLineBuf = pg_strdup(cstate->line_buf.data);
+    char *originHead = tmpLineBuf;
+    resetStringInfo(&(cstate->line_buf));
+    char *token = NULL;
+    int attNums=0, tokenNum=0;
+    bool first = true;
+
+    foreach (cur, cstate->attnumlist) {
+        attNums++;
+    }
+
+    /*
+     * When copy from text or csv that one col is self-incremental col,
+     * and there are more columns in the text than the columns to be imported,
+     * you must set ignore_extra_data 'on'. In this case, we choose the number
+     * of columns we want from front to back in the text, discarding the last
+     * unwanted values.
+     */
+    for (tokenNum=1, token = strsep(&tmpLineBuf, cstate->delim);
+        token != NULL && tokenNum <= attNums;
+        token = strsep(&tmpLineBuf, cstate->delim), ++tokenNum) {
+        if (first) {
+            appendBinaryStringInfo(&cstate->line_buf, token, strlen(token));
+            first = false;
+        } else {
+            appendBinaryStringInfo(&cstate->line_buf, cstate->delim, strlen(cstate->delim));
+            appendBinaryStringInfo(&cstate->line_buf, token, strlen(token));
+        }
+    }
+
+    /*
+     * If the text contains fewer columns of data than the columns to
+     * be imported and fill_missing_field is 'on', populate the data
+     * with delimiters.
+     */
+    if (attNums - tokenNum >= 0) {
+        for (; tokenNum <= attNums; ++tokenNum) {
+            appendBinaryStringInfo(&cstate->line_buf, cstate->delim, strlen(cstate->delim));
+        }
+    }
+    free(originHead);
+    originHead = NULL;
+    tmpLineBuf = NULL;
 
     CopyStateData new_cstate = *cstate;
     int i;
@@ -6649,7 +6943,7 @@ static bool CopyReadLineTextTemplate(CopyState cstate)
          *  would lead to format disorientation and cause import error when
          *  importing from file.
          */
-        if ((IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && cstate->copy_dest != COPY_FILE) {
+        if (!cstate->is_useeof && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE) && cstate->copy_dest != COPY_FILE) {
             if (c == '\\' && (!csv_mode || first_char_in_line)) {
                 char c2;
 
@@ -6874,6 +7168,10 @@ static int CopyReadAttributesTextT(CopyState cstate)
     char* line_begin_ptr = NULL;
     IllegalCharErrInfo* err_info = NULL;
     ListCell* cur = NULL;
+    StringInfo sequence_buf_ptr = &cstate->sequence_buf;
+    int numattrs = list_length(cstate->attnumlist);
+    int proc_col_num = 0;
+    int max_filler_index = numattrs + list_length(cstate->filler_col_list);
 
     /*
      * We need a special case for zero-column tables: check that the input
@@ -6886,6 +7184,8 @@ static int CopyReadAttributesTextT(CopyState cstate)
     }
 
     resetStringInfo(&cstate->attribute_buf);
+    resetStringInfo(sequence_buf_ptr);
+    memset_s(cstate->raw_fields, sizeof(char*) * cstate->max_fields, 0, sizeof(char*) * cstate->max_fields);
 
     /*
      * The de-escaped attributes will certainly not be longer than the input
@@ -6914,11 +7214,28 @@ static int CopyReadAttributesTextT(CopyState cstate)
         char* end_ptr = NULL;
         int input_len;
         bool saw_non_ascii = false;
+        proc_col_num++;
 
         /* Make sure there is enough space for the next value */
         if (fieldno >= cstate->max_fields) {
             cstate->max_fields *= 2;
             cstate->raw_fields = (char**)repalloc(cstate->raw_fields, cstate->max_fields * sizeof(char*));
+        }
+
+        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL)
+        {
+            if (cstate->sequence != NULL && fieldno < numattrs && cstate->sequence[fieldno] != NULL) {
+                cstate->raw_fields[fieldno] = &sequence_buf_ptr->data[sequence_buf_ptr->len];
+                appendStringInfo(sequence_buf_ptr, "%ld", cstate->sequence[fieldno]->start);
+                cstate->sequence[fieldno]->start += cstate->sequence[fieldno]->step;
+                cstate->sequence_buf.len++;
+                fieldno++;
+                continue;
+            } else if (cstate->constant != NULL && fieldno < numattrs && cstate->constant[fieldno] != NULL) {
+                cstate->raw_fields[fieldno] = cstate->constant[fieldno]->consVal;
+                fieldno++;
+                continue;
+            }
         }
 
         /* Remember start of field on both input and output sides */
@@ -7121,10 +7438,26 @@ static int CopyReadAttributesTextT(CopyState cstate)
             }
         }
 
-        fieldno++;
+        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL) {
+            fieldno++;
+        }
+
         /* Done if we hit EOL instead of a delim */
         if (!found_delim) {
             break;
+        }
+    }
+
+    for (int i = fieldno; i < numattrs; i++) {
+        if (cstate->sequence != NULL && cstate->sequence[i] != NULL) {
+            cstate->raw_fields[i] = &sequence_buf_ptr->data[sequence_buf_ptr->len];
+            appendStringInfo(sequence_buf_ptr, "%ld", cstate->sequence[i]->start);
+            cstate->sequence[i]->start += cstate->sequence[i]->step;
+            cstate->sequence_buf.len++;
+            fieldno = i + 1;
+        } else if (cstate->constant != NULL && cstate->constant[i] != NULL) {
+            cstate->raw_fields[i] = cstate->constant[i]->consVal;
+            fieldno = i + 1;
         }
     }
 
@@ -7159,6 +7492,10 @@ static int CopyReadAttributesCSVT(CopyState cstate)
     char* line_begin_ptr = NULL;
     IllegalCharErrInfo* err_info = NULL;
     ListCell* cur = NULL;
+    StringInfo sequence_buf_ptr = &cstate->sequence_buf;
+    int numattrs = list_length(cstate->attnumlist);
+    int proc_col_num = 0;
+    int max_filler_index = numattrs + list_length(cstate->filler_col_list);
 
     /*
      * We need a special case for zero-column tables: check that the input
@@ -7171,6 +7508,8 @@ static int CopyReadAttributesCSVT(CopyState cstate)
     }
 
     resetStringInfo(&cstate->attribute_buf);
+    resetStringInfo(sequence_buf_ptr);
+    memset_s(cstate->raw_fields, sizeof(char*) * cstate->max_fields, 0, sizeof(char*) * cstate->max_fields);
 
     /*
      * The de-escaped attributes will certainly not be longer than the input
@@ -7199,6 +7538,7 @@ static int CopyReadAttributesCSVT(CopyState cstate)
         char* start_ptr = NULL;
         char* end_ptr = NULL;
         int input_len;
+        proc_col_num++;
 
         /* Make sure there is enough space for the next value */
         if (fieldno >= cstate->max_fields) {
@@ -7209,6 +7549,22 @@ static int CopyReadAttributesCSVT(CopyState cstate)
             }
             cstate->max_fields *= 2;
             cstate->raw_fields = (char**)repalloc(cstate->raw_fields, cstate->max_fields * sizeof(char*));
+        }
+
+        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL)
+        {
+            if (cstate->sequence != NULL && fieldno < numattrs && cstate->sequence[fieldno] != NULL) {
+                cstate->raw_fields[fieldno] = &sequence_buf_ptr->data[sequence_buf_ptr->len];
+                appendStringInfo(sequence_buf_ptr, "%ld", cstate->sequence[fieldno]->start);
+                cstate->sequence[fieldno]->start += cstate->sequence[fieldno]->step;
+                cstate->sequence_buf.len++;
+                fieldno++;
+                continue;
+            } else if (cstate->constant != NULL && fieldno < numattrs && cstate->constant[fieldno] != NULL) {
+                cstate->raw_fields[fieldno] = cstate->constant[fieldno]->consVal;
+                fieldno++;
+                continue;
+            }
         }
 
         /* Remember start of field on both input and output sides */
@@ -7239,6 +7595,11 @@ static int CopyReadAttributesCSVT(CopyState cstate)
 
                     found_delim = true;
                     goto endfield;
+                }
+                /* ""ab"",""b"" error for gs_load */
+                if (cstate->is_load_copy && saw_quote) {
+                    ereport(ERROR,
+                            (errcode(ERRCODE_BAD_COPY_FILE_FORMAT), errmsg("no terminator found after quoted field")));
                 }
                 /* start of quoted field (or part of field) */
                 if (c == quotec) {
@@ -7323,10 +7684,26 @@ static int CopyReadAttributesCSVT(CopyState cstate)
             }
         }
 
-        fieldno++;
+        if (cstate->filler == NULL || proc_col_num > max_filler_index || cstate->filler[proc_col_num - 1] == NULL) {
+            fieldno++;
+        }
+
         /* Done if we hit EOL instead of a delim */
         if (!found_delim) {
             break;
+        }
+    }
+
+    for (int i = fieldno; i < numattrs; i++) {
+        if (cstate->sequence != NULL && cstate->sequence[i] != NULL) {
+            cstate->raw_fields[i] = &sequence_buf_ptr->data[sequence_buf_ptr->len];
+            appendStringInfo(sequence_buf_ptr, "%ld", cstate->sequence[i]->start);
+            cstate->sequence[i]->start += cstate->sequence[i]->step;
+            cstate->sequence_buf.len++;
+            fieldno = i + 1;
+        } else if (cstate->constant != NULL && cstate->constant[i] != NULL) {
+            cstate->raw_fields[i] = cstate->constant[i]->consVal;
+            fieldno = i + 1;
         }
     }
 
@@ -9373,6 +9750,16 @@ void FormAndSaveImportError(CopyState cstate, Relation errRel, Datum begintime, 
     elogger->SaveError(&edata);
 }
 
+static void FormAndSaveImportWhenLog(CopyState cstate, Relation errRel, Datum begintime, CopyErrorLogger* elogger)
+{
+    CopyError edata;
+    AutoContextSwitch autosiwitch(elogger->m_memCxt);
+
+    MemoryContextReset(elogger->m_memCxt);
+    elogger->FormWhenLog(cstate, begintime, &edata);
+    elogger->SaveError(&edata);
+}
+
 void FlushErrorInfo(Relation rel, EState* estate, ErrorCacheEntry* cache)
 {
     ImportError err;
@@ -9493,6 +9880,10 @@ void Log_copy_error_spi(CopyState cstate)
 {
     CopyError err;
     Oid argtypes[] = {VARCHAROID, TIMESTAMPTZOID, VARCHAROID, INT8OID, TEXTOID, TEXTOID};
+    /* for copy from load. */
+    if (cstate->is_from && cstate->is_load_copy) {
+        return LogCopyErrorLogBulk(cstate);
+    }
 
     Assert (RelationGetNumberOfAttributes(cstate->err_table) == CopyError::MaxNumOfValue);
     err.m_desc = RelationGetDescr(cstate->err_table);
@@ -9501,6 +9892,7 @@ void Log_copy_error_spi(CopyState cstate)
     cstate->logger->Reset();
 
     int ret;
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((ret = SPI_connect()) < 0) {
         /* internal error */
         ereport(ERROR,
@@ -9526,5 +9918,451 @@ void Log_copy_error_spi(CopyState cstate)
         }
     }
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
+}
+
+/*
+ *	Log_copy_summary_spi is used to insert the summary record into copy_summary table with SPI
+ *	APIs. Xids, execution, and rollback are dealt and guaranteed by SPI state machine.
+ */
+static void Log_copy_summary_spi(CopyState cstate)
+{
+    const int MAXNAMELEN = (NAMEDATALEN * 4 + 2);
+    const int MAXDETAIL = 512;
+    Datum values[COPY_SUMMARY_TABLE_NUM_COL];
+    char relname[MAXNAMELEN] = {'\0'};
+    char detail[MAXDETAIL] = {'\0'};
+    errno_t rc;
+    int ret;
+    if (cstate->summary_table == NULL) {
+        return;
+    }
+
+    if ((ret = SPI_connect()) < 0) {
+        /* internal error */
+        ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI connect failure - returned %d", ret)));
+    }
+
+    rc = snprintf_s(relname, MAXNAMELEN, MAXNAMELEN - 1, "%s.%s", get_namespace_name(RelationGetNamespace(cstate->rel)),
+                    RelationGetRelationName(cstate->rel));
+    securec_check_ss(rc, "\0", "\0");
+
+    values[0] = PointerGetDatum(cstring_to_text_with_len(relname, strlen(relname)));
+
+    /* save the begintime/endtime/rows  */
+    values[1] = cstate->copy_beginTime;
+    values[2] = TimestampTzGetDatum(GetCurrentTimestamp());
+    values[3] = Int64GetDatum(GetTopTransactionId());
+    values[4] = Int64GetDatum(t_thrd.proc_cxt.MyProcPid);
+    /* processed rows */
+    values[5] = Int64GetDatum(cstate->cur_lineno-1);
+    values[6] = Int64GetDatum(cstate->skiprows);
+    values[7] = Int64GetDatum(cstate->loadrows);
+    values[8] = Int64GetDatum(cstate->errorrows);
+    values[9] = Int64GetDatum(cstate->whenrows);
+    values[10] = Int64GetDatum(cstate->allnullrows);
+    /* save the detail here  */
+    snprintf_s(detail, MAXDETAIL, MAXDETAIL - 1,
+               "%lld Rows successfully loaded.\n"
+               "%lld Rows not loaded due to data errors.\n"
+               "%lld Rows not loaded because all WHEN clauses were failed.\n"
+               "%lld Rows not loaded because all fields were null.\n",
+               cstate->loadrows, cstate->errorrows, cstate->whenrows, cstate->allnullrows);
+
+    values[11] = PointerGetDatum(cstring_to_text_with_len(detail, strlen(detail)));
+
+    char *querystr = "insert into public.gs_copy_summary values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12);";
+    ret = SPI_execute_with_args(querystr, COPY_SUMMARY_TABLE_NUM_COL, copy_summary_table_col_typid, values, NULL, false,
+                                0, NULL);
+    if (ret != SPI_OK_INSERT) {
+        ereport(ERROR,
+                (errcode(ERRCODE_SPI_EXECUTE_FAILURE), errmsg("Error encountered while logging summary into %s.%s.",
+                                                              COPY_SUMMARY_TABLE_SCHEMA, COPY_SUMMARY_TABLE)));
+    }
+
+    SPI_finish();
+
+    relation_close(cstate->summary_table, RowExclusiveLock);
+    cstate->summary_table = NULL;
+}
+
+void CheckCopyWhenExprOptions(LoadWhenExpr *when)
+{
+    if (when == NULL) {
+        return;
+    }
+    if (when->whentype == 0){
+        if (when->start <= 0) {
+            ereport(ERROR,
+                    (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN start position %d should be > 0", when->start)));
+        }
+        if (when->end <= 0) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN end position %d should be > 0", when->end)));
+        }
+        if (when->end < when->start) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                            errmsg("WHEN start position %d should be <= end position %d", when->start, when->end)));
+        }
+    } else {
+        if (when->attname == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field name is null")));
+        }
+        if (when->oper == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field oper name is null")));
+        }
+    }
+    return;
+}
+
+static void CheckCopyWhenList(List *when_list)
+{
+    ListCell* lc = NULL;
+
+    foreach (lc, when_list) {
+        LoadWhenExpr *when = (LoadWhenExpr *)lfirst(lc);
+        CheckCopyWhenExprOptions(when);
+    }
+}
+
+static int whenpostion_strcmp(const char *arg1, int len1, const char *arg2, int len2)
+{
+    int result;
+    result = memcmp(arg1, arg2, Min(len1, len2));
+    if ((result == 0) && (len1 != len2)) {
+        result = (len1 < len2) ? -1 : 1;
+    }
+    return result;
+}
+
+static bool IfCopyLineMatchWhenPositionExpr(CopyState cstate, LoadWhenExpr *when)
+{
+    StringInfo buf =  &cstate->line_buf;
+
+    if (when == NULL || when->whentype == 1) {
+        return true;
+    }
+    if (buf->len < when->start || buf->len < when->end) {
+        return false;
+    }
+    if (when->val == NULL)
+        return false;
+
+    char *rawfield = buf->data + when->start - 1;
+    int rawfieldlen = when->end + 1 - when->start;
+
+    if (strlen(when->oper) == 1) {
+        if (strncmp(when->oper, "=", 1) == 0)
+            return (whenpostion_strcmp(rawfield, rawfieldlen, when->val, strlen(when->val)) == 0);
+        else {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN oper error")));
+            return false;
+        }
+    } else if (strlen(when->oper) == 2) {
+        if (strncmp(when->oper, "<>", 2) == 0)
+            return (whenpostion_strcmp(rawfield, rawfieldlen, when->val, strlen(when->val)) != 0);
+        else {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN oper error")));
+            return false;
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN oper error")));
+        return false;
+    }
+    return false;
+}
+
+static void CopyGetWhenExprAttFieldno(CopyState cstate, LoadWhenExpr *when, List *attnamelist)
+{
+    TupleDesc tupDesc;
+    if (when == NULL || when->whentype != 1) {
+        return;
+    }
+    if (when->attname == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("WHEN no field name")));
+        return;
+    }
+
+    if (attnamelist == NULL) {
+        if (cstate->rel == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("WHEN no relation")));
+            return;
+        }
+        tupDesc = RelationGetDescr(cstate->rel);
+        for (int i = 0; i < tupDesc->natts; i++) {
+            if (tupDesc->attrs[i]->attisdropped)
+                continue;
+            if (namestrcmp(&(tupDesc->attrs[i]->attname), when->attname) == 0) {
+                when->attnum = tupDesc->attrs[i]->attnum; /* based 1 */
+                return;
+            }
+        }
+        ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("WHEN field name not find")));
+    } else {
+        ListCell *l = NULL;
+        int attnum = 0;
+        foreach (l, attnamelist) {
+            attnum++;
+            char *name = strVal(lfirst(l));
+            if (strcmp(name, when->attname) == 0) {
+                when->attnum = attnum; /* based 1 */
+                return;
+            }
+        }
+        ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("WHEN field name not find")));
+    }
+    return;
+}
+
+static bool IfCopyLineMatchWhenFieldExpr(CopyState cstate, LoadWhenExpr *when)
+{
+    if (when == NULL || when->whentype != 1) {
+        return true;
+    }
+    if (when->attnum == 0) {  // assert
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field name not find")));
+    }
+    int attnum = when->attnum - 1;  // fields 0 based
+    if (attnum >= cstate->max_fields) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field > max fields")));
+    }
+    if (when->val == NULL)
+        return false;
+    if (cstate->raw_fields[attnum] == NULL) {
+        return false;
+    }
+
+    if (strlen(when->oper) == 1) {
+        if (strncmp(when->oper, "=", 1) == 0)
+            return (strcmp(cstate->raw_fields[attnum], when->val) == 0);
+        else {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field oper error")));
+            return false;
+        }
+    } else if (strlen(when->oper) == 2){
+        if (strncmp(when->oper, "<>", 2) == 0)
+            return (strcmp(cstate->raw_fields[attnum], when->val) != 0);
+        else {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field oper error")));
+            return false;
+        }
+    } else {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("WHEN field oper error")));
+        return false;
+    }
+    return false;
+}
+
+static bool IfCopyLineMatchWhenListPosition(CopyState cstate)
+{
+    ListCell* lc = NULL;
+    List *when_list = cstate->when;
+
+    foreach (lc, when_list) {
+        LoadWhenExpr *when = (LoadWhenExpr *)lfirst(lc);
+        if (IfCopyLineMatchWhenPositionExpr(cstate, when) == false) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void CopyGetWhenListAttFieldno(CopyState cstate, List *attnamelist)
+{
+    ListCell* lc = NULL;
+    List *when_list = cstate->when;
+
+    foreach (lc, when_list) {
+        LoadWhenExpr *when = (LoadWhenExpr *)lfirst(lc);
+        CopyGetWhenExprAttFieldno(cstate, when, attnamelist);
+    }
+    return;
+}
+
+static bool IfCopyLineMatchWhenListField(CopyState cstate)
+{
+    ListCell* lc = NULL;
+    List *when_list = cstate->when;
+
+    foreach (lc, when_list) {
+        LoadWhenExpr *when = (LoadWhenExpr *)lfirst(lc);
+        if (IfCopyLineMatchWhenFieldExpr(cstate, when) == false) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static int CopyGetColumnListIndex(CopyState cstate, List *attnamelist, const char* colname)
+{
+    TupleDesc tupDesc = NULL;
+    ListCell *col = NULL;
+    int index = 0;
+    if (colname == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Column name is NULL")));
+        return InvalidAttrNumber;
+    }
+
+    if (attnamelist == NULL) {
+        if (cstate->rel == NULL) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Column list no relation")));
+            return InvalidAttrNumber;
+        }
+        tupDesc = RelationGetDescr(cstate->rel);
+        for (int i = 0; i < tupDesc->natts; i++) {
+            if (tupDesc->attrs[i]->attisdropped)
+                continue;
+            if (namestrcmp(&(tupDesc->attrs[i]->attname), colname) == 0) {
+                return tupDesc->attrs[i]->attnum; /* based 1 */
+            }
+        }
+        ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Column name %s not find", colname)));
+    } else {
+        foreach (col, attnamelist) {
+            index++;
+            char *name = strVal(lfirst(col));
+            if (strcmp(name, colname) == 0) {
+                return index;
+            }
+        }
+        ereport(ERROR, (errcode(ERRCODE_INVALID_COLUMN_REFERENCE), errmsg("Column name %s not find", colname)));
+    }
+
+    /* on failure */
+    return InvalidAttrNumber;
+}
+
+static void BatchInsertCopyLog(LogInsertState copyLogInfo, int nBufferedTuples, HeapTuple *bufferedTuples)
+{
+    MemoryContext oldcontext;
+    HeapMultiInsertExtraArgs args = {NULL, 0, false};
+    TupleTableSlot *myslot = copyLogInfo->myslot;
+
+    /*
+     * heap_multi_insert leaks memory, so switch memory context
+     */
+    oldcontext = MemoryContextSwitchTo(GetPerTupleMemoryContext(copyLogInfo->estate));
+    (void)tableam_tuple_multi_insert(copyLogInfo->rel, copyLogInfo->resultRelInfo->ri_RelationDesc,
+                                    (Tuple *)bufferedTuples, nBufferedTuples, copyLogInfo->mycid,
+                                    copyLogInfo->insertOpt, copyLogInfo->bistate, &args);
+    MemoryContextSwitchTo(oldcontext);
+
+    if (copyLogInfo->resultRelInfo->ri_NumIndices > 0) {
+        int i;
+        for (i = 0; i < nBufferedTuples; i++) {
+            List *recheckIndexes = NULL;
+
+            (void)ExecStoreTuple(bufferedTuples[i], myslot, InvalidBuffer, false);
+
+            recheckIndexes = ExecInsertIndexTuples(myslot, &(bufferedTuples[i]->t_self), copyLogInfo->estate,
+                                                    NULL, NULL, InvalidBktId, NULL, NULL);
+
+            list_free(recheckIndexes);
+        }
+    }
+
+    return;
+}
+
+static LogInsertState InitInsertCopyLogInfo(CopyState cstate)
+{
+    LogInsertState copyLogInfo = NULL;
+    ResultRelInfo *resultRelInfo = NULL;
+    EState *estate = NULL;
+
+    copyLogInfo = (LogInsertState)palloc(sizeof(InsertCopyLogInfoData));
+    copyLogInfo->rel = cstate->err_table;
+    copyLogInfo->insertOpt= TABLE_INSERT_FROZEN;
+    copyLogInfo->mycid = GetCurrentCommandId(true);
+
+    resultRelInfo = makeNode(ResultRelInfo);
+    resultRelInfo->ri_RangeTableIndex = 1;
+    resultRelInfo->ri_RelationDesc = copyLogInfo->rel;
+    ExecOpenIndices(resultRelInfo, false);
+    copyLogInfo->resultRelInfo = resultRelInfo;
+
+    estate= CreateExecutorState();
+    estate->es_result_relations = resultRelInfo;
+    estate->es_num_result_relations = 1;
+    estate->es_result_relation_info = resultRelInfo;
+    copyLogInfo->estate = estate;
+
+    copyLogInfo->myslot = ExecInitExtraTupleSlot(estate);
+    ExecSetSlotDescriptor(copyLogInfo->myslot, RelationGetDescr(copyLogInfo->rel));
+
+    copyLogInfo->bistate = GetBulkInsertState();
+
+    return copyLogInfo;
+}
+
+static void FreeInsertCopyLogInfo(LogInsertState copyLogInfo)
+{
+    if (copyLogInfo == NULL) {
+        return;
+    }
+
+    FreeBulkInsertState(copyLogInfo->bistate);
+    ExecResetTupleTable(copyLogInfo->estate->es_tupleTable, false);
+    ExecCloseIndices(copyLogInfo->resultRelInfo);
+    FreeExecutorState(copyLogInfo->estate);
+    pfree(copyLogInfo->resultRelInfo);
+    pfree(copyLogInfo);
+}
+
+static void LogCopyErrorLogBulk(CopyState cstate)
+{
+    const int MAX_TUPLES = 10000;
+    const int MAX_TUPLES_BYTES = 1024 * 1024;
+    HeapTuple tuple;
+    MemoryContext oldcontext = CurrentMemoryContext;
+    int nBufferedTuples = 0;
+    HeapTuple *bufferedTuples = NULL;
+    Size bufferedTuplesSize = 0;
+    LogInsertState copyLogInfo = NULL;
+    CopyError err;
+
+    if (cstate->err_table == NULL)
+        return;
+    Assert(RelationGetNumberOfAttributes(cstate->err_table) == CopyError::MaxNumOfValue);
+    err.m_desc = RelationGetDescr(cstate->err_table);
+
+    /* Reset the offset of the logger. Read from 0. */
+    cstate->logger->Reset();
+
+    copyLogInfo = InitInsertCopyLogInfo(cstate);
+    bufferedTuples = (HeapTuple *)palloc0(MAX_TUPLES * sizeof(HeapTuple));
+
+    for (;;) {
+        CHECK_FOR_INTERRUPTS();
+        if (nBufferedTuples == 0) {
+            ResetPerTupleExprContext(copyLogInfo->estate);
+        }
+
+        MemoryContextSwitchTo(GetPerTupleMemoryContext(copyLogInfo->estate));
+
+        if (cstate->logger->FetchError(&err) == EOF) {
+            break;
+        }
+
+        tuple = (HeapTuple)heap_form_tuple(err.m_desc, err.m_values, err.m_isNull);
+        ExecStoreTuple(tuple, copyLogInfo->myslot, InvalidBuffer, false);
+
+        bufferedTuples[nBufferedTuples++] = tuple;
+        bufferedTuplesSize += tuple->t_len;
+
+        if (nBufferedTuples == MAX_TUPLES || bufferedTuplesSize > MAX_TUPLES_BYTES) {
+            BatchInsertCopyLog(copyLogInfo, nBufferedTuples, bufferedTuples);
+            nBufferedTuples = 0;
+            bufferedTuplesSize = 0;
+        }
+    }
+
+    if (nBufferedTuples > 0) {
+        BatchInsertCopyLog(copyLogInfo, nBufferedTuples, bufferedTuples);
+    }
+
+    MemoryContextSwitchTo(oldcontext);
+    pfree(bufferedTuples);
+    FreeInsertCopyLogInfo(copyLogInfo);
+    return;
 }

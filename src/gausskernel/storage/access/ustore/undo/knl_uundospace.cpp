@@ -64,10 +64,6 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
 
     WHITEBOX_TEST_STUB(UNDO_EXTEND_LOG_FAILED, WhiteboxDefaultErrorEmit);
     while (tail < offset) {
-        blockno = (BlockNumber)(tail / BLCKSZ + 1);
-        /* Create a new undo segment. */
-        smgrextend(reln, MAIN_FORKNUM, blockno, NULL, false);
-        pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         if ((!t_thrd.xlog_cxt.InRecovery) && (static_cast<int>(g_instance.undo_cxt.undoTotalSize) +
             static_cast<int>(g_instance.undo_cxt.undoMetaSize) >= g_instance.attr.attr_storage.undo_space_limit_size)) {
             ereport(ERROR, (errmodule(MOD_UNDO), errmsg(UNDOFORMAT(
@@ -75,6 +71,10 @@ void UndoSpace::ExtendUndoLog(int zid, UndoLogOffset offset, uint32 dbId)
                 g_instance.undo_cxt.undoTotalSize + g_instance.undo_cxt.undoMetaSize,
                 g_instance.attr.attr_storage.undo_space_limit_size)));
         }
+        blockno = (BlockNumber)(tail / BLCKSZ + 1);
+        /* Create a new undo segment. */
+        smgrextend(reln, MAIN_FORKNUM, blockno, NULL, false);
+        pg_atomic_fetch_add_u32(&g_instance.undo_cxt.undoTotalSize, segBlocks);
         tail += segSize;
     }
 
@@ -139,6 +139,7 @@ void UndoSpace::CreateNonExistsUndoFile(int zid, uint32 dbId)
         }
         offset += segSize;
     }
+    smgrclose(reln);
     return;
 }
 
@@ -325,7 +326,6 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
     g_instance.undo_cxt.undoMetaSize += spaceMetaSize;
 
     for (zoneId = 0; zoneId < PERSIST_ZONE_COUNT; zoneId++) {
-        UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
         UndoSpaceMetaInfo *uspMetaInfo = NULL;
         if (zoneId % (UNDOSPACE_COUNT_PER_PAGE * PAGES_READ_NUM) == 0) {
             Size readSize;
@@ -369,11 +369,15 @@ void UndoSpace::RecoveryUndoSpace(int fd, UndoSpaceType type)
                 return;
             }
         }
-        if (uzone == NULL) {
-            continue;
-        }
+
         int offset = zoneId % UNDOSPACE_COUNT_PER_PAGE;
         uspMetaInfo = (UndoSpaceMetaInfo *)(uspMetaBuffer + offset * sizeof(UndoSpaceMetaInfo));
+        UndoZone *uzone = (UndoZone *)g_instance.undo_cxt.uZones[zoneId];
+        if (uspMetaInfo->tail == 0 && uzone == NULL) {
+            continue;
+        }
+
+        uzone = UndoZoneGroup::GetUndoZone(zoneId, true);
         UndoSpace *usp = uzone->GetSpace(type);
         usp->LockInit();
         usp->MarkClean();

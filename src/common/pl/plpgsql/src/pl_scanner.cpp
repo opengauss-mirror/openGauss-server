@@ -14,15 +14,16 @@
  * -------------------------------------------------------------------------
  */
 #include "utils/plpgsql.h"
-
+#include "utils/pl_package.h"
 #include "catalog/pg_type.h"
+#include "catalog/gs_package.h"
 #include "mb/pg_wchar.h"
 #include "parser/scanner.h"
 
 #include "pl_gram.hpp" /* must be after parser/scanner.h */
 
 #define PG_KEYWORD(a, b, c) {a, b, c},
-
+#define LENGTH_OF_DOT_AND_STR_END 4
 /*
  * A word about keywords:
  *
@@ -85,6 +86,7 @@ static const ScanKeyword reserved_keywords[] = {
     PG_KEYWORD("in", K_IN, RESERVED_KEYWORD) 
     PG_KEYWORD("insert", K_INSERT, RESERVED_KEYWORD) 
     PG_KEYWORD("into", K_INTO, RESERVED_KEYWORD) 
+    PG_KEYWORD("limit", K_LIMIT, RESERVED_KEYWORD) 
     PG_KEYWORD("loop", K_LOOP, RESERVED_KEYWORD) 
     PG_KEYWORD("move", K_MOVE, RESERVED_KEYWORD)
     PG_KEYWORD("not", K_NOT, RESERVED_KEYWORD) 
@@ -101,7 +103,6 @@ static const ScanKeyword reserved_keywords[] = {
     PG_KEYWORD("strict", K_STRICT, RESERVED_KEYWORD)
     PG_KEYWORD("then", K_THEN, RESERVED_KEYWORD) 
     PG_KEYWORD("to", K_TO, RESERVED_KEYWORD)
-    PG_KEYWORD("type", K_TYPE, RESERVED_KEYWORD) 
     PG_KEYWORD("update", K_UPDATE, RESERVED_KEYWORD)
     PG_KEYWORD("using", K_USING, RESERVED_KEYWORD) 
     PG_KEYWORD("when", K_WHEN, RESERVED_KEYWORD)
@@ -117,6 +118,8 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("array", K_ARRAY, UNRESERVED_KEYWORD) 
     PG_KEYWORD("as", K_AS, UNRESERVED_KEYWORD) 
     PG_KEYWORD("backward", K_BACKWARD, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("bulk", K_BULK, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("collect", K_COLLECT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("commit", K_COMMIT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("constant", K_CONSTANT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("continue", K_CONTINUE, UNRESERVED_KEYWORD) 
@@ -124,22 +127,28 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("cursor", K_CURSOR, UNRESERVED_KEYWORD) 
     PG_KEYWORD("debug", K_DEBUG, UNRESERVED_KEYWORD) 
     PG_KEYWORD("detail", K_DETAIL, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("distinct", K_DISTINCT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("dump", K_DUMP, UNRESERVED_KEYWORD) 
     PG_KEYWORD("errcode", K_ERRCODE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("error", K_ERROR, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("except", K_EXCEPT, UNRESERVED_KEYWORD)
+    PG_KEYWORD("exceptions", K_EXCEPTIONS, UNRESERVED_KEYWORD) 
     PG_KEYWORD("first", K_FIRST, UNRESERVED_KEYWORD) 
     PG_KEYWORD("forward", K_FORWARD, UNRESERVED_KEYWORD) 
     PG_KEYWORD("function", K_FUNCTION, UNRESERVED_KEYWORD)
     PG_KEYWORD("hint", K_HINT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("immediate", K_IMMEDIATE, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("index", K_INDEX, UNRESERVED_KEYWORD) 
     PG_KEYWORD("info", K_INFO, UNRESERVED_KEYWORD) 
     PG_KEYWORD("instantiation", K_INSTANTIATION, UNRESERVED_KEYWORD)
+    PG_KEYWORD("intersect", K_INTERSECT, UNRESERVED_KEYWORD)
     PG_KEYWORD("is", K_IS, UNRESERVED_KEYWORD) 
     PG_KEYWORD("last", K_LAST, UNRESERVED_KEYWORD)
     PG_KEYWORD("log", K_LOG, UNRESERVED_KEYWORD) 
     PG_KEYWORD("merge", K_MERGE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("message", K_MESSAGE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("message_text", K_MESSAGE_TEXT, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("multiset", K_MULTISET, UNRESERVED_KEYWORD) 
     PG_KEYWORD("next", K_NEXT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("no", K_NO, UNRESERVED_KEYWORD) 
     PG_KEYWORD("notice", K_NOTICE, UNRESERVED_KEYWORD) 
@@ -155,19 +164,23 @@ static const ScanKeyword unreserved_keywords[] = {
     PG_KEYWORD("query", K_QUERY, UNRESERVED_KEYWORD) 
     PG_KEYWORD("record", K_RECORD, UNRESERVED_KEYWORD)
     PG_KEYWORD("relative", K_RELATIVE, UNRESERVED_KEYWORD) 
+    PG_KEYWORD("release", K_RELEASE, UNRESERVED_KEYWORD)
     PG_KEYWORD("result_oid", K_RESULT_OID, UNRESERVED_KEYWORD) 
     PG_KEYWORD("returned_sqlstate", K_RETURNED_SQLSTATE, UNRESERVED_KEYWORD)
     PG_KEYWORD("reverse", K_REVERSE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("rollback", K_ROLLBACK, UNRESERVED_KEYWORD) 
     PG_KEYWORD("row_count", K_ROW_COUNT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("rowtype", K_ROWTYPE, UNRESERVED_KEYWORD)
+    PG_KEYWORD("save", K_SAVE, UNRESERVED_KEYWORD)
     PG_KEYWORD("savepoint", K_SAVEPOINT, UNRESERVED_KEYWORD) 
     PG_KEYWORD("scroll", K_SCROLL, UNRESERVED_KEYWORD) 
     PG_KEYWORD("slice", K_SLICE, UNRESERVED_KEYWORD)
     PG_KEYWORD("sqlstate", K_SQLSTATE, UNRESERVED_KEYWORD) 
     PG_KEYWORD("stacked", K_STACKED, UNRESERVED_KEYWORD) 
     PG_KEYWORD("sys_refcursor", K_SYS_REFCURSOR, UNRESERVED_KEYWORD)
+    PG_KEYWORD("table", K_TABLE, UNRESERVED_KEYWORD)
     PG_KEYWORD("type", K_TYPE, UNRESERVED_KEYWORD)
+    PG_KEYWORD("union", K_UNION, UNRESERVED_KEYWORD)
     PG_KEYWORD("use_column", K_USE_COLUMN, UNRESERVED_KEYWORD)
     PG_KEYWORD("use_variable", K_USE_VARIABLE, UNRESERVED_KEYWORD)
     PG_KEYWORD("variable_conflict", K_VARIABLE_CONFLICT, UNRESERVED_KEYWORD)
@@ -177,6 +190,17 @@ static const ScanKeyword unreserved_keywords[] = {
 };
 
 static const int num_unreserved_keywords = lengthof(unreserved_keywords);
+
+static const struct PlpgsqlKeywordValue keywordsValue = {
+    .procedure = K_PROCEDURE,
+    .function = K_FUNCTION,
+    .begin = K_BEGIN,
+    .select = K_SELECT,
+    .update = K_UPDATE,
+    .insert = K_INSERT,
+    .Delete = K_DELETE,
+    .merge = K_MERGE
+};
 
 /* Auxiliary data about a token (other than the token type) */
 typedef struct {
@@ -212,6 +236,8 @@ int plpgsql_yylex(void)
     /* enum flag for returning specified tokens */
     int tok_flag = -1;
     int dbl_tok_flag = -1;
+    int trip_tok_flag = -1;
+    int quad_tok_flag = -1;
 
     /* parse cursor attribute, return token and location */
     tok1 = plpgsql_parse_cursor_attribute(&loc);
@@ -221,7 +247,7 @@ int plpgsql_yylex(void)
     }
 
     tok1 = internal_yylex(&aux1);
-    if (tok1 == IDENT || tok1 == PARAM) {
+    if (tok1 == IDENT || tok1 == PARAM || tok1 == T_SQL_BULK_EXCEPTIONS) {
         int tok2;
         TokenAuxData aux2;
 
@@ -231,7 +257,7 @@ int plpgsql_yylex(void)
             TokenAuxData aux3;
 
             tok3 = internal_yylex(&aux3);
-            if (tok3 == IDENT) {
+            if (tok3 == IDENT || (tok1 == IDENT && tok3 == K_DELETE)) {
                 int tok4;
                 TokenAuxData aux4;
 
@@ -241,12 +267,56 @@ int plpgsql_yylex(void)
                     TokenAuxData aux5;
 
                     tok5 = internal_yylex(&aux5);
-                    if (tok5 == IDENT) {
-                        if (plpgsql_parse_tripword(
-                                aux1.lval.str, aux3.lval.str, aux5.lval.str, &aux1.lval.wdatum, &aux1.lval.cword)) {
-                            tok1 = T_DATUM;
+                    if (tok5 == IDENT || (tok5 == K_DELETE && tok3 == IDENT && tok1 == IDENT)) {
+                        int tok6;
+                        TokenAuxData aux6;
+
+                        tok6 = internal_yylex(&aux6);
+                        if (tok6 == '.') {
+                            int tok7;
+                            TokenAuxData aux7;
+
+                            tok7 = internal_yylex(&aux7);
+                            if (tok7 == IDENT ||
+                                (tok7 == K_DELETE && tok5 == IDENT && tok3 == IDENT && tok1 == IDENT)) {
+                                if (plpgsql_parse_quadword(aux1.lval.str, aux3.lval.str, aux5.lval.str, aux7.lval.str,
+                                    &aux1.lval.wdatum, &aux1.lval.cword, &quad_tok_flag)) {
+                                    if (quad_tok_flag != -1) {
+                                        tok1 = get_self_defined_tok(quad_tok_flag);
+                                    } else {
+                                        tok1 = T_DATUM;
+                                    }
+                                } else {
+                                    tok1 = T_CWORD;
+                                }
+                            } else {
+                                /* not A.B.C.D, so just process A.B.C */
+                                push_back_token(tok7, &aux7);
+                                push_back_token(tok6, &aux6);
+                                if (plpgsql_parse_tripword(aux1.lval.str, aux3.lval.str, aux5.lval.str,
+                                    &aux1.lval.wdatum, &aux1.lval.cword, &trip_tok_flag)) {
+                                    if (trip_tok_flag != -1) {
+                                        tok1 = get_self_defined_tok(trip_tok_flag);
+                                    } else {
+                                        tok1 = T_DATUM;
+                                    }
+                                } else {
+                                    tok1 = T_CWORD;
+                                }
+                            }
                         } else {
-                            tok1 = T_CWORD;
+                            /* not A.B.C.D, so just process A.B.C */
+                            push_back_token(tok6, &aux6);
+                            if (plpgsql_parse_tripword(aux1.lval.str, aux3.lval.str, aux5.lval.str,
+                                &aux1.lval.wdatum, &aux1.lval.cword, &trip_tok_flag)) {
+                                if (trip_tok_flag != -1) {
+                                    tok1 = get_self_defined_tok(trip_tok_flag);
+                                } else {
+                                    tok1 = T_DATUM;
+                                }
+                            } else {
+                                tok1 = T_CWORD;
+                            }
                         }
                     } else {
                         /* not A.B.C, so just process A.B */
@@ -282,7 +352,7 @@ int plpgsql_yylex(void)
                 push_back_token(tok3, &aux3);
                 push_back_token(tok2, &aux2);
                 if (plpgsql_parse_word(
-                    aux1.lval.str, u_sess->plsql_cxt.core_yy->scanbuf + aux1.lloc, &aux1.lval.wdatum,
+                    aux1.lval.str, u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf + aux1.lloc, &aux1.lval.wdatum,
                     &aux1.lval.word, &tok_flag)) {
                     /* Get self defined token */
                     if (tok_flag != -1) {
@@ -303,7 +373,7 @@ int plpgsql_yylex(void)
             /* not A.B, so just process A */
             push_back_token(tok2, &aux2);
             if (plpgsql_parse_word(
-                aux1.lval.str, u_sess->plsql_cxt.core_yy->scanbuf + aux1.lloc, &aux1.lval.wdatum,
+                aux1.lval.str, u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf + aux1.lloc, &aux1.lval.wdatum,
                 &aux1.lval.word, &tok_flag)) {
                 /* Get self defined token */
                 if (tok_flag != -1) {
@@ -329,7 +399,52 @@ int plpgsql_yylex(void)
 
     plpgsql_yylval = aux1.lval;
     plpgsql_yylloc = aux1.lloc;
-    u_sess->plsql_cxt.plpgsql_yyleng = aux1.leng;
+    u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng = aux1.leng;
+    return tok1;
+}
+
+int plpgsql_yylex_single(void)
+{
+    int tok1;
+    int loc = 0;
+    TokenAuxData aux1;
+    const ScanKeyword* kw = NULL;
+    /* enum flag for returning specified tokens */
+    int tok_flag = -1;
+
+    /* parse cursor attribute, return token and location */
+    tok1 = plpgsql_parse_cursor_attribute(&loc);
+    if (tok1 != -1) {
+        plpgsql_yylloc = loc;
+        return tok1;
+    }
+
+    tok1 = internal_yylex(&aux1);
+    if (tok1 == IDENT || tok1 == PARAM) {
+        if (plpgsql_parse_word(
+            aux1.lval.str, u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf + aux1.lloc, &aux1.lval.wdatum,
+            &aux1.lval.word, &tok_flag)) {
+            /* Get self defined token */
+            if (tok_flag != -1) {
+                tok1 = get_self_defined_tok(tok_flag);
+            } else {
+                tok1 = T_DATUM;
+            }
+        } else if (!aux1.lval.word.quoted &&
+            (kw = ScanKeywordLookup(
+                aux1.lval.word.ident, unreserved_keywords, num_unreserved_keywords))) {
+                    aux1.lval.keyword = kw->name;
+                    tok1 = kw->value;
+            } else {
+                tok1 = T_WORD;
+            }
+    } else {
+        /* Not a potential plpgsql variable name, just return the data */
+    }
+
+    plpgsql_yylval = aux1.lval;
+    plpgsql_yylloc = aux1.lloc;
+    u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng = aux1.leng;
     return tok1;
 }
 
@@ -344,15 +459,17 @@ static int internal_yylex(TokenAuxData* auxdata)
     int token;
     const char* yytext = NULL;
 
-    if (u_sess->plsql_cxt.num_pushbacks > 0) {
-        u_sess->plsql_cxt.num_pushbacks--;
-        token = u_sess->plsql_cxt.pushback_token[u_sess->plsql_cxt.num_pushbacks];
-        *auxdata = pushback_auxdata[u_sess->plsql_cxt.num_pushbacks];
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+    if (curr_compile->num_pushbacks > 0) {
+        curr_compile->num_pushbacks--;
+        token = curr_compile->pushback_token[curr_compile->num_pushbacks];
+        *auxdata = pushback_auxdata[curr_compile->num_pushbacks];
     } else {
-        token = core_yylex(&auxdata->lval.core_yystype, &auxdata->lloc, u_sess->plsql_cxt.yyscanner);
+        token = core_yylex(&auxdata->lval.core_yystype, &auxdata->lloc, curr_compile->yyscanner);
 
         /* remember the length of yytext before it gets changed */
-        yytext = u_sess->plsql_cxt.core_yy->scanbuf + auxdata->lloc;
+        yytext = curr_compile->core_yy->scanbuf + auxdata->lloc;
         auxdata->leng = strlen(yytext);
 
         /* Check for << >> and #, which the core considers operators */
@@ -378,17 +495,19 @@ static int internal_yylex(TokenAuxData* auxdata)
  */
 static void push_back_token(int token, TokenAuxData* auxdata)
 {
-    if (u_sess->plsql_cxt.num_pushbacks >= MAX_PUSHBACKS) {
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+    if (curr_compile->num_pushbacks >= MAX_PUSHBACKS) {
         ereport(ERROR,
             (errmodule(MOD_PLSQL),
                 errcode(ERRCODE_INVALID_OPTION),
                 errmsg("too many tokens %d pushed back, max push back token is: %d",
-                    u_sess->plsql_cxt.num_pushbacks,
+                    curr_compile->num_pushbacks,
                     MAX_PUSHBACKS)));
     }
-    u_sess->plsql_cxt.pushback_token[u_sess->plsql_cxt.num_pushbacks] = token;
-    pushback_auxdata[u_sess->plsql_cxt.num_pushbacks] = *auxdata;
-    u_sess->plsql_cxt.num_pushbacks++;
+    curr_compile->pushback_token[curr_compile->num_pushbacks] = token;
+    pushback_auxdata[curr_compile->num_pushbacks] = *auxdata;
+    curr_compile->num_pushbacks++;
 }
 
 /*
@@ -403,7 +522,7 @@ void plpgsql_push_back_token(int token)
 
     auxdata.lval = plpgsql_yylval;
     auxdata.lloc = plpgsql_yylloc;
-    auxdata.leng = u_sess->plsql_cxt.plpgsql_yyleng;
+    auxdata.leng = u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng;
     push_back_token(token, &auxdata);
 }
 
@@ -414,7 +533,50 @@ void plpgsql_push_back_token(int token)
 void plpgsql_append_source_text(StringInfo buf, int startlocation, int endlocation)
 {
     AssertEreport(startlocation <= endlocation, MOD_PLSQL, "start should be less or equal end.");
-    appendBinaryStringInfo(buf, u_sess->plsql_cxt.scanorig + startlocation, endlocation - startlocation);
+    appendBinaryStringInfo(buf, u_sess->plsql_cxt.curr_compile_context->scanorig + startlocation,
+        endlocation - startlocation);
+}
+
+/*
+ * Append array type name after each array element.
+ */
+void plpgsql_append_object_typename(StringInfo buf, PLpgSQL_type *var_type)
+{
+    errno_t ret;
+    char* typcast = "::";
+    appendBinaryStringInfo(buf, typcast, 2);
+
+    int len = strlen(var_type->typname) + strlen(var_type->typnamespace) + LENGTH_OF_DOT_AND_STR_END;
+    char* typname = (char*)palloc(len);
+    ret = strcpy_s(typname, len, var_type->typnamespace);
+    securec_check(ret, "\0", "\0");
+    ret = strcat_s(typname, len, ".\"");
+    securec_check(ret, "\0", "\0");
+    ret = strcat_s(typname, len, var_type->typname);
+    securec_check(ret, "\0", "\0");
+    ret = strcat_s(typname, len, "\"");
+    securec_check(ret, "\0", "\0");
+    appendBinaryStringInfo(buf, typname, strlen(typname));
+    pfree_ext(typname);
+}
+
+/*
+ * Replace all identified array bounds(usually parentheses) with brackets.
+ */
+void plpgsql_process_stmt_array(StringInfo buf, List* bracket_loc)
+{
+    ListCell* lc = NULL;
+    if (bracket_loc == NULL) {
+        return;
+    }
+    /* brackets always comes in pairs */
+    AssertEreport(list_length(bracket_loc) % 2 == 0, MOD_PLSQL, "statement contains mismatched parentheses.");
+    int counter = 1;
+    int divider = list_length(bracket_loc) / 2;
+    foreach(lc, bracket_loc) {
+        buf->data[lfirst_int(lc)] = (counter <= divider) ? '[' : ']';
+        counter++;
+    }
 }
 
 /*
@@ -454,23 +616,23 @@ void plpgsql_peek2(int* tok1_p, int* tok2_p, int* tok1_loc, int* tok2_loc)
  * is a dummy (always 0, in fact).
  *
  * Note that this can only be used for messages emitted during initial
- * parsing of a plpgsql function, since it requires the u_sess->plsql_cxt.scanorig string
+ * parsing of a plpgsql function, since it requires the curr_compile->scanorig string
  * to still be available.
  */
 int plpgsql_scanner_errposition(int location)
 {
     int pos;
 
-    if (location < 0 || u_sess->plsql_cxt.scanorig == NULL) {
+    if (location < 0 || u_sess->plsql_cxt.curr_compile_context->scanorig == NULL) {
         return 0; /* no-op if location is unknown */
     }
 
     /* Convert byte offset to character number */
-    pos = pg_mbstrlen_with_len(u_sess->plsql_cxt.scanorig, location) + 1;
+    pos = pg_mbstrlen_with_len(u_sess->plsql_cxt.curr_compile_context->scanorig, location) + 1;
     /* And pass it to the ereport mechanism */
     (void)internalerrposition(pos);
     /* Also pass the function body string */
-    return internalerrquery(u_sess->plsql_cxt.scanorig);
+    return internalerrquery(u_sess->plsql_cxt.curr_compile_context->scanorig);
 }
 
 /*
@@ -484,12 +646,28 @@ int plpgsql_scanner_errposition(int location)
  * Beware of using yyerror for other purposes, as the cursor position might
  * be misleading!
  */
-void plpgsql_yyerror(const char* message)
+void plpgsql_yyerror(const char* message, bool isError)
 {
-    char* yytext = u_sess->plsql_cxt.core_yy->scanbuf + plpgsql_yylloc;
+    char* yytext = u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf + plpgsql_yylloc;
+    int errstate = 0;
+#ifndef ENABLE_MULTIPLE_NODES
+        if (u_sess->attr.attr_common.plsql_show_all_error && !isError) {
+            errstate = NOTICE;
+        } else {
+            errstate = ERROR;
+        }
+#else
+        errstate = ERROR;
+#endif 
+    int lines = 0;
+    int rc = CompileWhich();
+    if (rc != PLPGSQL_COMPILE_NULL) {
+        lines = GetProcedureLineNumberInPackage(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, plpgsql_yylloc);
+        addErrorList(message, lines);
+    }
 
     if (*yytext == '\0') {
-        ereport(ERROR,
+        ereport(errstate,
             (errcode(ERRCODE_SYNTAX_ERROR),
                 /* translator: %s is typically the translation of "syntax error" */
                 errmsg("%s at end of input", _(message)),
@@ -501,9 +679,9 @@ void plpgsql_yyerror(const char* message)
          * only the single token here.	This modifies scanbuf but we no longer
          * care about that.
          */
-        yytext[u_sess->plsql_cxt.plpgsql_yyleng] = '\0';
+        yytext[u_sess->plsql_cxt.curr_compile_context->plpgsql_yyleng] = '\0';
 
-        ereport(ERROR,
+        ereport(errstate,
             (errcode(ERRCODE_SYNTAX_ERROR),
                 /* translator: first %s is typically the translation of "syntax error" */
                 errmsg("%s at or near \"%s\"", _(message), yytext),
@@ -522,39 +700,43 @@ void plpgsql_yyerror(const char* message)
 int plpgsql_location_to_lineno(int location)
 {
     const char* loc = NULL;
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
 
-    if (location < 0 || u_sess->plsql_cxt.scanorig == NULL) {
+    if (location < 0 || curr_compile->scanorig == NULL) {
         return 0; /* garbage in, garbage out */
     }
-    loc = u_sess->plsql_cxt.scanorig + location;
+    loc = curr_compile->scanorig + location;
 
     /* be correct, but not fast, if input location goes backwards */
-    if (loc < u_sess->plsql_cxt.cur_line_start) {
+    if (loc < curr_compile->cur_line_start) {
         location_lineno_init();
     }
 
-    while (u_sess->plsql_cxt.cur_line_end != NULL && loc > u_sess->plsql_cxt.cur_line_end) {
-        u_sess->plsql_cxt.cur_line_start = u_sess->plsql_cxt.cur_line_end + 1;
-        u_sess->plsql_cxt.cur_line_num++;
-        u_sess->plsql_cxt.cur_line_end = strchr(u_sess->plsql_cxt.cur_line_start, '\n');
+    while (curr_compile->cur_line_end != NULL && loc > curr_compile->cur_line_end) {
+        curr_compile->cur_line_start = curr_compile->cur_line_end + 1;
+        u_sess->plsql_cxt.curr_compile_context->cur_line_num++;
+        curr_compile->cur_line_end = strchr(curr_compile->cur_line_start, '\n');
     }
 
-    return u_sess->plsql_cxt.cur_line_num;
+    return u_sess->plsql_cxt.curr_compile_context->cur_line_num;
 }
 
 char* plpgsql_get_curline_query()
 {
     int len = 0;
-    if (u_sess->plsql_cxt.cur_line_end == NULL) {
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+    if (curr_compile->cur_line_end == NULL) {
         /* no '\n' in whole procedure source text */
-        len = strlen(u_sess->plsql_cxt.cur_line_start);
+        len = strlen(curr_compile->cur_line_start);
     } else {
-        len = u_sess->plsql_cxt.cur_line_end - u_sess->plsql_cxt.cur_line_start;
+        len = curr_compile->cur_line_end - curr_compile->cur_line_start;
     }
     char* curQuery = NULL;
     if (len > 0) {
         curQuery = (char*)palloc0(sizeof(char) * (len + 1));
-        int rc = memcpy_s(curQuery, len + 1, u_sess->plsql_cxt.cur_line_start, len);
+        int rc = memcpy_s(curQuery, len + 1, curr_compile->cur_line_start, len);
         securec_check(rc, "\0", "\0");
     }
     return curQuery;
@@ -563,16 +745,19 @@ char* plpgsql_get_curline_query()
 /* initialize or reset the state for plpgsql_location_to_lineno */
 static void location_lineno_init(void)
 {
-    u_sess->plsql_cxt.cur_line_start = u_sess->plsql_cxt.scanorig;
-    u_sess->plsql_cxt.cur_line_num = 1;
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
 
-    u_sess->plsql_cxt.cur_line_end = strchr(u_sess->plsql_cxt.cur_line_start, '\n');
+    curr_compile->cur_line_start = curr_compile->scanorig;
+    curr_compile->cur_line_num = 1;
+
+    curr_compile->cur_line_end = strchr(curr_compile->cur_line_start, '\n');
 }
 
 /* return the most recently computed lineno */
 int plpgsql_latest_lineno(void)
 {
-    return u_sess->plsql_cxt.cur_line_num;
+    return u_sess->plsql_cxt.curr_compile_context->cur_line_num;
 }
 
 /*
@@ -584,22 +769,26 @@ int plpgsql_latest_lineno(void)
  */
 void plpgsql_scanner_init(const char* str)
 {
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     /* Start up the core scanner */
-    u_sess->plsql_cxt.yyscanner =
-        scanner_init(str, u_sess->plsql_cxt.core_yy, reserved_keywords, num_reserved_keywords);
+    curr_compile->yyscanner =
+        scanner_init(str, curr_compile->core_yy, reserved_keywords, num_reserved_keywords);
+    curr_compile->core_yy->isPlpgsqlKeyWord = true;
+    curr_compile->core_yy->plKeywordValue = &keywordsValue;
 
     /*
-     * u_sess->plsql_cxt.scanorig points to the original string, which unlike the scanner's
+     * curr_compile->scanorig points to the original string, which unlike the scanner's
      * scanbuf won't be modified on-the-fly by flex.  Notice that although
      * yytext points into scanbuf, we rely on being able to apply locations
-     * (offsets from string start) to u_sess->plsql_cxt.scanorig as well.
+     * (offsets from string start) to curr_compile->scanorig as well.
      */
-    u_sess->plsql_cxt.scanorig = str;
+    curr_compile->scanorig = str;
 
     /* Other setup */
-    u_sess->plsql_cxt.plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
+    curr_compile->plpgsql_IdentifierLookup = IDENTIFIER_LOOKUP_NORMAL;
 
-    u_sess->plsql_cxt.num_pushbacks = 0;
+    curr_compile->num_pushbacks = 0;
 
     location_lineno_init();
     /*
@@ -608,7 +797,7 @@ void plpgsql_scanner_init(const char* str)
      * in case of execution error-out, it better to help avoid access to in garbage
      * pointer
      */
-    u_sess->plsql_cxt.goto_labels = NIL;
+    curr_compile->goto_labels = NIL;
 }
 
 /*
@@ -616,11 +805,13 @@ void plpgsql_scanner_init(const char* str)
  */
 void plpgsql_scanner_finish(void)
 {
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     /* release storage */
-    scanner_finish(u_sess->plsql_cxt.yyscanner);
+    scanner_finish(curr_compile->yyscanner);
     /* avoid leaving any dangling pointers */
-    u_sess->plsql_cxt.yyscanner = NULL;
-    u_sess->plsql_cxt.scanorig = NULL;
+    curr_compile->yyscanner = NULL;
+    curr_compile->scanorig = NULL;
 }
 
 /*
@@ -642,10 +833,26 @@ static int get_self_defined_tok(int tok_flag)
             return T_ARRAY_COUNT;
         case PLPGSQL_TOK_VARRAY_EXTEND:
             return T_ARRAY_EXTEND;
+        case PLPGSQL_TOK_VARRAY_EXISTS:
+            return T_ARRAY_EXISTS;
+        case PLPGSQL_TOK_VARRAY_PRIOR:
+            return T_ARRAY_PRIOR;
+        case PLPGSQL_TOK_VARRAY_NEXT:
+            return T_ARRAY_NEXT;
+        case PLPGSQL_TOK_VARRAY_DELETE:
+            return T_ARRAY_DELETE;
+        case PLPGSQL_TOK_VARRAY_TRIM:
+            return T_ARRAY_TRIM;
         case PLPGSQL_TOK_VARRAY_VAR:
             return T_VARRAY_VAR;
         case PLPGSQL_TOK_RECORD:
             return T_RECORD;
+        case PLPGSQL_TOK_TABLE:
+            return T_TABLE;
+        case PLPGSQL_TOK_TABLE_VAR:
+            return T_TABLE_VAR;
+        case PLPGSQL_TOK_PACKAGE_VARIABLE:
+            return T_PACKAGE_VARIABLE;
         default:
             ereport(ERROR,
                 (errmodule(MOD_PLSQL),
@@ -668,11 +875,16 @@ static int plpgsql_parse_cursor_attribute(int* loc)
     TokenAuxData aux1;
     TokenAuxData aux2;
     TokenAuxData aux3;
+    TokenAuxData aux4;
+    TokenAuxData aux5;
     int tok1;
     int tok2;
     int tok3;
+    int tok4;
+    int tok5;
     int token = -1;
     PLpgSQL_nsitem* ns = NULL;
+    bool pkgCursor = false;
 
     if (u_sess->parser_cxt.in_package_function_compile) {
         return token;
@@ -684,10 +896,13 @@ static int plpgsql_parse_cursor_attribute(int* loc)
         return token;
     }
     tok2 = internal_yylex(&aux2);
-    if (tok2 != '%') {
+    if (tok2 != '%' && tok2 != '.') {
         push_back_token(tok2, &aux2);
         push_back_token(tok1, &aux1);
         return token;
+    }
+    if (tok2 == '.') {
+        pkgCursor = true;
     }
     tok3 = internal_yylex(&aux3);
     if (tok3 != IDENT) {
@@ -696,35 +911,75 @@ static int plpgsql_parse_cursor_attribute(int* loc)
         push_back_token(tok1, &aux1);
         return token;
     }
-
-    /* match implicit cursor attributes */
-    if (strncasecmp(aux1.lval.str, "SQL", 3) == 0) {
-        if (strncasecmp(aux3.lval.str, "ISOPEN", 6) == 0) {
-            token = T_SQL_ISOPEN;
+    if (pkgCursor) {
+        tok4 = internal_yylex(&aux4);
+        if (tok4 != '%') {
+            push_back_token(tok4, &aux4);
+            push_back_token(tok3, &aux3);
+            push_back_token(tok2, &aux2);
+            push_back_token(tok1, &aux1);
+            return token;
         }
-        if (strncasecmp(aux3.lval.str, "FOUND", 5) == 0) {
-            token = T_SQL_FOUND;
-        }
-        if (strncasecmp(aux3.lval.str, "NOTFOUND", 8) == 0) {
-            token = T_SQL_NOTFOUND;
-        }
-        if (strncasecmp(aux3.lval.str, "ROWCOUNT", 8) == 0) {
-            token = T_SQL_ROWCOUNT;
+        tok5 = internal_yylex(&aux5);
+        if (tok5 != IDENT) {
+            push_back_token(tok5, &aux5);
+            push_back_token(tok4, &aux4);
+            push_back_token(tok3, &aux3);
+            push_back_token(tok2, &aux2);
+            push_back_token(tok1, &aux1);
+            return token;
         }
     }
-    /* match explicit cursor attributes */
-    if (strncasecmp(aux1.lval.str, "SQL", 3) != 0) {
-        if (strncasecmp(aux3.lval.str, "ISOPEN", 6) == 0) {
-            token = T_CURSOR_ISOPEN;
+
+    if (!pkgCursor) {
+        /* match implicit cursor attributes */
+        if (strncasecmp(aux1.lval.str, "SQL", 3) == 0) {
+            if (strncasecmp(aux3.lval.str, "ISOPEN", 6) == 0) {
+                token = T_SQL_ISOPEN;
+            }
+            if (strncasecmp(aux3.lval.str, "FOUND", 5) == 0) {
+                token = T_SQL_FOUND;
+            }
+            if (strncasecmp(aux3.lval.str, "NOTFOUND", 8) == 0) {
+                token = T_SQL_NOTFOUND;
+            }
+            if (strncasecmp(aux3.lval.str, "ROWCOUNT", 8) == 0) {
+                token = T_SQL_ROWCOUNT;
+            }
+            if (strncasecmp(aux3.lval.str, "BULK_EXCEPTIONS", strlen("BULK_EXCEPTIONS")) == 0) {
+                token = T_SQL_BULK_EXCEPTIONS;
+            }
         }
-        if (strncasecmp(aux3.lval.str, "FOUND", 5) == 0) {
-            token = T_CURSOR_FOUND;
+        /* match explicit cursor attributes */
+        if (strncasecmp(aux1.lval.str, "SQL", 3) != 0) {
+            if (strncasecmp(aux3.lval.str, "ISOPEN", 6) == 0) {
+                token = T_CURSOR_ISOPEN;
+            }
+            if (strncasecmp(aux3.lval.str, "FOUND", 5) == 0) {
+                token = T_CURSOR_FOUND;
+            }
+            if (strncasecmp(aux3.lval.str, "NOTFOUND", 8) == 0) {
+                token = T_CURSOR_NOTFOUND;
+            }
+            if (strncasecmp(aux3.lval.str, "ROWCOUNT", 8) == 0) {
+                token = T_CURSOR_ROWCOUNT;
+            }
         }
-        if (strncasecmp(aux3.lval.str, "NOTFOUND", 8) == 0) {
-            token = T_CURSOR_NOTFOUND;
-        }
-        if (strncasecmp(aux3.lval.str, "ROWCOUNT", 8) == 0) {
-            token = T_CURSOR_ROWCOUNT;
+    } else {
+        /* match package cursor attributes */
+        if (strncasecmp(aux3.lval.str, "SQL", 3) != 0) {
+            if (strncasecmp(aux5.lval.str, "ISOPEN", 6) == 0) {
+                token = T_PACKAGE_CURSOR_ISOPEN;
+            }
+            if (strncasecmp(aux5.lval.str, "FOUND", 5) == 0) {
+                token = T_PACKAGE_CURSOR_FOUND;
+            }
+            if (strncasecmp(aux5.lval.str, "NOTFOUND", 8) == 0) {
+                token = T_PACKAGE_CURSOR_NOTFOUND;
+            }
+            if (strncasecmp(aux5.lval.str, "ROWCOUNT", 8) == 0) {
+                token = T_PACKAGE_CURSOR_ROWCOUNT;
+            }
         }
     }
     switch (token) {
@@ -735,6 +990,10 @@ static int plpgsql_parse_cursor_attribute(int* loc)
             /* get the cursor attribute location */
             *loc = aux1.lloc;
             break;
+        case T_SQL_BULK_EXCEPTIONS:
+            push_back_token(token, &aux3);
+            return -1;
+            break;
         case T_CURSOR_ISOPEN:
         case T_CURSOR_FOUND:
         case T_CURSOR_NOTFOUND:
@@ -742,7 +1001,7 @@ static int plpgsql_parse_cursor_attribute(int* loc)
             /* check the valid of cursor variable */
             ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, aux1.lval.str, NULL, NULL, NULL);
             if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_VAR) {
-                PLpgSQL_var* var = (PLpgSQL_var*)u_sess->plsql_cxt.plpgsql_Datums[ns->itemno];
+                PLpgSQL_var* var = (PLpgSQL_var*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
                 if (!(var != NULL && var->datatype && var->datatype->typoid == REFCURSOROID)) {
                     ereport(ERROR,
                         (errmodule(MOD_PLSQL),
@@ -761,8 +1020,39 @@ static int plpgsql_parse_cursor_attribute(int* loc)
             *loc = aux1.lloc;
             plpgsql_yylval = aux1.lval;
             break;
+        case T_PACKAGE_CURSOR_ISOPEN:
+        case T_PACKAGE_CURSOR_FOUND:
+        case T_PACKAGE_CURSOR_NOTFOUND:
+        case T_PACKAGE_CURSOR_ROWCOUNT:
+            /* check the valid of cursor variable */
+            ns = plpgsql_ns_lookup(plpgsql_ns_top(), false, aux1.lval.str, aux3.lval.str, NULL, NULL);
+            if (ns != NULL && ns->itemtype == PLPGSQL_NSTYPE_VAR) {
+                PLpgSQL_var* var = (PLpgSQL_var*)u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
+                if (!(var != NULL && var->datatype && var->datatype->typoid == REFCURSOROID)) {
+                    ereport(ERROR,
+                        (errmodule(MOD_PLSQL),
+                            errcode(ERRCODE_INVALID_CURSOR_DEFINITION),
+                            errmsg("%s.%s isn't a cursor", aux1.lval.str, aux3.lval.str)));
+                }
+                aux1.lval.wdatum.ident = aux1.lval.str;
+                aux1.lval.wdatum.dno = var->dno;
+            } else {
+                ereport(ERROR,
+                    (errmodule(MOD_PLSQL),
+                        errcode(ERRCODE_INVALID_CURSOR_DEFINITION),
+                        errmsg("undefined cursor: %s.%s", aux1.lval.str, aux3.lval.str)));
+            }
+
+            /* get the cursor attribute location */
+            *loc = aux1.lloc;
+            plpgsql_yylval = aux1.lval;
+            break;
         default:
             /* not match, push back tokens which were get before */
+            if (pkgCursor) {
+                push_back_token(tok5, &aux5);
+                push_back_token(tok4, &aux4);
+            }
             push_back_token(tok3, &aux3);
             push_back_token(tok2, &aux2);
             push_back_token(tok1, &aux1);
@@ -819,4 +1109,144 @@ bool plpgsql_is_token_match(int token)
     }
     plpgsql_push_back_token(tok);
     return false;
+}
+
+/*
+ * a convenient method to see if the next token is keyword
+ */
+bool plpgsql_is_token_keyword(int token)
+{
+#define MIN(A, B) ((B) < (A) ? (B) : (A))
+#define MAX(A, B) ((B) > (A) ? (B) : (A))
+    if ((token >= MIN(reserved_keywords[0].value, unreserved_keywords[0].value)) &&
+        (token <= MAX(reserved_keywords[num_reserved_keywords - 1].value,
+        unreserved_keywords[num_unreserved_keywords - 1].value))) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+static PLpgSQL_package* compilePackageSpec(Oid pkgOid)
+{
+    int oldCompileStatus = getCompileStatus();
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL ||
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile != NULL) {
+        CompileStatusSwtichTo(COMPILIE_PKG);
+    } else {
+         ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+            errmsg("nest compile package can't be null.")));
+    }
+    TokenAuxData temp_pushback_auxdata[MAX_PUSHBACKS];
+    for (int i = 0; i < MAX_PUSHBACKS; i++) {
+        temp_pushback_auxdata[i] = pushback_auxdata[i];
+    }
+    YYSTYPE temp_lval = plpgsql_yylval;
+    YYLTYPE temp_lloc = plpgsql_yylloc;
+    /* compile package spec */
+    PLpgSQL_package* pkg = plpgsql_package_validator(pkgOid, true, false);
+    CompileStatusSwtichTo(oldCompileStatus);
+    for (int i = 0; i < MAX_PUSHBACKS; i++) {
+        pushback_auxdata[i] = temp_pushback_auxdata[i];
+    }
+    plpgsql_yylval = temp_lval;
+    plpgsql_yylloc = temp_lloc;
+    return pkg;
+}
+
+PLpgSQL_datum* GetPackageDatum(List* name, bool* isSamePackage)
+{
+    char* objname = NULL;
+    char* pkgname = NULL;
+    char* schemaname = NULL;
+    PLpgSQL_package* pkg = NULL;
+    Oid pkgOid = InvalidOid;
+    Oid namespaceId = InvalidOid;
+
+    DeconstructQualifiedName(name, &schemaname, &objname, &pkgname);
+    if (schemaname != NULL) {
+        namespaceId = LookupNamespaceNoError(schemaname);
+    }
+    if (pkgname == NULL) {
+        return NULL;
+    }
+    /* namespace and pkgname has checked. */
+    pkgOid = PackageNameGetOid(pkgname, namespaceId);
+
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
+    if (curr_compile->plpgsql_curr_compile_package != NULL) {
+        Oid currentCompilePkgOid = curr_compile->plpgsql_curr_compile_package->pkg_oid;
+        if (currentCompilePkgOid == pkgOid) {
+            pkg = curr_compile->plpgsql_curr_compile_package;
+            if (isSamePackage != NULL) {
+                *isSamePackage = true;
+            }
+        }
+    }
+
+    if (!OidIsValid(pkgOid)) {
+        return NULL;
+    }
+
+    if (u_sess->plsql_cxt.need_pkg_dependencies) {
+        u_sess->plsql_cxt.pkg_dependencies =
+            list_append_unique_oid(u_sess->plsql_cxt.pkg_dependencies, pkgOid);
+    }
+    
+    if (pkg == NULL) {
+        MemoryContext temp = MemoryContextSwitchTo(curr_compile->compile_tmp_cxt);
+        pkg = compilePackageSpec(pkgOid);
+        MemoryContextSwitchTo(temp);
+    }
+
+    struct PLpgSQL_nsitem* nse = plpgsql_ns_lookup(pkg->public_ns, false, pkgname, objname, NULL, NULL);
+    if (nse == NULL) {
+        return NULL;
+    }
+
+    if (isSamePackage != NULL && *isSamePackage) {
+        return pkg->datums[nse->itemno];
+    }
+
+    /* record dependcy of func or package */
+    if (curr_compile->plpgsql_curr_compile == NULL) {
+        MemoryContext temp = MemoryContextSwitchTo(curr_compile->plpgsql_curr_compile_package->pkg_cxt);
+        record_pkg_function_dependency(pkg, &curr_compile->plpgsql_curr_compile_package->invalItems, InvalidOid, pkgOid);
+        (void)MemoryContextSwitchTo(temp);
+    } else {
+        MemoryContext temp = MemoryContextSwitchTo(curr_compile->plpgsql_curr_compile->fn_cxt);
+        record_pkg_function_dependency(pkg, &curr_compile->plpgsql_curr_compile->invalItems, InvalidOid, pkgOid);
+        (void)MemoryContextSwitchTo(temp);
+    }
+
+    return pkg->datums[nse->itemno];
+}
+
+bool pushed_bulk_exception()
+{
+    return plpgsql_yylval.wdatum.ident != NULL &&
+        strncasecmp(plpgsql_yylval.wdatum.ident, "BULK_EXCEPTIONS", strlen("BULK_EXCEPTIONS")) == 0;
+}
+
+/* Check if save exception statement is followed by DML */
+void CheckSaveExceptionsDML(int errstate)
+{
+    TokenAuxData aux1;
+    TokenAuxData aux2;
+    TokenAuxData aux3;
+    int tok1 = internal_yylex(&aux1);
+    int tok2 = internal_yylex(&aux2);
+    int tok3 = internal_yylex(&aux3);
+    /* check merge statement individually since internal_yylex itself wouldn't resolve unreserved keyword */
+    if (tok3 != K_INSERT && tok3 != K_UPDATE && tok3 != K_DELETE && tok3 != K_SELECT &&
+        strcmp(aux3.lval.str, "merge")) {
+        const char* message = "FORALL must follow DML statement.";
+        InsertErrorMessage(message, plpgsql_yylloc);
+        ereport(errstate,
+                (errcode(ERRCODE_FORALL_NEED_DML),
+                errmsg("FORALL must follow DML statement.")));
+    }
+    push_back_token(tok3, &aux3);
+    push_back_token(tok2, &aux2);
+    push_back_token(tok1, &aux1);
 }

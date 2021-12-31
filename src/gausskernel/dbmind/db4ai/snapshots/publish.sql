@@ -30,12 +30,14 @@ CREATE OR REPLACE FUNCTION db4ai.manage_snapshot_internal(
 RETURNS db4ai.snapshot_name LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp SET client_min_messages TO ERROR
 AS $$
 DECLARE
-    s_mode VARCHAR(3);  -- current snapshot mode
-    s_vers_del CHAR;    -- snapshot version delimiter, default '@'
-    s_vers_sep CHAR;    -- snapshot version separator, default '.'
-    s_name_vers TEXT[]; -- split snapshot id into name and version
-    e_stack_act TEXT;   -- current stack for validation
-    res db4ai.snapshot_name;    -- composite result
+    s_mode VARCHAR(3);                  -- current snapshot mode
+    s_vers_del CHAR;                    -- snapshot version delimiter, default '@'
+    s_vers_sep CHAR;                    -- snapshot version separator, default '.'
+    s_name_vers TEXT[];                 -- split snapshot id into name and version
+    e_stack_act TEXT;                   -- current stack for validation
+     current_compatibility_mode TEXT;   -- current compatibility mode
+    none_represent INT;                 -- 0 or NULL
+    res db4ai.snapshot_name;            -- composite result
 BEGIN
 
     BEGIN
@@ -85,6 +87,13 @@ BEGIN
         s_vers_sep := '.';
     END;
 
+    current_compatibility_mode := current_setting('sql_compatibility');
+    IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
+        none_represent := 0;
+    ELSE
+        none_represent := NULL;
+    END IF;
+
     -- check all input parameters
     IF i_name IS NULL OR i_name = '' THEN
         RAISE EXCEPTION 'i_name cannot be NULL or empty';
@@ -92,7 +101,7 @@ BEGIN
         i_name := replace(i_name, chr(1), s_vers_del);
         i_name := replace(i_name, chr(2), s_vers_sep);
         s_name_vers := regexp_split_to_array(i_name, s_vers_del);
-        IF array_length(s_name_vers, 1) <> 2 OR array_length(s_name_vers, 2) IS NOT NULL THEN
+        IF array_length(s_name_vers, 1) <> 2 OR array_length(s_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_name must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;

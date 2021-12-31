@@ -259,8 +259,7 @@ inline bool IsSeqScanPath(const Path* path)
 
 inline bool IsBtreeIndexPath(const Path* path)
 {
-    return path->type == T_IndexPath && 
-        ((IndexPath*)path)->indexinfo->relam == BTREE_AM_OID;
+    return path->type == T_IndexPath && OID_IS_BTREE(((IndexPath*)path)->indexinfo->relam);
 }
 
 inline bool AreTwoBtreeIdxPaths(const Path* path1, const Path* path2)

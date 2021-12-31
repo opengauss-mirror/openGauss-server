@@ -39,10 +39,16 @@
 
 extern const uint32 GRAND_VERSION_NUM;
 
+extern const uint32 FUNC_PARAM_COL_VERSION_NUM;
+extern const uint32 SUBPARTITION_VERSION_NUM;
 extern const uint32 COMMENT_PROC_VERSION_NUM;
+extern const uint32 COMMENT_ROWTYPE_TABLEOF_VERSION_NUM;
 extern const uint32 COMMENT_PCT_TYPE_VERSION_NUM;
 extern const uint32 HINT_ENHANCEMENT_VERSION_NUM;
+extern const uint32 MATERIALIZED_CTE_NUM;
+extern const uint32 DEFAULT_MAT_CTE_NUM;
 extern const uint32 MATVIEW_VERSION_NUM;
+extern const uint32 SWCB_VERSION_NUM;
 extern const uint32 PARTIALPUSH_VERSION_NUM;
 extern const uint32 SUBLINKPULLUP_VERSION_NUM;
 extern const uint32 PREDPUSH_VERSION_NUM;
@@ -67,13 +73,15 @@ extern const uint32 V5R2C00_START_VERSION_NUM;
 extern const uint32 V5R2C00_BACKEND_VERSION_NUM;
 extern const uint32 TWOPHASE_FILE_VERSION;
 extern const uint32 CLIENT_ENCRYPTION_PROC_VERSION_NUM;
+extern const uint32 PRIVS_DIRECTORY_VERSION_NUM;
+extern const uint32 COMMENT_RECORD_PARAM_VERSION_NUM;
+extern const uint32 PUBLICATION_VERSION_NUM;
+extern const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM;
 
 extern void register_backend_version(uint32 backend_version);
 extern bool contain_backend_version(uint32 version_number);
-extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 extern const uint32 SUPPORT_HASH_XLOG_VERSION_NUM;
-extern const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM;
-extern const uint32 PUBLICATION_VERSION_NUM;
+extern const uint32 ANALYZER_HOOK_VERSION_NUM;
 
 #define INPLACE_UPGRADE_PRECOMMIT_VERSION 1
 
@@ -88,7 +96,12 @@ extern const uint32 PUBLICATION_VERSION_NUM;
 #define OPT_CONCAT_VARIADIC 256
 #define OPT_MEGRE_UPDATE_MULTI 512
 #define OPT_CONVERT_TO_NUMERIC 1024
-#define OPT_MAX 11
+#define OPT_PLSTMT_IMPLICIT_SAVEPOINT 2048
+#define OPT_HIDE_TAILING_ZERO 4096
+#define OPT_SECURITY_DEFINER 8192
+#define OPT_SKIP_GS_SOURCE 16384
+#define OPT_PROC_OUTPARAM_OVERRIDE 32768
+#define OPT_MAX 16
 
 #define DISPLAY_LEADING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_DISPLAY_LEADING_ZERO)
 #define END_MONTH_CALCULATE (u_sess->utils_cxt.behavior_compat_flags & OPT_END_MONTH_CALCULATE)
@@ -104,7 +117,11 @@ extern const uint32 PUBLICATION_VERSION_NUM;
 #define CONCAT_VARIADIC (!(u_sess->utils_cxt.behavior_compat_flags & OPT_CONCAT_VARIADIC))
 #define MEGRE_UPDATE_MULTI (u_sess->utils_cxt.behavior_compat_flags & OPT_MEGRE_UPDATE_MULTI)
 #define CONVERT_STRING_DIGIT_TO_NUMERIC (u_sess->utils_cxt.behavior_compat_flags & OPT_CONVERT_TO_NUMERIC)
-
+#define PLSTMT_IMPLICIT_SAVEPOINT (u_sess->utils_cxt.behavior_compat_flags & OPT_PLSTMT_IMPLICIT_SAVEPOINT)
+#define HIDE_TAILING_ZERO (u_sess->utils_cxt.behavior_compat_flags & OPT_HIDE_TAILING_ZERO)
+#define PLSQL_SECURITY_DEFINER (u_sess->utils_cxt.behavior_compat_flags & OPT_SECURITY_DEFINER)
+#define SKIP_GS_SOURCE (u_sess->utils_cxt.behavior_compat_flags & OPT_SKIP_GS_SOURCE)
+#define PROC_OUTPARAM_OVERRIDE (u_sess->utils_cxt.behavior_compat_flags & OPT_PROC_OUTPARAM_OVERRIDE)
 /* define database compatibility Attribute */
 typedef struct {
     int flag;
@@ -300,7 +317,7 @@ extern bool InLocalUserIdChange(void);
 extern bool InSecurityRestrictedOperation(void);
 extern void GetUserIdAndContext(Oid* userid, bool* sec_def_context);
 extern void SetUserIdAndContext(Oid userid, bool sec_def_context);
-extern void InitializeSessionUserId(const char* rolename, Oid useroid = InvalidOid);
+extern void InitializeSessionUserId(const char* rolename, bool flagresue = false, Oid useroid = InvalidOid);
 extern void InitializeSessionUserIdStandalone(void);
 extern void SetSessionAuthorization(Oid userid, bool is_superuser);
 extern Oid GetCurrentRoleId(void);
@@ -314,10 +331,6 @@ extern bool in_logic_cluster();
 extern bool exist_logic_cluster();
 #ifdef ENABLE_MULTIPLE_NODES
 extern const char* show_nodegroup_mode(void);
-#endif
-
-#ifndef ENABLE_MULTIPLE_NODES
-extern const int GetCustomParserId();
 #endif
 extern const char* show_lcgroup_name();
 extern Oid get_pgxc_logic_groupoid(Oid roleid);
@@ -398,6 +411,7 @@ typedef enum {
     UndoRecyclerProcess,
     TsCompactionProcess,
     TsCompactionAuxiliaryProcess,
+    XlogCopyBackendProcess,
     NUM_SINGLE_AUX_PROC, /* Sentry for auxiliary type with single thread. */
 
     /*
@@ -406,7 +420,6 @@ typedef enum {
      * Meanwhile, you must update NUM_MULTI_AUX_PROC and GetAuxProcEntryIndex().
      */
     PageWriterProcess,
-    MultiBgWriterProcess,
     PageRedoProcess,
     TpoolListenerProcess,
     TsCompactionConsumerProcess,
@@ -419,7 +432,6 @@ typedef enum {
 #define AmStartupProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == StartupProcess)
 #define AmPageRedoProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == PageRedoProcess)
 #define AmBackgroundWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == BgWriterProcess)
-#define AmMulitBackgroundWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == MultiBgWriterProcess)
 #define AmCheckpointerProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == CheckpointerProcess)
 #define AmWalWriterProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalWriterProcess)
 #define AmWalWriterAuxiliaryProcess() (t_thrd.bootstrap_cxt.MyAuxProcType == WalWriterAuxiliaryProcess)
@@ -450,7 +462,7 @@ typedef enum {
 
 /* in utils/init/postinit.c */
 extern void pg_split_opts(char** argv, int* argcp, char* optstr);
-extern void PostgresResetUsernamePgoption(const char* username);
+extern void PostgresResetUsernamePgoption(const char* username, bool ispoolerreuse = false);
 extern void BaseInit(void);
 
 /*

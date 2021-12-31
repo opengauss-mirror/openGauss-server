@@ -2,6 +2,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2008, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -34,6 +35,7 @@
 #include "tcop/utility.h"
 #include "utils/acl.h"
 #include "utils/inval.h"
+#include "utils/lsyscache.h"
 #include "utils/syscache.h"
 #include "access/genam.h"
 #include "access/multixact.h"
@@ -55,7 +57,8 @@ void insertPartitionEntry(Relation pg_partition_desc, Partition new_part_desc, O
 
     pd_part = new_part_desc->pd_part;
     Assert(pd_part->parttype == PART_OBJ_TYPE_PARTED_TABLE || pd_part->parttype == PART_OBJ_TYPE_TOAST_TABLE ||
-           pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION || pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION);
+           pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION || pd_part->parttype == PART_OBJ_TYPE_INDEX_PARTITION ||
+           pd_part->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION);
 
     /* This is a tad tedious, but way cleaner than what we used to do... */
     errorno = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -171,6 +174,22 @@ typedef struct {
     List* partKeyValueList;
     bool topClosed; /* whether the top range is closed or open */
 } GetPartitionOidArgs;
+
+void ExceptionHandlerForPartition(GetPartitionOidArgs *args, Oid partitionOid, bool missingOk)
+{
+    // For subpartition, we'll deal with it in subPartitionGetSubPartitionOid
+    if (args->objectType != PART_OBJ_TYPE_TABLE_SUB_PARTITION && !OidIsValid(partitionOid)) {
+        if (!missingOk) {
+            if (args->partitionName != NULL) {
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                errmsg("partition \"%s\" does not exist", args->partitionName)));
+            } else {
+                /* here partitionOid is InvalidOid, so it's meaningless to print its value */
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Specified partition does not exist")));
+            }
+        }
+    }
+}
 
 /*
  * @Description: get partitoin oid from partition name or values list
@@ -311,18 +330,41 @@ static Oid partitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode
         partitionOldOid = partitionOid;
     }
 
+    ExceptionHandlerForPartition(args, partitionOid, missingOk);
+
+    return partitionOid;
+}
+
+Oid SubPartitionGetSubPartitionOid(GetPartitionOidArgs *args, Oid partitionedRelationOid, Oid *partOidForSubPart,
+                                   LOCKMODE lockMode, bool missingOk, bool noWait)
+{
+    Relation rel = relation_open(partitionedRelationOid, lockMode);
+    List *partOidList = relationGetPartitionOidList(rel);
+    ListCell *cell = NULL;
+    Oid partitionOid = InvalidOid;
+    foreach (cell, partOidList) {
+        Oid partOid = lfirst_oid(cell);
+        args->partitionedRelOid = partOid;
+        partitionOid = partitionGetPartitionOid(args, lockMode, missingOk, noWait);
+        if (OidIsValid(partitionOid)) {
+            *partOidForSubPart = partOid;
+            break;
+        }
+    }
+    relation_close(rel, lockMode);
+
     if (!OidIsValid(partitionOid)) {
         if (!missingOk) {
             if (args->partitionName != NULL) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_UNDEFINED_OBJECT),
-                        errmsg("partition \"%s\" does not exist", args->partitionName)));
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                errmsg("subpartition \"%s\" does not exist", args->partitionName)));
             } else {
-                /* here partitionOid is InvalidOid, so it's meaningless to print its value */
-                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Specified partition does not exist")));
+                /* here subpartitionOid is InvalidOid, so it's meaningless to print its value */
+                ereport(ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Specified subpartition does not exist")));
             }
         }
     }
+
     return partitionOid;
 }
 
@@ -338,7 +380,7 @@ static Oid partitionGetPartitionOid(GetPartitionOidArgs* args, LOCKMODE lockMode
  */
 Oid partitionNameGetPartitionOid(Oid partitionedRelationOid, const char* partitionName, char objectType,
     LOCKMODE lockMode, bool missingOk, bool noWait, PartitionNameGetPartidCallback callback, void* callback_arg,
-    LOCKMODE callbackobj_lockMode)
+    LOCKMODE callbackobj_lockMode, Oid *partOidForSubPart)
 {
     if (!OidIsValid(partitionedRelationOid) || !PointerIsValid(partitionName)) {
         return InvalidOid;
@@ -360,7 +402,13 @@ Oid partitionNameGetPartitionOid(Oid partitionedRelationOid, const char* partiti
 
     Relation partitionRelRelation = relation_open(PartitionRelationId, AccessShareLock);
 
-    Oid partitionOid = partitionGetPartitionOid(&args, lockMode, missingOk, noWait);
+    Oid partitionOid = InvalidOid;
+    if (objectType == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        partitionOid = SubPartitionGetSubPartitionOid(&args, partitionedRelationOid, partOidForSubPart, lockMode,
+                                                      missingOk, noWait);
+    } else {
+        partitionOid = partitionGetPartitionOid(&args, lockMode, missingOk, noWait);
+    }
 
     relation_close(partitionRelRelation, AccessShareLock);
 
@@ -693,7 +741,9 @@ List* getPartitionObjectIdList(Oid relid, char relkind)
     HeapTuple tuple = NULL;
 
     /* only a table or index can have partitions */
-    Assert(PART_OBJ_TYPE_TABLE_PARTITION == relkind || PART_OBJ_TYPE_INDEX_PARTITION == relkind);
+    Assert(PART_OBJ_TYPE_TABLE_PARTITION == relkind ||
+           PART_OBJ_TYPE_INDEX_PARTITION == relkind ||
+           PART_OBJ_TYPE_TABLE_SUB_PARTITION == relkind);
 
     relation = heap_open(PartitionRelationId, AccessShareLock);
 
@@ -792,12 +842,24 @@ List* searchPgPartitionByParentId(char parttype, Oid parentId)
 }
 
 /*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		:
- * Description	:
- * Notes		:
+ * Get the sub-partition list-list
  */
+List* searchPgSubPartitionByParentId(char parttype, List *partTuples)
+{
+    List *result = NIL;
+    ListCell *lc = NULL;
+
+    foreach (lc, partTuples)
+    {
+        HeapTuple tuple = (HeapTuple)lfirst(lc);
+        Oid parentOid = HeapTupleGetOid(tuple);
+        List *subPartTuples = searchPgPartitionByParentId(parttype, parentOid);
+        result = lappend(result, subPartTuples);
+    }
+
+    return result;
+}
+
 void freePartList(List* plist)
 {
     ListCell* tuplecell = NULL;
@@ -814,6 +876,298 @@ void freePartList(List* plist)
     if (PointerIsValid(plist)) {
         pfree_ext(plist);
     }
+}
+
+void freeSubPartList(List* plist)
+{
+    ListCell* cell = NULL;
+
+    foreach (cell, plist) {
+        List *subParts = (List *)lfirst(cell);
+        freePartList(subParts);
+    }
+
+    if (PointerIsValid(plist)) {
+        pfree_ext(plist);
+    }
+}
+
+/* IMPORTANT: This function will case invalidation message process,  the relation may
+              be rebuild,  and the relation->partMap may be changed.
+              After call this founction,  should not call getNumberOfRangePartitions/getNumberOfPartitions,
+              using list_length(partitionList) instead
+ */
+List* relationGetPartitionList(Relation relation, LOCKMODE lockmode)
+{
+    List* partitionOidList = NIL;
+    List* partitionList = NIL;
+
+    partitionOidList = relationGetPartitionOidList(relation);
+    if (PointerIsValid(partitionOidList)) {
+        ListCell* cell = NULL;
+        Oid partitionId = InvalidOid;
+        Partition partition = NULL;
+
+        foreach (cell, partitionOidList) {
+            partitionId = lfirst_oid(cell);
+            Assert(OidIsValid(partitionId));
+            partition = partitionOpen(relation, partitionId, lockmode);
+            partitionList = lappend(partitionList, partition);
+        }
+
+        list_free_ext(partitionOidList);
+    }
+
+    return partitionList;
+}
+
+List* RelationGetSubPartitionList(Relation relation, LOCKMODE lockmode)
+{
+    List* partitionOidList = NIL;
+    List* subPartList = NIL;
+
+    partitionOidList = relationGetPartitionOidList(relation);
+    if (PointerIsValid(partitionOidList)) {
+        ListCell* cell = NULL;
+        Oid partitionId = InvalidOid;
+        Partition partition = NULL;
+
+        foreach (cell, partitionOidList) {
+            partitionId = lfirst_oid(cell);
+            Assert(OidIsValid(partitionId));
+            partition = partitionOpen(relation, partitionId, lockmode);
+            Relation partRel = partitionGetRelation(relation, partition);
+            List* subPartListTmp = relationGetPartitionList(partRel, lockmode);
+            subPartList = list_concat(subPartList, subPartListTmp);
+            releaseDummyRelation(&partRel);
+            partitionClose(relation, partition, lockmode);
+        }
+
+        list_free_ext(partitionOidList);
+    }
+
+    return subPartList;
+}
+
+// give one partitioned index  relation,
+// return a list, consisting of oid of all its index partition
+List* indexGetPartitionOidList(Relation indexRelation)
+{
+    List* indexPartitionOidList = NIL;
+    List* indexPartitionTupleList = NIL;
+    ListCell* cell = NULL;
+
+    if (indexRelation->rd_rel->relkind != RELKIND_INDEX || RelationIsNonpartitioned(indexRelation))
+        return indexPartitionOidList;
+    indexPartitionTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, indexRelation->rd_id);
+    foreach (cell, indexPartitionTupleList) {
+        Oid indexPartOid = HeapTupleGetOid((HeapTuple)lfirst(cell));
+        if (OidIsValid(indexPartOid)) {
+            indexPartitionOidList = lappend_oid(indexPartitionOidList, indexPartOid);
+        }
+    }
+
+    freePartList(indexPartitionTupleList);
+    return indexPartitionOidList;
+}
+
+List* indexGetPartitionList(Relation indexRelation, LOCKMODE lockmode)
+{
+    List* indexPartitionList = NIL;
+    List* indexPartitionTupleList = NIL;
+    ListCell* cell = NULL;
+
+    if (indexRelation->rd_rel->relkind != RELKIND_INDEX || RelationIsNonpartitioned(indexRelation))
+        return indexPartitionList;
+    indexPartitionTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, indexRelation->rd_id);
+    foreach (cell, indexPartitionTupleList) {
+        Partition indexPartition = NULL;
+        Oid indexPartOid = HeapTupleGetOid((HeapTuple)lfirst(cell));
+
+        if (OidIsValid(indexPartOid)) {
+            indexPartition = partitionOpen(indexRelation, indexPartOid, lockmode);
+            indexPartitionList = lappend(indexPartitionList, indexPartition);
+        }
+    }
+
+    freePartList(indexPartitionTupleList);
+    return indexPartitionList;
+}
+
+Relation SubPartitionGetRelation(Relation heap, Partition subPart, LOCKMODE lockmode)
+{
+    Oid partOid = subPart->pd_part->parentid;
+    Partition part = partitionOpen(heap, partOid, lockmode);
+    Relation partRel = partitionGetRelation(heap, part);
+    Relation subPartRel = partitionGetRelation(partRel, subPart);
+    releaseDummyRelation(&partRel);
+    partitionClose(heap, part, lockmode);
+
+    return subPartRel;
+}
+
+Relation SubPartitionOidGetParentRelation(Relation rel, Oid subPartOid, LOCKMODE lockmode)
+{
+    Oid parentOid = partid_get_parentid(subPartOid);
+    Partition part = partitionOpen(rel, parentOid, lockmode);
+    Relation partRel = partitionGetRelation(rel, part);
+    partitionClose(rel, part, lockmode);
+
+    return partRel;
+}
+
+void releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode, bool validCheck)
+{
+    ListCell* cell = NULL;
+    Partition partition = NULL;
+    Relation partRel = NULL;
+
+    foreach (cell, *partList) {
+        partition = (Partition)lfirst(cell);
+        Assert(!validCheck || PointerIsValid(partition));
+        if (PointerIsValid(partition)) {
+            if (partition->pd_part->parentid != relation->rd_id) {
+                partRel = SubPartitionOidGetParentRelation(relation, partition->pd_id, lockmode);
+                partitionClose(partRel, partition, lockmode);
+                releaseDummyRelation(&partRel);
+            } else {
+                partitionClose(relation, partition, lockmode);
+            }
+        }
+    }
+
+    list_free_ext(*partList);
+    *partList = NULL;
+}
+
+void releaseSubPartitionList(Relation relation, List** partList, LOCKMODE lockmode)
+{
+    ListCell* cell = NULL;
+    List *subpartList = NULL;
+    Partition subPart = NULL;
+    Oid partOid = InvalidOid;
+    Partition part = NULL;
+    Relation partRel = NULL;
+
+    foreach (cell, *partList) {
+        subpartList = (List *)lfirst(cell);
+        Assert(PointerIsValid(subpartList));
+        if (RelationIsIndex(relation)) {
+            releasePartitionList(relation, &subpartList, lockmode);
+        } else {
+            subPart = (Partition)linitial(subpartList);
+            partOid = subPart->pd_part->parentid;
+            part = partitionOpen(relation, partOid, lockmode);
+            partRel = partitionGetRelation(relation, part);
+            releasePartitionList(partRel, &subpartList, lockmode);
+            releaseDummyRelation(&partRel);
+            partitionClose(relation, part, lockmode);
+        }
+    }
+
+    list_free_ext(*partList);
+    *partList = NULL;
+}
+
+/*
+ * Get partition list, free with releasePartitionOidList.
+ */
+List* relationGetPartitionOidList(Relation rel)
+{
+    List* result = NIL;
+    Oid partitionId = InvalidOid;
+
+    if (rel == NULL || rel->partMap == NULL) {
+        return NIL;
+    }
+
+    PartitionMap* map = rel->partMap;
+    int sumtotal = getPartitionNumber(map);
+    for (int conuter = 0; conuter < sumtotal; ++conuter) {
+        if (map->type == PART_TYPE_LIST) {
+            partitionId = ((ListPartitionMap*)map)->listElements[conuter].partitionOid;
+        } else if (map->type == PART_TYPE_HASH) {
+            partitionId = ((HashPartitionMap*)map)->hashElements[conuter].partitionOid;
+        } else {
+            partitionId = ((RangePartitionMap*)map)->rangeElements[conuter].partitionOid;
+        }
+        result = lappend_oid(result, partitionId);
+    }
+
+    return result;
+}
+
+/*
+ * Get sub-partition list, free with releasePartitionOidList.
+ */
+List* RelationGetSubPartitionOidList(Relation rel, LOCKMODE lockmode)
+{
+    if (!RelationIsSubPartitioned(rel))
+        return NULL;
+
+    List *parts = relationGetPartitionOidList(rel);
+    List *result = NULL;
+    ListCell *lc = NULL;
+    foreach (lc, parts)
+    {
+        Oid partOid = lfirst_oid(lc);
+        Partition part = partitionOpen(rel, partOid, lockmode);
+        Relation partRel = partitionGetRelation(rel, part);
+        List *subParts = relationGetPartitionOidList(partRel);
+        result = list_concat(result, subParts);
+        releaseDummyRelation(&partRel);
+        partitionClose(rel, part, lockmode);
+    }
+
+    return result;
+}
+
+/*
+ * Get sub-partition list-list, free with ReleaseSubPartitionOidList.
+ */
+List* RelationGetSubPartitionOidListList(Relation rel)
+{
+    if (!RelationIsSubPartitioned(rel))
+        return NULL;
+
+    List *parts = relationGetPartitionOidList(rel);
+    List *result = NULL;
+    ListCell *lc = NULL;
+    foreach (lc, parts)
+    {
+        Oid partOid = lfirst_oid(lc);
+        Partition part = partitionOpen(rel, partOid, AccessShareLock);
+        Relation partRel = partitionGetRelation(rel, part);
+        List *subParts = relationGetPartitionOidList(partRel);
+        result = lappend(result, subParts);
+        releaseDummyRelation(&partRel);
+        partitionClose(rel, part, AccessShareLock);
+    }
+
+    return result;
+}
+
+void releasePartitionOidList(List** partList)
+{
+    if (PointerIsValid(partList)) {
+        list_free_ext(*partList);
+
+        *partList = NIL;
+    }
+}
+
+void ReleaseSubPartitionOidList(List** partList)
+{
+    ListCell* cell = NULL;
+    List *subPartOidList = NULL;
+
+    foreach (cell, *partList) {
+        subPartOidList = (List *)lfirst(cell);
+        releasePartitionOidList(&subPartOidList);
+    }
+
+    list_free_ext(*partList);
+    *partList = NULL;
 }
 
 /*

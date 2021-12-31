@@ -177,6 +177,7 @@ static void SetWALFileNameForCleanup(void)
 {
     bool fnameOK = false;
     errno_t errorno = EOK;
+    int segLen = 32;
 
     TrimExtension(restartWALFileName, additional_ext);
 
@@ -204,7 +205,7 @@ static void SetWALFileNameForCleanup(void)
              * Use just the prefix of the filename, ignore everything after
              * first period
              */
-            XLogFileName(exclusiveCleanupFileName, tli, ((uint64)log) << 32 | seg);
+            XLogFileName(exclusiveCleanupFileName, tli, ((uint64)log) << segLen | seg);
         }
     }
 

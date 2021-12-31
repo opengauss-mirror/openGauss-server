@@ -59,9 +59,10 @@
 #include "replication/walsender_private.h"
 #include "replication/walsender.h"
 #include "pgxc/pgxc.h"
-#include "replication/obswalreceiver.h"
+#include "replication/archive_walreceiver.h"
 #include "replication/walreceiver.h"
 #include "access/obs/obs_am.h"
+#include "access/archive/archive_am.h"
 #include "replication/dcf_replication.h"
 
 /* ----------
@@ -292,7 +293,6 @@ static void pgarch_waken(SIGNAL_ARGS)
     /* set flag that there is work to be done */
     t_thrd.arch.wakened = true;
     SetLatch(&t_thrd.arch.mainloop_latch);
-    ereport(DEBUG1, (errmsg("pgarch_waken")));
     errno = save_errno;
 }
 
@@ -367,7 +367,7 @@ static void pgarch_MainLoop(void)
         if (t_thrd.arch.got_SIGHUP) {
             t_thrd.arch.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
-            if (!XLogArchivingActive() && getObsReplicationSlot() == NULL) {
+            if (!XLogArchivingActive() && getArchiveReplicationSlot() == NULL) {
                 ereport(LOG, (errmsg("PgArchiver exit")));
                 return;
             }
@@ -404,7 +404,7 @@ static void pgarch_MainLoop(void)
         /* Do what we're here for */
         if (t_thrd.arch.wakened || time_to_stop) {
             t_thrd.arch.wakened = false;
-            obs_archive_slot = getObsReplicationSlot();
+            obs_archive_slot = getArchiveReplicationSlot();
             if (obs_archive_slot != NULL && !IsServerModeStandby()) {
                 gettimeofday(&curtime, NULL);
                 const long time_diff = TIME_GET_MILLISEC(curtime) -  t_thrd.arch.last_arch_time;
@@ -445,7 +445,7 @@ static void pgarch_MainLoop(void)
 #endif
                     }
                     pgarch_ArchiverObsCopyLoop(flushPtr, fun);
-                    advanceObsSlot(flushPtr);
+                    AdvanceArchiveSlot(flushPtr);
                 }
             } else {
                 pgarch_ArchiverCopyLoop();
@@ -503,7 +503,7 @@ static void pgarch_MainLoop(void)
          * or after completing one more archiving cycle after receiving
          * SIGUSR2.
          */
-    } while (PostmasterIsAlive() && !time_to_stop && (XLogArchivingActive() || getObsReplicationSlot() != NULL));
+    } while (PostmasterIsAlive() && !time_to_stop && (XLogArchivingActive() || getArchiveReplicationSlot() != NULL));
 }
 
 /*
@@ -644,6 +644,19 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
     return false;
 }
 
+/*
+ * Update archived xlog LSN for barrier.
+ *
+ */
+static inline void UpdateArchivedLsn(XLogRecPtr targetLsn)
+{
+    ArchiveTaskStatus *archive_task_status = nullptr;
+    archive_task_status = find_archive_task_status(&t_thrd.arch.archive_task_idx);
+    if (archive_task_status == nullptr) {
+        return;
+    }
+    archive_task_status->archived_lsn = targetLsn;
+}
 
 /*
  * pgarch_ArchiverObsCopyLoop
@@ -709,6 +722,7 @@ static void pgarch_ArchiverObsCopyLoop(XLogRecPtr flushPtr, doArchive fun)
             gettimeofday(&tv, NULL);
             t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
             t_thrd.arch.pitr_task_last_lsn = targetLsn;
+            UpdateArchivedLsn(targetLsn);
             ResetLatch(&t_thrd.arch.mainloop_latch);
             ereport(LOG,
                 (errmsg("pgarch_ArchiverObsCopyLoop time change to %ld", t_thrd.arch.last_arch_time)));
@@ -970,9 +984,9 @@ static void pgarch_archiveRoachForPitrStandby()
             (uint32)(archive_task_status->archive_task.targetLsn), 
             archive_task_status->archive_task.term, 
             archive_task_status->archive_task.sub_term)));
-    if (obs_replication_archive(&archive_task_status->archive_task) == 0) {
+    if (ArchiveReplicationAchiver(&archive_task_status->archive_task) == 0) {
         archive_task_status->pitr_finish_result = true;
-        obs_update_archive_start_end_location_file(archive_task_status->archive_task.targetLsn, TIME_GET_MILLISEC(tv));
+        update_archive_start_end_location_file(archive_task_status->archive_task.targetLsn, TIME_GET_MILLISEC(tv));
     } else {
         ereport(WARNING,
             (errmsg("error when pgarch_archiveRoachForPitrStandby %s : %X/%X, term:%d, subterm:%d", 
@@ -1056,7 +1070,7 @@ static bool pgarch_archiveRoachForCoordinator(XLogRecPtr targetLsn)
     archive_xlog_info.term = 0;
     archive_xlog_info.sub_term = 0;
     archive_xlog_info.tli = 0;
-    if (obs_replication_archive(&archive_xlog_info) != 0) {
+    if (ArchiveReplicationAchiver(&archive_xlog_info) != 0) {
         archive_task_status->pitr_finish_result = false;
         ereport(WARNING,
             (errmsg("error when pgarch_archiveRoachForCoordinator %s : %X/%X, term:%d, subterm:%d", 
@@ -1142,8 +1156,7 @@ static void InitArchiverLastTaskLsn()
     load_server_mode();
     gettimeofday(&tv,NULL);
     t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
-    t_thrd.arch.arch_start_timestamp = TIME_GET_MILLISEC(tv);
-    ArchiveSlotConfig* obs_archive_slot = getObsReplicationSlot();
+    ArchiveSlotConfig* obs_archive_slot = getArchiveReplicationSlot();
     if (obs_archive_slot != NULL && !IsServerModeStandby()) {
         InitPitrTaskLastLsn(obs_archive_slot);
     }
@@ -1155,7 +1168,7 @@ static void InitPitrTaskLastLsn(ArchiveSlotConfig* obs_archive_slot)
     struct timeval tv;
 
     gettimeofday(&tv,NULL);
-    if (obs_replication_get_last_xlog(&obs_archive_info, &obs_archive_slot->archive_obs) == 0) {
+    if (archive_replication_get_last_xlog(&obs_archive_info, &obs_archive_slot->archive_config) == 0) {
         t_thrd.arch.pitr_task_last_lsn = obs_archive_info.targetLsn;
         ereport(LOG,
             (errmsg("initLastTaskLsn update lsn to  %X/%X from obs", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32),
@@ -1179,11 +1192,11 @@ static void InitPitrTaskLastLsn(ArchiveSlotConfig* obs_archive_slot)
             write_start_end_arch_timeto_obs(get_curr_last_xlog_time(LastRemovedSegno), true);
             t_thrd.arch.pitr_task_last_lsn = OldestKeepRecvPtr - (OldestKeepRecvPtr % XLogSegSize);
         }
-        advanceObsSlot(t_thrd.arch.pitr_task_last_lsn);
+        AdvanceArchiveSlot(t_thrd.arch.pitr_task_last_lsn);
     } else {
         XLogRecPtr targetLsn = GetFlushRecPtr();
         t_thrd.arch.pitr_task_last_lsn = targetLsn - (targetLsn % XLogSegSize);
-        advanceObsSlot(t_thrd.arch.pitr_task_last_lsn);
+        AdvanceArchiveSlot(t_thrd.arch.pitr_task_last_lsn);
         ereport(LOG,
             (errmsg("initLastTaskLsn update lsn to  %X/%X from local", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32),
             (uint32)(t_thrd.arch.pitr_task_last_lsn))));
@@ -1197,8 +1210,9 @@ static void write_start_end_arch_timeto_obs(long cur_time, bool is_start)
         return ;
     }
     errno_t rc = 0;
-    ObsArchiveConfig obsConfig;
-    ArchiveSlotConfig* obs_archive_slot = getObsReplicationSlot();
+    ArchiveConfig obsConfig;
+    const int messageLen = 21;
+    ArchiveSlotConfig* obs_archive_slot = getArchiveReplicationSlot();
     if (obs_archive_slot == NULL) {
         return;
     }
@@ -1208,11 +1222,11 @@ static void write_start_end_arch_timeto_obs(long cur_time, bool is_start)
         cur_time, is_start ? "true" : "false")));
 
     /* copy OBS configs to temporary variable for customising file path */
-    rc = memcpy_s(&obsConfig, sizeof(ObsArchiveConfig), &obs_archive_slot->archive_obs, sizeof(ObsArchiveConfig));
+    rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), &obs_archive_slot->archive_config, sizeof(ArchiveConfig));
     securec_check(rc, "", "");
     
     if (!IS_PGXC_COORDINATOR) {
-        rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.obs_prefix);
+        rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.archive_prefix);
         securec_check(rc, "\0", "\0");
 
         char *p = strrchr(pathPrefix, '/');
@@ -1221,12 +1235,12 @@ static void write_start_end_arch_timeto_obs(long cur_time, bool is_start)
                     errmsg("Obs path prefix is invalid")));
         }
         *p = '\0';
-        obsConfig.obs_prefix = pathPrefix;
+        obsConfig.archive_prefix = pathPrefix;
     }
     rc = snprintf_s(obsfile_name, MAXPGPATH, MAXPGPATH - 1, "%s/%s_%013ld", 
         ARCH_TIME_FOLDER, is_start ? "s" : "e", cur_time);
     securec_check_ss_c(rc, "\0", "\0");
-    obsWrite(obsfile_name, "not important content", MAX_BARRIER_ID_LENGTH - 1, &obsConfig);
+    ArchiveWrite(obsfile_name, "not important content", messageLen, &obsConfig);
 }
 
 
@@ -1238,7 +1252,7 @@ static long get_current_barrier_time()
     uint64_t barrier_id;
     long ts = 0;
 
-    if (obs_replication_read_file(BARRIER_FILE, (char *)barrier_name, MAX_BARRIER_ID_LENGTH, t_thrd.arch.slot_name)) {
+    if (ArchiveReplicationReadFile(BARRIER_FILE, (char *)barrier_name, MAX_BARRIER_ID_LENGTH, t_thrd.arch.slot_name)) {
         barrier_name[BARRIER_NAME_LEN - 1] = '\0';
         ereport(LOG, (errmsg("[initLastTaskLsn] read barrier id from obs %s", barrier_name)));
     } else {

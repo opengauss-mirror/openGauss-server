@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -34,7 +35,7 @@
 #include "utils/builtins.h"
 #include "utils/typcache.h"
 #include "storage/lmgr.h"
-
+#include "commands/user.h"
 #define MAX_LINESIZE 32767
 
 extern bool PQsendQueryStart(PGconn *conn);
@@ -96,6 +97,7 @@ void AutonomousSession::AttachSession(void)
 
     /* create a connection info with current database info */
     char connInfo[MAX_CONNINFO_SIZE];
+    char userName[NAMEDATALEN];
     const char* dbName = get_database_name(u_sess->proc_cxt.MyDatabaseId);
     if (dbName == NULL) {
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_DATABASE), errmsg("database with OID %u does not exist",
@@ -103,8 +105,9 @@ void AutonomousSession::AttachSession(void)
     }
 
     errno_t ret = snprintf_s(connInfo, sizeof(connInfo), sizeof(connInfo) - 1,
-                             "dbname=%s port=%d application_name='autonomoustransaction'",
-                             dbName, g_instance.attr.attr_network.PostPortNumber);
+                             "dbname=%s port=%d host='localhost' application_name='autonomoustransaction' user=%s",
+                             dbName, g_instance.attr.attr_network.PostPortNumber,
+                             (char*)GetSuperUserName((char*)userName));
     securec_check_ss_c(ret, "\0", "\0");
 
     /* do the actual create session */
@@ -206,6 +209,9 @@ void CreateAutonomousSession(void)
         (void)MemoryContextSwitchTo(oldCxt);
         u_sess->SPI_cxt.autonomous_session->Init();
         u_sess->SPI_cxt.autonomous_session->AttachSession();
+        u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("set session_timeout = 0;", NULL, 0);
+        u_sess->SPI_cxt.autonomous_session->current_attach_sessionid =
+            u_sess->SPI_cxt.autonomous_session->ExecSimpleQuery("select pg_current_sessid();", NULL, 0);
     } else {
         if (!u_sess->SPI_cxt.autonomous_session->GetConnStatus() 
             && !u_sess->SPI_cxt.autonomous_session->ReConnSession()) {
@@ -444,9 +450,15 @@ int PQsendQueryAutonm(PGconn* conn, const char* query)
 #endif
 
     Oid currentId = GetCurrentUserId();
+    uint64 sessionId = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
+    /* put 64bit sessionId in 32bit once time */
+    uint32 sessionId_l32 = sessionId;
+    uint32 sessionId_h32 = sessionId >> 32;
     /* construct the outgoing Query message */
-    if (pqPutMsgStart('u', false, conn) < 0 || pqPutInt((int)currentId, 4, conn) 
-        || pqPuts(query, conn) < 0 || pqPutMsgEnd(conn) < 0) {
+    bool execFlag = pqPutMsgStart('u', false, conn) < 0 || pqPutInt((int)currentId, 4, conn)
+        || pqPutInt(sessionId_h32, 4, conn) || pqPutInt(sessionId_l32, 4, conn)
+        || pqPuts(query, conn) < 0 || pqPutMsgEnd(conn) < 0;
+    if (execFlag) {
         pqHandleSendFailure(conn);
         return 0;
     }

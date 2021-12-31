@@ -12,6 +12,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/c.h
  *
@@ -420,6 +421,10 @@ typedef union {
 #define INT128_MIN (-INT128_MAX - 1)
 #define UINT128_MAX (((uint128)INT128_MAX << 1) + 1)
 
+#define PG_INT128_MAX INT128_MAX
+#define PG_INT128_MIN INT128_MIN
+#define PG_UINT128_MAX UINT128_MAX
+
 #define UINT128_IS_EQUAL(x, y) ((x).u128 == (y).u128)
 #define UINT128_COPY(x, y)  (x).u128 = (y).u128
 
@@ -723,8 +728,8 @@ typedef struct pathData {
  * ----------------
  */
 
-#define TYPEALIGN(ALIGNVAL, LEN) (((uintptr_t)(LEN) + ((ALIGNVAL)-1)) & ~((uintptr_t)((ALIGNVAL)-1)))
-
+#define TYPEALIGN(ALIGNVAL, LEN) (((uintptr_t)(LEN) + ((ALIGNVAL) - 1)) & ~((uintptr_t)((ALIGNVAL) - 1)))
+#define IS_TYPE_ALIGINED(ALIGNVAL, LEN) ((((uintptr_t)(LEN)) & ((uintptr_t)((ALIGNVAL) - 1))) == 0)
 #define SHORTALIGN(LEN) TYPEALIGN(ALIGNOF_SHORT, (LEN))
 #define INTALIGN(LEN) TYPEALIGN(ALIGNOF_INT, (LEN))
 #define LONGALIGN(LEN) TYPEALIGN(ALIGNOF_LONG, (LEN))

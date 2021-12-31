@@ -16,7 +16,7 @@
 
  <refsynopsisdiv>
 <synopsis>
-DROP SEQUENCE [ IF EXISTS ] {[schema.]sequence_name} [, ...] [ CASCADE | RESTRICT ];
+DROP [ LARGE ] SEQUENCE [ IF EXISTS ] { [schema.] sequence_name } [, ...] [ CASCADE | RESTRICT ];
 </synopsis>
  </refsynopsisdiv>
 

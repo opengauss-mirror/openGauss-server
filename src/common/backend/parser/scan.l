@@ -39,7 +39,8 @@
 #include "parser/scanner.h"
 #include "parser/scansup.h"
 #include "mb/pg_wchar.h"
-
+#include "utils/pl_package.h"
+#include "utils/plpgsql.h"
 
 /* Avoid exit() on fatal scanner errors (a bit ugly -- see yy_fatal_error) */
 #undef fprintf
@@ -68,7 +69,6 @@ long getDynaParamSeq(const char *string, bool initflag, bool placeholder, core_y
 #define SET_YYLLOC()  (*(yylloc) = yytext - yyextra->scanbuf)
 
 #define COMMENT_NOT_IGNORED()  (yyextra->is_hint_str || yyextra->include_ora_comment)
-
 /*
  * Advance yylloc by the given number of bytes.
  */
@@ -175,7 +175,6 @@ space			[ \t\n\r\f]
 horiz_space		[ \t\f]
 newline			[\n\r]
 non_newline		[^\n\r]
-
 comment			("--"{non_newline}*)
 
 whitespace		({space}+|{comment})
@@ -448,7 +447,7 @@ other			.
 					}
 		}
 
-<xc><<EOF>>		{ yyerror("unterminated /* comment"); }
+<xc><<EOF>>		{ yyerror("unterminated /* comment"); return 0;}
 
 {xbstart}		{
 					/* Binary bit type.
@@ -478,7 +477,7 @@ other			.
 <xb>{quotecontinue}	{
 					/* ignore */
 				}
-<xb><<EOF>>		{ yyerror("unterminated bit string literal"); }
+<xb><<EOF>>		{ yyerror("unterminated bit string literal"); return 0;}
 
 {xhstart}		{
 					/* Hexadecimal bit type.
@@ -500,7 +499,7 @@ other			.
 					yyextra->is_hint_str = false;
 					return XCONST;
 		}
-<xh><<EOF>>		{ yyerror("unterminated hexadecimal string literal"); }
+<xh><<EOF>>		{ yyerror("unterminated hexadecimal string literal"); return 0;}
 
 {xnstart}		{
 					/* National character.
@@ -674,7 +673,7 @@ other			.
 					/* This is only needed for \ just before EOF */
 					addlitchar(yytext[0], yyscanner);
 				}
-<xq,xe,xus><<EOF>>		{ yyerror("unterminated quoted string"); }
+<xq,xe,xus><<EOF>>		{ yyerror("unterminated quoted string"); return 0;}
 
 {dolqdelim}		{
 					SET_YYLLOC();
@@ -721,7 +720,7 @@ other			.
 					/* This is only needed for $ inside the quoted text */
 					addlitchar(yytext[0], yyscanner);
 				}
-<xdolq><<EOF>>	{ yyerror("unterminated dollar-quoted string"); }
+<xdolq><<EOF>>	{ yyerror("unterminated dollar-quoted string"); return 0;}
 
 {xdstart}		{
 					SET_YYLLOC();
@@ -740,7 +739,7 @@ other			.
 					if (yyextra->literallen == 0)
 						yyerror("zero-length delimited identifier");
 					ident = litbufdup(yyscanner);
-					if (yyextra->literallen >= NAMEDATALEN)
+					if (yyextra->literallen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
 						truncate_identifier(ident, yyextra->literallen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					yyextra->ident_quoted = true;
@@ -756,7 +755,7 @@ other			.
 						yyerror("zero-length delimited identifier");
 					ident = litbuf_udeescape('\\', yyscanner);
 					identlen = strlen(ident);
-					if (identlen >= NAMEDATALEN)
+					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
 						truncate_identifier(ident, identlen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					/* throw back all but the quote */
@@ -774,7 +773,7 @@ other			.
 						yyerror("zero-length delimited identifier");
 					ident = litbuf_udeescape(yytext[yyleng - 2], yyscanner);
 					identlen = strlen(ident);
-					if (identlen >= NAMEDATALEN)
+					if (identlen >= NAMEDATALEN && u_sess->parser_cxt.is_load_copy == false)
 						truncate_identifier(ident, identlen, yyextra->warnOnTruncateIdent);
 					yylval->str = ident;
 					yyextra->ident_quoted = false;
@@ -787,7 +786,7 @@ other			.
 <xd,xui>{xdinside}	{
 					addlit(yytext, yyleng, yyscanner);
 				}
-<xd,xui><<EOF>>		{ yyerror("unterminated quoted identifier"); }
+<xd,xui><<EOF>>		{ yyerror("unterminated quoted identifier"); return 0;}
 
 {xufailed}	{
 					char		   *ident;
@@ -845,8 +844,11 @@ other			.
 							yyextra->paren_depth++;
 						else if (yytext[0] == ')' && yyextra->paren_depth > 0)
 							yyextra->paren_depth--;
-						else if (yytext[0] == ';' && yyextra->paren_depth == 0 && !yyextra->in_slash_proc_body)
+						else if (yytext[0] == ';' && yyextra->paren_depth == 0 && !yyextra->in_slash_proc_body) {
 							yyextra->query_string_locationlist = lappend_int(yyextra->query_string_locationlist, *yylloc);
+                            /* reset is_createstmt to parse next sql */
+                            yyextra->is_createstmt = false;
+                        }
 					}
 					yyextra->is_hint_str = false;
 					return yytext[0];
@@ -1034,6 +1036,7 @@ other			.
 												yyextra->num_keywords);
 
 					yyextra->is_hint_str = false;
+					bool isPlpgsqlKeyword = yyextra->isPlpgsqlKeyWord;
 
 					if (keyword != NULL)
 					{
@@ -1049,26 +1052,29 @@ other			.
 							/* Create trigger don't need set dolqstart */
 							yyextra->is_createstmt = false;
 						}
-						else if ((keyword->value == PROCEDURE || keyword->value == FUNCTION)
-								 && yyextra->is_createstmt)
+						else if ((keyword->value == (isPlpgsqlKeyword? yyextra->plKeywordValue->procedure : PROCEDURE) ||
+						    keyword->value == (isPlpgsqlKeyword? yyextra->plKeywordValue->function : FUNCTION))
+							&& (yyextra->is_createstmt))
 						{
 							/* Make yyextra->dolqstart not NULL means its in a proc with $$. */
 							yyextra->dolqstart = "";
 						}
-						else if (keyword->value == BEGIN_P)
+						else if (keyword->value == (isPlpgsqlKeyword? yyextra->plKeywordValue->begin : BEGIN_P))
 						{
-							/* cases that have to be a trans stmt and fall quickly */
-							if (yyg->yy_hold_char == ';' || /* found ';' after 'begin' */
-								yyg->yy_hold_char == '\0')  /* found '\0' after 'begin' */
-								return BEGIN_NON_ANOYBLOCK;
-							/* look for other transaction stmt */
-							if (is_trans_stmt(yyextra->scanbuf, yyextra->scanbuflen))
-								return BEGIN_NON_ANOYBLOCK;
+                            if (!(u_sess->parser_cxt.isCreateFuncOrProc || u_sess->plsql_cxt.curr_compile_context != NULL)) {
+                                /* cases that have to be a trans stmt and fall quickly */
+                                if (yyg->yy_hold_char == ';' || /* found ';' after 'begin' */
+                                    yyg->yy_hold_char == '\0')  /* found '\0' after 'begin' */
+                                    return BEGIN_NON_ANOYBLOCK;
+                                /* look for other transaction stmt */
+                                if (is_trans_stmt(yyextra->scanbuf, yyextra->scanbuflen))
+                                    return BEGIN_NON_ANOYBLOCK;
+                            }
 						}
-						else if (keyword->value == SELECT ||
-								 keyword->value == UPDATE||
-								 keyword->value == INSERT ||
-								 keyword->value == DELETE_P ||
+						else if (keyword->value == (isPlpgsqlKeyword? yyextra->plKeywordValue->select : SELECT) ||
+								 keyword->value == (isPlpgsqlKeyword? yyextra->plKeywordValue->update : UPDATE) ||
+								 keyword->value == (isPlpgsqlKeyword? yyextra->plKeywordValue->insert : INSERT) ||
+								 keyword->value == (isPlpgsqlKeyword? yyextra->plKeywordValue->Delete : DELETE_P) ||
 								 keyword->value == MERGE)
 						{
 							yyextra->is_hint_str = true;
@@ -1157,13 +1163,28 @@ void
 scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 {
 	const char *loc = yyextra->scanbuf + *yylloc;
-
-    if (u_sess->plsql_cxt.plpgsql_curr_compile != NULL &&
-               u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
-		PLpgSQL_function* func = u_sess->plsql_cxt.plpgsql_curr_compile;
+	u_sess->plsql_cxt.have_error = true; 
+    int errstate = 0;
+	int lines = 0;
+	int rc = CompileWhich();
+#ifndef ENABLE_MULTIPLE_NODES
+        if (rc != PLPGSQL_COMPILE_NULL && u_sess->attr.attr_common.plsql_show_all_error) {
+            lines = GetProcedureLineNumberInPackage(u_sess->plsql_cxt.curr_compile_context->core_yy->scanbuf, u_sess->plsql_cxt.plpgsql_yylloc);
+            addErrorList(message, lines);
+        }
+        if (u_sess->attr.attr_common.plsql_show_all_error && rc != PLPGSQL_COMPILE_NULL) {
+            errstate = NOTICE;
+        } else {
+            errstate = ERROR;
+        }
+#else
+        errstate = ERROR;
+#endif 
+    if (rc == PLPGSQL_COMPILE_PACKAGE_PROC) {
+		PLpgSQL_function* func = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile;
 		if (*loc == YY_END_OF_BUFFER_CHAR)
 		{
-            ereport(ERROR,
+            ereport(errstate,
                 (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("%s at end of input when compile function %s", _(message), func->fn_signature),
                     errdetail("syntax error"),
@@ -1172,7 +1193,7 @@ scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 		}
 		else
 		{
-            ereport(ERROR,
+            ereport(errstate,
                 (errmodule(MOD_PLSQL), errcode(ERRCODE_SYNTAX_ERROR),
                     errmsg("%s at or near \"%s\" when compile function %s", _(message), loc, func->fn_signature),
                     errdetail("syntax error"),
@@ -1182,7 +1203,7 @@ scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 	} else {
 		if (*loc == YY_END_OF_BUFFER_CHAR)
 		{
-			ereport(ERROR,
+			ereport(errstate,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 /* translator: %s is typically the translation of "syntax error" */
 				 errmsg("%s at end of input", _(message)),
@@ -1190,7 +1211,7 @@ scanner_yyerror(const char *message, core_yyscan_t yyscanner)
 		}
 		else
 		{
-			ereport(ERROR,
+			ereport(errstate,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 /* translator: first %s is typically the translation of "syntax error" */
 				 errmsg("%s at or near \"%s\"", _(message), loc),
@@ -1246,6 +1267,10 @@ scanner_init(const char *str,
 	yyext->literalbuf = (char *) palloc(yyext->literalalloc);
 	yyext->literallen = 0;
 	yyext->warnOnTruncateIdent = true;
+
+    /* plpgsql keyword params */
+    yyext->isPlpgsqlKeyWord = false;
+    yyext->plKeywordValue = NULL;
 
 	// Added CALL for procedure and function
 	getDynaParamSeq("init", true, true, NULL);
@@ -1693,6 +1718,8 @@ getDynaParamSeq(const char *string, bool initflag, bool placeholder, core_yyscan
 
 	if (initflag)
 	{ 
+		u_sess->parser_cxt.is_load_copy = false;
+		u_sess->parser_cxt.col_list = NULL;
 		u_sess->parser_cxt.has_dollar = false;
 		u_sess->parser_cxt.has_placeholder = false;
 		return 0;
@@ -1715,6 +1742,12 @@ getDynaParamSeq(const char *string, bool initflag, bool placeholder, core_yyscan
 				errmsg("It is forbidden to use placeholder and dollar quoting together.")));
 
 
+	if(u_sess->parser_cxt.is_load_copy == true){
+		if (yyextra->ident_quoted)
+			u_sess->parser_cxt.copy_fieldname = pstrdup(string);
+		else
+			u_sess->parser_cxt.copy_fieldname = pg_strtolower(pstrdup(string));
+	}
 	foreach(cell, yyextra->parameter_list)
 	{
 		result++;
@@ -1800,4 +1833,16 @@ is_trans_stmt(const char *haystack, int haystack_len)
 	 *    it is a anaynomous block stmt
 	 */
 	return found_non_blank_char ? false : true;
+}
+
+void addErrorList(const char* message, int lines)
+{
+    PLpgSQL_error* erritem;
+    MemoryContext oldcxt;
+    oldcxt = MemoryContextSwitchTo(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
+    erritem = (PLpgSQL_error*)palloc(sizeof(PLpgSQL_error));
+    erritem->errmsg = pstrdup(message);
+    erritem->line = lines;
+    u_sess->plsql_cxt.errorList = lappend(u_sess->plsql_cxt.errorList, erritem);
+    MemoryContextSwitchTo(oldcxt);
 }

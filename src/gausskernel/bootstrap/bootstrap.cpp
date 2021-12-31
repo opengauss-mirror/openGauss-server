@@ -248,7 +248,7 @@ void BootStrapProcessMain(int argc, char* argv[])
     t_thrd.bootstrap_cxt.MyAuxProcType = CheckerProcess;
 
     initOptParseContext(&optCtxt);
-    while ((flag = getopt_r(argc, argv, "B:c:d:D:Fr:x:-:", &optCtxt)) != -1) {
+    while ((flag = getopt_r(argc, argv, "B:c:d:D:Fr:x:g:-:", &optCtxt)) != -1) {
         switch (flag) {
             case 'B':
                 SetConfigOption("shared_buffers", optCtxt.optarg, PGC_POSTMASTER, PGC_S_ARGV);
@@ -269,6 +269,9 @@ void BootStrapProcessMain(int argc, char* argv[])
             } break;
             case 'F':
                 SetConfigOption("fsync", "false", PGC_POSTMASTER, PGC_S_ARGV);
+                break;
+            case 'g':
+                SetConfigOption("xlog_file_path", optCtxt.optarg, PGC_POSTMASTER, PGC_S_ARGV);
                 break;
             case 'r':
                 errorno = strcpy_s(t_thrd.proc_cxt.OutputFileName, MAXPGPATH, optCtxt.optarg);
@@ -337,6 +340,9 @@ void BootStrapProcessMain(int argc, char* argv[])
 
     pgstat_initialize();
     pgstat_bestart();
+    if (!IsUnderPostmaster) {
+        ShareStorageInit();
+    }
     /*
      * XLOG operations
      */

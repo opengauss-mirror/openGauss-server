@@ -1,0 +1,6 @@
+ abc ,10,,def,AAa,456
+ abc ,10,,def
+ abc ,10,,def,
+  abc ,1a,,def,AAa,456
+" abc, qwe ",10,,"def,asd",AAa
+abc ,10,,"""def,asd""",AAa

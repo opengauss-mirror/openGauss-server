@@ -33,7 +33,7 @@ DECLARE
     quoted BOOLEAN := FALSE;  -- inside quoted identifier
     cur_ch VARCHAR;           -- current character in tokenizer
     idx INTEGER := 0;         -- loop counter, cannot use FOR .. iterator
-    start INTEGER := 1;
+    start_pos INTEGER := 1;
     stmt TEXT := i_statement;
 BEGIN
 
@@ -69,7 +69,7 @@ BEGIN
             IF quoted OR nested > 0 THEN
                 CONTINUE;
             ELSIF pattern IS NULL OR length(pattern) = 0 THEN
-                start := idx;
+                start_pos := idx;
                 CONTINUE;
             END IF;
         ELSE
@@ -80,10 +80,10 @@ BEGIN
 -- END splitter code for testing
 
         IF pattern IN ('FROM', 'WHERE') THEN
-            RETURN ARRAY [ left(i_statement, start - 1), substr(i_statement, start + 1) ];
+            RETURN ARRAY [ left(i_statement, start_pos - 1), substr(i_statement, start_pos + 1) ];
         END IF;
         pattern := '';
-        start := idx;
+        start_pos := idx;
     END LOOP;
 
 --   RETURN NULL;

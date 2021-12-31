@@ -44,6 +44,9 @@ CREATE TYPE <replaceable class="parameter">name</replaceable> (
 )
 
 CREATE TYPE <replaceable class="parameter">name</replaceable>
+
+CREATE TYPE name AS ENUM
+    ( [ 'lable' [, ... ] ] )
 </synopsis>
  </refsynopsisdiv>
 </refentry>

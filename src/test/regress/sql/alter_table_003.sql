@@ -238,7 +238,7 @@ insert into anothertab (atcol1, atcol2) values (default, true);
 insert into anothertab (atcol1, atcol2) values (default, false);
 select * from anothertab order by atcol1, atcol2;
 
-alter table anothertab alter column atcol1 type boolean; -- we could support this cast
+alter table anothertab alter column atcol1 type boolean; -- we cannot support this cast with numeric nextval
 alter table anothertab alter column atcol1 type integer;
 
 select * from anothertab order by atcol1, atcol2;

@@ -133,6 +133,9 @@ void statement_init_metric_context()
         }
 
         instr_stmt_report_stat_at_handle_init();
+        if (IsConnFromCoord()) {
+            instr_stmt_dynamic_change_level();
+        }
     }
 }
 
@@ -334,9 +337,16 @@ void statement_commit_metirc_context()
 
     (void)syscalllockAcquire(&u_sess->statement_cxt.list_protect);
 
-    /* ignore record to persist (to statement_history) if unique sql id = 0 */
+    /*
+     * Rules to persist handle to statement_history
+     * - ignore record to persist (to statement_history) if unique sql id = 0
+     * - dynamic tracked sql(dynamic_track_level >= L0)
+     * - full sql(statement_level[0] >= L0)
+     * - slow sql(statement_leve[1] >= L0 && duration >= log_min_duration_statement && log_min_duration_statement > 0)
+     */
     if (CURRENT_STMT_METRIC_HANDLE->unique_query_id != 0 &&
-        (u_sess->statement_cxt.statement_level[0] >= STMT_TRACK_L0 ||
+        (CURRENT_STMT_METRIC_HANDLE->dynamic_track_level >= STMT_TRACK_L0 ||
+        u_sess->statement_cxt.statement_level[0] >= STMT_TRACK_L0 ||
         (u_sess->statement_cxt.statement_level[1] >= STMT_TRACK_L0 &&
         (CURRENT_STMT_METRIC_HANDLE->finish_time - CURRENT_STMT_METRIC_HANDLE->start_time) >=
         CURRENT_STMT_METRIC_HANDLE->slow_query_threshold &&

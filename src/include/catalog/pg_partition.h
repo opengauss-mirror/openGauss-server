@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -91,6 +92,7 @@ typedef FormData_pg_partition *Form_pg_partition;
 #define PART_OBJ_TYPE_PARTED_TABLE       'r'
 #define PART_OBJ_TYPE_TOAST_TABLE        't'
 #define PART_OBJ_TYPE_TABLE_PARTITION    'p'
+#define PART_OBJ_TYPE_TABLE_SUB_PARTITION 's'
 #define PART_OBJ_TYPE_INDEX_PARTITION    'x'
 
 #define Natts_pg_partition               29

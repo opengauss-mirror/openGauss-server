@@ -61,8 +61,6 @@ typedef enum {
     g_instance.attr.attr_storage.comm_cn_dn_logic_conn &&                                   \
     IS_PGXC_DATANODE))
 
-#define IS_SERVICE_NODE (g_instance.role == VCOORDINATOR || g_instance.role == VSINGLENODE)
-
 /* key pair to be used as object id while using advisory lock for backup */
 #define XC_LOCK_FOR_BACKUP_KEY_1 0xFFFF
 #define XC_LOCK_FOR_BACKUP_KEY_2 0xFFFF

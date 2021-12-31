@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/parser/parse_type.h
  *
@@ -21,6 +22,8 @@ typedef HeapTuple Type;
 extern Type LookupTypeName(ParseState* pstate, const TypeName* typname, int32* typmod_p, bool print_notice = true);
 extern Type LookupTypeNameExtended(ParseState* pstate, const TypeName* typname, int32* typmod_p, bool temp_ok,
                             bool print_notice = true);
+extern Oid LookupPctTypeInPackage(RangeVar* rel, Oid pkgOid, const char* field);
+extern Oid LookupTypeInPackage(const char* typeName, Oid pkgOid = InvalidOid, Oid namespaceId = InvalidOid);
 extern Type typenameType(ParseState* pstate, const TypeName* typname, int32* typmod_p);
 extern Oid typenameTypeId(ParseState* pstate, const TypeName* typname);
 extern void typenameTypeIdAndMod(ParseState* pstate, const TypeName* typname, Oid* typeid_p, int32* typmod_p);
@@ -49,6 +52,8 @@ extern bool IsTypeSupportedByUStore (_in_ Oid typeOid, _in_ int32 typeMod);
 
 extern void parseTypeString(const char* str, Oid* typeid_p, int32* typmod_p);
 extern bool IsTypeTableInInstallationGroup(const Type type_tup);
+extern HeapTuple FindPkgVariableType(ParseState* pstate, const TypeName* typname, int32* typmod_p);
+extern char* CastPackageTypeName(const char* typName, Oid  pkgOid, bool isPackage, bool isPublic = true);
 #define ISCOMPLEX(typeid) (typeidTypeRelid(typeid) != InvalidOid)
 
 #endif /* PARSE_TYPE_H */

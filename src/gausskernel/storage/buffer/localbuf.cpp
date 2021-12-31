@@ -267,6 +267,7 @@ BufferDesc *LocalBufferAlloc(SMgrRelation smgr, ForkNumber forkNum, BlockNumber 
      * it's all ours now.
      */
     buf_desc->tag = new_tag;
+    buf_desc->encrypt = smgr->encrypt ? true : false; /* set tde flag */
     buf_state &= ~(BM_VALID | BM_DIRTY | BM_JUST_DIRTIED | BM_IO_ERROR);
     buf_state |= BM_TAG_VALID;
     buf_state &= ~BUF_USAGECOUNT_MASK;

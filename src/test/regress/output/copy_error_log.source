@@ -65,7 +65,8 @@ select * from copy_error_log_create();
 (1 row)
 
 select * from copy_error_log_create();
-ERROR:  relation "pgxc_copy_error_log" already exists
+ERROR:  relation "pgxc_copy_error_log" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
 CONTEXT:  SQL statement "CREATE TABLE public.pgxc_copy_error_log 
 							(relname varchar, begintime timestamptz, filename varchar, lineno int8, rawrecord text, detail text)"
 PL/pgSQL function copy_error_log_create() line 9 at EXECUTE statement
@@ -191,7 +192,8 @@ select * from copy_error_log_create();
 (1 row)
 
 select * from copy_error_log_create();
-ERROR:  relation "pgxc_copy_error_log" already exists
+ERROR:  relation "pgxc_copy_error_log" already exists in schema "public"
+DETAIL:  creating new table with existing name in the same schema
 CONTEXT:  SQL statement "CREATE TABLE public.pgxc_copy_error_log 
 							(relname varchar, begintime timestamptz, filename varchar, lineno int8, rawrecord text, detail text)"
 PL/pgSQL function copy_error_log_create() line 9 at EXECUTE statement

@@ -49,18 +49,18 @@ set(TGT_replication_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/datasyncrep.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/heartbeat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/libpqwalreceiver.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/archive_walreceiver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rto_statistic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/slot.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/slotfuncs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/syncrep.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/walrcvwriter.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/obswalreceiver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/walreceiver.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/walreceiverfuncs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/walreceiverfuncs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/walsender.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/repl_gram.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/syncrep_gram.cpp 
+    ${CMAKE_CURRENT_SOURCE_DIR}/shared_storage_walreceiver.cpp 
     ${CMAKE_CURRENT_SOURCE_DIR}/subscription_walreceiver.cpp
 )
 

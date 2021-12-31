@@ -67,6 +67,8 @@
 #define static
 #endif
 
+SqlErrorHandle sqlErrHandle = SQLERROR_HANDLE_CONTINUE;
+
 /* functions for use in this file */
 static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, PQExpBuffer query_buf);
 static bool do_edit(const char* filename_arg, PQExpBuffer query_buf, int lineno, bool* edited);
@@ -804,14 +806,12 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
             if (NULL != dencrypt_key) {
                 tmpkeylen = strlen(dencrypt_key);
 
-                if (KEY_LEN == tmpkeylen) {
-                    isIllegal = check_key((const char*)dencrypt_key, KEY_LEN);
-                    if (isIllegal) {
-                        rc = memset_s(pset.decryptInfo.Key, KEY_MAX_LEN, 0, KEY_MAX_LEN);
-                        securec_check_c(rc, "\0", "\0");
-                        rc = strncpy_s((char*)pset.decryptInfo.Key, KEY_MAX_LEN, dencrypt_key, KEY_MAX_LEN - 1);
-                        securec_check_c(rc, dencrypt_key, "\0");
-                    }
+                isIllegal = check_input_password(dencrypt_key);
+                if (isIllegal) {
+                    rc = memset_s(pset.decryptInfo.Key, KEY_MAX_LEN, 0, KEY_MAX_LEN);
+                    securec_check_c(rc, "\0", "\0");
+                    rc = strncpy_s((char*)pset.decryptInfo.Key, KEY_MAX_LEN, dencrypt_key, KEY_MAX_LEN - 1);
+                    securec_check_c(rc, dencrypt_key, "\0");
                 }
                 rc = memset_s(dencrypt_key, tmpkeylen, 0, tmpkeylen);
                 securec_check_c(rc, dencrypt_key, "\0");
@@ -830,14 +830,15 @@ static backslashResult exec_command(const char* cmd, PsqlScanState scan_state, P
                                 strcmp(cmd, "include_relative") == 0 || strcmp(cmd, "include_relative+") == 0);
             expand_tilde(&fname);
             /* Database Security: Data importing/dumping support AES128. */
-            if ((pset.decryptInfo.encryptInclude == true && KEY_LEN == tmpkeylen && isIllegal) ||
+            if ((pset.decryptInfo.encryptInclude == true && isIllegal) ||
                 (pset.decryptInfo.encryptInclude == false)) {
                 success = (process_file(fname, false, include_relative) == EXIT_SUCCESS);
             } else {
-                psql_error("\\%s: Missing the key or the key is illegal,must be letters or numbers and the length must "
-                           "be %d\n",
+                psql_error("\\%s: Missing the key or the key is illegal,must be %d~%d bytes and "
+                    "contain at least three kinds of characters!\n",
                     cmd,
-                    KEY_LEN);
+                    MIN_KEY_LEN,
+                    MAX_KEY_LEN);
             }
             free(fname);
             fname = NULL;
@@ -2237,6 +2238,41 @@ static bool setToptFormat(const char* value, size_t vallen, printQueryOpt* popt,
     return true;
 }
 
+static bool setSqlErrorHandle(const char* value, size_t vallen, bool quiet)
+{
+    if (value == NULL) {
+        ;
+    } else if (pg_strncasecmp("continue", value, vallen) == 0) {
+        sqlErrHandle = SQLERROR_HANDLE_CONTINUE;
+    } else if (pg_strncasecmp("exit", value, vallen) == 0) {
+        sqlErrHandle = SQLERROR_HANDLE_EXIT;
+    } else {
+        psql_error("\\pset: allowed sqlerror_handle are continue, exit\n");
+        return false;
+    }
+
+    if (!quiet) {
+        if (sqlErrHandle == SQLERROR_HANDLE_CONTINUE) {
+            printf(_("Whenever Error behavior is continue.\n"));
+        } else {
+            printf(_("Whenever Error behavior is exit.\n"));
+        }
+    }
+
+    return true;
+}
+
+static bool setBorder(const char* value, printQueryOpt* popt, bool quiet)
+{
+    if (NULL != value)
+        popt->topt.border = atoi(value);
+
+    if (!quiet)
+        printf(_("Border style is %d.\n"), popt->topt.border);
+
+    return true;
+}
+
 bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool quiet)
 {
     size_t vallen = 0;
@@ -2249,6 +2285,13 @@ bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool qui
     /* set format */
     if (strcmp(param, "format") == 0) {
         if(!setToptFormat(value, vallen, popt, quiet)) {
+            return false;
+        }
+    }
+
+    // set Sql Error Handle
+    else if (strcmp(param, "sqlerror_handle") == 0) {
+        if (!setSqlErrorHandle(value, vallen, quiet)) {
             return false;
         }
     }
@@ -2274,11 +2317,9 @@ bool do_pset(const char* param, const char* value, printQueryOpt* popt, bool qui
 
     /* set border style/width */
     else if (strcmp(param, "border") == 0) {
-        if (NULL != value)
-            popt->topt.border = atoi(value);
-
-        if (!quiet)
-            printf(_("Border style is %d.\n"), popt->topt.border);
+        if(!setBorder(value, popt, quiet)) {
+            return false;
+        }
     }
 
     /* set expanded/vertical mode */

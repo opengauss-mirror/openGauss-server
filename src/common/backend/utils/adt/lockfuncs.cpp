@@ -1321,6 +1321,7 @@ Datum pgxc_lock_for_backup(PG_FUNCTION_ARGS)
      *    is denied.
      */
     /* Connect to SPI manager to check any prepared transactions */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_CONNECTION_EXCEPTION), errmsg("internal error while locking the cluster for backup")));
@@ -1329,6 +1330,7 @@ Datum pgxc_lock_for_backup(PG_FUNCTION_ARGS)
     /* Are there any prepared transactions that have not yet been committed? */
     SPI_execute("select gid from pg_catalog.pg_prepared_xacts limit 1", true, 0);
     prepared_xact_count = SPI_processed;
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
 
     if (prepared_xact_count > 0) {
@@ -1430,6 +1432,7 @@ Datum pgxc_lock_for_sp_database(PG_FUNCTION_ARGS)
      */
 
     /* Connect to SPI manager to check any prepared transactions */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_CONNECTION_EXCEPTION), errmsg("internal error while locking the cluster for backup")));
@@ -1438,6 +1441,7 @@ Datum pgxc_lock_for_sp_database(PG_FUNCTION_ARGS)
     /* Are there any prepared transactions that have not yet been committed? */
     SPI_execute("select gid from pg_catalog.pg_prepared_xacts limit 1", true, 0);
     prepared_xact_count = SPI_processed;
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
 
     if (prepared_xact_count > 0) {

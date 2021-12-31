@@ -74,12 +74,13 @@ typedef unsigned char GS_UCHAR;
 #define SM4_KEY_LENGTH  16
 #define SM4_BLOCK_SIZE  16
 #define SM4_IV_LENGTH   SM4_BLOCK_SIZE
-#define SM4_WORD_SIZE  (SM4_BLOCK_SIZE/sizeof(GS_UINT32))
+#define SM4_WORD_SIZE  (SM4_BLOCK_SIZE / sizeof(GS_UINT32))
 
 typedef enum {
     UNKNOWN_KEY_MODE,
     SERVER_MODE,
     CLIENT_MODE,
+    HADR_MODE,
     OBS_MODE,
     SOURCE_MODE,
     GDS_MODE,

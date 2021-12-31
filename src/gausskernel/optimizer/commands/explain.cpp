@@ -159,6 +159,7 @@ static void show_groupby_keys(AggState* aggstate, List* ancestors, ExplainState*
 static void show_sort_keys(SortState* sortstate, List* ancestors, ExplainState* es);
 static void show_merge_append_keys(MergeAppendState* mstate, List* ancestors, ExplainState* es);
 static void show_merge_sort_keys(PlanState* state, List* ancestors, ExplainState* es);
+static void show_startwith_pseudo_entries(PlanState* state, List* ancestors, ExplainState* es);
 static void show_sort_info(SortState* sortstate, ExplainState* es);
 static void show_hash_info(HashState* hashstate, ExplainState* es);
 static void show_vechash_info(VecHashJoinState* hashstate, ExplainState* es);
@@ -1409,7 +1410,7 @@ void ExplainOneQueryForStatistics(QueryDesc* queryDesc)
     u_sess->exec_cxt.under_auto_explain = false;
     u_sess->instr_cxt.global_instr = oldInstr;
 
-    AutoContextSwitch memSwitch(g_instance.wlm_cxt->query_resource_track_mcxt);
+    AutoContextSwitch memSwitch(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_CBB));
     t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan = (char*)palloc0(es.str->len + 1 + 1);
     errno_t rc =
         memcpy_s(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->query_plan, es.str->len, es.str->data, es.str->len);
@@ -2001,10 +2002,15 @@ static void ExplainNode(
             BitmapIndexScan* bitmapindexscan = (BitmapIndexScan*)plan;
             const char* indexname = explain_get_index_name(bitmapindexscan->indexid);
 
-            if (es->format == EXPLAIN_FORMAT_TEXT)
+            if (es->format == EXPLAIN_FORMAT_TEXT) {
                 appendStringInfo(es->str, " on %s", indexname);
-            else
+                if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL) {
+                    StringInfo tmpName = &es->planinfo->m_planInfo->m_pname;
+                    appendStringInfo(tmpName, " using %s", indexname);
+                }
+            } else {
                 ExplainPropertyText("Index Name", indexname, es);
+            }
 
             pt_index_name = indexname;
             pt_index_owner = get_namespace_name(get_rel_namespace(bitmapindexscan->indexid));
@@ -2515,6 +2521,9 @@ static void ExplainNode(
                 show_tidbitmap_info((BitmapHeapScanState*)planstate, es);
             }
             show_llvm_info(planstate, es);
+            break;
+        case T_StartWithOp:
+            show_startwith_pseudo_entries(planstate, ancestors, es);
             break;
         case T_SeqScan:
         case T_CStoreScan:
@@ -3171,6 +3180,11 @@ static void show_plan_tlist(PlanState* planstate, List* ancestors, ExplainState*
     foreach (lc, plan->targetlist) {
         TargetEntry* tle = (TargetEntry*)lfirst(lc);
 
+        /* skip pseudo columns once startwith exist */
+        if (IsPseudoReturnTargetEntry(tle) || IsPseudoInternalTargetEntry(tle)) {
+            continue;
+        }
+
         result = lappend(result, deparse_expression((Node*)tle->expr, context, useprefix, false));
     }
 
@@ -3770,6 +3784,32 @@ static void show_merge_sort_keys(PlanState* state, List* ancestors, ExplainState
         sort->nullsFirst,
         ancestors,
         es);
+}
+
+static void show_startwith_pseudo_entries(PlanState* state, List* ancestors, ExplainState* es)
+{
+    Plan* plan = state->plan;
+    StartWithOp *swplan = (StartWithOp *)plan;
+    List* result = NIL;
+    const char *qlabel = "Start With pseudo atts";
+
+    ListCell *lc = NULL;
+    foreach (lc, swplan->internalEntryList) {
+        TargetEntry *entry = (TargetEntry *)lfirst(lc);
+
+        result = lappend(result, pstrdup(entry->resname));
+    }
+
+    if (t_thrd.explain_cxt.explain_perf_mode != EXPLAIN_NORMAL && es->planinfo->m_verboseInfo) {
+        es->planinfo->m_verboseInfo->set_plan_name<false, true>();
+
+        appendStringInfo(es->planinfo->m_verboseInfo->info_str, "%s: ", qlabel);
+        ExplainPrettyList(result, es);
+    } else {
+        ExplainPropertyList(qlabel, result, es);
+    }
+
+    list_free_deep(result);
 }
 
 static void show_detail_sortinfo(ExplainState* es, const char* sortMethod, const char* spaceType, long spaceUsed)
@@ -10406,6 +10446,17 @@ static void show_sort_group_keys(PlanState* planstate, const char* qlabel, int n
         /* find key expression in tlist */
         AttrNumber keyresno = keycols[keyno];
         TargetEntry* target = get_tle_by_resno(plan->targetlist, keyresno);
+
+        /*
+         * Start/With support
+         *
+         * Skip pseudo target entry in SORT list
+         */
+        if (IsPseudoInternalTargetEntry(target)) {
+            result = lappend(result, pstrdup(target->resname));
+            continue;
+        }
+
         char* exprstr = NULL;
 
         if (target == NULL)

@@ -7,6 +7,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/namespace.h
  *
@@ -121,6 +122,7 @@ extern bool RelationIsVisible(Oid relid);
 extern Oid	TypenameGetTypid(const char *typname);
 extern Oid  TypenameGetTypidExtended(const char *typname, bool temp_ok);
 extern bool TypeIsVisible(Oid typid);
+extern Oid TryLookForSynonymType(const char* typname, const Oid namespaceId);
 
 extern void SetTempFromSearchPath(List* namelist);
 
@@ -129,9 +131,8 @@ extern FuncCandidateList FuncnameGetCandidates(List *names,
                       bool expand_variadic,
                       bool expand_defaults,
                       bool func_create,
-                      bool  include_out = false);
-					  
-extern PLpgSQL_datum* copy_plpgsql_datum(PLpgSQL_datum* datum);
+                      bool  include_out = false,
+                      char prokind = 'u');
 
 extern bool FunctionIsVisible(Oid funcid);
 

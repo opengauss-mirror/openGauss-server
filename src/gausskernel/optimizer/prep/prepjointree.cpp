@@ -17,6 +17,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -477,10 +478,6 @@ static Node* pull_up_sublinks_qual_recurse(PlannerInfo* root, Node* node, Node**
         JoinExpr* j = NULL;
         Relids child_rels;
 
-        /* For subquery will pulled up, we should substitute ctes */
-        if (IS_STREAM_PLAN)
-            substitute_ctes_with_subqueries(root, (Query*)sublink->subselect, root->is_under_recursive_tree);
-
         if (has_no_expand_hint((Query*)sublink->subselect)) {
             return node;
         }
@@ -568,10 +565,6 @@ static Node* pull_up_sublinks_qual_recurse(PlannerInfo* root, Node* node, Node**
         Relids child_rels;
 
         if (sublink && IsA(sublink, SubLink)) {
-            /* For subquery will pulled up, we should substitute ctes */
-            if (IS_STREAM_PLAN)
-                substitute_ctes_with_subqueries(root, (Query*)sublink->subselect, root->is_under_recursive_tree);
-
             if (sublink->subLinkType == EXISTS_SUBLINK) {
                 if ((j = convert_EXISTS_sublink_to_join(root, sublink, true, *available_rels1)) != NULL) {
                     /* Yes; insert the new join node into the join tree */
@@ -701,13 +694,6 @@ static Node* pull_up_sublinks_qual_recurse(PlannerInfo* root, Node* node, Node**
                             errcode(ERRCODE_DATATYPE_MISMATCH),
                                 errmsg("Node should be SubLink in pull_up_sublinks_qual_recurse")));
 
-
-                /* For subquery will pulled up, we should substitute ctes */
-                if (IS_STREAM_PLAN) {
-                    substitute_ctes_with_subqueries(root, (Query *) ((SubLink *) sublink)->subselect,
-                                                root->is_under_recursive_tree);
-                }
-
                 /*Return value is changed opexpr*/
                 node = convert_EXPR_sublink_to_join(root, jtlink1,
                                         node,
@@ -770,12 +756,6 @@ static Node* pull_up_sublinks_targetlist(PlannerInfo *root,
 
         /* Currently we only support expr sublink */
         if (sublink->subLinkType == EXPR_SUBLINK) {
-            /* For subquery will pulled up, we should substitute ctes */
-            if (IS_STREAM_PLAN) {
-                substitute_ctes_with_subqueries(root,
-                            (Query *) ((SubLink *) sublink)->subselect,
-                            root->is_under_recursive_tree);
-            }
 
             /*
             * Return value is changed opexpr. Since we only modify
@@ -797,69 +777,6 @@ static Node* pull_up_sublinks_targetlist(PlannerInfo *root,
     *newTargetList = node;
 
   return jtnode;
-}
-
-/*
- * substitute_ctes_with_subqueries
- *	Attempt to sustitute CTEs with subqueries.
- *
- * Parameters:
- *	@in root: plannerinfo struct for current query level
- *	@in parse: parse tree to substitute cte expression
- */
-void substitute_ctes_with_subqueries(PlannerInfo* root, Query* parse, bool under_recursive_tree)
-{
-    ListCell* rt = NULL;
-
-    foreach (rt, parse->rtable) {
-        RangeTblEntry* rte = (RangeTblEntry*)lfirst(rt);
-
-        if (rte->rtekind == RTE_CTE) {
-            Query* ctequery = NULL;
-            int levelsup = rte->ctelevelsup;
-            int i = (root->parse == parse) ? 0 : 1;
-            PlannerInfo* cte_root = root;
-
-            /* Find the query level that has the CTE */
-            while (i < levelsup) {
-                cte_root = cte_root->parent_root;
-                levelsup--;
-                if (cte_root == NULL) {
-                    ereport(ERROR,
-                        (errmodule(MOD_OPT),
-                            errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-                            errmsg("bad levelsup for CTE \"%s\"", rte->ctename)));
-                }
-            }
-
-            /*
-             * For pulled up subquery or cte, parse tree is not stored in query level info,
-             * so we should search parse tree directly if cte located in current level
-             */
-            if (root->parse != parse && levelsup == 0) {
-                ctequery = search_cte_by_parse_tree(parse, rte, under_recursive_tree);
-            } else {
-                ctequery = search_cte_by_parse_tree(cte_root->parse, rte, under_recursive_tree);
-                /* Recursively search cte if it has other referenced ctes */
-                if (ctequery != NULL) {
-                    substitute_ctes_with_subqueries(cte_root, ctequery, under_recursive_tree);
-                }
-            }
-
-            if (ctequery != NULL) {
-                /*
-                 * if correlated cte is referenced in different subquery level,
-                 * we should also adjust correlated params in cte parse tree
-                 */
-                if (rte->ctelevelsup != 0)
-                    IncrementVarSublevelsUp((Node*)ctequery, rte->ctelevelsup, 1);
-
-                /* Successful expansion, replace the rtable entry */
-                rte->rtekind = RTE_SUBQUERY;
-                rte->subquery = ctequery;
-            }
-        }
-    }
 }
 
 /*
@@ -1170,12 +1087,6 @@ static Node* pull_up_simple_subquery(PlannerInfo* root, Node* jtnode, RangeTblEn
      * that we don't need so many special cases to deal with that situation.
      */
     replace_empty_jointree(subquery);
-
-    /*
-     * Try to subsitute CTEs with subqueries.
-     */
-    if (IS_STREAM_PLAN)
-        substitute_ctes_with_subqueries(root, subquery, root->is_under_recursive_tree);
 
     /*
      * Pull up any SubLinks within the subquery's quals, so that we don't

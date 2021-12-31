@@ -483,6 +483,14 @@ Form_gs_opt_model CheckModelTargets(const char* templateName, const char* modelN
     bool isNULL = false;
     Form_gs_opt_model modelinfo = NULL;
     *nLabel = 0;
+    if (templateName == NULL) {
+        ereport(ERROR,
+            (errmodule(MOD_OPT_AI), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("templateName must not be NULL."),
+                errdetail("N/A"),
+                errcause("System error."),
+                erraction("Contact Huawei Engineer.")));
+    }
     /* check templateName, for only rlstm is supported */
     if (strcmp(templateName, RLSTM_TEMPLATE_NAME) != 0) {
         ereport(ERROR,

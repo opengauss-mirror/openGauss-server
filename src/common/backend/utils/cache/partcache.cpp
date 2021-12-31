@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -253,6 +254,7 @@ void SetupPageCompressForPartition(RelFileNode* node, PageCompressOpts* compress
             symbol = false;
             compressLevel = -compress_options->compressLevel;
         }
+
         bool success = false;
         uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
         if (!success) {
@@ -357,8 +359,14 @@ static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, 
      */
     if (partition->pd_part->parentid != InvalidOid) {
         PartitionInitPhysicalAddr(partition);
+        Oid partitionTableOid = InvalidOid;
+        if (partition->pd_part->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+            partitionTableOid = partid_get_parentid(partition->pd_part->parentid);
+        } else {
+            partitionTableOid = partition->pd_part->parentid;
+        }
         if (storage_type == INVALID_STORAGE) {
-            storage_type = PartitionGetStorageType(partition->pd_part->parentid);
+            storage_type = PartitionGetStorageType(partitionTableOid);
         }
     }
 
@@ -376,6 +384,9 @@ static Partition PartitionBuildDesc(Oid targetPartId, StorageType storage_type, 
 
     /* make sure the partrel is empty yet */
     partition->partrel = NULL;
+
+    /* Assign value in partitiongetrelation. */
+    partition->partMap = NULL;
 
     /*
      * now we can free the memory allocated for pg_class_tuple
@@ -626,6 +637,10 @@ static void PartitionDestroyPartition(Partition partition)
         }
         releaseDummyRelation(&partition->partrel);
     }
+    if (partition->partMap != NULL) {
+        RelationDestroyPartitionMap(partition->partMap);
+        partition->partMap = NULL;
+    }
     pfree_ext(partition);
 }
 
@@ -762,6 +777,13 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
             ereport(LOG, (errmsg("partition %u storage type changing from [%d] to [%d]", save_partid, tempNode,
                 partition->pd_node.bucketNode)));
         }
+        if (PartitionHasSubpartition(newpart) && newpart->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
+            Oid parentOid = partid_get_parentid(newpart->pd_id);
+            Relation rel = relation_open(parentOid, NoLock);
+            Relation partRel = partitionGetRelation(rel, newpart);
+            releaseDummyRelation(&partRel);
+            relation_close(rel, NoLock);
+        }
         /*
          * Perform swapping of the partcache entry contents.  Within this
          * process the old entry is momentarily invalid, so there *must* be no
@@ -803,6 +825,11 @@ static void PartitionClearPartition(Partition partition, bool rebuild)
         if (newpart->newcbi) {
             SWAPFIELD(bool, newcbi);
             partition->pd_node.bucketNode = newpart->pd_node.bucketNode;
+        }
+
+        if (newpart->partMap) {
+            RebuildPartitonMap(newpart->partMap, partition->partMap);
+            SWAPFIELD(PartitionMap*, partMap);
         }
 
 #undef SWAPFIELD
@@ -1310,7 +1337,10 @@ Relation partitionGetRelation(Relation rel, Partition part)
     securec_check(rc, "\0", "\0");
     relation->rd_rel->reltoastrelid = part->pd_part->reltoastrelid;
     relation->rd_rel->reltablespace = part->pd_part->reltablespace;
-    relation->rd_rel->parttype = PARTTYPE_NON_PARTITIONED_RELATION;
+    if (PartitionHasSubpartition(part))
+        relation->rd_rel->parttype = PARTTYPE_PARTITIONED_RELATION;
+    else
+        relation->rd_rel->parttype = PARTTYPE_NON_PARTITIONED_RELATION;
     relation->rd_rel->relfilenode = part->pd_part->relfilenode;
     relation->rd_rel->relpages = part->pd_part->relpages;
     relation->rd_rel->reltuples = part->pd_part->reltuples;
@@ -1336,7 +1366,7 @@ Relation partitionGetRelation(Relation rel, Partition part)
         relation->rd_indexcxt = NULL;
     } else {
         Assert(rel->rd_indexcxt != NULL);
-        relation->rd_indexcxt = AllocSetContextCreate(rel->rd_indexcxt,
+        relation->rd_indexcxt = AllocSetContextCreate(u_sess->cache_mem_cxt,
             PartitionGetPartitionName(part),
             ALLOCSET_SMALL_MINSIZE,
             ALLOCSET_SMALL_INITSIZE,
@@ -1364,8 +1394,14 @@ Relation partitionGetRelation(Relation rel, Partition part)
     relation->rd_lockInfo = part->pd_lockInfo;
     relation->rd_toastoid = part->pd_toastoid;
     relation->partMap = NULL;
+    relation->subpartitiontype = part->pd_part->parttype;
     relation->pgstat_info = part->pd_pgstat_info;
     relation->parentId = rel->rd_id;
+    if (part->pd_part->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+        relation->grandparentId = rel->parentId;
+    } else {
+        relation->grandparentId = InvalidOid;
+    }
     relation->rd_smgr = part->pd_smgr;
     relation->rd_isblockchain = rel->rd_isblockchain;
     relation->storage_type = rel->storage_type;
@@ -1391,6 +1427,14 @@ Relation partitionGetRelation(Relation rel, Partition part)
         securec_check(ret, "\0", "\0");
     }
 
+    if (PartitionHasSubpartition(part) && part->pd_part->parttype == PART_OBJ_TYPE_TABLE_PARTITION) {
+        if (part->partMap != NULL) {
+            relation->partMap = part->partMap;
+        } else {
+            RelationInitPartitionMap(relation, true);
+            part->partMap = relation->partMap;
+        }
+    }
     (void)MemoryContextSwitchTo(oldcxt);
 
     return relation;
@@ -1433,6 +1477,7 @@ void releaseDummyRelation(Relation* relation)
     if (NULL != (*relation)->rd_options) {
         pfree_ext((*relation)->rd_options);
     }
+
     pfree_ext(*relation);
     *relation = NULL;
 }
@@ -1515,7 +1560,7 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     errno_t rc;
     bool isbucket;
 
-    Assert((parent->rd_rel->relkind == RELKIND_INDEX || parent->rd_rel->relkind == RELKIND_SEQUENCE)
+    Assert((parent->rd_rel->relkind == RELKIND_INDEX || RELKIND_IS_SEQUENCE(parent->rd_rel->relkind))
                ? freezeXid == InvalidTransactionId
                : TransactionIdIsNormal(freezeXid));
 
@@ -1592,7 +1637,7 @@ void PartitionSetNewRelfilenode(Relation parent, Partition part, TransactionId f
     Assert(!((part)->pd_part->relfilenode == InvalidOid));
     partform->relfilenode = newrelfilenode;
 
-    Assert(parent->rd_rel->relkind != RELKIND_SEQUENCE);
+    Assert(!RELKIND_IS_SEQUENCE(parent->rd_rel->relkind));
     partform->relpages = 0; /* it's empty until further notice */
     partform->reltuples = 0;
     partform->relallvisible = 0;
@@ -1680,12 +1725,12 @@ static void PartitionParseRelOptions(Partition partition, HeapTuple tuple)
     return;
 }
 
-/* Check one partition whether it is normal use, and save in Bitmapset liveParts */
-static bool PartitionStatusIsLive(Oid partOid, Bitmapset** liveParts)
+/* Check one partition whether it is normal use, and save in liveParts */
+static bool PartitionStatusIsLive(Oid partOid, OidRBTree** liveParts)
 {
     HeapTuple partTuple = NULL;
 
-    if (bms_is_member(partOid, *liveParts)) {
+    if (OidRBTreeMemberOid(*liveParts, partOid)) {
         return true;
     }
 
@@ -1693,7 +1738,7 @@ static bool PartitionStatusIsLive(Oid partOid, Bitmapset** liveParts)
     partTuple = SearchSysCache1WithLogLevel(PARTRELID, ObjectIdGetDatum(partOid), LOG);
     if (HeapTupleIsValid(partTuple)) {
         ReleaseSysCache(partTuple);
-        *liveParts = bms_add_member(*liveParts, partOid);
+        (void)OidRBTreeInsertOid(*liveParts, partOid);
         return true;
     }
 
@@ -2045,7 +2090,7 @@ void PartitionedSetEnabledClean(Oid parentOid)
  * and cannot be executed in parallel with PartitionSetWaitCleanGpi, if updatePartitioned
  */
 void PartitionSetEnabledClean(
-    Oid parentOid, const Bitmapset* cleanedParts, const Bitmapset* invisibleParts, bool updatePartitioned)
+    Oid parentOid, OidRBTree* cleanedParts, OidRBTree* invisibleParts, bool updatePartitioned)
 {
     if (IS_PGXC_COORDINATOR) {
         return;
@@ -2056,7 +2101,7 @@ void PartitionSetEnabledClean(
     ScanKeyData key[2];
     HeapTuple tuple = NULL;
     Oid partOid;
-    Bitmapset* liveParts = NULL;
+    OidRBTree* liveParts = CreateOidRBTree();
     bool needSetOpts = false;
     bool needSetPartitioned = updatePartitioned;
 
@@ -2073,9 +2118,9 @@ void PartitionSetEnabledClean(
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         needSetOpts = false;
         partOid = HeapTupleGetOid(tuple);
-        if (bms_is_member(partOid, cleanedParts)) {
+        if (OidRBTreeMemberOid(cleanedParts, partOid)) {
             needSetOpts = true;
-        } else if (bms_is_member(partOid, invisibleParts)) {
+        } else if (OidRBTreeMemberOid(invisibleParts, partOid)) {
             needSetOpts = true;
         } else if (PartitionStatusIsLive(partOid, &liveParts)) {
             needSetOpts = true;
@@ -2091,7 +2136,7 @@ void PartitionSetEnabledClean(
     }
     systable_endscan(scan);
     heap_close(pgPartition, NoLock);
-    bms_free(liveParts);
+    DestroyOidRBTree(&liveParts);
 
     if (needSetPartitioned) {
         PartitionedSetEnabledClean(parentOid);
@@ -2118,6 +2163,19 @@ void PartitionSetAllEnabledClean(Oid parentOid)
 
     scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 1, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
+        Form_pg_partition partitionForm = (Form_pg_partition)GETSTRUCT(tuple);
+        if (partitionForm->relfilenode == InvalidOid) {
+            SysScanDesc subscan = NULL;
+            ScanKeyData subkey[1];
+            HeapTuple subtuple = NULL;
+            ScanKeyInit(&subkey[0], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(HeapTupleGetOid(tuple)));
+            subscan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 1, subkey);
+            while (HeapTupleIsValid(subtuple = systable_getnext(subscan))) {
+                UpdateWaitCleanGpiRelOptions(pgPartition, subtuple, false, true);
+            }
+            systable_endscan(subscan);
+        }
         UpdateWaitCleanGpiRelOptions(pgPartition, tuple, false, true);
     }
     systable_endscan(scan);
@@ -2134,13 +2192,13 @@ void PartitionSetAllEnabledClean(Oid parentOid)
  * and AccessShareLock for ADD_PARTITION_ACTION (to prevent parallelism with the
  * process of automatically creating partitions in any interval partition)
  */
-void PartitionGetAllInvisibleParts(Oid parentOid, Bitmapset** invisibleParts)
+void PartitionGetAllInvisibleParts(Oid parentOid, OidRBTree** invisibleParts)
 {
     Relation pgPartition = NULL;
     SysScanDesc scan = NULL;
     ScanKeyData key[2];
     HeapTuple tuple = NULL;
-    Bitmapset* liveParts = NULL;
+    OidRBTree* liveParts = CreateOidRBTree();
     Oid partOid;
 
     pgPartition = heap_open(PartitionRelationId, AccessShareLock);
@@ -2154,17 +2212,36 @@ void PartitionGetAllInvisibleParts(Oid parentOid, Bitmapset** invisibleParts)
     scan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 2, key);
     while (HeapTupleIsValid(tuple = systable_getnext(scan))) {
         partOid = HeapTupleGetOid(tuple);
-        if (bms_is_member(partOid, *invisibleParts)) {
+        if (OidRBTreeMemberOid(*invisibleParts, partOid)) {
             continue;
         } else if (PartitionStatusIsLive(partOid, &liveParts)) {
             continue;
         } else {
-            *invisibleParts = bms_add_member(*invisibleParts, partOid);
+            (void)OidRBTreeInsertOid(*invisibleParts, partOid);
+        }
+
+        Form_pg_partition partitionForm = (Form_pg_partition)GETSTRUCT(tuple);
+        if (partitionForm->relfilenode == InvalidOid) {
+            SysScanDesc subscan = NULL;
+            ScanKeyData subkey[2];
+            HeapTuple subtuple = NULL;
+            ScanKeyInit(&subkey[0], Anum_pg_partition_parttype, BTEqualStrategyNumber, F_CHAREQ,
+                CharGetDatum(PART_OBJ_TYPE_TABLE_SUB_PARTITION));
+            ScanKeyInit(&subkey[1], Anum_pg_partition_parentid, BTEqualStrategyNumber, F_OIDEQ,
+                ObjectIdGetDatum(partOid));
+            subscan = systable_beginscan(pgPartition, InvalidOid, false, SnapshotAny, 2, subkey);
+            while (HeapTupleIsValid(subtuple = systable_getnext(subscan))) {
+                Oid subpartOid = HeapTupleGetOid(subtuple);
+                if (!OidRBTreeMemberOid(*invisibleParts, subpartOid) && PartitionStatusIsLive(subpartOid, &liveParts)) {
+                    (void)OidRBTreeInsertOid(*invisibleParts, subpartOid);
+                }
+            }
+            systable_endscan(subscan);
         }
     }
     systable_endscan(scan);
     heap_close(pgPartition, NoLock);
-    bms_free(liveParts);
+    DestroyOidRBTree(&liveParts);
 }
 
 /*

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -441,8 +442,10 @@ char* CheckReferencedObject(Oid relOid, RangeVar* objVar, const char* synName)
                 &detail, _("Maybe you want to use synonym to reference a type object, but it is not yet supported."));
             break;
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
             appendStringInfo(&detail,
-                _("Maybe you want to use synonym to reference a sequence object, but it is not yet supported."));
+                _("Maybe you want to use synonym to reference a (large) sequence object, "
+                  "but it is not yet supported."));
             break;
         default:
             appendStringInfo(&detail,

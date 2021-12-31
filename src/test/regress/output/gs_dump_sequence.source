@@ -1,0 +1,28 @@
+drop database if exists dump_sequence_db;
+NOTICE:  database "dump_sequence_db" does not exist, skipping
+create database dump_sequence_db;
+\c dump_sequence_db
+drop schema if exists dumptest cascade;
+NOTICE:  schema "dumptest" does not exist, skipping
+create schema dumptest;
+create role seq_user1 password 'Gauss_234';
+create sequence s1;
+create large sequence s2;
+create table tab_seq(c1 serial, c2 largeserial);
+NOTICE:  CREATE TABLE will create implicit sequence "tab_seq_c1_seq" for serial column "tab_seq.c1"
+NOTICE:  CREATE TABLE will create implicit sequence "tab_seq_c2_seq" for serial column "tab_seq.c2"
+comment on sequence s1 is 'this is a normal sequence';
+comment on large sequence s2 is 'this is a large sequence';
+grant select on s1 to seq_user1;
+grant select on s2 to seq_user1;
+\! @abs_bindir@/gs_dump dump_sequence_db -p @portstring@ -f @abs_bindir@/dump_sequence.tar -F t >/dev/null 2>&1; echo $?
+0
+drop database if exists restore_sequence_db;
+NOTICE:  database "restore_sequence_db" does not exist, skipping
+create database restore_sequence_db;
+\! @abs_bindir@/gs_restore -d restore_sequence_db -p @portstring@ @abs_bindir@/dump_sequence.tar >/dev/null 2>&1; echo $?
+0
+\c regression
+drop database if exists restore_sequence_db;
+drop database if exists dump_sequence_db;
+drop role seq_user1;

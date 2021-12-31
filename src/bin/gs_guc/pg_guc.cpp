@@ -228,6 +228,8 @@ typedef struct {
 } nodeInfo;
 /* storage the name which perform remote connection failed */
 nodeInfo* g_incorrect_nodeInfo = NULL;
+/* storage the name which need to ignore */
+nodeInfo* g_ignore_nodeInfo = NULL;
 
 typedef struct {
     char** nodename_array;
@@ -1313,12 +1315,17 @@ do_gucset(const char *action_type, const char *data_dir)
                 to_generatenewline(optconf_line, newconf_line, config_param[i], config_value[i], optvalue_len);
             } else {
                 /*
-                 * if parameter value is NULL; not consider it as UNSET,
-                 * which means maintain the configuration parameter, and
-                 * there will be prompts telling the user to assign a value.
+                 * if parameter as value is NULL; consider it as UNSET (i.e to default value)
+                 *  which means comment the configuration parameter
                  */
-                write_stderr(_("ERROR: %s parameters value is expected\n"), config_param[i]);
-                return FAILURE;
+                //line is commented
+                if (isOptLineCommented(optconf_line)) {
+                    rc = strncpy_s(newconf_line, MAX_PARAM_LEN*2, optconf_line, (size_t)Min(line_len, MAX_PARAM_LEN*2 - 1));
+                    securec_check_c(rc, "\0", "\0");
+                } else {
+                    nRet = snprintf_s(newconf_line, MAX_PARAM_LEN*2, MAX_PARAM_LEN*2 - 1, "#%s", optconf_line);
+                    securec_check_ss_c(nRet, "\0", "\0");
+                }
             }
             updateoradd = UPDATE_PARAMETER;
         } else {
@@ -1554,19 +1561,23 @@ static void do_help_config_guc(void)
 #ifdef ENABLE_MULTIPLE_NODES
     (void)printf(_("    NODE-TYPE is coordinator, datanode or gtm:\n"));
     (void)printf(_("        %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                   "[--lcname=LCNAME] {-c \"parameter = value\" -c \"parameter = value\" ...}\n"),
+                   "[--lcname=LCNAME] [--ignore-node=NODES] "
+                   "{-c \"parameter = value\" -c \"parameter = value\" ...}\n"),
         progname);
     (void)printf(_("        %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                   "[--lcname=LCNAME] {-c \" parameter = value \" -c \" parameter = value \" ...}\n"),
+                   "[--lcname=LCNAME] [--ignore-node=NODES] "
+                   "{-c \" parameter = value \" -c \" parameter = value \" ...}\n"),
         progname);
     (void)printf(_("        %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                   "[--lcname=LCNAME] {-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"),
+                   "[--lcname=LCNAME] [--ignore-node=NODES] "
+                   "{-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"),
         progname);
     (void)printf(_("        %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                   "[--lcname=LCNAME] {-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"),
+                   "[--lcname=LCNAME] [--ignore-node=NODES] "
+                   "{-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"),
         progname);
     (void)printf(_("        %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                   "[--lcname=LCNAME] {-c \"parameter\" -c \"parameter\" ...}\n"),
+                   "[--lcname=LCNAME] [--ignore-node=NODES] {-c \"parameter\" -c \"parameter\" ...}\n"),
         progname);
     (void)printf(_("    NODE-TYPE is cmserver or cmagent:\n"));
     (void)printf(_("        %s {set | reload} -Z NODE-TYPE [-N all -I all] "
@@ -1597,15 +1608,19 @@ static void do_help_config_guc(void)
     (void)printf(_("    e.g. %s set -Z cmagent -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
 #else
     (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                        "[--lcname=LCNAME] {-c \"parameter = value\" -c \"parameter = value\" ...}\n"), progname);
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \"parameter = value\" -c \"parameter = value\" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                        "[--lcname=LCNAME] {-c \" parameter = value \" -c \" parameter = value \" ...}\n"), progname);
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \" parameter = value \" -c \" parameter = value \" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                "[--lcname=LCNAME] {-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"), progname);
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \"parameter = \'value\'\" -c \"parameter = \'value\'\" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                "[--lcname=LCNAME] {-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"), progname);
+                "[--lcname=LCNAME] [--ignore-node=NODES] "
+                "{-c \" parameter = \'value\' \" -c \" parameter = \'value\' \" ...}\n"), progname);
     (void)printf(_("        %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
-                "[--lcname=LCNAME] {-c \"parameter\" -c \"parameter\" ...}\n"), progname);
+                "[--lcname=LCNAME] [--ignore-node=NODES] {-c \"parameter\" -c \"parameter\" ...}\n"), progname);
     (void)printf(
      _("    e.g. %s set -Z datanode -N all -I all -c \"program = \'\\\"Hello\\\", World\\!\'\".\n"), progname);
     (void)printf(
@@ -1629,48 +1644,54 @@ static void do_help_config_hba(void)
     (void)printf(_("\nConfiguring Authentication Policy:\n"));
     
 #ifdef ENABLE_MULTIPLE_NODES
-    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                   "DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options\" \n"),
+    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                   "[--ignore-node=NODES] "
+                   "-h \"HOSTTYPE DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                   "DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options\" \n"),
+    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                   "[--ignore-node=NODES] "
+                   "-h \"HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                   "DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options\" \n"),
+    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                   "[--ignore-node=NODES] "
+                   "-h \"HOSTTYPE DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options\" \n"),
         progname);
 
     (void)printf(_("  If authentication policy need to set/reload DEFAULT OR COMMENT then provide without "
                    "authentication menthod, use the form: \n"));
-    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                   "DATABASE USERNAME IPADDR IPMASK\" \n"),
+    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                   "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME IPADDR IPMASK\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                   "DATABASE USERNAME IPADDR-WITH-IPMASK \" \n"),
+    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                   "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK \" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                   "DATABASE USERNAME HOSTNAME\" \n"),
+    (void)printf(_("    %s {set | reload} -Z NODE-TYPE [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                   "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME HOSTNAME\" \n"),
         progname);
 #else
-    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                "DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options\" \n"),
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                "[--ignore-node=NODES] "
+                "-h \"HOSTTYPE DATABASE USERNAME IPADDR IPMASK AUTHMEHOD authentication-options\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                "DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options\" \n"),
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                "[--ignore-node=NODES] "
+                "-h \"HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK AUTHMEHOD authentication-options\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                "DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options\" \n"),
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                "[--ignore-node=NODES] "
+                "-h \"HOSTTYPE DATABASE USERNAME HOSTNAME AUTHMEHOD authentication-options\" \n"),
         progname);
 
     (void)printf(_("  If authentication policy need to set/reload DEFAULT OR COMMENT then provide without "
                 "authentication menthod, use the form: \n"));
-    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                "DATABASE USERNAME IPADDR IPMASK\" \n"),
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME IPADDR IPMASK\" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                "DATABASE USERNAME IPADDR-WITH-IPMASK \" \n"),
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME IPADDR-WITH-IPMASK \" \n"),
         progname);
-    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} -h \"HOSTTYPE "
-                "DATABASE USERNAME HOSTNAME\" \n"),
+    (void)printf(_("    %s {set | reload} [-Z NODE-TYPE] [-N NODE-NAME] {-I INSTANCE-NAME | -D DATADIR} "
+                "[--ignore-node=NODES] -h \"HOSTTYPE DATABASE USERNAME HOSTNAME\" \n"),
         progname);
 #endif
 
@@ -1701,6 +1722,8 @@ static void do_help_common_options(void)
     (void)printf(_("  -c    parameter=value   the parameter to set\n"));
     (void)printf(_("  -c    parameter         the parameter value to DEFAULT (i.e comments in configuration file)\n"));
     (void)printf(_("  --lcname=LCNAME         logical cluter name. It only can be used with datanode\n"));
+    (void)printf(_("  --ignore-node=NODES     Nodes which need to ignore. "
+                   "It only can be used with set/reload operation,and CN/DN nodetype\n"));
     (void)printf(_("  -h    host-auth-policy  to set authentication policy in HBA conf file\n"));
     (void)printf(_("  -?, --help              show this help, then exit\n"));
     (void)printf(_("  -V, --version           output version information, then exit\n"));
@@ -2299,6 +2322,68 @@ void clear_g_incorrect_nodeInfo()
     GS_FREE(g_incorrect_nodeInfo);
 }
 
+static void clear_g_ignore_nodeInfo()
+{
+    uint32 idx = 0;
+    if (g_ignore_nodeInfo == NULL) {
+        return;
+    }
+    for (idx = 0; idx < g_ignore_nodeInfo->num; idx++) {
+        GS_FREE(g_ignore_nodeInfo->nodename_array[idx]);
+    }
+    GS_FREE(g_ignore_nodeInfo->nodename_array);
+    GS_FREE(g_ignore_nodeInfo);
+}
+
+static int countIgnoreNodeElems(const char *input)
+{
+    int cnt = 1;
+
+    for (; *input != '\0'; input++) {
+        if (*input == ',') {
+            cnt++;
+        }
+    }
+    return cnt;
+}
+
+static void saveIgnoreNodeElems(const char *input)
+{
+    errno_t rc = 0;
+    int cnt = 0;
+    int strLen = 0;
+    char* node = NULL;
+    char* tmpStr = NULL;
+    char* saveStr = NULL;
+    const char* split = ",";
+
+    if ((input == NULL) || (input[0] == '\0')) {
+        write_stderr(_("%s: invalid ignore nodes,please check it\n"), progname);
+        exit(1);
+    }
+
+    strLen = strlen(input);
+    tmpStr = (char*)pg_malloc_zero(strLen + 1);
+    rc = memcpy_s(tmpStr, strLen, input, strLen);
+    securec_check_c(rc, "\0", "\0");
+
+    cnt = countIgnoreNodeElems(tmpStr);
+    g_ignore_nodeInfo = (nodeInfo*)pg_malloc(sizeof(nodeInfo));
+    g_ignore_nodeInfo->nodename_array = (char**)pg_malloc_zero(cnt * sizeof(char*));
+    g_ignore_nodeInfo->num = 0;
+
+    node = strtok_r(tmpStr, split, &saveStr);
+    g_ignore_nodeInfo->nodename_array[g_ignore_nodeInfo->num++] = xstrdup(node);
+    while (node != NULL) {
+        node = strtok_r(NULL, split, &saveStr);
+        if (node == NULL) {
+            break;
+        }
+        g_ignore_nodeInfo->nodename_array[g_ignore_nodeInfo->num++] = xstrdup(node);
+    }
+    free(tmpStr);
+}
+
 static void process_encrypt_cmd(const char* pgdata_D, const char* pgdata_C, const char* pgdata_R)
 {
     errno_t rc = 0;
@@ -2370,6 +2455,7 @@ int main(int argc, char** argv)
         {"keyuser", required_argument, NULL, 'U'},
         {"keymode", required_argument, NULL, 'M'},
         {"lcname", required_argument, NULL, 1},
+        {"ignore-node", required_argument, NULL, 2},
         {NULL, 0, NULL, 0}};
 
     int option_index;
@@ -2588,6 +2674,11 @@ int main(int argc, char** argv)
                     g_lcname = xstrdup(optarg);
                     break;
 
+                case 2: /* 2 is ignore-node */
+                    clear_g_ignore_nodeInfo();
+                    saveIgnoreNodeElems(optarg);
+                    break;
+
                 default:
                     do_advice();
                     exit(1);
@@ -2624,6 +2715,29 @@ int main(int argc, char** argv)
     if (ctl_command != ENCRYPT_KEY_COMMAND && ctl_command != GENERATE_KEY_COMMAND && !bhave_nodetype) {
         write_stderr(_("%s: the type of node is not specified\n"), progname);
         do_advice();
+        exit(1);
+    }
+
+    if ((g_ignore_nodeInfo != NULL) &&
+        (ctl_command != SET_CONF_COMMAND) &&
+        (ctl_command != RELOAD_CONF_COMMAND)) {
+        write_stderr(_("%s: --ignore-node must be used with set/reload operation\n"), progname);
+        clear_g_ignore_nodeInfo();
+        exit(1);
+    }
+
+    if ((g_ignore_nodeInfo != NULL) &&
+        (nodetype != INSTANCE_DATANODE) &&
+        (nodetype != INSTANCE_COORDINATOR)) {
+        write_stderr(_("%s: --ignore-node must be used with DN/CN\n"), progname);
+        clear_g_ignore_nodeInfo();
+        exit(1);
+    }
+
+    if ((g_ignore_nodeInfo != NULL) &&
+        (pgdata_D != NULL)) {
+        write_stderr(_("%s:  -D and -ignore-node cannot be used together\n"), progname);
+        clear_g_ignore_nodeInfo();
         exit(1);
     }
 
@@ -2735,6 +2849,7 @@ int main(int argc, char** argv)
     nRet = print_guc_result((const char*)nodename);
     GS_FREE(nodename);
     clear_g_incorrect_nodeInfo();
+    clear_g_ignore_nodeInfo();
     if (is_hba_conf) {
         free_hba_params();
     }

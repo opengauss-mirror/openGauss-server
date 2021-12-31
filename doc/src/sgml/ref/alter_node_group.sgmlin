@@ -10,10 +10,8 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-ALTER NODE GROUP groupname [ option ]
-
-where option can be:
-SET DEFAULT
+ALTER NODE GROUP groupname
+    | SET DEFAULT
     | RENAME TO new_group_name
     | SET VCGROUP RENAME TO new_group_name
     | SET NOT VCGROUP

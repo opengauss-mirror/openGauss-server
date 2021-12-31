@@ -1609,49 +1609,7 @@ BlockNumber seg_nblocks(SMgrRelation reln, ForkNumber forknum)
 
 void seg_truncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
 {
-    LOG_SMGR_API(reln->smgr_rnode, forknum, InvalidBlockNumber, "seg_truncate");
-
-    bool seg_exist = open_segment(reln, forknum, false);
-    if (!seg_exist) {
-        return;
-    }
-
-    BlockNumber curr_nblock = seg_nblocks(reln, forknum);
-
-    if (nblocks > curr_nblock) {
-        if (t_thrd.xlog_cxt.InRecovery) {
-            return;
-        }
-        ereport(ERROR, (errcode_for_file_access(),
-                        errmsg("could not truncate segment \"%s\" to %u blocks: it's only %u blocks now",
-                               relpath(reln->smgr_rnode, forknum), nblocks, curr_nblock)));
-    }
-
-    if (nblocks == curr_nblock) {
-        return;
-    }
-
-    // XXX: We should release extent instead of just reducing nblocks
-    Buffer seg_buffer = read_head_buffer(reln, forknum, true);
-    SegmentCheck(BufferIsValid(seg_buffer));
-    SegmentHead *seg_head = (SegmentHead *)PageGetContents(BufferGetBlock(seg_buffer));
-
-    LockBuffer(seg_buffer, BUFFER_LOCK_EXCLUSIVE);
-
-    START_CRIT_SECTION();
-    SegMarkBufferDirty(seg_buffer);
-    seg_head->nblocks = nblocks;
-
-    // XLog issue
-    {
-        XLogBeginInsert();
-        XLogRegisterBuffer(0, seg_buffer, REGBUF_KEEP_DATA);
-        XLogRegisterBufData(0, (char *)&nblocks, sizeof(BlockNumber));
-        XLogRecPtr recptr = XLogInsert(RM_SEGPAGE_ID, XLOG_SEG_TRUNCATE, false, SegmentBktId);
-        PageSetLSN(BufferGetPage(seg_buffer), recptr);
-    }
-    END_CRIT_SECTION();
-    SegUnlockReleaseBuffer(seg_buffer);
+    SegmentCheck(0);
 }
 
 void seg_move_buckets(const RelFileNodeBackend &dest, const RelFileNodeBackend &src, List *bucketList)

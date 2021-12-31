@@ -27,10 +27,11 @@
 #include "c.h"
 
 class RawValue;
+class StatementData;
 
 class RawValuesList {
 public:
-    RawValuesList();
+    RawValuesList(const bool should_free_values = true);
     ~RawValuesList();
     bool add(RawValue *raw_value);
     RawValue *at(size_t pos) const;
@@ -41,12 +42,15 @@ public:
     bool erase(size_t pos, bool is_delete_object);
     void sort_by_location();
     void clear();
+    void merge_from(const RawValuesList* other);
     RawValue **m_raw_values;
+    bool gen_values_from_statement(const StatementData *statement_data);
 
 private:
     void quicksort_by_location(int lo, int high);
     int partition_by_location(int lo, int high);
     size_t m_raw_values_size;
+     bool m_should_free_values;
 };
 
 #endif

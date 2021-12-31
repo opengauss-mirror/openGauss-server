@@ -737,12 +737,6 @@ static void prepare_cmpr_buffer(RewriteState state, Size meta_size, const char *
 
     PageReinitWithDict(page, meta_size);
     Assert(PageIsCompressed(page) && (meta_data != NULL));
-    const char* algo = RelationGetAlgo(state->rs_new_rel);
-    if (RelationisEncryptEnable(state->rs_new_rel) || (algo && *algo != '\0')) {
-        phdr->pd_upper -= sizeof(TdePageInfo);
-        phdr->pd_special -= sizeof(TdePageInfo);
-        PageSetTDE(page);
-    }
 
     rc = memcpy_s((char *)getPageDict(page), meta_size, meta_data, meta_size);
     securec_check(rc, "", "");

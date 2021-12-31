@@ -52,6 +52,7 @@ typedef struct OprCacheKey {
     Oid left_arg;  /* Left input OID, or 0 if prefix op */
     Oid right_arg; /* Right input OID, or 0 if postfix op */
     Oid search_path[MAX_CACHED_PATH_LEN];
+    bool use_a_style_coercion;
 } OprCacheKey;
 
 typedef struct OprCacheEntry {
@@ -61,12 +62,13 @@ typedef struct OprCacheEntry {
     Oid opr_oid; /* OID of the resolved operator */
 } OprCacheEntry;
 
-static Oid binary_oper_exact(List* opname, Oid arg1, Oid arg2);
+static Oid binary_oper_exact(List* opname, Oid arg1, Oid arg2, bool use_a_style_coercion);
 static FuncDetailCode oper_select_candidate(int nargs, Oid* input_typeids, FuncCandidateList candidates, Oid* operOid);
 static const char* op_signature_string(List* op, char oprkind, Oid arg1, Oid arg2);
 static void op_error(
     ParseState* pstate, List* op, char oprkind, Oid arg1, Oid arg2, FuncDetailCode fdresult, int location);
-static bool make_oper_cache_key(OprCacheKey* key, List* opname, Oid ltypeId, Oid rtypeId);
+static bool make_oper_cache_key(
+    OprCacheKey* key, List* opname, Oid ltypeId, Oid rtypeId, bool use_a_style_coercion = false);
 static Oid find_oper_cache_entry(OprCacheKey* key);
 static void make_oper_cache_entry(OprCacheKey* key, Oid opr_oid);
 
@@ -253,19 +255,28 @@ static HeapTuple find_mapping_in_cache(OprCacheKey key, bool key_ok)
  * the same type as the other operand for this purpose.  Also, consider
  * the possibility that the other operand is a domain type that needs to
  * be reduced to its base type to find an "exact" match.
+ *
+ * If A-style coercion is active, other = unkonw will be treated as
+ * text = text rather than other = other for other cases.
  */
-static Oid binary_oper_exact(List* opname, Oid arg1, Oid arg2)
+static Oid binary_oper_exact(List* opname, Oid arg1, Oid arg2, bool use_a_style_coercion)
 {
     Oid result;
     bool was_unknown = false;
+    bool other_was_num = false;
 
     /* Unspecified type for one of the arguments? then use the other */
     if ((arg1 == UNKNOWNOID) && (arg2 != InvalidOid)) {
         arg1 = arg2;
         was_unknown = true;
+        other_was_num = get_typecategory(arg2) == TYPCATEGORY_NUMERIC;
     } else if ((arg2 == UNKNOWNOID) && (arg1 != InvalidOid)) {
         arg2 = arg1;
         was_unknown = true;
+        other_was_num = get_typecategory(arg1) == TYPCATEGORY_NUMERIC;
+    }
+    if (use_a_style_coercion && was_unknown && other_was_num) {
+        return OpernameGetOprid(opname, TEXTOID, TEXTOID);
     }
 
     result = OpernameGetOprid(opname, arg1, arg2);
@@ -369,6 +380,7 @@ Operator oper(ParseState* pstate, List* opname, Oid ltypeId, Oid rtypeId, bool n
     bool key_ok = false;
     FuncDetailCode fdresult = FUNCDETAIL_NOTFOUND;
     HeapTuple tup;
+    bool use_a_style_coercion = false;
 
     if (inNumeric && u_sess->attr.attr_sql.convert_string_to_digit &&
         ((IsIntType(ltypeId) && IsCharType(rtypeId)) || (IsIntType(rtypeId) && IsCharType(ltypeId)))) {
@@ -379,7 +391,11 @@ Operator oper(ParseState* pstate, List* opname, Oid ltypeId, Oid rtypeId, bool n
     /*
      * Try to find the mapping in the lookaside cache.
      */
-    key_ok = make_oper_cache_key(&key, opname, ltypeId, rtypeId);
+    if (pstate != NULL) {
+        use_a_style_coercion = pstate->p_is_case_when && ENABLE_SQL_BETA_FEATURE(A_STYLE_COERCE);
+    }
+        
+    key_ok = make_oper_cache_key(&key, opname, ltypeId, rtypeId, use_a_style_coercion);
     tup = find_mapping_in_cache(key, key_ok);
     if (HeapTupleIsValid(tup))
         return (Operator)tup;
@@ -387,7 +403,7 @@ Operator oper(ParseState* pstate, List* opname, Oid ltypeId, Oid rtypeId, bool n
     /*
      * First try for an "exact" match.
      */
-    operOid = binary_oper_exact(opname, ltypeId, rtypeId);
+    operOid = binary_oper_exact(opname, ltypeId, rtypeId, use_a_style_coercion);
     if (!OidIsValid(operOid)) {
         /*
          * Otherwise, search for the most suitable candidate.
@@ -891,7 +907,7 @@ Expr* make_scalar_array_op(ParseState* pstate, List* opname, bool useOr, Node* l
  * Returns TRUE if successful, FALSE if the search_path overflowed
  * (hence no caching is possible).
  */
-static bool make_oper_cache_key(OprCacheKey* key, List* opname, Oid ltypeId, Oid rtypeId)
+static bool make_oper_cache_key(OprCacheKey* key, List* opname, Oid ltypeId, Oid rtypeId, bool use_a_style_coercion)
 {
     char* schemaname = NULL;
     char* opername = NULL;
@@ -908,6 +924,7 @@ static bool make_oper_cache_key(OprCacheKey* key, List* opname, Oid ltypeId, Oid
     strlcpy(key->oprname, opername, NAMEDATALEN);
     key->left_arg = ltypeId;
     key->right_arg = rtypeId;
+    key->use_a_style_coercion = use_a_style_coercion;
 
     if (schemaname != NULL) {
         /* search only in exact schema given */

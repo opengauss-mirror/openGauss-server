@@ -1,0 +1,50 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+
+-- testcase 1 constant
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_test2.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS (ID constant \"0\", NAME constant \"name\", CON, DT);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- testcase 2 position
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_position.txt' truncate into table sqlldr_tbl TRAILING NULLCOLS (id position(1-3) char \"case when :id<200 then :id else :id - 200 end\", name position(4-11) char  \"trim(:name)\", con position(12-15) \"trim(:con)\", dt);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- testcase 3 sql_string
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_test.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS (ID decimal external \":ID/2\", NAME  \"replace(:CON, '-', '')\", CON char \"('batch_code')\", DT);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- testcase 4 sequence text
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "OPTIONS(errors=100) load data infile '@abs_srcdir@/data/sqlldr_sequence.csv' truncate into table sqlldr_tbl fields terminated by ',' TRAILING NULLCOLS (ID sequence (2,3), name  \"replace(:CON, 'a', 'A')\", con, dt);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+
+-- testcase 5 sequence fixed
+\! @abs_bindir@/gsql -t -r -p @portstring@ -d regression -c "load data infile '@abs_srcdir@/data/sqlldr_position.txt' truncate into table sqlldr_tbl TRAILING NULLCOLS (id sequence (1,2), name position(4-11) char  \"trim(:name)\", con position(12-15) \"trim(:con)\", dt);" > @abs_srcdir@/data/sqlldr_column_copy.sql
+
+\! cat @abs_srcdir@/data/sqlldr_column_copy.sql | @abs_bindir@/gsql -t -r -p @portstring@ -d regression
+
+select * from SQLLDR_TBL order by 1,2,3,4;
+
+-- teardown
+drop table SQLLDR_TBL;

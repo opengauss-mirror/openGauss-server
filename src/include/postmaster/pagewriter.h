@@ -29,9 +29,11 @@
 #include "catalog/pg_control.h"
 
 #define ENABLE_INCRE_CKPT g_instance.attr.attr_storage.enableIncrementalCheckpoint
+#define NEED_CONSIDER_USECOUNT u_sess->attr.attr_storage.enable_candidate_buf_usage_count
 
 typedef struct PGPROC PGPROC;
 typedef struct BufferDesc BufferDesc;
+typedef struct CkptSortItem CkptSortItem;
 
 typedef struct ThrdDwCxt {
     char* dw_buf;
@@ -42,17 +44,44 @@ typedef struct ThrdDwCxt {
 
 typedef struct PageWriterProc {
     PGPROC* proc;
+    /* dirty page queue */
     volatile uint32 start_loc;
-    volatile uint32 end_loc;
+    volatile uint32 need_flush_num;
     volatile bool need_flush;
-    volatile uint32 actual_flush_num;
+
+    /* thread double writer cxt */
+    ThrdDwCxt thrd_dw_cxt;
+
+    /* thread dirty list */
+    CkptSortItem *dirty_buf_list;
+    uint32 dirty_list_size;
+
+    volatile int buf_id_start;     /* buffer id start loc */
+    int32 next_scan_normal_loc;
+
+    /* thread candidate list, main thread store the segment buffer information */
+    Buffer *cand_buf_list;   /* thread candidate buffer list */
+    volatile int cand_list_size;    /* thread candidate list max size, */
+    pg_atomic_uint64 head;
+    pg_atomic_uint64 tail;
+
+    /* thread seg buffer information */
+    Buffer *seg_cand_buf_list;
+    volatile int seg_cand_list_size;
+    pg_atomic_uint64 seg_head;
+    pg_atomic_uint64 seg_tail;
+
+    volatile int seg_id_start;     /* buffer id start loc */
+    int32 next_scan_seg_loc;
 } PageWriterProc;
 
 typedef struct PageWriterProcs {
     PageWriterProc* writer_proc;
     volatile int num;             /* number of pagewriter thread */
+    volatile int sub_num;
     pg_atomic_uint32 running_num; /* number of pagewriter thread which flushing dirty page */
-    ThrdDwCxt thrd_dw_cxt;
+    volatile uint32 queue_flush_max;
+    volatile uint32 list_flush_max;
 } PageWriterProcs;
 
 typedef struct DirtyPageQueueSlot {
@@ -70,7 +99,7 @@ typedef struct incre_ckpt_view_col {
     incre_ckpt_view_get_data_func get_val;
 } incre_ckpt_view_col;
 
-const int RESTART_POINT_QUEUE_LEN = 20;
+const int RESTART_POINT_QUEUE_LEN = 40;
 /* recovery checkpoint queue */
 typedef struct CheckPointItem {
     XLogRecPtr CkptLSN;
@@ -106,14 +135,20 @@ extern int get_dirty_page_queue_head_buffer();
 extern void ckpt_shutdown_pagewriter();
 extern uint64 get_dirty_page_queue_rec_lsn();
 extern XLogRecPtr ckpt_get_min_rec_lsn(void);
-extern uint32 calculate_thread_max_flush_num(bool is_pagewriter);
 extern uint64 get_loc_for_lsn(XLogRecPtr target_lsn);
 extern uint64 get_time_ms();
 
 const int PAGEWRITER_VIEW_COL_NUM = 8;
 const int INCRE_CKPT_VIEW_COL_NUM = 7;
+const int CANDIDATE_VIEW_COL_NUM = 7;
 
 extern const incre_ckpt_view_col g_ckpt_view_col[INCRE_CKPT_VIEW_COL_NUM];
 extern const incre_ckpt_view_col g_pagewriter_view_col[PAGEWRITER_VIEW_COL_NUM];
+extern const incre_ckpt_view_col g_pagewirter_view_two_col[CANDIDATE_VIEW_COL_NUM];
 
+extern bool candidate_buf_pop(int *buf_id, int thread_id);
+extern bool seg_candidate_buf_pop(int *buf_id, int thread_id);
+extern void candidate_buf_init(void);
+
+extern uint32 get_curr_candidate_nums(bool segment);
 #endif /* _PAGEWRITER_H */

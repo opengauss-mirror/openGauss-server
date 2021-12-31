@@ -16,6 +16,7 @@
 #include <string>
 #include <iostream>
 #include <stdio.h>
+#include <libgen.h>
 
 #define strpos(p, s) (strstr((p), (s)) != NULL ? strstr((p), (s)) - (p) : -1)
 
@@ -34,6 +35,7 @@
 #include "utils/elog.h"
 #include "utils/palloc.h"
 #include "utils/plog.h"
+#include "postmaster/alarmchecker.h"
 #include "replication/walreceiver.h"
 
 // Some Windows stuff
@@ -1525,7 +1527,7 @@ void FetchUrlProperties(const char *url, char **hostname, char **bucket, char **
 
 FETCH_URL_ERROR:
     ereport(ERROR,
-            (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA), errmsg("OBS URL's %s is not valid '%s'", invalid_element, url)));
+            (errcode(ERRCODE_FDW_INVALID_OPTION_DATA), errmsg("OBS URL's %s is not valid '%s'", invalid_element, url)));
 }
 
 /*
@@ -1584,7 +1586,7 @@ void FetchUrlPropertiesForQuery(const char *folderName, char **bucket, char **pr
     return;
 
 FETCH_URL_ERROR2:
-    ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+    ereport(ERROR, (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
                     errmsg("OBS URL's %s is not valid '%s'", invalid_element, folderName)));
 }
 
@@ -1766,33 +1768,33 @@ bool is_ip_address_format(const char *addr)
     return false;
 }
 
-ObsArchiveConfig *getObsArchiveConfig()
+ArchiveConfig *getArchiveConfig()
 {
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     if (walrcv->archive_slot == NULL) {
-        walrcv->archive_slot = getObsRecoverySlot();
+        walrcv->archive_slot = GetArchiveRecoverySlot();
         if (walrcv->archive_slot == NULL) {
             ereport(LOG, (errmsg("Cannot get replication slots!")));
             return NULL;
         }
     }
-    return &walrcv->archive_slot->archive_obs;
+    return &walrcv->archive_slot->archive_config;
 }
 
-static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, ObsArchiveConfig *obs_config = NULL,
+static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, ArchiveConfig *obs_config = NULL,
                                 bool shortenConnTime = false)
 {
-    ObsArchiveConfig *archive_obs = NULL;
+    ArchiveConfig *archive_obs = NULL;
     errno_t rc = EOK;
     char xlogfpath[MAXPGPATH] = {0};
 
     if (obs_config != NULL) {
         archive_obs = obs_config;
     } else {
-        archive_obs = getObsArchiveConfig();
+        archive_obs = getArchiveConfig();
     }
 
-    if (archive_obs == NULL) {
+    if (archive_obs == NULL || archive_obs->conn_config == NULL || archive_obs->conn_config->obs_address == NULL) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("Cannot get obs bucket config from replication slots")));
     }
@@ -1800,13 +1802,13 @@ static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, Obs
     /* Initialize obs option */
     init_obs_options(&handler->m_option);
 
-    handler->m_option.bucket_options.host_name = archive_obs->obs_address;
-    handler->m_option.bucket_options.bucket_name = archive_obs->obs_bucket;
+    handler->m_option.bucket_options.host_name = archive_obs->conn_config->obs_address;
+    handler->m_option.bucket_options.bucket_name = archive_obs->conn_config->obs_bucket;
     handler->m_option.bucket_options.protocol = OBS_PROTOCOL_HTTPS;
     handler->m_option.bucket_options.uri_style = is_ip_address_format(handler->m_option.bucket_options.host_name) ?
                                                  OBS_URI_STYLE_PATH : OBS_URI_STYLE_VIRTUALHOST;
-    handler->m_option.bucket_options.access_key = archive_obs->obs_ak;
-    handler->m_option.bucket_options.secret_access_key = archive_obs->obs_sk;
+    handler->m_option.bucket_options.access_key = archive_obs->conn_config->obs_ak;
+    handler->m_option.bucket_options.secret_access_key = archive_obs->conn_config->obs_sk;
 
     t_thrd.obs_cxt.pCAInfo = getCAInfo();
     handler->m_option.bucket_options.certificate_info = t_thrd.obs_cxt.pCAInfo;
@@ -1816,7 +1818,7 @@ static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, Obs
     }
 
     /* Fill in obs full file path */
-    rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_obs->obs_prefix, key);
+    rc = snprintf_s(xlogfpath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", archive_obs->archive_prefix, key);
     securec_check_ss(rc, "\0", "\0");
 
     handler->m_object_info.key = pstrdup(xlogfpath);
@@ -1824,7 +1826,7 @@ static void fillBucketContext(OBSReadWriteHandler *handler, const char* key, Obs
 }
 
 
-size_t obsRead(const char* fileName, int offset, char *buffer, int length, ObsArchiveConfig *obs_config)
+size_t obsRead(const char* fileName, const int offset, char *buffer, const int length, ArchiveConfig *obs_config)
 {
     OBSReadWriteHandler *handler;
     errno_t rc = EOK;
@@ -1858,7 +1860,7 @@ size_t obsRead(const char* fileName, int offset, char *buffer, int length, ObsAr
     return readLength;
 }
 
-int obsWrite(const char* fileName, const char *buffer, const int bufferLength, ObsArchiveConfig *obs_config)
+int obsWrite(const char* fileName, const char *buffer, const int bufferLength, ArchiveConfig *obs_config)
 {
     OBSReadWriteHandler *handler;
     int ret = 0;
@@ -1888,7 +1890,7 @@ int obsWrite(const char* fileName, const char *buffer, const int bufferLength, O
     return ret;
 }
 
-int obsDelete(const char* fileName, ObsArchiveConfig *obs_config)
+int obsDelete(const char* fileName, ArchiveConfig *obs_config)
 {
     OBSReadWriteHandler *handler;
     int ret = 0;
@@ -1910,7 +1912,7 @@ int obsDelete(const char* fileName, ObsArchiveConfig *obs_config)
     return ret;
 }
 
-List* obsList(const char* prefix, ObsArchiveConfig *obs_config, bool reportError, bool shortenConnTime)
+List* obsList(const char* prefix, ArchiveConfig *obs_config, bool reportError, bool shortenConnTime)
 {
     OBSReadWriteHandler *handler;
     errno_t rc = EOK;
@@ -1932,14 +1934,15 @@ List* obsList(const char* prefix, ObsArchiveConfig *obs_config, bool reportError
     return fileNameList;
 }
 
-void fillObsOption(obs_options *option, ObsArchiveConfig *obs_config = NULL)
+
+void fillObsOption(obs_options *option, ArchiveConfig *obs_config = NULL)
 {
-    ObsArchiveConfig *archive_obs = NULL;
+    ArchiveConfig *archive_obs = NULL;
 
     if (obs_config != NULL) {
         archive_obs = obs_config;
     } else {
-        archive_obs = getObsArchiveConfig();
+        archive_obs = getArchiveConfig();
     }
 
     if (archive_obs == NULL) {
@@ -1948,12 +1951,12 @@ void fillObsOption(obs_options *option, ObsArchiveConfig *obs_config = NULL)
     }
 
 
-    option->bucket_options.host_name = archive_obs->obs_address;
-    option->bucket_options.bucket_name = archive_obs->obs_bucket;
+    option->bucket_options.host_name = archive_obs->conn_config->obs_address;
+    option->bucket_options.bucket_name = archive_obs->conn_config->obs_bucket;
     option->bucket_options.protocol = OBS_PROTOCOL_HTTPS;
     option->bucket_options.uri_style = OBS_URI_STYLE_PATH;
-    option->bucket_options.access_key = archive_obs->obs_ak;
-    option->bucket_options.secret_access_key = archive_obs->obs_sk;
+    option->bucket_options.access_key = archive_obs->conn_config->obs_ak;
+    option->bucket_options.secret_access_key = archive_obs->conn_config->obs_sk;
     t_thrd.obs_cxt.pCAInfo = getCAInfo();
     option->bucket_options.certificate_info = t_thrd.obs_cxt.pCAInfo;
     option->request_options.ssl_cipher_list = OBS_CIPHER_LIST;
@@ -2082,7 +2085,7 @@ static void head_complete_callback(obs_status status,
 /*
  * Create multipart upload file
  */
-void* createOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config)
+void* createOBSFile(const char* file_path, const char* mode, ArchiveConfig *obs_config)
 {
     OBSWriteFile* obsFile = NULL;
     char uploadId[OBS_MAX_UPLOAD_ID_LEN] = {0};
@@ -2162,7 +2165,7 @@ void* createOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *o
  * write data to OBS
  */
 int writeOBSData(const void* write_data, size_t size, size_t len, OBSFile* fp, size_t* writeSize,
-    ObsArchiveConfig *obs_config)
+    ArchiveConfig *obs_config)
 {
     int eTagLen = 0;
     int nRet = 0;
@@ -2249,7 +2252,7 @@ int writeOBSData(const void* write_data, size_t size, size_t len, OBSFile* fp, s
 /*
  * close OBS file
  */
-int closeOBSFile(void* filePtr, ObsArchiveConfig *obs_config)
+int closeOBSFile(void* filePtr, ArchiveConfig *obs_config)
 {
     int ulIndex = 0;
     int retriesG = MAX_RETRIES;
@@ -2344,7 +2347,7 @@ int closeOBSFile(void* filePtr, ObsArchiveConfig *obs_config)
 /*
  * open obs file
  */
-void* openReadOBSFile(const char* file_path, const char* mode, ObsArchiveConfig *obs_config)
+void* openReadOBSFile(const char* file_path, const char* mode, ArchiveConfig *obs_config)
 {
     OBSReadFile* obsFile = NULL;
     int retriesG = MAX_RETRIES;
@@ -2404,7 +2407,7 @@ void* openReadOBSFile(const char* file_path, const char* mode, ObsArchiveConfig 
  *  0: sucess
  *  x: continue
  */
-int readOBSFile(char* data, size_t size, size_t len, void* fp, size_t* readSize, ObsArchiveConfig *obs_config)
+int readOBSFile(char* data, size_t size, size_t len, void* fp, size_t* readSize, ArchiveConfig *obs_config)
 {
     OBSReadFile* obsFile = (OBSReadFile*)fp;
 
@@ -2498,7 +2501,7 @@ int closeReadOBSFile(void* fp)
 /*
  * check whether the file exists in the OBS
  */
-bool checkOBSFileExist(const char* file_path, ObsArchiveConfig *obs_config)
+bool checkOBSFileExist(const char* file_path, ArchiveConfig *obs_config)
 {
     HEAD_OBJECT_DATA data;
     data.object_length = 0;
@@ -2516,7 +2519,7 @@ bool checkOBSFileExist(const char* file_path, ObsArchiveConfig *obs_config)
         &head_complete_callback
     };
 
-    rc = snprintf_s(obsFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", obs_config->obs_prefix, file_path);
+    rc = snprintf_s(obsFilePath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", obs_config->archive_prefix, file_path);
     securec_check_ss(rc, "\0", "\0");
 
     ereport(DEBUG1, (errmsg("[OBS] before ListObjects check OBS file %s exist", obsFilePath)));
@@ -2555,7 +2558,7 @@ void initializeOBS()
     return;
 }
 
-bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ObsArchiveConfig *obs_config)
+bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ArchiveConfig *obs_config)
 {
     FILE *fpReadFromDisk = NULL;
     OBSFile* fpWriteToNB = NULL;
@@ -2613,7 +2616,7 @@ bool UploadOneFileToOBS(char* localFilePath, char* netBackupPath, ObsArchiveConf
     return true;
 }
 
-bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ObsArchiveConfig *obs_config)
+bool DownloadOneItemFromOBS(char* netBackupPath, char* localPath, ArchiveConfig *obs_config)
 {
     ereport(LOG, (errmsg("start download obs file %s", netBackupPath)));
     void* fp = NULL;

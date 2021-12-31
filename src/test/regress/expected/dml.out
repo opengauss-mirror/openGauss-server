@@ -686,8 +686,8 @@ partition by range (c1, c2, c3, c4)
  c2     | double precision |           | plain    |              | 
  c3     | real             |           | plain    |              | 
  c4     | text             |           | extended |              | 
-Range partition by(c1, c2, c3, c4)
-Number of partition: 3 (View pg_partition to check each partition range.)
+Partition By RANGE(c1, c2, c3, c4)
+Number of partitions: 3 (View pg_partition to check each partition range.)
 Has OIDs: no
 Options: orientation=row, compression=no
 

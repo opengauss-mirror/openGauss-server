@@ -409,17 +409,6 @@ void comm_print_packet_lenght_static()
 }
 
 
-void comm_reset_packet_static()
-{
-    g_static_pkt_cnt_idx[ChannelTX] = 0;
-    g_static_pkt_cnt_idx[ChannelRX] = 0;
-
-    memset_s(g_static_pkt_cnt_by_length[ChannelTX], sizeof(unsigned long int) * MAX_PKT_TRANS_CNT, 0,
-        sizeof(unsigned long int) * MAX_PKT_TRANS_CNT);
-    memset_s(g_static_pkt_cnt_by_length[ChannelRX], sizeof(unsigned long int) * MAX_PKT_TRANS_CNT, 0,
-        sizeof(unsigned long int) * MAX_PKT_TRANS_CNT);
-};
-
 void comm_update_packet_static(size_t len, int type)
 {
     int id = g_static_pkt_cnt_idx[type];
@@ -448,17 +437,6 @@ void comm_print_packet_static()
 
 }
 
-void comm_reset_walsender_static()
-{
-    g_static_walsender_cnt_idx[WalSenderEnter] = 0;
-    g_static_walsender_cnt_idx[WalSenderWakeup] = 0;
-
-    memset_s(g_static_walsender_wakeup[WalSenderEnter], sizeof(unsigned long int) * MAX_PKT_TRANS_CNT, 0,
-        sizeof(unsigned long int) * MAX_PKT_TRANS_CNT);
-    memset_s(g_static_walsender_wakeup[WalSenderWakeup], sizeof(unsigned long int) * MAX_PKT_TRANS_CNT, 0,
-        sizeof(unsigned long int) * MAX_PKT_TRANS_CNT);
-
-};
 
 void comm_update_walsender_static(int type, int len)
 {
@@ -489,18 +467,6 @@ void comm_print_walsender_static()
     fflush(stdout);
 }
 
-void comm_reset_walrcvwriter_static()
-{
-    g_static_walrcvwriter_idx[WalRcvWriterWrite] = 0;
-    g_static_walrcvwriter_idx[WalRcvWriterExpectWrite] = 0;
-    g_static_walrcvwriter_idx[WalRcvWriterFlush] = 0;
-    memset_s(g_static_walrcvwriter_iostat[WalRcvWriterWrite], sizeof(unsigned long int) * WalRcvWriterStatMax, 0,
-        sizeof(unsigned long int) * WalRcvWriterStatMax);
-    memset_s(g_static_walrcvwriter_iostat[WalRcvWriterExpectWrite], sizeof(unsigned long int) * WalRcvWriterStatMax, 0,
-        sizeof(unsigned long int) * WalRcvWriterStatMax);
-    memset_s(g_static_walrcvwriter_iostat[WalRcvWriterFlush], sizeof(unsigned long int) * WalRcvWriterStatMax, 0,
-        sizeof(unsigned long int) * WalRcvWriterStatMax);
-};
 
 void comm_update_walrcvwriter_static(int type, int len)
 {    

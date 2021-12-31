@@ -2176,6 +2176,7 @@ Datum cursor_to_xml(PG_FUNCTION_ARGS)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2190,6 +2191,7 @@ Datum cursor_to_xml(PG_FUNCTION_ARGS)
     for (i = 0; i < (int)SPI_processed; i++)
         SPI_sql_row_to_xmlelement(i, &result, NULL, nulls, tableforest, targetns, true);
 
+    SPI_STACK_LOG("finish", portal->sourceText, NULL);
     SPI_finish();
 
     PG_RETURN_XML_P(stringinfo_to_xmltype(&result));
@@ -2251,6 +2253,7 @@ static StringInfo query_to_xml_internal(const char* query, char* tablename, cons
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2272,6 +2275,7 @@ static StringInfo query_to_xml_internal(const char* query, char* tablename, cons
     if (!tableforest)
         xmldata_root_element_end(result, xmltn);
 
+    SPI_STACK_LOG("finish", query, NULL);
     SPI_finish();
 
     return result;
@@ -2326,6 +2330,7 @@ Datum query_to_xmlschema(PG_FUNCTION_ARGS)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2343,6 +2348,7 @@ Datum query_to_xmlschema(PG_FUNCTION_ARGS)
 
     result = _SPI_strdup(map_sql_table_to_xmlschema(portal->tupDesc, InvalidOid, nulls, tableforest, targetns));
     SPI_cursor_close(portal);
+    SPI_STACK_LOG("finish", portal->sourceText, NULL);
     SPI_finish();
 
     PG_RETURN_XML_P(cstring_to_xmltype(result));
@@ -2373,6 +2379,7 @@ Datum cursor_to_xmlschema(PG_FUNCTION_ARGS)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2384,6 +2391,7 @@ Datum cursor_to_xmlschema(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_UNDEFINED_CURSOR), errmsg("cursor \"%s\" does not exist", name)));
 
     xmlschema = _SPI_strdup(map_sql_table_to_xmlschema(portal->tupDesc, InvalidOid, nulls, tableforest, targetns));
+    SPI_STACK_LOG("finish", portal->sourceText, NULL);
     SPI_finish();
 
     PG_RETURN_XML_P(cstring_to_xmltype(xmlschema));
@@ -2439,6 +2447,7 @@ Datum query_to_xml_and_xmlschema(PG_FUNCTION_ARGS)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2456,6 +2465,7 @@ Datum query_to_xml_and_xmlschema(PG_FUNCTION_ARGS)
 
     xmlschema = _SPI_strdup(map_sql_table_to_xmlschema(portal->tupDesc, InvalidOid, nulls, tableforest, targetns));
     SPI_cursor_close(portal);
+    SPI_STACK_LOG("finish", portal->sourceText, NULL);
     SPI_finish();
 
     PG_RETURN_XML_P(
@@ -2487,6 +2497,7 @@ static StringInfo schema_to_xml_internal(
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2495,6 +2506,7 @@ static StringInfo schema_to_xml_internal(
 
     relid_list = schema_get_xml_visible_tables(nspid);
 
+    SPI_STACK_LOG("push", NULL, NULL);
     SPI_push();
 
     foreach (cell, relid_list) {
@@ -2507,7 +2519,9 @@ static StringInfo schema_to_xml_internal(
         appendStringInfoChar(result, '\n');
     }
 
+    SPI_STACK_LOG("pop", NULL, NULL);
     SPI_pop();
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
 
     xmldata_root_element_end(result, xmlsn);
@@ -2595,6 +2609,7 @@ static StringInfo schema_to_xmlschema_internal(
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2618,6 +2633,7 @@ static StringInfo schema_to_xmlschema_internal(
 
     xsd_schema_element_end(result);
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
 
     return result;
@@ -2706,6 +2722,7 @@ static StringInfo database_to_xml_internal(const char* xmlschema, bool nulls, bo
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2714,6 +2731,7 @@ static StringInfo database_to_xml_internal(const char* xmlschema, bool nulls, bo
 
     nspid_list = database_get_xml_visible_schemas();
 
+    SPI_STACK_LOG("push", NULL, NULL);
     SPI_push();
 
     foreach (cell, nspid_list) {
@@ -2726,7 +2744,9 @@ static StringInfo database_to_xml_internal(const char* xmlschema, bool nulls, bo
         appendStringInfoChar(result, '\n');
     }
 
+    SPI_STACK_LOG("pop", NULL, NULL);
     SPI_pop();
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
 
     xmldata_root_element_end(result, xmlcn);
@@ -2761,6 +2781,7 @@ static StringInfo database_to_xmlschema_internal(bool nulls, bool tableforest, c
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if ((rc = SPI_connect()) != SPI_OK_CONNECT)
         ereport(ERROR,
             (errmodule(MOD_OPT),
@@ -2785,6 +2806,7 @@ static StringInfo database_to_xmlschema_internal(bool nulls, bool tableforest, c
 
     xsd_schema_element_end(result);
 
+    SPI_STACK_LOG("finish", NULL, NULL);
     SPI_finish();
 
     return result;

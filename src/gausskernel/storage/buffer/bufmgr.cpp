@@ -71,6 +71,7 @@
 #include "utils/resowner.h"
 #include "utils/timestamp.h"
 #include "utils/syscache.h"
+#include "utils/evp_cipher.h"
 #include "replication/walsender_private.h"
 #include "replication/walsender.h"
 #include "workload/workload.h"
@@ -1697,7 +1698,7 @@ Buffer ReadBufferExtended(Relation reln, ForkNumber fork_num, BlockNumber block_
     pgstatCountBlocksFetched4SessionLevel();
 
     if (RelationisEncryptEnable(reln)) {
-        TdeTableEncryptionInsert(reln);
+        reln->rd_smgr->encrypt = true;
     }
     buf = ReadBuffer_common(reln->rd_smgr, reln->rd_rel->relpersistence, fork_num,
                             block_num, mode, strategy, &hit, NULL);
@@ -2096,9 +2097,13 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
      * was not originally committed, the tid or the heap(page) should not
      * be visible. So accessing the non-existent heap tuple by the tid
      * should return that the tuple does not exist without error reporting.
+     *
+     * Segment-page storage does not support standby reading. Its segment
+     * head may be re-used, i.e., the relfilenode may be reused. Thus the
+     * smgrnblocks interface can not be used on standby. Just skip this check.
      */
 #ifndef ENABLE_MULTIPLE_NODES
-    } else if (RecoveryInProgress()) {
+    } else if (RecoveryInProgress() && !IsSegmentFileNode(smgr->smgr_rnode.node)) {
         BlockNumber totalBlkNum = smgrnblocks_cached(smgr, forkNum);
 
         /* Update cached blocks */
@@ -2113,10 +2118,6 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
     }
     if (isLocalBuf) {
         bufHdr = LocalBufferAlloc(smgr, forkNum, blockNum, &found);
-        if (smgr->encrypt) {
-            bufHdr->encrypt = true;
-        }
-        
         if (found) {
             u_sess->instr_cxt.pg_buffer_usage->local_blks_hit++;
         } else {
@@ -2129,10 +2130,9 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
          * not currently in memory.
          */
         bufHdr = BufferAlloc(smgr, relpersistence, forkNum, blockNum, strategy, &found, pblk);
-        if (smgr->encrypt) {
-            bufHdr->encrypt = true;
+        if (g_instance.attr.attr_security.enable_tde && IS_PGXC_DATANODE) {
+            bufHdr->encrypt = smgr->encrypt ? true : false; /* set tde flag */
         }
-        
         if (found) {
             u_sess->instr_cxt.pg_buffer_usage->shared_blks_hit++;
         } else {
@@ -2266,7 +2266,7 @@ static Buffer ReadBuffer_common(SMgrRelation smgr, char relpersistence, ForkNumb
          * Check the BufferDesc rec_lsn to determine whether the dirty page is in the dirty page queue.
          * If the rec_lsn is valid, dirty page is already in the queue, don't need to push it again.
          */
-        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+        if (ENABLE_INCRE_CKPT) {
             for (;;) {
                 buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
                 if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&bufHdr->rec_lsn))) {
@@ -2334,7 +2334,7 @@ void SimpleMarkBufDirty(BufferDesc *buf)
      * Check the BufferDesc rec_lsn to determine whether the dirty page is in the dirty page queue.
      * If the rec_lsn is valid, dirty page is already in the queue, don't need to push it again.
      */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         for (;;) {
             bufState = oldBufState | (BM_DIRTY | BM_JUST_DIRTIED);
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
@@ -2504,8 +2504,7 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
          * after re-locking the buffer header.
          */
         if (old_flags & BM_DIRTY) {
-            
-            /* backend should not flush dirty pages if PageWriter is there */
+            /* backend should not flush dirty pages if working version less than DW_SUPPORT_NEW_SINGLE_FLUSH */
             if (!backend_can_flush_dirty_page()) {
                 UnpinBuffer(buf, true);
                 (void)sched_yield();
@@ -2560,12 +2559,19 @@ static BufferDesc *BufferAlloc(SMgrRelation smgr, char relpersistence, ForkNumbe
                 /* OK, do the I/O */
                 TRACE_POSTGRESQL_BUFFER_WRITE_DIRTY_START(fork_num, block_num, smgr->smgr_rnode.node.spcNode,
                                                           smgr->smgr_rnode.node.dbNode, smgr->smgr_rnode.node.relNode);
-                if (dw_enabled()) {
+
+                /* during initdb, not need flush dw file */
+                if (dw_enabled() && pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) > 0) {
+                    if (!free_space_enough(buf->buf_id)) {
+                        LWLockRelease(buf->content_lock);
+                        UnpinBuffer(buf, true);
+                        continue;
+                    }
                     uint32 pos = 0;
-                    pos = dw_single_flush(buf);
+                    pos = first_version_dw_single_flush(buf);
                     t_thrd.proc->dw_pos = pos;
                     FlushBuffer(buf, NULL);
-                    g_instance.dw_single_cxt.single_flush_state[pos].data_flush = true;
+                    g_instance.dw_single_cxt.single_flush_state[pos] = true;
                     t_thrd.proc->dw_pos = -1;
                 } else {
                     FlushBuffer(buf, NULL);
@@ -2839,7 +2845,7 @@ retry:
     }
 
     /* remove from dirty page list */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && (buf_state & BM_DIRTY)) {
+    if (ENABLE_INCRE_CKPT && (buf_state & BM_DIRTY)) {
         if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
             remove_dirty_page_from_queue(buf);
         } else {
@@ -2933,7 +2939,7 @@ void MarkBufferDirty(Buffer buffer)
      * Check the BufferDesc rec_lsn to determine whether the dirty page is in the dirty page queue.
      * If the rec_lsn is valid, dirty page is already in the queue, don't need to push it again.
      */
-    if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+    if (ENABLE_INCRE_CKPT) {
         for (;;) {
             buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->rec_lsn))) {
@@ -4121,10 +4127,10 @@ void CheckPointBuffers(int flags, bool doFullCheckpoint)
      * to data file. if IsBootstrapProcessingMode or pagewriter thread is not started also need call
      * BufferSync to flush dirty page.
      */
-    if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint || IsBootstrapProcessingMode() ||
+    if (!ENABLE_INCRE_CKPT || IsBootstrapProcessingMode() ||
         pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) < 1) {
         BufferSync(flags);
-    } else if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && doFullCheckpoint) {
+    } else if (ENABLE_INCRE_CKPT && doFullCheckpoint) {
         long waitCount = 0;
         /*
          * If the enable_incremental_checkpoint is on, but doFullCheckpoint is true (full checkpoint),
@@ -4266,15 +4272,19 @@ void GetFlushBufferInfo(void *buf, RedoBufferInfo *bufferinfo, uint32 *buf_state
 char* PageDataEncryptForBuffer(Page page, BufferDesc *bufdesc, bool is_segbuf)
 {
     char *bufToWrite = NULL;
-    TdeInfo *tde_info = NULL;
+    TdeInfo tde_info = {0};
+
     if (bufdesc->encrypt) {
-        tde_info = TDE::TDEBufferCache::get_instance().search_cache(bufdesc->tag.rnode);
-        if (tde_info == NULL) {
-            ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
-                errmsg("page buffer get TDE buffer cache entry failed"), errdetail("N/A"), 
-                errcause("TDE cache miss this key"), erraction("check cache status")));
+        TDE::TDEBufferCache::get_instance().search_cache(bufdesc->tag.rnode, &tde_info);
+        if (strlen(tde_info.dek_cipher) == 0) {
+            ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
+                errmsg("page buffer get TDE buffer cache entry failed, RelFileNode is %u/%u/%u",
+                       bufdesc->tag.rnode.spcNode, bufdesc->tag.rnode.dbNode, bufdesc->tag.rnode.relNode),
+                errdetail("N/A"),
+                errcause("TDE cache miss this key"),
+                erraction("check cache status")));
         }
-        bufToWrite = PageDataEncryptIfNeed(page, tde_info, true, is_segbuf);
+        bufToWrite = PageDataEncryptIfNeed(page, &tde_info, true, is_segbuf);
     } else {
         bufToWrite = (char*)page;
     }
@@ -4632,6 +4642,7 @@ void DropRelFileNodeShareBuffers(RelFileNode node, ForkNumber forkNum, BlockNumb
             UnlockBufHdr(buf_desc, buf_state);
     }
 }
+
 /*
  * DropRelFileNodeBuffers - This function removes from the buffer pool all the
  * pages of the specified relation fork that have block numbers >= firstDelBlock.
@@ -4749,8 +4760,66 @@ void DropRelFileNodeAllBuffersUsingHash(HTAB *relfilenode_hashtbl)
             UnlockBufHdr(buf_desc, buf_state);
         }
     }
+}
 
-    gstrace_exit(GS_TRC_ID_DropRelFileNodeAllBuffers);
+/*
+ * drop_rel_one_fork_buffers_use_hash - This function removes from the buffer pool
+ * all the pages of one fork of the relfilenode_hashtbl.
+ */
+void DropRelFileNodeOneForkAllBuffersUsingHash(HTAB *relfilenode_hashtbl)
+{
+    int i;
+    for (i = 0; i < g_instance.attr.attr_storage.NBuffers; i++) {
+        BufferDesc *buf_desc = GetBufferDescriptor(i);
+        uint32 buf_state;
+        bool found = false;
+        bool equal = false;
+        bool find_dir = false;
+        ForkRelFileNode rd_node_snapshot;
+
+        /*
+         * As in DropRelFileNodeBuffers, an unlocked precheck should be safe
+         * and saves some cycles.
+         */
+        rd_node_snapshot.rnode = buf_desc->tag.rnode;
+        rd_node_snapshot.forkNum = buf_desc->tag.forkNum;
+
+        if (IsBucketFileNode(rd_node_snapshot.rnode)) {
+            /* bucket buffer */
+            ForkRelFileNode rd_node_bucketdir = rd_node_snapshot;
+            rd_node_bucketdir.rnode.bucketNode = SegmentBktId;
+            hash_search(relfilenode_hashtbl, &(rd_node_bucketdir), HASH_FIND, &found);
+            find_dir = found;
+
+            if (!find_dir) {
+                hash_search(relfilenode_hashtbl, &(rd_node_snapshot), HASH_FIND, &found);
+            }
+        } else {
+            /* no bucket buffer */
+            hash_search(relfilenode_hashtbl, &rd_node_snapshot, HASH_FIND, &found);
+        }
+
+        if (!found) {
+            continue;
+        }
+
+        buf_state = LockBufHdr(buf_desc);
+
+        if (find_dir) {
+            // matching the bucket dir
+            equal = RelFileNodeRelEquals(buf_desc->tag.rnode, rd_node_snapshot.rnode) &&
+                buf_desc->tag.forkNum == rd_node_snapshot.forkNum;
+        } else {
+            equal = RelFileNodeEquals(buf_desc->tag.rnode, rd_node_snapshot.rnode) &&
+                buf_desc->tag.forkNum == rd_node_snapshot.forkNum;
+        }
+
+        if (equal == true) {
+            InvalidateBuffer(buf_desc); /* releases spinlock */
+        } else {
+            UnlockBufHdr(buf_desc, buf_state);
+        }
+    }
 }
 
 static FORCE_INLINE int compare_rnode_func(const void *left, const void *right)
@@ -5206,7 +5275,7 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
          * The incremental checkpoint is protected by the doublewriter, the
          * half-write problem does not occur.
          */
-        if (!g_instance.attr.attr_storage.enableIncrementalCheckpoint && XLogHintBitIsNeeded() &&
+        if (!ENABLE_INCRE_CKPT && XLogHintBitIsNeeded() &&
             (pg_atomic_read_u32(&buf_desc->state) & BM_PERMANENT)) {
             /*
              * If we're in recovery we cannot dirty a page because of a hint.
@@ -5286,7 +5355,7 @@ void MarkBufferDirtyHint(Buffer buffer, bool buffer_std)
          * Check the BufferDesc rec_lsn to determine whether the dirty page is in the dirty page queue.
          * If the rec_lsn is valid, dirty page is already in the queue, don't need to push it again.
          */
-        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+        if (ENABLE_INCRE_CKPT) {
             for (;;) {
                 buf_state = old_buf_state | (BM_DIRTY | BM_JUST_DIRTIED);
                 if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf_desc->rec_lsn))) {
@@ -5854,7 +5923,7 @@ static void TerminateBufferIO_common(BufferDesc *buf, bool clear_dirty, uint32 s
     buf_state &= ~(BM_IO_IN_PROGRESS | BM_IO_ERROR);
 
     if (clear_dirty) {
-        if (g_instance.attr.attr_storage.enableIncrementalCheckpoint) {
+        if (ENABLE_INCRE_CKPT) {
             if (!XLogRecPtrIsInvalid(pg_atomic_read_u64(&buf->rec_lsn))) {
                 remove_dirty_page_from_queue(buf);
             } else {
@@ -6020,7 +6089,6 @@ void shared_buffer_write_error_callback(void *arg)
 
     if (edata->elevel >= ERROR) {
         reset_dw_pos_flag();
-        clean_buf_need_flush_flag((BufferDesc*)buf_desc);
     }
 
     /* Buffer is pinned, so we can read the tag without locking the spinlock */
@@ -6409,69 +6477,6 @@ retry:
     }
 }
 
-void clean_buf_need_flush_flag(BufferDesc *buf_desc)
-{
-    uint32 old_buf_state;
-    uint32 buf_state;
-
-    old_buf_state = pg_atomic_read_u32(&buf_desc->state);
-    for (;;) {
-        if (old_buf_state & BM_LOCKED) {
-            old_buf_state = WaitBufHdrUnlocked(buf_desc);
-        }
-        buf_state = old_buf_state;
-        buf_state &= ~BM_CHECKPOINT_NEEDED;
-
-        if (pg_atomic_compare_exchange_u32(&buf_desc->state, &old_buf_state, buf_state)) {
-            break;
-        }
-    }
-
-    return;
-}
-
-/**
- * @Description: pagewriter thread flush dirty pages to data file.
- * @in          number of pagewriter need flush dirty page.
- * @return      number of dirty pages actually flushed
- */
-void ckpt_flush_dirty_page(int thread_id, WritebackContext wb_context)
-{
-    uint32 i;
-    uint32 actual_written = 0;
-    int buf_id;
-    BufferDesc* buf_desc = NULL;
-    uint32 buf_state;
-
-    for (i = g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].start_loc;
-         i <= g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].end_loc; i++) {
-        buf_id = g_instance.ckpt_cxt_ctl->CkptBufferIds[i].buf_id;
-        if (buf_id == DW_INVALID_BUFFER_ID) {
-            continue;
-        }
-
-        buf_desc = GetBufferDescriptor(buf_id);
-        buf_state = LockBufHdr(buf_desc);
-        if ((buf_state & BM_CHECKPOINT_NEEDED) && (buf_state & BM_DIRTY)) {
-            UnlockBufHdr(buf_desc, buf_state);
-            uint32 ret = SyncOneBuffer(buf_id, false, &wb_context, true);
-            if (ret & BUF_WRITTEN) {
-                actual_written++;
-            } else {
-                clean_buf_need_flush_flag(buf_desc);
-            }
-        } else {
-            buf_state &= (~BM_CHECKPOINT_NEEDED);
-            UnlockBufHdr(buf_desc, buf_state);
-        }
-    }
-
-    g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].need_flush = false;
-    g_instance.ckpt_cxt_ctl->page_writer_procs.writer_proc[thread_id].actual_flush_num = actual_written;
-    (void)pg_atomic_fetch_sub_u32(&g_instance.ckpt_cxt_ctl->page_writer_procs.running_num, 1);
-    smgrcloseall();
-}
-
 /*
  * ForgetBuffer -- drop a buffer from shared buffers
  *
@@ -6528,44 +6533,51 @@ void ForgetBuffer(RelFileNode rnode, ForkNumber forkNum, BlockNumber blockNum)
     }
 }
 
-void TdeTableEncryptionInsert(Relation reln)
+bool InsertTdeInfoToCache(RelFileNode rnode, TdeInfo *tde_info)
 {
     bool result = false;
-    TdeInfo *tde_info = NULL;
-    tde_info = (TdeInfo*)palloc0(sizeof(TdeInfo));
-    reln->rd_smgr->encrypt = true;
-    GetTdeInfoFromRel(reln, tde_info);
-    /* insert TDE buffer cache */
-    if (TDE::TDEBufferCache::get_instance().empty()) {
-        TDE::TDEBufferCache::get_instance().init();
-    }
-    result = TDE::TDEBufferCache::get_instance().insert_cache(reln->rd_node, tde_info);
-    if (!result) {
-        pfree_ext(tde_info);
-        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
-            errmsg("insert TDE buffer cache entry failed"), errdetail("N/A"), 
-            errcause("initialize cache memory failed"), erraction("check cache out of memory or system cache")));
-    }
-    pfree_ext(tde_info);
-}
-
-bool StandbyTdeTableEncryptionInsert(TdeInfo* tde_info, RelFileNode rnode)
-{
-    bool result = false;
-
-    if (tde_info->algo == 0) {
+    Assert(!TDE::TDEBufferCache::get_instance().empty());
+    if (tde_info->algo == TDE_ALGO_NONE) {
         return false;
     }
-    /* insert TDE buffer cache */
-    if (TDE::TDEBufferCache::get_instance().empty()) {
-        TDE::TDEBufferCache::get_instance().init();
-    }
+
     result = TDE::TDEBufferCache::get_instance().insert_cache(rnode, tde_info);
-    if (!result) {
-        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE),
-            errmsg("insert TDE buffer cache entry failed"), errdetail("N/A"),
-            errcause("initialize cache memory failed"), 
-            erraction("check cache out of memory or system cache")));
-    }
     return result;
 }
+
+void RelationInsertTdeInfoToCache(Relation reln)
+{
+    bool result = false;
+    TdeInfo tde_info;
+
+    GetTdeInfoFromRel(reln, &tde_info);
+    /* insert tde info to cache */
+    result = InsertTdeInfoToCache(reln->rd_node, &tde_info);
+    if (!result) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+            errmsg("insert tde info to cache failed, relation RelFileNode is %u/%u/%u",
+                   reln->rd_node.spcNode, reln->rd_node.dbNode, reln->rd_node.relNode),
+            errdetail("N/A"),
+            errcause("initialize cache memory failed"),
+            erraction("check cache out of memory or system cache")));
+    }
+}
+
+void PartitionInsertTdeInfoToCache(Relation reln, Partition p)
+{
+    bool result = false;
+    TdeInfo tde_info;
+
+    GetTdeInfoFromRel(reln, &tde_info);
+    /* insert tde info to cache */
+    result = InsertTdeInfoToCache(p->pd_node, &tde_info);
+    if (!result) {
+        ereport(ERROR, (errmodule(MOD_SEC_TDE), errcode(ERRCODE_UNEXPECTED_NULL_VALUE), 
+            errmsg("insert tde info to cache failed, partition RelFileNode is %u/%u/%u",
+                   p->pd_node.spcNode, p->pd_node.dbNode, p->pd_node.relNode),
+            errdetail("N/A"),
+            errcause("initialize cache memory failed"),
+            erraction("check cache out of memory or system cache")));
+    }
+}
+

@@ -707,41 +707,41 @@ order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 
 ALTER TABLE alter_table SPLIT PARTITION p0 AT (2500) INTO (PARTITION p10, PARTITION p11) update global index;
 select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
-    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples, part.reloptions
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
 order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
-   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples |                    reloptions                     
--------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------+---------------------------------------------------
- alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499 | {orientation=row,compression=no,wait_clean_gpi=y}
- p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499 | {orientation=row,compression=no,wait_clean_gpi=y}
- p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499 | {orientation=row,compression=no,wait_clean_gpi=y}
- p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500 | {orientation=row,compression=no,wait_clean_gpi=y}
- p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500 | {orientation=row,compression=no,wait_clean_gpi=y}
- p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500 | {orientation=row,compression=no,wait_clean_gpi=y}
- p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000 | {orientation=row,compression=no}
- p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000 | {orientation=row,compression=no}
- p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000 | {orientation=row,compression=no}
- p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000 | {orientation=row,compression=no}
- p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000 | {orientation=row,compression=no}
- p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000 | {orientation=row,compression=no}
- p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000 | {orientation=row,compression=no}
- p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000 | {orientation=row,compression=no}
- p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000 | {orientation=row,compression=no}
- p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000 | {orientation=row,compression=no}
- p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000 | {orientation=row,compression=no}
- p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000 | {orientation=row,compression=no}
- p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001 | {orientation=row,compression=no}
- p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001 | {orientation=row,compression=no}
- p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001 | {orientation=row,compression=no}
- p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0 | {orientation=row,compression=no}
- p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0 | {orientation=row,compression=no}
- p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0 | {orientation=row,compression=no}
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p10         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {2500}     |      2499
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p11         |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |      2500
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
 (30 rows)
 
 explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;
@@ -888,38 +888,38 @@ order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
 
 ALTER TABLE alter_table MERGE PARTITIONS p10, p11 INTO PARTITION p1 update global index;
 select part.relname, part.indextblid, part.parttype, part.rangenum, part.intervalnum, part.partstrategy, part.relallvisible,
-    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples, part.reloptions
+    part.reltoastrelid, part.partkey, part.interval, part.boundaries, part.reltuples
 from pg_class class, pg_partition part, pg_index ind where class.relname = 'alter_table' and ind.indrelid = class.oid and part.parentid = ind.indrelid
 order by 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11;
-   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples |                    reloptions                     
--------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------+---------------------------------------------------
- alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0 | {orientation=row,compression=no}
- p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0 | {orientation=row,compression=no}
- p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0 | {orientation=row,compression=no}
- p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0 | {orientation=row,compression=no,wait_clean_gpi=y}
- p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000 | {orientation=row,compression=no}
- p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000 | {orientation=row,compression=no}
- p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000 | {orientation=row,compression=no}
- p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000 | {orientation=row,compression=no}
- p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000 | {orientation=row,compression=no}
- p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000 | {orientation=row,compression=no}
- p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000 | {orientation=row,compression=no}
- p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000 | {orientation=row,compression=no}
- p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000 | {orientation=row,compression=no}
- p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000 | {orientation=row,compression=no}
- p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000 | {orientation=row,compression=no}
- p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000 | {orientation=row,compression=no}
- p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001 | {orientation=row,compression=no}
- p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001 | {orientation=row,compression=no}
- p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001 | {orientation=row,compression=no}
- p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0 | {orientation=row,compression=no}
- p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0 | {orientation=row,compression=no}
- p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0 | {orientation=row,compression=no}
+   relname   | indextblid | parttype | rangenum | intervalnum | partstrategy | relallvisible | reltoastrelid | partkey | interval | boundaries | reltuples 
+-------------+------------+----------+----------+-------------+--------------+---------------+---------------+---------+----------+------------+-----------
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ alter_table |          0 | r        |        0 |           0 | r            |             0 |             0 | 1       |          |            |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p1          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {5000}     |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p2          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {20000}    |         0
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p3          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {30000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p4          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {40000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p5          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {50000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p6          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {60000}    |     10000
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p7          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {100001}   |     40001
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
+ p8          |          0 | p        |        0 |           0 | r            |             0 |             0 |         |          | {500000}   |         0
 (27 rows)
 
 explain (costs off) select count(*) from alter_table where INV_DATE_SK < 10000;

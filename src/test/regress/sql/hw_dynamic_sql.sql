@@ -1,5 +1,7 @@
 --Dynamic SQL TEST
 --CREATE schema and table ,INSERT data
+create database pl_test_dy_sql DBCOMPATIBILITY 'pg';
+\c pl_test_dy_sql;
 SET CHECK_FUNCTION_BODIES TO ON;
 CREATE SCHEMA test_user;
 create table test_user.test_table(
@@ -704,3 +706,5 @@ BEGIN
 END;
 /
 drop procedure calc_stats;
+\c regression;
+drop database IF EXISTS pl_test_dy_sql;

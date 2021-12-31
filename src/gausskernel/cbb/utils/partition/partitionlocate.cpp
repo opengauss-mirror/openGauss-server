@@ -1,5 +1,6 @@
 /*
  * Copyright (c) Huawei Technologies Co., Ltd. 2012-2021 All rights reserved.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -58,7 +59,7 @@ bool isPartKeyValuesInHashPartition(Relation partTableRel, const HashPartitionMa
     Assert(partkeyColumnNum == partMap->partitionKey->dim1);
 
     int sourcePartSeq = -1;
-    Oid sourceOid = getHashPartitionOid(partTableRel, partKeyValues, &sourcePartSeq, true);
+    Oid sourceOid = getHashPartitionOid(partTableRel->partMap, partKeyValues, &sourcePartSeq, true);
     if (sourcePartSeq < 0) {
         ereport(ERROR,
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),

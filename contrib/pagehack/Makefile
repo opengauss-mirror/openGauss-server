@@ -13,7 +13,7 @@ else
 subdir = contrib/pagehack
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
-override CFLAGS += -lzstd
+enable_shared = false
 
 ifeq ($(enable_debug), yes)
 	PG_CPPFLAGS += -DDEBUG

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -173,6 +174,8 @@ typedef struct VecToRowState {
     bool* m_ttsisnull;             // indicator if one column value is null
 
     int part_id;
+    List* subpartitions;
+    List* subPartLengthList;
     DevectorizeFun* devectorizeFunRuntime;
 
 } VecToRowState;

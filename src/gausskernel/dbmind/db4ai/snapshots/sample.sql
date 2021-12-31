@@ -50,6 +50,8 @@ DECLARE
     exec_cmds TEXT[];               -- commands for execution
     qual_name TEXT;                 -- qualified snapshot name
     mapping NAME[];                 -- mapping user column names to backing column names
+    current_compatibility_mode TEXT;-- current compatibility mode
+    none_represent INT;             -- 0 or NULL
     s_name db4ai.snapshot_name;     -- snapshot sample name
 BEGIN
 
@@ -83,6 +85,13 @@ BEGIN
         s_vers_sep := '.';
     END;
 
+    current_compatibility_mode := current_setting('sql_compatibility');
+    IF current_compatibility_mode = 'ORA' OR current_compatibility_mode = 'A' THEN
+        none_represent := 0;
+    ELSE
+        none_represent := NULL;
+    END IF;
+
     -- check all input parameters
     IF i_schema IS NULL OR i_schema = '' THEN
         i_schema := CASE WHEN (SELECT 0=COUNT(*) FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_USER) THEN 'public' ELSE CURRENT_USER END;
@@ -94,7 +103,7 @@ BEGIN
         i_parent := replace(i_parent, chr(1), s_vers_del);
         i_parent := replace(i_parent, chr(2), s_vers_sep);
         p_name_vers := regexp_split_to_array(i_parent, s_vers_del);
-        IF array_length(p_name_vers, 1) <> 2 OR array_length(p_name_vers, 2) IS NOT NULL THEN
+        IF array_length(p_name_vers, 1) <> 2 OR array_length(p_name_vers, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_parent must contain exactly one ''%'' character', s_vers_del
             USING HINT = 'reference a snapshot using the format: snapshot_name' || s_vers_del || 'version';
         END IF;
@@ -107,12 +116,12 @@ BEGIN
         RAISE EXCEPTION 'parent snapshot %.% does not exist' , quote_ident(i_schema), quote_ident(i_parent);
     END;
 
-    IF i_sample_infixes IS NULL OR array_length(i_sample_infixes, 1) IS NULL OR array_length(i_sample_infixes, 2) IS NOT NULL THEN
+    IF i_sample_infixes IS NULL OR array_length(i_sample_infixes, 1) = none_represent OR array_length(i_sample_infixes, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_infixes array malformed'
         USING HINT = 'pass sample infixes as NAME[] literal, e.g. ''{_train, _test}''';
     END IF;
 
-    IF i_sample_ratios IS NULL OR array_length(i_sample_ratios, 1) IS NULL OR array_length(i_sample_ratios, 2) IS NOT NULL THEN
+    IF i_sample_ratios IS NULL OR array_length(i_sample_ratios, 1) = none_represent OR array_length(i_sample_ratios, 2) <> none_represent THEN
         RAISE EXCEPTION 'i_sample_ratios array malformed'
         USING HINT = 'pass sample percentages as NUMBER[] literal, e.g. ''{.8, .2}''';
     END IF;
@@ -122,7 +131,7 @@ BEGIN
     END IF;
 
     IF i_stratify IS NOT NULL THEN
-        IF array_length(i_stratify, 1) IS NULL OR array_length(i_stratify, 2) IS NOT NULL THEN
+        IF array_length(i_stratify, 1) = none_represent OR array_length(i_stratify, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_stratify array malformed'
             USING HINT = 'pass stratification field names as NAME[] literal, e.g. ''{color, size}''';
         END IF;
@@ -140,7 +149,7 @@ BEGIN
     END IF;
 
     IF i_sample_comments IS NOT NULL THEN
-        IF array_length(i_sample_comments, 1) IS NULL OR array_length(i_sample_comments, 2) IS NOT NULL THEN
+        IF array_length(i_sample_comments, 1) = none_represent OR array_length(i_sample_comments, 2) <> none_represent THEN
             RAISE EXCEPTION 'i_sample_comments array malformed'
             USING HINT = 'pass sample comments as TEXT[] literal, e.g. ''{comment 1, comment 2}''';
         ELSIF array_length(i_sample_infixes, 1) <> array_length(i_sample_comments, 1) THEN

@@ -1,3 +1,7 @@
+//
+// Created by w00427717 on 2021/11/30.
+//
+
 #ifndef OPENGAUSS_SERVER_OPENGAUSSCOMPRESSION_H
 #define OPENGAUSS_SERVER_OPENGAUSSCOMPRESSION_H
 #define FRONTEND 1
@@ -31,6 +35,7 @@ public:
     bool ReadChunkOfBlock(char* dst, size_t* dstLen, BlockNumber blockNumber);
     bool WriteBackCompressedData(char* source, size_t sourceLen, BlockNumber blockNumber);
     bool WriteBackUncompressedData();
+    void MarkCompressedDirty(char* source, size_t sourceLen);
     void MarkUncompressedDirty();
     BlockNumber GetMaxBlockNumber();
     char* GetPcdFilePath();

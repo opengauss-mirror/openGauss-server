@@ -329,7 +329,7 @@ static void PreDropForDfsTable(ObjectAddresses* targetObjects)
  * dropped, is the union of the implicit-object list for all objects.  This
  * makes each check be more relaxed.
  */
-void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behavior, uint32 flags)
+void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behavior, uint32 flags, bool isPkgDropTypes)
 {
     Relation depRel;
     ObjectAddresses* targetObjects = NULL;
@@ -395,7 +395,11 @@ void performMultipleDeletions(const ObjectAddresses* objects, DropBehavior behav
      * If there's exactly one object being deleted, report it the same way as
      * in performDeletion(), else we have to be vaguer.
      */
-    reportDependentObjects(targetObjects, behavior, NOTICE, (objects->numrefs == 1 ? objects->refs : NULL));
+    if (isPkgDropTypes) {
+        reportDependentObjects(targetObjects, behavior, INFO, ((objects->numrefs == 1) ? objects->refs : NULL));
+    } else {
+        reportDependentObjects(targetObjects, behavior, NOTICE, ((objects->numrefs == 1) ? objects->refs : NULL));
+    }
 
     /*
      * Don't allow "drop DFS table" to run inside a transaction block.
@@ -1184,7 +1188,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
                  */
                 if (relKind == RELKIND_RELATION)
                     isTmpTable = IsTempTable(object->objectId);
-                else if (relKind == RELKIND_SEQUENCE) {
+                else if (RELKIND_IS_SEQUENCE(relKind)) {
                     isTmpSequence = IsTempSequence(object->objectId);
                     /*
                      * A relation is opened to get the schema and database name as
@@ -1234,6 +1238,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
              */
             switch (relKind) {
                 case RELKIND_SEQUENCE:
+                case RELKIND_LARGE_SEQUENCE:
                     /*
                      * Drop the sequence on GTM.
                      * Sequence is dropped on GTM by a remote Coordinator only
@@ -1442,7 +1447,7 @@ static void doDeletion(const ObjectAddress* object, int flags)
             break;
 
         case OCLASS_PG_JOB:
-            remove_job_by_oid(NULL, RelOid, true, object->objectId);
+            remove_job_by_oid(object->objectId, RelOid, true);
             break;
 
         case OCLASS_SYNONYM:
@@ -3203,6 +3208,9 @@ static void getRelationDescription(StringInfo buffer, Oid relid)
             break;
         case RELKIND_SEQUENCE:
             appendStringInfo(buffer, _("sequence %s"), relname);
+            break;
+        case RELKIND_LARGE_SEQUENCE:
+            appendStringInfo(buffer, _("large sequence %s"), relname);
             break;
         case RELKIND_TOASTVALUE:
             appendStringInfo(buffer, _("toast table %s"), relname);

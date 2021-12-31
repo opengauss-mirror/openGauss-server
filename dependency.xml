@@ -6,6 +6,7 @@
     <id>
         <offering>${offering}</offering>
         <version>${BVersion}</version>
+        <snapshot>Y</snapshot>
     </id>
     <isClear>Y</isClear>
     <copies>
@@ -14,7 +15,7 @@
             <DEL></DEL>
         </copy>
     </copies>
-	</artifact>
+    </artifact>
     <dependencies>
        <dependency>
             <versionType>BVersion</versionType>
@@ -36,14 +37,13 @@
             <repoType>Generic</repoType>
             <id>
                 <offering>DOPRA SSP</offering>
-                <version>DOPRA SSP V300R005C10SPC102B500</version>
+                <version>DOPRA SSP V300R021C00SPC020B100</version>
             </id>
             <isClear>Y</isClear>
             <copies>
                 <copy>
                     <source></source>
                     <dest></dest>
-                    <DEL>Y</DEL>
                 </copy>
             </copies>
        </dependency>
@@ -51,8 +51,23 @@
             <versionType>BVersion</versionType>
             <repoType>Generic</repoType>
             <id>
-                <offering>Huawei JDK</offering>
-                <version>Huawei_JDK_V100R001C00SPC290B001</version>
+                <offering>Cloud Compiler JDK</offering>
+                <version>Cloud Compiler JDK V100R003C30SPC300B001</version>
+            </id>
+            <isClear>Y</isClear>
+            <copies>
+                <copy>
+                    <source></source>
+                    <dest></dest>
+                </copy>
+            </copies>
+       </dependency>
+       <dependency>
+            <versionType>BVersion</versionType>
+            <repoType>Generic</repoType>
+            <id>
+                <offering>KMC</offering>
+                <version>KMC 21.0.0.B003</version>
             </id>
             <isClear>Y</isClear>
             <copies>

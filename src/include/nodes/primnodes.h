@@ -10,6 +10,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/nodes/primnodes.h
  *
@@ -80,12 +81,14 @@ typedef struct RangeVar {
     char* schemaname;    /* the schema name, or NULL */
     char* relname;       /* the relation/sequence name */
     char* partitionname; /* partition name, if is a partition */
+    char* subpartitionname; /* partition name, if is a subpartition */
     InhOption inhOpt;    /* expand rel by inheritance? recursively act
                           * on children? */
     char relpersistence; /* see RELPERSISTENCE_* in pg_class.h */
     Alias* alias;        /* table alias & optional column aliases */
     int location;        /* token location, or -1 if unknown */
     bool ispartition;    /* for partition action */
+    bool issubpartition;    /* for subpartition action */
     List* partitionKeyValuesList;
     bool isbucket;       /* is the RangeVar means a hash bucket id ? */
     List* buckets;       /* the corresponding bucketid list */
@@ -232,6 +235,8 @@ typedef struct Param {
     int32 paramtypmod;   /* typmod value, if known */
     Oid paramcollid;     /* OID of collation, or InvalidOid if none */
     int location;        /* token location, or -1 if unknown */
+    Oid tableOfIndexType; /* type Oid of table of */
+    Oid recordVarTypOid; /* package record var's composite type oid */
 } Param;
 
 /*
@@ -1025,8 +1030,16 @@ typedef struct XmlExpr {
  * NullTest represents the operation of testing a value for NULLness.
  * The appropriate test is performed and returned as a boolean Datum.
  *
- * NOTE: the semantics of this for rowtype inputs are noticeably different
- * from the scalar case.  We provide an "argisrow" flag to reflect that.
+ * When argisrow is false, this simply represents a test for the null value.
+ *
+ * When argisrow is true, the input expression must yield a rowtype, and
+ * the node implements "row IS [NOT] NULL" per the SQL standard.  This
+ * includes checking individual fields for NULLness when the row datum
+ * itself isn't NULL.
+ *
+ * NOTE: the combination of a rowtype input and argisrow==false does NOT
+ * correspond to the SQL notation "row IS [NOT] NULL"; instead, this case
+ * represents the SQL notation "row IS [NOT] DISTINCT FROM NULL".
  * ----------------
  */
 typedef enum NullTestType { IS_NULL, IS_NOT_NULL } NullTestType;
@@ -1035,7 +1048,7 @@ typedef struct NullTest {
     Expr xpr;
     Expr* arg;                 /* input expression */
     NullTestType nulltesttype; /* IS NULL, IS NOT NULL */
-    bool argisrow;             /* T if input is of a composite type */
+    bool argisrow;             /* T to perform field-by-field null checks */
 } NullTest;
 
 /*
@@ -1219,6 +1232,13 @@ typedef struct TargetEntry {
                             * final target list */
 } TargetEntry;
 
+/* mainly support Start with */
+typedef struct PseudoTargetEntry {
+    NodeTag      type;
+    TargetEntry *tle;
+    TargetEntry *srctle;
+} PseudoTargetEntry;
+
 /* ----------------------------------------------------------------
  *					node types for join trees
  *
@@ -1400,7 +1420,6 @@ typedef struct UpsertExpr {
     List* updateTlist;        /* List of UPDATE TargetEntrys */
     List* exclRelTlist;       /* tlist of the 'EXCLUDED' pseudo relation */
     int exclRelIndex;        /* RT index of 'EXCLUDED' relation */
-    bool partKeyUpsert;      /* we allow upsert index key and partition key in B_FORMAT */
 } UpsertExpr;
 
 /*

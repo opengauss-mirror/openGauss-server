@@ -7,6 +7,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/nodes/nodes.h
  *
@@ -50,6 +51,7 @@ typedef enum NodeTag {
     T_PartIterator,
     T_MergeAppend,
     T_RecursiveUnion,
+    T_StartWithOp,
     T_BitmapAnd,
     T_BitmapOr,
     T_Scan,
@@ -114,6 +116,7 @@ typedef enum NodeTag {
     T_PartIteratorParam,
     T_PlanRowMark,
     T_PlanInvalItem,
+    T_FuncInvalItem,
     /* TAGS FOR POLICY LABEL */
     T_PolicyFilterNode,
     T_CreatePolicyLabelStmt,
@@ -144,6 +147,7 @@ typedef enum NodeTag {
     T_PartIteratorState,
     T_MergeAppendState,
     T_RecursiveUnionState,
+    T_StartWithOpState,
     T_BitmapAndState,
     T_BitmapOrState,
     T_ScanState,
@@ -241,6 +245,7 @@ typedef enum NodeTag {
     T_HashFilter,
     T_EstSPNode,
     T_Rownum,
+    T_PseudoTargetEntry,
 
     /*
      * TAGS FOR EXPRESSION STATE NODES (execnodes.h)
@@ -456,6 +461,7 @@ typedef enum NodeTag {
     T_DropOwnedStmt,
     T_ReassignOwnedStmt,
     T_CompositeTypeStmt,
+    T_TableOfTypeStmt,
     T_CreateEnumStmt,
     T_CreateRangeStmt,
     T_AlterEnumStmt,
@@ -541,11 +547,23 @@ typedef enum NodeTag {
     T_XmlSerialize,
     T_WithClause,
     T_CommonTableExpr,
+    T_StartWithOptions,
     T_PruningResult,
+    T_SubPartitionPruningResult,
     T_Position,
+    T_LoadWhenExpr,
     T_MergeWhenClause,
 	T_UpsertClause,
 	T_CopyColExpr,
+    T_StartWithClause,
+    T_StartWithTargetRelInfo,
+    T_StartWithInfo,
+    T_SqlLoadColPosInfo,
+    T_SqlLoadScalarSpec,
+    T_SqlLoadSequInfo,
+    T_SqlLoadFillerInfo,
+    T_SqlLoadConsInfo,
+    T_SqlLoadColExpr,
     /*
      * TAGS FOR REPLICATION GRAMMAR PARSE NODES (replnodes.h)
      */
@@ -572,7 +590,7 @@ typedef enum NodeTag {
      * purposes (usually because they are involved in APIs where we want to
      * pass multiple object types through the same pointer).
      */
-    T_TriggerData = 960, /* in commands/trigger.h */
+    T_TriggerData = 970, /* in commands/trigger.h */
     T_ReturnSetInfo,     /* in nodes/execnodes.h */
     T_WindowObjectData,  /* private in nodeWindowAgg.c */
     T_TIDBitmap,         /* in nodes/tidbitmap.h */

@@ -151,7 +151,6 @@ private:
 
     static bool get_column_names_from_target_list(const List *target_list, CStringsMap *col_alias_map,
         StatementData *statement_data);
-    static bool process_clause_value(StatementData *statement_data);
     static bool run_pre_select_target_list(List *targetList, StatementData *statementData,
         ExprPartsList *funcExprPartsList);
     static bool process_res_target(ResTarget *resTarget, StatementData *statementData,

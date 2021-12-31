@@ -62,7 +62,8 @@ typedef enum LightUnSupportType {
     FOREIGN_UNSUPPORT,
     STATEMENT_UNSUPPORT,
     USERTYPE_UNSUPPORT,
-    MAX_UNSUPPORT_TYPE
+    NODE_NAME_UNSUPPORT,
+    MAX_UNSUPPORT_TYPE,
 } LightUnSupportType;
 
 /* like in RemoteQueryState */

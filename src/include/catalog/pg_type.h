@@ -7,6 +7,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/catalog/pg_type.h
  *
@@ -50,9 +51,9 @@ CATALOG(pg_type,1247) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71) BKI_SCHEMA_MACRO
 	int2		typlen;
 
 	/*
-	 * typbyval determines whether internal openGauss routines pass a value of
-	 * this type by value or by reference.	typbyval had better be FALSE if
-	 * the length is not 1, 2, or 4 (or 8 on 8-byte-Datum machines).
+     * typbyval determines whether internal openGauss routines pass a value of
+     * this type by value or by reference.  typbyval had better be FALSE if
+     * the length is not 1, 2, or 4 (or 8 on 8-byte-Datum machines).
 	 * Variable-length types are always passed by reference. Note that
 	 * typbyval can be false even if the length would allow pass-by-value;
 	 * this is currently true for type float4, for example.
@@ -65,6 +66,7 @@ CATALOG(pg_type,1247) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71) BKI_SCHEMA_MACRO
 	 * pseudo-type, or 'r' for a range type. (Use the TYPTYPE macros below.)
 	 *
 	 * If typtype is 'c', typrelid is the OID of the class' entry in pg_class.
+	 * typtype is 'o' for a table of type.
 	 */
 	char		typtype;
 
@@ -98,6 +100,8 @@ CATALOG(pg_type,1247) BKI_BOOTSTRAP BKI_ROWTYPE_OID(71) BKI_SCHEMA_MACRO
 	 * whether a type is a "true" array type is if:
 	 *
 	 * typelem != 0 and typlen == -1.
+	 * 
+	 * if typtype is 'o' (e.g table of A),  typelem means the Oid of A in pg_type
 	 */
 	Oid			typelem;
 
@@ -359,6 +363,10 @@ DATA(insert OID = 33 (	int2vector_extend PGNSP PGUID -1 f b A f t \054 0	21 1004
 DESCR("array of int2, used in system tables and support toast storage");
 #define INT2VECTOREXTENDOID	33
 
+DATA(insert OID = 34 (	int16	   PGNSP PGUID	16 f b N f t \054 0	 0 1234 int16in int16out int16recv int16send - - - d p f 0 -1 0 0 _null_ _null_ _null_ ));
+DESCR("~38 digit integer, 16-byte storage");
+#define INT16OID			34
+
 DATA(insert OID = 86 (	raw		PGNSP PGUID -1 f b U f t \054 0	0  87 rawin rawout rawrecv rawsend - - - i x f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("variable-length string, binary values escaped");
 #define RAWOID  86
@@ -576,6 +584,8 @@ DATA(insert OID = 1187 ( _interval	 PGNSP PGUID	-1 f b A f t \054 0 1186 0 array
 /* OIDS 1200 - 1299 */
 DATA(insert OID = 1231 (  _numeric	 PGNSP PGUID -1 f b A f t \054 0	1700 0 array_in array_out array_recv array_send numerictypmodin numerictypmodout array_typanalyze i x f 0 -1 0 0 _null_ _null_ _null_ ));
 #define ARRAYNUMERICOID 1231
+DATA(insert OID = 1234 (  _int16	 PGNSP PGUID -1 f b A f t \054 0	34 0 array_in array_out array_recv array_send - - array_typanalyze d x f 0 -1 0 0 _null_ _null_ _null_ ));
+
 
 DATA(insert OID = 1266 ( timetz		 PGNSP PGUID 12 f b D f t \054 0	0 1270 timetz_in timetz_out timetz_recv timetz_send timetztypmodin timetztypmodout - d p f 0 -1 0 0 _null_ _null_ _null_ ));
 DESCR("time of day with time zone");
@@ -804,6 +814,7 @@ DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 ar
 #define  TYPTYPE_ENUM		'e' /* enumerated type */
 #define  TYPTYPE_PSEUDO		'p' /* pseudo-type */
 #define  TYPTYPE_RANGE		'r' /* range type */
+#define  TYPTYPE_TABLEOF    'o' /* table of type */
 
 #define  TYPCATEGORY_INVALID	'\0'	/* not an allowed category */
 #define  TYPCATEGORY_ARRAY		'A'
@@ -821,6 +832,8 @@ DATA(insert OID = 4407 ( _TdigestData		PGNSP PGUID -1 f b A f t \054 0 4406 0 ar
 #define  TYPCATEGORY_USER		'U'
 #define  TYPCATEGORY_BITSTRING	'V'		/* er ... "varbit"? */
 #define  TYPCATEGORY_UNKNOWN	'X'
+#define  TYPCATEGORY_TABLEOF    'O'     /* table of type, index by int */
+#define  TYPCATEGORY_TABLEOF_VARCHAR  'Q' /* table of type, index by varchar */
 
 /* Is a type OID a polymorphic pseudotype?	(Beware of multiple evaluation) */
 #define IsPolymorphicType(typid)  \

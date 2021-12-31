@@ -137,6 +137,24 @@ partition p8 values less than (maxvalue)
 
 set enable_hashagg = off;
 explain (costs off)
+with s1 as materialized (
+	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
+),
+s2 as materialized (
+	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
+)
+select
+	a1, sum(total) total
+from(
+	select * from s1
+	union all
+	select * from s2
+) tmp1
+group by a1
+order by a1
+;
+
+explain (costs off)
 with s1 as(
 	select a1, sum(b1) total from smp_mergeappend1 join smp_mergeappend2 on a1 = a2 group by a1
 ),

@@ -7,6 +7,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -34,6 +35,8 @@
 #include "catalog/pg_directory.h"
 #include "catalog/pg_job.h"
 #include "catalog/pg_job_proc.h"
+#include "catalog/gs_job_argument.h"
+#include "catalog/gs_job_attribute.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_obsscaninfo.h"
 #include "catalog/pg_pltemplate.h"
@@ -66,6 +69,7 @@
 #include "storage/smgr/fd.h"
 #include "storage/smgr/segment.h"
 #include "utils/fmgroids.h"
+#include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"
 #include "utils/snapmgr.h"
@@ -637,7 +641,7 @@ bool IsSystemClass(Form_pg_class reltuple)
 {
     Oid relnamespace = reltuple->relnamespace;
 
-    return IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace);
+    return IsSystemNamespace(relnamespace) || IsToastNamespace(relnamespace) || IsPackageSchemaOid(relnamespace);
 }
 
 /*
@@ -846,9 +850,10 @@ bool IsSharedRelation(Oid relationId)
         relationId == DbRoleSettingDatidRolidIndexId ||
         /* Add job system table indexs */
         relationId == PgJobOidIndexId || relationId == PgJobIdIndexId || relationId == PgJobProcOidIndexId ||
-        relationId == PgJobProcIdIndexId || relationId == DataSourceOidIndexId || relationId == DataSourceNameIndexId ||
-        relationId == SubscriptionObjectIndexId || relationId == SubscriptionNameIndexId ||
-        relationId == ReplicationOriginIdentIndex || relationId == ReplicationOriginNameIndex)
+        relationId == PgJobProcIdIndexId || relationId == DataSourceOidIndexId ||
+        relationId == DataSourceNameIndexId || relationId == SubscriptionObjectIndexId ||
+        relationId == SubscriptionNameIndexId || relationId == ReplicationOriginIdentIndex ||
+        relationId == ReplicationOriginNameIndex)
         return true;
     /* These are their toast tables and toast indexes (see toasting.h) */
     if (relationId == PgShdescriptionToastTable || relationId == PgShdescriptionToastIndex ||
@@ -940,23 +945,29 @@ Oid GetNewOidWithIndex(Relation relation, Oid indexId, AttrNumber oidcolumn)
     Oid newOid;
     SysScanDesc scan;
     ScanKeyData key;
+    Snapshot snapshot;
+    SnapshotData snapshotDirty;
     bool collides = false;
+    bool isToastRel = IsToastNamespace(RelationGetNamespace(relation));
+
+    InitDirtySnapshot(snapshotDirty);
+
+    /*
+     * See notes in GetNewOid about using SnapshotAny.
+     * Exception: SnapshotDirty is used for upgrading non-TOAST catalog rels, because the time qual used
+     * for catalogs is SnapshotNow, rather than MVCC or SnapshotToast.
+     */
+    snapshot = (u_sess->attr.attr_common.IsInplaceUpgrade && !isToastRel) ? &snapshotDirty : SnapshotAny;
 
     /* Generate new OIDs until we find one not in the table */
     do {
         CHECK_FOR_INTERRUPTS();
 
-        /*
-         * See comments in GetNewObjectId.
-         * In the future, we might turn to SnapshotToast when getting new
-         * chunk_id for toast datum to prevent wrap around.
-         */
-        newOid = GetNewObjectId(IsToastNamespace(RelationGetNamespace(relation)));
+        newOid = GetNewObjectId(isToastRel);
 
         ScanKeyInit(&key, oidcolumn, BTEqualStrategyNumber, F_OIDEQ, ObjectIdGetDatum(newOid));
 
-        /* see notes above about using SnapshotAny */
-        scan = systable_beginscan(relation, indexId, true, SnapshotAny, 1, &key);
+        scan = systable_beginscan(relation, indexId, true, snapshot, 1, &key);
 
         collides = HeapTupleIsValid(systable_getnext(scan));
 
@@ -1060,4 +1071,58 @@ Oid GetNewRelFileNode(Oid reltablespace, Relation pg_class, char relpersistence)
     } while (collides);
 
     return rnode.node.relNode;
+}
+
+bool IsPackageSchemaOid(Oid relnamespace)
+{
+    const char* packageSchemaList[] = {
+        "dbe_lob",
+        "dbe_random",
+        "dbe_output",
+        "dbe_raw",
+        "dbe_task",
+        "dbe_scheduler",
+        "dbe_sql",
+        "dbe_file",
+        "pkg_service",
+        "pkg_util",
+        "dbe_match",
+        "dbe_perf",
+        "dbe_session"
+    };
+    int schemaNum = 10;
+    char* schemaName = get_namespace_name(relnamespace);
+    if (schemaName == NULL) {
+        return false;
+    }
+    for (int i = 0; i < schemaNum; ++i) {
+        if (strcmp(schemaName, packageSchemaList[i]) == 0) {
+            pfree_ext(schemaName);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsPackageSchemaName(const char* schemaName)
+{
+    const char* packageSchemaList[] = {
+        "dbe_lob",
+        "dbe_random",
+        "dbe_output",
+        "dbe_raw",
+        "dbe_task",
+        "dbe_scheduler",
+        "dbe_sql",
+        "dbe_file",
+        "pkg_service",
+        "pkg_util"
+    };
+    int schemaNum = 10;
+    for (int i = 0; i < schemaNum; ++i) {
+        if (strcmp(schemaName, packageSchemaList[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
 }

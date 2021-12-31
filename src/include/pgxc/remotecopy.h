@@ -5,6 +5,7 @@
  *
  *
  * Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -71,7 +72,7 @@ typedef struct RemoteCopyOptions {
     char* rco_timestamp_format;        /* customed timestamp format */
     char* rco_smalldatetime_format;    /* customed smalldatetime format */
     bool rco_compatible_illegal_chars; /* compatible illegal chars conversion flag */
-    bool rco_fill_missing_fields;      /* fill missing fields */
+    int rco_fill_missing_fields;       /* 0 off;1 Compatible with the original copy; -1 trailing nullcols */
     const char *transform_query_string;      /* source sql string for copy */
 } RemoteCopyOptions;
 

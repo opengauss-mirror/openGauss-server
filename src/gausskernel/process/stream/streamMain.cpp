@@ -39,6 +39,7 @@
 #include "storage/ipc.h"
 #include "storage/pmsignal.h"
 #include "storage/proc.h"
+#include "storage/procarray.h"
 #include "tcop/tcopprot.h"
 #include "threadpool/threadpool.h"
 #include "utils/memtrack.h"
@@ -91,8 +92,6 @@ int StreamMain()
         if (g_threadPoolControler) {
             g_threadPoolControler->GetSessionCtrl()->releaseLockIfNecessary();
         }
-        /* reset STP thread local valueables */
-        stp_reset_opt_values();
 
         gstrace_tryblock_exit(true, oldTryCounter);
         HandleStreamSigjmp();
@@ -323,6 +322,9 @@ static void HandleStreamSigjmp()
 
     /* Since not using PG_TRY, must reset error stack by hand */
     t_thrd.log_cxt.error_context_stack = NULL;
+
+    t_thrd.log_cxt.call_stack = NULL;
+    
     /* reset buffer strategy flag */
     t_thrd.storage_cxt.is_btree_split = false;
     
@@ -699,6 +701,9 @@ ThreadId ApplyStreamThread(StreamProducer *producer)
                    producer->getKey().smpIdentifier);
     } else {
         producer->setChildSlot(AssignPostmasterChildSlot());
+        if (producer->getChildSlot() == -1) {
+            return InvalidTid;
+        }
         tid = initialize_util_thread(STREAM_WORKER, producer);
     }
 
@@ -757,6 +762,8 @@ void StreamExit()
     if (t_thrd.proc_cxt.MyBackendId != InvalidBackendId) {
         release_statement_context(t_thrd.shemem_ptr_cxt.MyBEEntry, __FUNCTION__, __LINE__);
     }
+    /* When the stream session ends, the user count decreases by one. */
+    DecreaseUserCount(u_sess->proc_cxt.MyRoleId);
 
     free_session_context(u_sess);
 }

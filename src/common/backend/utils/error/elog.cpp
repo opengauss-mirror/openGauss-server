@@ -45,6 +45,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -284,6 +285,9 @@ bool errstart(int elevel, const char* filename, int lineno, const char* funcname
          */
         for (i = 0; i <= t_thrd.log_cxt.errordata_stack_depth; i++)
             elevel = Max(elevel, t_thrd.log_cxt.errordata[i].elevel);
+        if (elevel == FATAL && t_thrd.role == JOB_WORKER) {
+            elevel = ERROR;
+        }
     }
 
     /*
@@ -2396,7 +2400,7 @@ static void log_line_prefix(StringInfo buf, ErrorData* edata)
                 appendStringInfo(buf, XID_FMT, GetTopTransactionIdIfAny());
                 break;
             case 'e':
-                appendStringInfoString(buf, unpack_sql_state(edata->sqlerrcode));
+                appendStringInfoString(buf, plpgsql_get_sqlstate(edata->sqlerrcode));
                 break;
             case 'n':
                 appendStringInfoString(buf, g_instance.attr.attr_common.PGXCNodeName);
@@ -2594,7 +2598,7 @@ static void write_csvlog(ErrorData* edata)
 
     /* SQL state code */
     /* @CSV_SCHMA@ sql_state text, @ */
-    appendStringInfoString(&buf, unpack_sql_state(edata->sqlerrcode));
+    appendStringInfoString(&buf, plpgsql_get_sqlstate(edata->sqlerrcode));
     appendStringInfoChar(&buf, ',');
 
     /* errmessage */
@@ -2729,6 +2733,16 @@ char* unpack_sql_state(int sql_state)
     return buf;
 }
 
+/* if sqlcode is init by the database, it must be positive; if is init by the user, then it must be negative */
+char *plpgsql_get_sqlstate(int sqlcode)
+{
+    if (sqlcode >= 0) {
+        return unpack_sql_state(sqlcode);
+    } else {
+        return plpgsql_code_int2cstring(sqlcode);
+    }
+}
+
 const char* mask_encrypted_key(const char *query_string, int str_len)
 {
     int mask_len = 8;
@@ -2859,7 +2873,7 @@ static void send_message_to_server_log(ErrorData* edata)
     }
 
     if (u_sess->attr.attr_common.Log_error_verbosity >= PGERROR_VERBOSE && !edata->hide_prefix)
-        appendStringInfo(&buf, "%s: ", unpack_sql_state(edata->sqlerrcode));
+        appendStringInfo(&buf, "%s: ", plpgsql_get_sqlstate(edata->sqlerrcode));
 
     if (edata->message) {
         append_with_tabs(&buf, edata->message);
@@ -4125,36 +4139,63 @@ static void tolower_func(char *convert_query)
     }
 }
 
+static void apply_funcs3_mask(char *string, char** end, char replace)
+{
+    errno_t rc = EOK;
+    if (*end == NULL || **end == '\0') {
+        return;
+    }
+    char *start = *end;
+
+    /* find '=' in param: field  ^=   123abc */
+    while (**end != '=' && **end != '\0') {
+        (*end)++;
+    }
+    if (**end != '=') {
+        return;
+    }
+    (*end)++;
+
+    /* find start of value in param: field  =   ^123abc */
+    while (**end == ' ') {
+        (*end)++;
+    }
+    if (**end == '\0') {
+        return;
+    }
+    start = *end;
+    (*end)++;
+
+    /* find end of value in param: field  =   123abc^ */
+    while (**end != ' ' && **end != '\0') {
+        (*end)++;
+    }
+    size_t param_len = *end - start;
+    Assert(param_len < strlen(string));
+    /*
+     * replace value with '*': field  =   ****** ...
+     *                                   ^      ^
+     *                                 start   end
+     */
+    rc = memset_s(start, param_len, replace, param_len);
+    securec_check_c(rc, "\0", "\0");
+}
+
 char* mask_funcs3_parameters(const char* query_string)
 {
-    char* start = NULL;
-    int len_start = 0;
-    int j = 0;
-    errno_t rc = EOK;
-    const char* funcs3Mask[] = {"accesskey=", "secretkey="};
+    const char* funcs3Mask[] = {"accesskey", "secretkey"};
     int funcs3MaskNum =  sizeof(funcs3Mask) / sizeof(funcs3Mask[0]);
-    char* mask_string = MemoryContextStrdup(
-        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), query_string);
+    char* mask_string = MemoryContextStrdup(SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_STORAGE), query_string);
     for (int i = 0; i < funcs3MaskNum; i++) {
-        start = mask_string;
+        char *start = mask_string;
         while ((start = strstr(start, funcs3Mask[i])) != NULL) {
-            start = start + strlen(funcs3Mask[i]);
-            len_start = strlen(start);
-            for (j = 0; j < len_start; j++) {
-                if (start[j] == '\0' || start[j] == ' ')
-                    break;
-            }
-            if (j > 0) {
-                rc = memset_s(start, len_start, '*', j);
-                securec_check(rc, "\0", "\0");
-            } else {
-                /* nothing to replace */
-                break;
-            }
+            /* take the original string and replace the key value with '*' */
+            apply_funcs3_mask(mask_string, &start, '*');
         }
     }
     return mask_string;
 }
+
 /*
  * Mask the password in statment CREATE ROLE, CREATE USER, ALTER ROLE, ALTER USER, CREATE GROUP
  * SET ROLE, CREATE DATABASE LINK, and some function
@@ -4181,7 +4222,7 @@ static char* mask_Password_internal(const char* query_string)
     int truncateLen = 0; /* accumulate total length for each truncate */
 
     /* the functions need to mask all contents */
-    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128","gs_encrypt", "gs_decrypt"};
+    const char* funCrypt[] = {"gs_encrypt_aes128", "gs_decrypt_aes128", "gs_encrypt", "gs_decrypt"};
     int funCryptNum = sizeof(funCrypt) / sizeof(funCrypt[0]);
     bool isCryptFunc = false;
 
@@ -4274,13 +4315,10 @@ static char* mask_Password_internal(const char* query_string)
                             mask_string = MemoryContextStrdup(
                                 SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_SECURITY), query_string);
                         }
-                        if (unlikely(yyextra.literallen != (int)strlen(childStmt))) {
-                            ereport(ERROR,
-                                (errcode(ERRCODE_SYNTAX_ERROR), errmsg("parse error on statement %s.", childStmt)));
-                        }
-                        rc = memcpy_s(mask_string + yylloc + 1, yyextra.literallen, childStmt, yyextra.literallen);
+
+                        rc = memcpy_s(mask_string + yylloc + 1, yyextra.literallen, childStmt, strlen(childStmt));
                         securec_check(rc, "\0", "\0");
-                        rc = memset_s(childStmt, yyextra.literallen, 0, yyextra.literallen);
+                        rc = memset_s(childStmt, strlen(childStmt), 0, strlen(childStmt));
                         securec_check(rc, "", "");
                         pfree(childStmt);
                     }
@@ -4296,7 +4334,9 @@ static char* mask_Password_internal(const char* query_string)
             if (curStmtType > 0 && curStmtType != 12 && curStmtType != 13 && curStmtType != 14 && curStmtType != 15 &&
                 (currToken == SCONST || currToken == IDENT)) {
                 if (unlikely(yylloc >= (int)strlen(query_string))) {
-                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("parse error on query %s.", query_string)));
+                    ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR),
+                        errmsg("current index (%d) out of length of query string (%lu).",
+                        yylloc, strlen(query_string))));
                 }
                 char ch = query_string[yylloc];
                 position[idx] = yylloc;

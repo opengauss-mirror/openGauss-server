@@ -43,7 +43,7 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
     new_query = NULL;
     new_query_size = other.new_query_size;
     if (other.new_query != NULL && other.new_query_size > 0) {
-        new_query = (char *)malloc(new_query_size + 1);
+        new_query = (char *)calloc(new_query_size + 1, sizeof(char));
         if (new_query == NULL) {
             printf("out of memory\n");
             exit(EXIT_FAILURE);
@@ -52,7 +52,7 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
         new_query[new_query_size] = '\0';
     }
     if (other.nParams && other.copy_sizes) {
-        copy_sizes = (size_t *)malloc(other.nParams * sizeof(size_t));
+        copy_sizes = (size_t *)calloc(other.nParams, sizeof(size_t));
         if (copy_sizes == NULL) {
             printf("out of memory\n");
             exit(EXIT_FAILURE);
@@ -61,14 +61,14 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
             memcpy_s(copy_sizes, nParams * sizeof(size_t), other.copy_sizes, other.nParams * sizeof(size_t)));
     }
     if (other.new_param_values) {
-        new_param_values = (unsigned char **)malloc(other.nParams * sizeof(unsigned char *));
+        new_param_values = (unsigned char **)calloc(other.nParams, sizeof(unsigned char *));
         if (new_param_values == NULL) {
             printf("out of memory\n");
             exit(EXIT_FAILURE);
         }
         for (size_t i = 0; i < other.nParams; ++i) {
             if (copy_sizes != NULL && copy_sizes[i]) {
-                new_param_values[i] = (unsigned char *)malloc(other.copy_sizes[i] * sizeof(unsigned char));
+                new_param_values[i] = (unsigned char *)calloc(other.copy_sizes[i], sizeof(unsigned char));
                 if (new_param_values[i] == NULL) {
                     printf("out of memory\n");
                     exit(EXIT_FAILURE);
@@ -81,7 +81,7 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
         }
     }
     if (other.adjusted_paramTypes) {
-        adjusted_paramTypes = (Oid *)malloc(other.nParams * sizeof(Oid));
+        adjusted_paramTypes = (Oid *)calloc(other.nParams, sizeof(Oid));
         if (adjusted_paramTypes == NULL) {
             printf("out of memory\n");
             exit(EXIT_FAILURE);
@@ -90,7 +90,7 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
             other.nParams * sizeof(Oid)));
     }
     if (other.adjusted_param_lengths) {
-        adjusted_param_lengths = (int *)malloc(other.nParams * sizeof(int));
+        adjusted_param_lengths = (int *)calloc(other.nParams, sizeof(int));
         if (adjusted_param_lengths == NULL) {
             printf("out of memory\n");
             exit(EXIT_FAILURE);
@@ -103,9 +103,7 @@ void PGClientLogicParams::init(const PGClientLogicParams &other)
 PGClientLogicParams::~PGClientLogicParams()
 {
     for (size_t i = 0; i < nParams; i++) {
-        if (copy_sizes[i]) {
-            libpq_free(new_param_values[i]);
-        }
+        libpq_free(new_param_values[i]);
     }
     libpq_free(new_param_values);
     libpq_free(copy_sizes);

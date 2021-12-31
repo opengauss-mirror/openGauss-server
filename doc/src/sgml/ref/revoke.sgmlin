@@ -51,7 +51,7 @@ REVOKE [ GRANT OPTION FOR ]
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT ];
 REVOKE [ GRANT OPTION FOR ]
-    { { READ | WRITE } [, ...] | ALL [ PRIVILEGES ] }
+    { { READ | WRITE | ALTER | DROP } [, ...] | ALL [ PRIVILEGES ] }
     ON DIRECTORY directory_name [, ...]
     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
     [ CASCADE | RESTRICT ];
@@ -104,10 +104,6 @@ REVOKE [ GRANT OPTION FOR ]
 REVOKE [ GRANT OPTION FOR ]
     { USAGE | ALL [ PRIVILEGES ] }
     ON DATA SOURCE src_name [, ...]
-    FROM { [GROUP] role_name | PUBLIC } [, ...];
-REVOKE [ GRANT OPTION FOR ]
-    { { READ | WRITE } [, ...] | ALL [ PRIVILEGES ] }
-    ON DIRECTORY directory_name [, ...]
     FROM { [GROUP] role_name | PUBLIC } [, ...];
 REVOKE [ GRANT OPTION FOR ]
     { { EXECUTE | ALTER | DROP | COMMENT } [, ...] | ALL [ PRIVILEGES ] }

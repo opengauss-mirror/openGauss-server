@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -28,6 +29,7 @@
 #include "access/tupdesc.h"
 #include "nodes/bitmapset.h"
 #include "utils/relcache.h"
+#include "utils/oidrbtree.h"
 
 #define PARTITIONTYPE(partition) (partition->pd_part->parttype)
 
@@ -36,6 +38,8 @@
 #define PartitionIsToastTable(partition) (PART_OBJ_TYPE_TOAST_TABLE == (partition)->pd_part->parttype)
 
 #define PartitionIsTablePartition(partition) (PART_OBJ_TYPE_TABLE_PARTITION == (partition)->pd_part->parttype)
+
+#define PartitionIsTableSubPartition(partition) (PART_OBJ_TYPE_TABLE_SUB_PARTITION == (partition)->pd_part->parttype)
 
 #define PartitionIsBucket(partition) \
     ((partition)->pd_node.bucketNode > InvalidBktId && (partition)->pd_node.bucketNode < SegmentBktId)
@@ -96,9 +100,9 @@ extern bool PartitionInvisibleMetadataKeep(Datum datumRelOptions);
 extern bool PartitionParentOidIsLive(Datum parentDatum);
 extern void PartitionedSetEnabledClean(Oid parentOid);
 extern void PartitionSetEnabledClean(
-    Oid parentOid, const Bitmapset* cleanedParts, const Bitmapset* invisibleParts, bool updatePartitioned);
+    Oid parentOid, OidRBTree* cleanedParts, OidRBTree* invisibleParts, bool updatePartitioned);
 extern void PartitionSetAllEnabledClean(Oid parentOid);
-extern void PartitionGetAllInvisibleParts(Oid parentOid, Bitmapset** invisibleParts);
+extern void PartitionGetAllInvisibleParts(Oid parentOid, OidRBTree** invisibleParts);
 extern bool PartitionMetadataDisabledClean(Relation pgPartition);
 
 #endif /* RELCACHE_H */

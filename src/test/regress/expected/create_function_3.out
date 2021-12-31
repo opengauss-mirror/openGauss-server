@@ -247,6 +247,15 @@ SELECT proname, prorettype::regtype, proargtypes::regtype[]
  float8le                              | boolean    | [0:1]={"double precision","double precision"}
  float8lt                              | boolean    | [0:1]={"double precision","double precision"}
  float8ne                              | boolean    | [0:1]={"double precision","double precision"}
+ int16eq                               | boolean    | [0:1]={int16,int16}
+ int16ge                               | boolean    | [0:1]={int16,int16}
+ int16gt                               | boolean    | [0:1]={int16,int16}
+ int16le                               | boolean    | [0:1]={int16,int16}
+ int16lt                               | boolean    | [0:1]={int16,int16}
+ int16mi                               | int16      | [0:1]={int16,int16}
+ int16mul                              | int16      | [0:1]={int16,int16}
+ int16ne                               | boolean    | [0:1]={int16,int16}
+ int16pl                               | int16      | [0:1]={int16,int16}
  int1eq                                | boolean    | [0:1]={tinyint,tinyint}
  int1ge                                | boolean    | [0:1]={tinyint,tinyint}
  int1gt                                | boolean    | [0:1]={tinyint,tinyint}
@@ -415,7 +424,7 @@ SELECT proname, prorettype::regtype, proargtypes::regtype[]
  xideq4                                | boolean    | [0:1]={xid32,xid32}
  xidlt                                 | boolean    | [0:1]={xid,xid}
  xidlt4                                | boolean    | [0:1]={xid32,xid32}
-(249 rows)
+(258 rows)
 
 --
 -- CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT

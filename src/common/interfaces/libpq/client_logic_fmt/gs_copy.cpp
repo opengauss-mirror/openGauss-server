@@ -1658,8 +1658,9 @@ static bool deprocess_and_replace(PGconn *conn, PreparedStatement *entry, const 
 
     unsigned char *plaintext = NULL;
     size_t plaintext_len;
+    ProcessStatus process_status = ONLY_VALUE;
     if (ValuesProcessor::deprocess_value(conn, (const unsigned char *)processed_bytea, processed_bytea_size,
-        entry->original_data_types_oids[entry->copy_state->fieldno], 0, &plaintext, plaintext_len, false) == 
+        entry->original_data_types_oids[entry->copy_state->fieldno], 0, &plaintext, plaintext_len, process_status) == 
         DEC_DATA_SUCCEED) {
         size_t escaped_size = 0;
         char *escaped = escape_and_quote(conn, entry, plaintext, is_quoted, &escaped_size);

@@ -54,36 +54,26 @@ extern bool IsBgwriterProcess(void);
 /* incremental checkpoint bgwriter thread */
 const int INCRE_CKPT_BGWRITER_VIEW_COL_NUM = 6;
 extern const incre_ckpt_view_col g_bgwriter_view_col[INCRE_CKPT_BGWRITER_VIEW_COL_NUM];
-extern void candidate_buf_init(void);
-extern void incre_ckpt_bgwriter_cxt_init();
-extern void incre_ckpt_background_writer_main(void);
+
 extern void invalid_buffer_bgwriter_main();
 extern void ckpt_shutdown_bgwriter();
-extern int get_bgwriter_thread_id(void);
-extern bool candidate_buf_pop(int *bufId, int threadId);
-extern uint32 get_curr_candidate_nums(bool segment);
 extern HTAB* relfilenode_hashtbl_create(const char* name, bool use_heap_mem);
-
-
-typedef struct BgWriterProc {
-    PGPROC *proc;
-    CkptSortItem *dirty_buf_list;
-    uint32 dirty_list_size;
-    int *cand_buf_list;   /* thread candidate buffer list */
-    volatile int cand_list_size;     /* thread candidate list max size */
-    volatile int buf_id_start;     /* buffer id start loc */
-    pg_atomic_uint64 head;
-    pg_atomic_uint64 tail;
-    bool need_flush;
-    ThrdDwCxt thrd_dw_cxt;         /* thread double writer cxt */
-    volatile uint32 thread_last_flush;
-    int32 next_scan_loc;
-} BgWriterProc;
+extern HTAB *relfilenode_fork_hashtbl_create(const char* name, bool use_heap_mem);
 
 typedef struct DelFileTag {
     RelFileNode rnode;
     int32 maxSegNo;
 } DelFileTag;
+
+typedef struct ForkRelFileNode {
+    RelFileNode rnode; /* physical relation identifier */
+    ForkNumber forkNum;
+} ForkRelFileNode;
+
+typedef struct DelForkFileTag {
+    ForkRelFileNode forkrnode;
+    int32 maxSegNo;
+} DelForkFileTag;
 
 #endif /* _BGWRITER_H */
 

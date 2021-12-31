@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -21,6 +22,7 @@
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
+#include "catalog/gs_package.h"
 #include "catalog/pg_authid.h"
 #include "catalog/pg_collation.h"
 #include "catalog/pg_conversion.h"
@@ -155,6 +157,42 @@ void recordDependencyOnOwner(Oid classId, Oid objectId, Oid owner, const char* o
     referenced.objectSubId = 0;
 
     recordSharedDependencyOn(&myself, &referenced, SHARED_DEPENDENCY_OWNER, objfile);
+}
+
+/*
+ * recordDependencyOnPackage
+ *
+ * Register the dependencies to packages in batch.
+ */
+void recordDependencyOnPackage(Oid classId, Oid objectId, List* pkgOidList)
+{
+    ObjectAddress myself;
+    int nSkip = 0;
+    int referencedCnt = 0;
+    if ((referencedCnt = list_length(pkgOidList)) == 0) {
+        return;
+    }
+
+    myself.classId = classId;
+    myself.objectId = objectId;
+    myself.objectSubId = 0;
+
+    ObjectAddress* referenced = (ObjectAddress*)palloc(sizeof(ObjectAddress) * referencedCnt);
+    ObjectAddress* cursor = referenced;
+    ListCell* lc = NULL;
+    foreach(lc, pkgOidList) {
+        Oid pkgOid = lfirst_oid(lc);
+        if (pkgOid == objectId) {
+            nSkip++;
+            continue;
+        }
+        cursor->classId = PackageRelationId;
+        cursor->objectId = lfirst_oid(lc);
+        cursor->objectSubId = 0;
+        cursor++;
+    }
+    recordMultipleDependencies(&myself, referenced, referencedCnt - nSkip, DEPENDENCY_AUTO);
+    pfree_ext(referenced);
 }
 
 #ifdef ENABLE_MOT

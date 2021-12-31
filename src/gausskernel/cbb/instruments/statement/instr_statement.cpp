@@ -64,6 +64,7 @@
 #include "utils/fmgroids.h"
 #include "utils/relcache.h"
 #include "commands/copy.h"
+#include "instruments/instr_func_control.h"
 
 #define MAX_SLOW_QUERY_RETENSION_DAYS 604800
 #define MAX_FULL_SQL_RETENSION_SEC 86400
@@ -1471,10 +1472,28 @@ void instr_stmt_report_query(uint64 unique_query_id)
     if (!u_sess->attr.attr_common.track_stmt_parameter) {
         CURRENT_STMT_METRIC_HANDLE->query = FindCurrentUniqueSQL();
     } else {
+        const char* query_string = NULL;
+        char* mask_string = NULL;
+
         if (u_sess->unique_sql_cxt.curr_single_unique_sql != NULL) {
-            instr_stmt_track_param_query(u_sess->unique_sql_cxt.curr_single_unique_sql);
+            query_string = u_sess->unique_sql_cxt.curr_single_unique_sql;
         } else {
-            instr_stmt_track_param_query(t_thrd.postgres_cxt.debug_query_string);
+            query_string = t_thrd.postgres_cxt.debug_query_string;
+        }
+
+        if (query_string == NULL) {
+            return;
+        }
+
+        mask_string = maskPassword(query_string);
+        if (mask_string == NULL) {
+            mask_string = (char*)query_string;
+        }
+
+        instr_stmt_track_param_query(mask_string);
+
+        if (mask_string != query_string) {
+            pfree(mask_string);
         }
     }
 
@@ -1616,7 +1635,7 @@ void instr_stmt_report_query_plan(QueryDesc *queryDesc)
 {
     StatementStatContext *ssctx = (StatementStatContext *)u_sess->statement_cxt.curStatementMetrics;
     if (queryDesc == NULL || ssctx == NULL || ssctx->level <= STMT_TRACK_L0
-        || ssctx->level > STMT_TRACK_L2 || ssctx->plan_size != 0) {
+        || ssctx->level > STMT_TRACK_L2 || ssctx->plan_size != 0 || u_sess->statement_cxt.executer_run_level > 1) {
         return;
     }
     /* when getting plan directly from CN, the plan is partial, deparse plan will be failed,
@@ -1674,4 +1693,22 @@ static bool is_valid_detail_record(uint32 bytea_data_len, const char *details, u
     }
 
     return true;
+}
+
+void instr_stmt_dynamic_change_level()
+{
+    CHECK_STMT_HANDLE();
+
+    /* if find user defined statement level, dynamic change the statement track level */
+    StatLevel specified_level = instr_track_stmt_find_level();
+    if (specified_level <= STMT_TRACK_OFF) {
+        return;
+    }
+
+    /* at commit stage, for dynamic track utility, need a symbol to decide flush the handle or not */
+    CURRENT_STMT_METRIC_HANDLE->level = (specified_level > CURRENT_STMT_METRIC_HANDLE->level) ?
+        specified_level : CURRENT_STMT_METRIC_HANDLE->level;
+    CURRENT_STMT_METRIC_HANDLE->dynamic_track_level = specified_level;
+    ereport(DEBUG1, (errmodule(MOD_INSTR), errmsg("[Statement] change (%lu) track level to L%d",
+        u_sess->unique_sql_cxt.unique_sql_id, CURRENT_STMT_METRIC_HANDLE->level - 1)));
 }

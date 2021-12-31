@@ -3,8 +3,10 @@
  * pl_funcs.c		- Misc functions for the PL/pgSQL
  *			  procedural language
  *
+ * Portions Copyright (c) 2021 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -15,16 +17,17 @@
 
 #include "utils/plpgsql.h"
 #include "optimizer/pgxcship.h"
+#include "utils/lsyscache.h"
 #include "utils/memutils.h"
-
-
+#include "utils/pl_package.h"
+#include "catalog/gs_package.h"
 /* ----------
  * plpgsql_ns_init			Initialize namespace processing for a new function
  * ----------
  */
 void plpgsql_ns_init(void)
 {
-    u_sess->plsql_cxt.ns_top = NULL;
+    u_sess->plsql_cxt.curr_compile_context->ns_top = NULL;
 }
 
 /* ----------
@@ -41,8 +44,8 @@ void plpgsql_ns_push(const char* label)
 
 void add_pkg_compile()
 {
-    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL)  {
-        plpgsql_add_pkg_ns(u_sess->plsql_cxt.plpgsql_curr_compile_package);
+    if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL)  {
+        plpgsql_add_pkg_ns(u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package);
     }
 }
 /*
@@ -72,17 +75,44 @@ void plpgsql_add_pkg_ns(PLpgSQL_package* pkg)
         char* objname = ((PLpgSQL_var*) datum)->refname;
         if (datum != NULL) {
             datum->ispkg = true;
-            varno = plpgsql_adddatum(datum);
+            varno = plpgsql_adddatum(datum, false);
             switch (datum->dtype) {
                 case PLPGSQL_DTYPE_VAR:
-                    plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, varno, objname, pkgname);
+                    if (((PLpgSQL_var*)datum)->addNamespace) {
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_VAR, varno, objname, pkgname);
+                    }
                     break;
                 case PLPGSQL_DTYPE_ROW:
-                    plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, objname, pkgname);
+                    if (((PLpgSQL_row*)datum)->addNamespace) {
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, objname, pkgname);
+                    }
+                    break;
+                case PLPGSQL_DTYPE_REC:
+                    if (((PLpgSQL_rec*)datum)->addNamespace) {
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_REC, varno, objname, pkgname);
+                    }
                     break;
                 case PLPGSQL_DTYPE_RECORD:
-                    plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, objname, pkgname);
+                    if (((PLpgSQL_rec*)datum)->addNamespace) {
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_ROW, varno, objname, pkgname);
+                    }
                     break;
+                case PLPGSQL_DTYPE_RECORD_TYPE:
+                    if (((PLpgSQL_rec_type*)datum)->addNamespace) {
+                        plpgsql_ns_additem(PLPGSQL_NSTYPE_RECORD, varno, objname, pkgname);
+                    }
+                    break;
+                case PLPGSQL_DTYPE_VARRAY:
+                    plpgsql_ns_additem(PLPGSQL_NSTYPE_VARRAY, varno, objname, pkgname);
+                    break;
+                case PLPGSQL_DTYPE_TABLE:
+                    plpgsql_ns_additem(PLPGSQL_NSTYPE_TABLE, varno, objname, pkgname);
+                    break;
+                case PLPGSQL_DTYPE_UNKNOWN:
+                    plpgsql_ns_additem(PLPGSQL_NSTYPE_UNKNOWN, varno, objname, pkgname);
+                    break;
+                case PLPGSQL_DTYPE_COMPOSITE:
+                    break;    
                 default:
                     ereport(ERROR, (errmodule(MOD_PLSQL), errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
                         errmsg("unrecognized ttype: %d, when build variable in PLSQL, this situation should not occur.",
@@ -99,11 +129,11 @@ void plpgsql_add_pkg_ns(PLpgSQL_package* pkg)
  */
 void plpgsql_ns_pop(void)
 {
-    AssertEreport(u_sess->plsql_cxt.ns_top != NULL, MOD_PLSQL, "ns_top should not be null.");
-    while (u_sess->plsql_cxt.ns_top->itemtype != PLPGSQL_NSTYPE_LABEL) {
-        u_sess->plsql_cxt.ns_top = u_sess->plsql_cxt.ns_top->prev;
+    AssertEreport(u_sess->plsql_cxt.curr_compile_context->ns_top != NULL, MOD_PLSQL, "ns_top should not be null.");
+    while (u_sess->plsql_cxt.curr_compile_context->ns_top->itemtype != PLPGSQL_NSTYPE_LABEL) {
+        u_sess->plsql_cxt.curr_compile_context->ns_top = u_sess->plsql_cxt.curr_compile_context->ns_top->prev;
     }
-    u_sess->plsql_cxt.ns_top = u_sess->plsql_cxt.ns_top->prev;
+    u_sess->plsql_cxt.curr_compile_context->ns_top = u_sess->plsql_cxt.curr_compile_context->ns_top->prev;
 }
 
 /* ----------
@@ -112,39 +142,92 @@ void plpgsql_ns_pop(void)
  */
 PLpgSQL_nsitem* plpgsql_ns_top(void)
 {
-    return u_sess->plsql_cxt.ns_top;
+    return u_sess->plsql_cxt.curr_compile_context->ns_top;
 }
 
 /* ----------
  * plpgsql_ns_additem		Add an item to the current namespace chain
  * ----------
  */
-void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* pkgname)
+void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* pkgname,  const char* schemaName)
 {
     PLpgSQL_nsitem* nse = NULL;
     errno_t rc;
-
+    MemoryContext temp = NULL;
 
     AssertEreport(name != NULL, MOD_PLSQL, "name should not be null");
+    Assert(u_sess->plsql_cxt.curr_compile_context);
+    PLpgSQL_compile_context* curr_compile = u_sess->plsql_cxt.curr_compile_context;
     /* first item added must be a label */
-    AssertEreport(u_sess->plsql_cxt.ns_top != NULL || itemtype == PLPGSQL_NSTYPE_LABEL, MOD_PLSQL, "");
+    AssertEreport(curr_compile->ns_top != NULL || itemtype == PLPGSQL_NSTYPE_LABEL, MOD_PLSQL, "");
 
-    nse = (PLpgSQL_nsitem*)palloc(offsetof(PLpgSQL_nsitem, name) + (strlen(name) + 1) * sizeof(char));
+    if (curr_compile->plpgsql_curr_compile_package != NULL) {
+        temp = MemoryContextSwitchTo(curr_compile->plpgsql_curr_compile_package->pkg_cxt);
+    }
+
+    size_t nameLength = strlen(name);
+    size_t nseNameSize = nameLength + 1;
+    nse = (PLpgSQL_nsitem*)palloc(offsetof(PLpgSQL_nsitem, name) + (nseNameSize) * sizeof(char));
     nse->itemtype = itemtype;
     nse->itemno = itemno;
-    nse->prev = u_sess->plsql_cxt.ns_top;
-    rc = strncpy_s(nse->name, strlen(name) + 1, name, strlen(name));
+    nse->prev = curr_compile->ns_top;
+    rc = strncpy_s(nse->name, nseNameSize, name, nameLength);
     securec_check_c(rc, "\0", "\0");
 
     if (pkgname != NULL) {
-        nse->pkgname = (char*)palloc(sizeof(char) * (strlen(pkgname) + 1));
-        rc = strncpy_s(nse->pkgname, strlen(pkgname) + 1, pkgname, strlen(pkgname));
+        size_t pkgNameLength = strlen(pkgname);
+        size_t nsePkgNameSize = pkgNameLength + 1;
+        nse->pkgname = (char*)palloc(sizeof(char) * nsePkgNameSize);
+        rc = strncpy_s(nse->pkgname, nsePkgNameSize, pkgname, pkgNameLength);
         securec_check_c(rc, "\0", "\0");
     } else {
         nse->pkgname = NULL;
     }
+    
+    if (schemaName != NULL) {
+        size_t schemaNameLength = strlen(schemaName);
+        size_t nseSchemaNameSize = schemaNameLength + 1;
+        nse->schemaName = (char*)palloc(sizeof(char) * nseSchemaNameSize);
+        rc = strncpy_s(nse->schemaName, nseSchemaNameSize, schemaName, schemaNameLength);
+        securec_check_c(rc, "\0", "\0");
+    } else if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package) {
+        PLpgSQL_package* curr_package = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+        if (!OidIsValid(curr_package->namespaceOid)) {
+            Oid pkg_oid = curr_package->pkg_oid;
+            Assert(OidIsValid(pkg_oid));
+            curr_package->namespaceOid = GetPackageNamespace(pkg_oid);
+        }
+        nse->schemaName = get_namespace_name(curr_package->namespaceOid);
+    } else {
+        nse->schemaName = NULL;
+    }
 
-    u_sess->plsql_cxt.ns_top = nse;
+    curr_compile->ns_top = nse;
+    if (curr_compile->plpgsql_curr_compile_package != NULL) {
+        temp = MemoryContextSwitchTo(temp);
+    }
+}
+
+static bool IsSameSchema(const char* schemaName, const char* currCompilePackageSchemaName)
+{
+    if (currCompilePackageSchemaName && strcmp(schemaName, currCompilePackageSchemaName) == 0) {
+        return true;
+    }
+    return false;
+}
+
+static char* GetPackageSchemaName()
+{
+    Oid packageSchemaOid = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->namespaceOid;
+    char* packageSchemaName = get_namespace_name(packageSchemaOid);
+    return packageSchemaName;
+}
+
+static char* GetPackageSchemaName(Oid packageOid)
+{
+    Oid packageSchemaOid = GetPackageNamespace(packageOid);
+    char* packageSchemaName = get_namespace_name(packageSchemaOid);
+    return packageSchemaName;
 }
 
 /* ----------
@@ -166,46 +249,107 @@ void plpgsql_ns_additem(int itemtype, int itemno, const char* name, const char* 
  * Similarly, if name2 isn't NULL, we disregard unqualified matches to
  * scalar variables.
  * ----------
+ *
+ * name1.name2.name3
+ * name1:
+ *      (var_name)
+ * name1.name2:
+ *      (package_name.var_name)
+ *      (record_name.column_name)
+ * name1.name2.name3:
+ *      (schema_name.package_name.var_name)
+ *      (schema_name.record_name.column_name)
  */
 PLpgSQL_nsitem* plpgsql_ns_lookup(
     PLpgSQL_nsitem* ns_cur, bool localmode, const char* name1, const char* name2, const char* name3, int* names_used)
 {
     /* Outer loop iterates once per block level in the namespace chain */
+    int rc = 0;
+    char* currCompilePackageName = NULL;
+    char* currCompilePackageSchemaName = NULL;
+    rc = CompileWhich();
+    if (rc == PLPGSQL_COMPILE_PACKAGE_PROC || rc == PLPGSQL_COMPILE_PACKAGE) {
+        currCompilePackageName = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package->pkg_signature;
+        currCompilePackageSchemaName = GetPackageSchemaName();
+    }
     while (ns_cur != NULL) {
         PLpgSQL_nsitem* nsitem = NULL;
-
         /* Check this level for unqualified match to variable name */
         for (nsitem = ns_cur; nsitem->itemtype != PLPGSQL_NSTYPE_LABEL; nsitem = nsitem->prev) {
+            if (name1 == NULL) {
+                continue;
+            }
+            bool isSamePackage = false;
+            if (OidIsValid(u_sess->plsql_cxt.running_pkg_oid) && currCompilePackageName == NULL) {
+                NameData* CompilePackageName = GetPackageName(u_sess->plsql_cxt.running_pkg_oid);
+                currCompilePackageName = CompilePackageName->data;
+                currCompilePackageSchemaName = GetPackageSchemaName(u_sess->plsql_cxt.running_pkg_oid);
+            }
+            if (currCompilePackageName != NULL && nsitem->pkgname != NULL) {
+                if (strcmp(currCompilePackageName, nsitem->pkgname) == 0) {
+                    if (nsitem->schemaName == NULL) {
+                        /* By default, we assume package is same if schema is empty. */
+                        isSamePackage = true;
+                    } else {
+                        isSamePackage = IsSameSchema(nsitem->schemaName, currCompilePackageSchemaName);
+                    } 
+                }
+            }
             if (strcmp(nsitem->name, name1) == 0) {
+                bool isContinue = nsitem->pkgname != NULL && !isSamePackage;
+                if (isContinue) {
+                    continue;
+                }
                 if (name2 == NULL || nsitem->itemtype != PLPGSQL_NSTYPE_VAR) {
                     if (names_used != NULL) {
                         *names_used = 1;
                     }
+                    pfree_ext(currCompilePackageSchemaName);
                     return nsitem;
                 }
             }
-
+            if (name2 == NULL) {
+                continue;
+            }
             if (nsitem->pkgname != NULL && strcmp(nsitem->pkgname, name1) == 0) {
-                if (name2 == NULL) {
-                    continue;
-                } else if (strcmp(nsitem->name, name2) == 0 && (name3 == NULL ||
+                if (strcmp(nsitem->name, name2) == 0 && (name3 == NULL ||
                     nsitem->itemtype != PLPGSQL_NSTYPE_VAR)) {
                     if (names_used != NULL) {
                         *names_used = 2;
                     }
+                    pfree_ext(currCompilePackageSchemaName);
+                    return nsitem;
+                }
+            }
+            if (name3 == NULL) {
+                continue;
+            }
+            if (nsitem->schemaName != NULL && (strcmp(nsitem->schemaName, name1) == 0)) {
+                if (nsitem->pkgname == NULL) {
+                    continue;
+                } else if (!(strcmp(nsitem->pkgname, name2) == 0)) {
+                    continue;
+                }
+                if (strcmp(nsitem->name, name3) == 0) {
+                    if (names_used != NULL) {
+                        *names_used = 3;
+                    }
+                    pfree_ext(currCompilePackageSchemaName);
                     return nsitem;
                 }
             }
         }
 
         /* Check this level for qualified match to variable name */
-        if (name2 != NULL && strcmp(nsitem->name, name1) == 0) {
+
+        if (name1 != NULL && name2 != NULL && strcmp(nsitem->name, name1) == 0) {
             for (nsitem = ns_cur; nsitem->itemtype != PLPGSQL_NSTYPE_LABEL; nsitem = nsitem->prev) {
                 if (strcmp(nsitem->name, name2) == 0) {
                     if (name3 == NULL || nsitem->itemtype != PLPGSQL_NSTYPE_VAR) {
                         if (names_used != NULL) {
                             *names_used = 2;
                         }
+                        pfree_ext(currCompilePackageSchemaName);
                         return nsitem;
                     }
                 }
@@ -223,9 +367,36 @@ PLpgSQL_nsitem* plpgsql_ns_lookup(
     if (names_used != NULL) {
         *names_used = 0;
     }
+    pfree_ext(currCompilePackageSchemaName);
     return NULL; /* No match found */
 }
 
+PLpgSQL_datum* plpgsql_lookup_datum(
+    bool localmode, const char* name1, const char* name2, const char* name3, int* names_used)
+{
+    if (u_sess->plsql_cxt.curr_compile_context == NULL) {
+        return NULL;
+    }
+
+    PLpgSQL_nsitem* ns = plpgsql_ns_lookup(plpgsql_ns_top(), localmode, name1, name2, name3, names_used);
+    if (ns == NULL) {
+        /* find from pkg */
+        if (u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
+            PLpgSQL_package* pkg = u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package;
+            ns = plpgsql_ns_lookup(pkg->public_ns, localmode, name1, name2, name3, names_used);
+            if (ns == NULL) {
+                ns = plpgsql_ns_lookup(pkg->private_ns, localmode, name1, name2, name3, names_used);
+            }
+            if (ns != NULL) {
+                return pkg->datums[ns->itemno];
+            }
+        }
+    } else {
+        return u_sess->plsql_cxt.curr_compile_context->plpgsql_Datums[ns->itemno];
+    }
+
+    return NULL;
+}
 /* ----------
  * plpgsql_ns_lookup_label		Lookup a label in the given namespace chain
  * ----------
@@ -240,6 +411,20 @@ PLpgSQL_nsitem* plpgsql_ns_lookup_label(PLpgSQL_nsitem* ns_cur, const char* name
     }
 
     return NULL; /* label not found */
+}
+
+static const char* plpgsql_savepoint_typename(PLpgSQL_stmt_savepoint *stmt)
+{
+    switch (stmt->opType) {
+        case PLPGSQL_SAVEPOINT_CREATE:
+            return "SAVEPOINT";
+        case PLPGSQL_SAVEPOINT_ROLLBACKTO:
+            return "ROLLBACK TO SAVEPOINT";
+        case PLPGSQL_SAVEPOINT_RELEASE:
+            return "RELEASE SAVEPOINT";
+        default:
+            return "unknown savepoint";
+    }
 }
 
 /*
@@ -302,6 +487,8 @@ const char* plpgsql_stmt_typename(PLpgSQL_stmt* stmt)
             return "COMMIT";
         case PLPGSQL_STMT_ROLLBACK:
             return "ROLLBACK";
+        case PLPGSQL_STMT_SAVEPOINT:
+            return plpgsql_savepoint_typename((PLpgSQL_stmt_savepoint*)stmt);
         default:
             break;
     }
@@ -373,6 +560,7 @@ static void free_null(PLpgSQL_stmt_null* stmt);
 static void free_perform(PLpgSQL_stmt_perform* stmt);
 static void free_commit(PLpgSQL_stmt_commit *stmt);
 static void free_rollback(PLpgSQL_stmt_rollback *stmt);
+static void free_savepoint(PLpgSQL_stmt_savepoint *stmt);
 
 static void free_stmt(PLpgSQL_stmt* stmt)
 {
@@ -458,6 +646,9 @@ static void free_stmt(PLpgSQL_stmt* stmt)
         case PLPGSQL_STMT_NULL:
             free_null((PLpgSQL_stmt_null*)stmt);
             break;
+        case PLPGSQL_STMT_SAVEPOINT:
+            free_savepoint((PLpgSQL_stmt_savepoint*)stmt);
+            break;
         default:
             ereport(ERROR,
                 (errmodule(MOD_PLSQL),
@@ -493,6 +684,17 @@ static void free_block(PLpgSQL_stmt_block* block)
 static void free_assign(PLpgSQL_stmt_assign* stmt)
 {
     free_expr(stmt->expr);
+}
+
+void free_assignlist(List* assignlist)
+{
+    ListCell* lc = NULL;
+    foreach(lc, assignlist) {
+        Node* n = (Node*)lfirst(lc);
+        if (IsA(n, A_Indices)) {
+            free_expr((PLpgSQL_expr*)(((A_Indices*)n)->uidx));
+        }
+    }
 }
 
 static void free_if(PLpgSQL_stmt_if* stmt)
@@ -605,6 +807,10 @@ static void free_rollback(PLpgSQL_stmt_rollback *stmt)
 {
 }
 
+static void free_savepoint(PLpgSQL_stmt_savepoint *stmt)
+{
+}
+
 static void free_exit(PLpgSQL_stmt_exit* stmt)
 {
     free_expr(stmt->cond);
@@ -691,7 +897,8 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
     /*
      * function which in package not free memory alone 
      */
-    if (u_sess->plsql_cxt.plpgsql_curr_compile_package != NULL) {
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        u_sess->plsql_cxt.curr_compile_context->plpgsql_curr_compile_package != NULL) {
         return;
     }
 
@@ -706,24 +913,40 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
             continue;
         }
         switch (d->dtype) {
+            case PLPGSQL_DTYPE_VARRAY:
+            case PLPGSQL_DTYPE_TABLE:
             case PLPGSQL_DTYPE_VAR: {
                 PLpgSQL_var* var = (PLpgSQL_var*)d;
 
                 free_expr(var->default_val);
                 free_expr(var->cursor_explicit_expr);
+                if (var->tableOfIndex != NULL) {
+                    hash_destroy(var->tableOfIndex);
+                    var->tableOfIndex = NULL;
+                }
             } break;
-            case PLPGSQL_DTYPE_ROW:
-                break;
-            case PLPGSQL_DTYPE_REC:
-                break;
             case PLPGSQL_DTYPE_RECORD:
+            case PLPGSQL_DTYPE_ROW: {
+                PLpgSQL_row* row = (PLpgSQL_row*)d;
+                free_expr(row->default_val);
+            } break;
+            case PLPGSQL_DTYPE_REC:
                 break;
             case PLPGSQL_DTYPE_RECFIELD:
                 break;
             case PLPGSQL_DTYPE_ARRAYELEM:
                 free_expr(((PLpgSQL_arrayelem*)d)->subscript);
                 break;
+            case PLPGSQL_DTYPE_TABLEELEM:
+                free_expr(((PLpgSQL_tableelem*)d)->subscript);
+                break;
+            case PLPGSQL_DTYPE_ASSIGNLIST:
+                free_assignlist(((PLpgSQL_assignlist*)d)->assignlist);
             case PLPGSQL_DTYPE_UNKNOWN:
+                break;
+            case PLPGSQL_DTYPE_COMPOSITE:
+                break;
+            case PLPGSQL_DTYPE_RECORD_TYPE:
                 break;
             default:
                 ereport(ERROR,
@@ -768,8 +991,9 @@ void plpgsql_free_function_memory(PLpgSQL_function* func)
      * itself (which has to be kept around because there may be multiple
      * fn_extra pointers to it).
      */
-    if (func->fn_cxt == u_sess->plsql_cxt.plpgsql_cxt)
-        u_sess->plsql_cxt.plpgsql_cxt = NULL;
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        func->fn_cxt == u_sess->plsql_cxt.curr_compile_context->compile_cxt)
+        u_sess->plsql_cxt.curr_compile_context->compile_cxt = NULL;
     if (!OidIsValid(func->pkg_oid)) {
         if (func->fn_cxt) {
             MemoryContextDelete(func->fn_cxt);
@@ -788,6 +1012,10 @@ void plpgsql_free_package_memory(PLpgSQL_package* pkg)
     int i;
     ListCell* l;
     foreach(l, pkg->proc_compiled_list) {
+        if (((PLpgSQL_function*)lfirst(l))->use_count > 0)
+            return;
+    }
+    foreach(l, pkg->proc_compiled_list) {
         PLpgSQL_function* func = (PLpgSQL_function*)lfirst(l);
         plpgsql_free_function_memory(func);
     }
@@ -795,21 +1023,39 @@ void plpgsql_free_package_memory(PLpgSQL_package* pkg)
     for (i = 0; i < pkg->ndatums; i++) {
         PLpgSQL_datum* d = pkg->datums[i];
         switch (d->dtype) {
+            case PLPGSQL_DTYPE_VARRAY:
+            case PLPGSQL_DTYPE_TABLE:
             case PLPGSQL_DTYPE_VAR: {
                 PLpgSQL_var* var = (PLpgSQL_var*)d;
                 free_expr(var->default_val);
                 free_expr(var->cursor_explicit_expr);
+                if (var->tableOfIndex != NULL) {
+                    hash_destroy(var->tableOfIndex);
+                    var->tableOfIndex = NULL;
+                }
             } break;
-            case PLPGSQL_DTYPE_ROW:
-                break;
-            case PLPGSQL_DTYPE_REC:
+            case PLPGSQL_DTYPE_UNKNOWN:
                 break;
             case PLPGSQL_DTYPE_RECORD:
+            case PLPGSQL_DTYPE_ROW: {
+                PLpgSQL_row* row = (PLpgSQL_row*)d;
+                free_expr(row->default_val);
+            } break;
+            case PLPGSQL_DTYPE_REC:
                 break;
             case PLPGSQL_DTYPE_RECFIELD:
                 break;
             case PLPGSQL_DTYPE_ARRAYELEM:
                 free_expr(((PLpgSQL_arrayelem*)d)->subscript);
+                break;
+            case PLPGSQL_DTYPE_TABLEELEM:
+                free_expr(((PLpgSQL_tableelem*)d)->subscript);
+                break;
+            case PLPGSQL_DTYPE_ASSIGNLIST:
+                free_assignlist(((PLpgSQL_assignlist*)d)->assignlist);
+            case PLPGSQL_DTYPE_COMPOSITE:
+                break;
+            case PLPGSQL_DTYPE_RECORD_TYPE:
                 break;
             default:
                 ereport(ERROR,
@@ -832,8 +1078,9 @@ void plpgsql_free_package_memory(PLpgSQL_package* pkg)
      * itself (which has to be kept around because there may be multiple
      * fn_extra pointers to it).
      */
-    if (pkg->pkg_cxt == u_sess->plsql_cxt.plpgsql_cxt)
-        u_sess->plsql_cxt.plpgsql_cxt = NULL;
+    if (u_sess->plsql_cxt.curr_compile_context != NULL &&
+        pkg->pkg_cxt == u_sess->plsql_cxt.curr_compile_context->compile_cxt)
+        u_sess->plsql_cxt.curr_compile_context->compile_cxt = NULL;
     if (pkg->pkg_cxt) {
         MemoryContextDelete(pkg->pkg_cxt);
     }
@@ -875,6 +1122,7 @@ static void dump_commit(PLpgSQL_stmt_commit *stmt);
 static void dump_rollback(PLpgSQL_stmt_rollback *stmt);
 static void dump_null(PLpgSQL_stmt_null* stmt);
 static void dump_expr(PLpgSQL_expr* expr);
+static void dump_savepoint(PLpgSQL_stmt_savepoint *stmt);
 
 static void dump_ind(void)
 {
@@ -969,6 +1217,9 @@ static void dump_stmt(PLpgSQL_stmt* stmt)
             break;
         case PLPGSQL_STMT_NULL:
             dump_null((PLpgSQL_stmt_null*)stmt);
+            break;
+        case PLPGSQL_STMT_SAVEPOINT:
+            dump_savepoint((PLpgSQL_stmt_savepoint*)stmt);
             break;
         default:
             ereport(ERROR,
@@ -1343,6 +1594,24 @@ static void dump_null(PLpgSQL_stmt_null* stmt)
     printf("NULL\n");
 }
 
+static void dump_savepoint(PLpgSQL_stmt_savepoint *stmt)
+{
+    switch (stmt->opType) {
+        case PLPGSQL_SAVEPOINT_CREATE:
+            printf("SAVEPOINT %s;", stmt->spName);
+            break;
+        case PLPGSQL_SAVEPOINT_ROLLBACKTO:
+            printf("ROLLBACK TO %s", stmt->spName);
+            break;
+        case PLPGSQL_SAVEPOINT_RELEASE:
+            printf("RELEASE %s", stmt->spName);
+            break;
+        default:
+            printf("??? unknown savepoint operate: %s", stmt->spName);
+            break;
+    }
+}
+
 static void dump_exit(PLpgSQL_stmt_exit* stmt)
 {
     dump_ind();
@@ -1627,6 +1896,11 @@ void plpgsql_dumptree(PLpgSQL_function* func)
                         printf(" %s=var %d", row->fieldnames[j], row->varnos[j]);
                     }
                 }
+                if (row->default_val != NULL) {
+                    printf("                                  DEFAULT ");
+                    dump_expr(row->default_val);
+                    printf("\n");
+                }
                 printf("\n");
             } break;
             case PLPGSQL_DTYPE_REC:
@@ -1648,7 +1922,7 @@ void plpgsql_dumptree(PLpgSQL_function* func)
         }
     }
     printf("\nFunction's statements:\n");
-
+    /* ??? */
     u_sess->plsql_cxt.dump_indent = 0;
     printf("%3d:", func->action->lineno);
     dump_block(func->action);
@@ -1686,6 +1960,9 @@ bool traverse_cursor_direction(PLpgSQL_function* func, PLpgSQL_stmt_fetch* stmt)
 bool traverse_close(PLpgSQL_stmt_close* stmt);
 bool traverse_perform(PLpgSQL_function* func, PLpgSQL_stmt_perform* stmt);
 bool traverse_expr(PLpgSQL_function* func, PLpgSQL_expr* expr);
+bool traverse_savepoint(PLpgSQL_function* func, PLpgSQL_stmt_savepoint *stmt);
+bool traverse_commit(PLpgSQL_function* func, PLpgSQL_stmt_commit *stmt);
+bool traverse_rollback(PLpgSQL_function* func, PLpgSQL_stmt_rollback *stmt);
 
 /*
  * @Description : traverse statements in trigger body for checking shippable.
@@ -1800,6 +2077,15 @@ bool traverse_stmt(PLpgSQL_function* func, PLpgSQL_stmt* stmt)
             break;
         case PLPGSQL_STMT_PERFORM:
             is_shippable = traverse_perform(func, (PLpgSQL_stmt_perform*)stmt);
+            break;
+        case PLPGSQL_STMT_SAVEPOINT:
+            is_shippable = traverse_savepoint(func, (PLpgSQL_stmt_savepoint*)stmt);
+            break;
+        case PLPGSQL_STMT_COMMIT:
+            is_shippable = traverse_commit(func, (PLpgSQL_stmt_commit*)stmt);
+            break;
+        case PLPGSQL_STMT_ROLLBACK:
+            is_shippable = traverse_rollback(func, (PLpgSQL_stmt_rollback*)stmt);
             break;
         default:
             ereport(ERROR, (errcode(ERRCODE_INVALID_OPERATION), errmsg("unrecognized cmd_type: %d", stmt->cmd_type)));
@@ -2354,6 +2640,21 @@ bool traverse_expr(PLpgSQL_function* func, PLpgSQL_expr* expr)
 
     expr->func = func;
     return pgxc_is_query_shippable_in_trigger(expr);
+}
+
+bool traverse_savepoint(PLpgSQL_function* func, PLpgSQL_stmt_savepoint *stmt)
+{
+    return false;
+}
+
+bool traverse_commit(PLpgSQL_function* func, PLpgSQL_stmt_commit *stmt)
+{
+    return false;
+}
+
+bool traverse_rollback(PLpgSQL_function* func, PLpgSQL_stmt_rollback *stmt)
+{
+    return false;
 }
 
 /*

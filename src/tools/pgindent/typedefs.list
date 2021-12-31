@@ -1125,6 +1125,7 @@ PLpgSQL_stmt_return
 PLpgSQL_stmt_return_next
 PLpgSQL_stmt_return_query
 PLpgSQL_stmt_while
+PLpgSQL_tableelem
 PLpgSQL_type
 PLpgSQL_var
 PLpgSQL_variable
@@ -1696,6 +1697,7 @@ TabStatusArray
 TableDataInfo
 TableInfo
 TableLikeClause
+TableOfTypeStmt
 TableSpaceCacheEntry
 TableSpaceOpts
 TargetEntry

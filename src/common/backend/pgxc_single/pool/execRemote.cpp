@@ -7,6 +7,7 @@
  *
  * Portions Copyright (c) 1996-2011, PostgreSQL Global Development Group
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -300,7 +301,8 @@ RemoteQueryState* CreateResponseCombiner(int node_count, CombineType combine_typ
     combiner->currentRow.msg = NULL;
     combiner->currentRow.msglen = 0;
     combiner->currentRow.msgnode = 0;
-    combiner->row_store = RowStoreAlloc(CurrentMemoryContext, ROW_STORE_MAX_MEM);
+    combiner->row_store = RowStoreAlloc(CurrentMemoryContext, ROW_STORE_MAX_MEM,
+                                        t_thrd.utils_cxt.CurrentResourceOwner);
     combiner->tapenodes = NULL;
     combiner->remoteCopyType = REMOTE_COPY_NONE;
     combiner->copy_file = NULL;

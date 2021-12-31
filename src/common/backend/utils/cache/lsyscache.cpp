@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/backend/utils/cache/lsyscache.c
@@ -76,6 +77,8 @@
 #include "streaming/planner.h"
 #include "catalog/pgxc_group.h"
 #include "catalog/pg_proc_fn.h"
+#include "catalog/gs_package.h"
+
 
 /*				---------- AMOP CACHES ----------						 */
 
@@ -1643,6 +1646,25 @@ bool get_func_iswindow(Oid funcid)
     return result;
 }
 
+char get_func_prokind(const Oid funcid)
+{
+    HeapTuple tp = NULL;
+    char result;
+    bool isnull = false;
+    tp = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
+    if (!HeapTupleIsValid(tp)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
+    }
+    Datum prokindDatum = SysCacheGetAttr(PROCOID, tp, Anum_pg_proc_prokind, &isnull);
+    if (isnull) {
+        result = PROKIND_FUNCTION; /* Null prokind items are created when there is no procedure */
+    } else {
+        result = DatumGetChar(prokindDatum);
+    }
+    ReleaseSysCache(tp);
+    return result;
+}
+
 /*				---------- RELATION CACHE ----------					 */
 
 /*
@@ -1860,6 +1882,7 @@ char* getPartitionName(Oid partid, bool missing_ok)
         Form_pg_partition partition = (Form_pg_partition)GETSTRUCT(tuple);
         /* make sure it is a partition */
         Assert((PART_OBJ_TYPE_TABLE_PARTITION == partition->parttype) ||
+               (PART_OBJ_TYPE_TABLE_SUB_PARTITION == partition->parttype) ||
                (PART_OBJ_TYPE_INDEX_PARTITION == partition->parttype));
         /* get partition name */
         pname = pstrdup(NameStr(partition->relname));
@@ -1884,7 +1907,8 @@ bool check_rel_is_partitioned(Oid relid)
     HeapTuple tp = SearchSysCache1WithLogLevel(RELOID, ObjectIdGetDatum(relid), LOG);
     if (HeapTupleIsValid(tp)) {
         Form_pg_class reltup = (Form_pg_class)GETSTRUCT(tp);
-        bool result = (reltup->parttype == PARTTYPE_PARTITIONED_RELATION);
+        bool result = (reltup->parttype == PARTTYPE_PARTITIONED_RELATION) ||
+                      (reltup->parttype == PARTTYPE_SUBPARTITIONED_RELATION);
         ReleaseSysCache(tp);
         return result;
     } else {
@@ -5015,7 +5039,41 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
         }
     }
     /* Search syscache by name only */
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_common.IsInplaceUpgrade) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
+    }
+    if (expr) {
+        HeapTuple proctupl = NULL;
+        proctupl = SearchSysCache1(PROCOID, ObjectIdGetDatum(((FuncExpr*)expr)->funcid));
+        if (HeapTupleIsValid(proctupl)) {
+            Form_pg_proc procform;
+            char* proname = NULL;
+            Datum pkgOiddatum;
+            bool isnull = true;
+            NameData* pkgname = NULL;
+            Oid pkgOid = InvalidOid;
+            procform = (Form_pg_proc)GETSTRUCT(proctupl);
+            proname = NameStr(procform->proname);
+            pkgOiddatum = SysCacheGetAttr(PROCOID, proctupl, Anum_pg_proc_packageid, &isnull);
+            if (!isnull) {
+                pkgOid = DatumGetObjectId(pkgOiddatum);
+                pkgname = GetPackageName(pkgOid);
+            }
+            if (pkgname && OidIsValid(pkgOid)) {
+                ReleaseSysCacheList(catlist);
+                ReleaseSysCache(proctupl);
+                return (((FuncExpr*)expr)->funcid);
+            }
+            ReleaseSysCache(proctupl);
+        }
+    }
+#else
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+#endif
     for (i = 0; i < catlist->n_members; i++) {
         HeapTuple proctup = &catlist->members[i]->tuple;
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
@@ -5023,9 +5081,11 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
             /* Consider only procs in specified namespace */
             if (procform->pronamespace != funcnamespace) {
                 continue;
-        }
-	   }
+            }
+	    }
+
         if (expr != NULL && IsA(expr, FuncExpr) && procform->pronargs != list_length(((FuncExpr*)expr)->args)
+            && procform->pronargs != list_length(((FuncExpr*)expr)->args) + procform->pronargdefaults
 #ifdef ENABLE_MULTIPLE_NODES
             && !is_streaming_hash_group_func(funcname, funcnamespace)
 #endif   /* ENABLE_MULTIPLE_NODES */
@@ -5090,7 +5150,15 @@ Oid get_func_oid_ext(const char* funcname, Oid funcnamespace, Oid funcrettype, i
     CatCList* catlist = NULL;
     int i, j;
     /* Search syscache by name only */
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.proc->workingVersionNum < 92470) {
+        catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+    } else {
+        catlist = SearchSysCacheList1(PROCALLARGS, CStringGetDatum(funcname));
+    }
+#else
     catlist = SearchSysCacheList1(PROCNAMEARGSNSP, CStringGetDatum(funcname));
+#endif
     for (i = 0; i < catlist->n_members; i++) {
         HeapTuple proctup = &catlist->members[i]->tuple;
         Form_pg_proc procform = (Form_pg_proc)GETSTRUCT(proctup);
@@ -5160,4 +5228,19 @@ bool is_not_strict_agg(Oid funcOid)
     }
     ReleaseSysCache(func_tuple);
     return false;
+}
+
+char get_typecategory(Oid typid)
+{
+    HeapTuple tuple;
+    Form_pg_type typeForm;
+    char result;
+    tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for type %u", typid)));
+    }
+    typeForm = (Form_pg_type)GETSTRUCT(tuple);
+    result = typeForm->typcategory;
+    ReleaseSysCache(tuple);
+    return result;
 }

@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/utils/elog.h
  *
@@ -282,6 +283,12 @@ typedef struct ErrorContextCallback {
     void* arg;
 } ErrorContextCallback;
 
+typedef struct FormatCallStack {
+    struct FormatCallStack* prev;
+    void* elem;
+} FormatCallStack;
+
+
 #ifndef FRONTEND
 #define securec_check(errno, charList, ...)                                                                            \
     {                                                                                                                  \
@@ -534,6 +541,7 @@ typedef enum {
 /* Other exported functions */
 extern void DebugFileOpen(void);
 extern char* unpack_sql_state(int sql_state);
+extern char *plpgsql_get_sqlstate(int sqlcode);
 extern bool in_error_recursion_trouble(void);
 
 #ifdef HAVE_SYSLOG

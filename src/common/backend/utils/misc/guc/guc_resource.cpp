@@ -290,17 +290,6 @@ static void InitResourceConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-        {{"enable_custom_parser",
-          PGC_USERSET,
-          NODE_ALL,
-          UNGROUPED,
-          gettext_noop("Enables custom parser"),
-          NULL},
-         &u_sess->attr.attr_sql.enable_custom_parser,
-         false,
-         NULL,
-         NULL,
-         NULL},
         {{"enable_resource_record",
             PGC_SIGHUP,
             NODE_ALL,
@@ -499,19 +488,6 @@ static void InitResourceConfigureNamesBool()
             NULL,
             NULL,
             NULL},
-#ifndef ENABLE_MULTIPLE_NODES
-        {{"enable_auto_clean_unique_sql",
-          PGC_POSTMASTER,
-          NODE_SINGLENODE,
-          INSTRUMENTS_OPTIONS,
-          gettext_noop("Enable auto clean unique sql entry when the UniqueSQL hash table is full."),
-          NULL},
-         &g_instance.attr.attr_common.enable_auto_clean_unique_sql,
-         false,
-         NULL,
-         NULL,
-         NULL},
-#endif
         /* End-of-list marker */
         {{NULL,
             (GucContext)0,
@@ -1030,7 +1006,7 @@ static bool check_cgroup_name(char** newval, void** extra, GucSource source)
 
     p = *newval;
 
-    if (StringIsValid(p) && IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry &&
+    if (StringIsValid(p) && IS_PGXC_COORDINATOR && t_thrd.shemem_ptr_cxt.MyBEEntry &&
         (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET)) {
         if (g_instance.wlm_cxt->gscgroup_init_done == 0)
             ereport(ERROR,
@@ -1059,7 +1035,7 @@ static bool check_cgroup_name(char** newval, void** extra, GucSource source)
 static void assign_cgroup_name(const char* newval, void* extra)
 {
     /* set "control_group" global variable */
-    if (IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry && newval && *newval) {
+    if (IS_PGXC_COORDINATOR && t_thrd.shemem_ptr_cxt.MyBEEntry && newval && *newval) {
         if (g_instance.wlm_cxt->gscgroup_init_done == 0)
             return;
 

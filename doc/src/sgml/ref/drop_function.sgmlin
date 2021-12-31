@@ -10,7 +10,7 @@
 </refnamediv>
 <refsynopsisdiv>
 <synopsis>
-DROP FUNCTION [ IF EXISTS ] function_name [ ( [ {[ argmode ] [ argname ] argtype} [, ...] ] ) [ CASCADE | RESTRICT ] ];
+DROP FUNCTION [ IF EXISTS ] function_name [ ( [ { [ argmode ] [ argname ] argtype} [, ...] ] ) [ CASCADE | RESTRICT ] ];
 </synopsis>
 </refsynopsisdiv>
 </refentry>

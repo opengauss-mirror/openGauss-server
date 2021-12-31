@@ -1676,7 +1676,7 @@ static List* GetAllFiles(
                     delete (conn);
                     conn = NULL;
                     ereport(ERROR,
-                        (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+                        (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
                             errmodule(MOD_HDFS),
                             errmsg("The foldername option cannot be a file path.")));
                 }
@@ -1691,7 +1691,7 @@ static List* GetAllFiles(
                         delete (conn);
                         conn = NULL;
                         ereport(ERROR,
-                            (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+                            (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
                                 errmodule(MOD_HDFS),
                                 errmsg("The entries in the options fileNames must be file!")));
                     }
@@ -1770,7 +1770,7 @@ static List* GetHdfsAllFiles(dfs::DFSConnector* conn, Oid foreignTableId, List* 
             delete (conn);
             conn = NULL;
             ereport(ERROR,
-                (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+                (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
                     errmodule(MOD_HDFS),
                     errmsg("The foldername option cannot be a file path.")));
         }
@@ -1785,7 +1785,7 @@ static List* GetHdfsAllFiles(dfs::DFSConnector* conn, Oid foreignTableId, List* 
                 delete (conn);
                 conn = NULL;
                 ereport(ERROR,
-                    (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+                    (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
                         errmodule(MOD_HDFS),
                         errmsg("The entries in the options fileNames must be file!")));
             }
@@ -2203,7 +2203,7 @@ static bool PartitionFilterClause(SplitInfo* split, List* scanClauses, Var* valu
     partValue = strchr(fileName, '=');
     if (NULL == partValue) {
         ereport(ERROR,
-            (errcode(ERRCODE_FDW_INVALID_OPTOIN_DATA),
+            (errcode(ERRCODE_FDW_INVALID_OPTION_DATA),
                 errmodule(MOD_HDFS),
                 errmsg("Something wrong with the partition directory name of file %s.", split->filePath)));
     }

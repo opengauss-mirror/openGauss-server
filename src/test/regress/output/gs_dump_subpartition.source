@@ -1,0 +1,181 @@
+drop database if exists dump_subpartition_db;
+NOTICE:  database "dump_subpartition_db" does not exist, skipping
+drop database if exists restore_subpartition_db;
+NOTICE:  database "restore_subpartition_db" does not exist, skipping
+create database dump_subpartition_db with dbcompatibility = 'B';
+create database restore_subpartition_db;
+\c dump_subpartition_db
+-- create subpartition table
+CREATE TABLE range_range
+(
+    id int,
+    gender varchar not null,
+    birthday date not null,
+    primary key(id,birthday)
+)
+PARTITION BY RANGE (id) SUBPARTITION BY RANGE (birthday)
+(
+    PARTITION p_1 VALUES LESS THAN(100)
+    (
+        SUBPARTITION p_1_a VALUES LESS THAN('2010-01-01'),
+        SUBPARTITION p_1_b VALUES LESS THAN(MAXVALUE)
+    ),
+    PARTITION p_2 VALUES LESS THAN(200)
+    (
+        SUBPARTITION p_2_a VALUES LESS THAN('2010-01-01'),
+        SUBPARTITION p_2_b VALUES LESS THAN(MAXVALUE)
+    ),
+    PARTITION p_3 VALUES LESS THAN(MAXVALUE)
+    (
+        SUBPARTITION p_3_a VALUES LESS THAN('2010-01-01'),
+        SUBPARTITION p_3_b VALUES LESS THAN(MAXVALUE)
+    )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_range_pkey" for table "range_range"
+insert into range_range values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
+insert into range_range values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
+insert into range_range values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
+CREATE TABLE range_list
+(
+    id int primary key,
+    gender varchar not null,
+    birthday date not null
+)
+PARTITION BY RANGE (id) SUBPARTITION BY LIST (gender)
+(
+    PARTITION p_1 VALUES LESS THAN(100)
+    (
+        SUBPARTITION p_1_a VALUES ('boy'),
+        SUBPARTITION p_1_b VALUES ('girl')
+    ),
+    PARTITION p_2 VALUES LESS THAN(200)
+    (
+        SUBPARTITION p_2_a VALUES ('boy'),
+        SUBPARTITION p_2_b VALUES ('girl')
+    ),
+    PARTITION p_3 VALUES LESS THAN(MAXVALUE)
+    (
+        SUBPARTITION p_3_a VALUES ('boy','girl')
+    )
+);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "range_list_pkey" for table "range_list"
+create index on range_list(birthday) local;
+insert into range_list values(198,'boy','2010-02-15'),(33,'boy','2003-08-11'),(78,'girl','2014-06-24');
+insert into range_list values(233,'girl','2010-01-01'),(360,'boy','2007-05-14'),(146,'girl','2005-03-08');
+insert into range_list values(111,'girl','2013-11-19'),(15,'girl','2009-01-12'),(156,'boy','2011-05-21');
+CREATE TABLE list_list
+(
+    month_code VARCHAR2 ( 30 ) NOT NULL ,
+    dept_code  VARCHAR2 ( 30 ) NOT NULL ,
+    user_no    VARCHAR2 ( 30 ) NOT NULL ,
+    sales_amt  int
+)
+PARTITION BY LIST (month_code) SUBPARTITION BY LIST (dept_code)
+(
+  PARTITION p_201901 VALUES ( '201902' )
+  (
+    SUBPARTITION p_201901_a VALUES ( '1', '2' ),
+    SUBPARTITION p_201901_b VALUES ( default )
+  ),
+  PARTITION p_201902 VALUES ( '201903' )
+  (
+    SUBPARTITION p_201902_a VALUES ( '1', '2' ),
+    SUBPARTITION p_201902_b VALUES ( default )
+  )
+);
+\! @abs_bindir@/gs_dump dump_subpartition_db -p @portstring@ -f @abs_bindir@/dump_subpartition.tar -F t >/dev/null 2>&1; echo $?
+0
+\! @abs_bindir@/gs_restore -d restore_subpartition_db -p @portstring@ @abs_bindir@/dump_subpartition.tar >/dev/null 2>&1; echo $?
+0
+\c restore_subpartition_db
+select count(*) from range_range;
+ count 
+-------
+     9
+(1 row)
+
+select count(*) from range_list;
+ count 
+-------
+     9
+(1 row)
+
+select relname, parttype, partstrategy, partkey, boundaries from pg_partition where parttype in ('r', 'p', 's') order by oid;
+   relname   | parttype | partstrategy | partkey |  boundaries  
+-------------+----------+--------------+---------+--------------
+ list_list   | r        | l            | 1       | 
+ p_201901    | p        | l            | 2       | {201902}
+ p_201901_a  | s        | l            |         | {1,2}
+ p_201901_b  | s        | l            |         | {NULL}
+ p_201902    | p        | l            | 2       | {201903}
+ p_201902_a  | s        | l            |         | {1,2}
+ p_201902_b  | s        | l            |         | {NULL}
+ range_list  | r        | r            | 1       | 
+ p_1         | p        | r            | 2       | {100}
+ p_1_a       | s        | l            |         | {boy}
+ p_1_b       | s        | l            |         | {girl}
+ p_2         | p        | r            | 2       | {200}
+ p_2_a       | s        | l            |         | {boy}
+ p_2_b       | s        | l            |         | {girl}
+ p_3         | p        | r            | 2       | {NULL}
+ p_3_a       | s        | l            |         | {boy,girl}
+ range_range | r        | r            | 1       | 
+ p_1         | p        | r            | 3       | {100}
+ p_1_a       | s        | r            |         | {2010-01-01}
+ p_1_b       | s        | r            |         | {NULL}
+ p_2         | p        | r            | 3       | {200}
+ p_2_a       | s        | r            |         | {2010-01-01}
+ p_2_b       | s        | r            |         | {NULL}
+ p_3         | p        | r            | 3       | {NULL}
+ p_3_a       | s        | r            |         | {2010-01-01}
+ p_3_b       | s        | r            |         | {NULL}
+(26 rows)
+
+\d+ range_range
+                                  Table "public.range_range"
+  Column  |              Type              | Modifiers | Storage  | Stats target | Description 
+----------+--------------------------------+-----------+----------+--------------+-------------
+ id       | integer                        | not null  | plain    |              | 
+ gender   | character varying              | not null  | extended |              | 
+ birthday | timestamp(0) without time zone | not null  | plain    |              | 
+Indexes:
+    "range_range_pkey" PRIMARY KEY, btree (id, birthday) LOCAL TABLESPACE pg_default
+Partition By RANGE(id) Subpartition By RANGE(birthday)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Number of subpartitions: 6 (View pg_partition to check each subpartition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ range_list
+                                   Table "public.range_list"
+  Column  |              Type              | Modifiers | Storage  | Stats target | Description 
+----------+--------------------------------+-----------+----------+--------------+-------------
+ id       | integer                        | not null  | plain    |              | 
+ gender   | character varying              | not null  | extended |              | 
+ birthday | timestamp(0) without time zone | not null  | plain    |              | 
+Indexes:
+    "range_list_pkey" PRIMARY KEY, btree (id) TABLESPACE pg_default
+    "range_list_birthday_idx" btree (birthday) LOCAL TABLESPACE pg_default
+Partition By RANGE(id) Subpartition By LIST(gender)
+Number of partitions: 3 (View pg_partition to check each partition range.)
+Number of subpartitions: 5 (View pg_partition to check each subpartition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\d+ list_list
+                                Table "public.list_list"
+   Column   |         Type          | Modifiers | Storage  | Stats target | Description 
+------------+-----------------------+-----------+----------+--------------+-------------
+ month_code | character varying(30) | not null  | extended |              | 
+ dept_code  | character varying(30) | not null  | extended |              | 
+ user_no    | character varying(30) | not null  | extended |              | 
+ sales_amt  | integer               |           | plain    |              | 
+Partition By LIST(month_code) Subpartition By LIST(dept_code)
+Number of partitions: 2 (View pg_partition to check each partition range.)
+Number of subpartitions: 4 (View pg_partition to check each subpartition range.)
+Has OIDs: no
+Options: orientation=row, compression=no
+
+\c regression
+drop database if exists restore_subpartition_db;
+drop database if exists dump_subpartition_db;

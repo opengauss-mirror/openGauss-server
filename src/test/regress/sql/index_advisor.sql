@@ -1,6 +1,8 @@
 /*
  * This file is used to test index advisor function
  */
+create database pl_test_ind_adv DBCOMPATIBILITY 'pg';
+\c pl_test_ind_adv;
 CREATE TABLE t1 (col1 int, col2 int, col3 text);
 INSERT INTO t1 VALUES(generate_series(1, 3000),generate_series(1, 3000),repeat( chr(int4(random()*26)+65),4));
 ANALYZE t1;
@@ -36,3 +38,5 @@ SELECT * FROM hypopg_reset_index();
 
 DROP TABLE t1;
 DROP TABLE t2;
+\c regression;
+drop database IF EXISTS pl_test_ind_adv;

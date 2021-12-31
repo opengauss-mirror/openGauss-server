@@ -273,7 +273,6 @@ static void dumpacl(Acl* acl)
 }
 #endif /* ACLDEBUG */
 
-#define DATA_NODE_CHECK()  if (IS_PGXC_DATANODE)  break;
 /* if we have a detoasted copy of acl, free it */
 #define FREE_DETOASTED_ACL(acl, aclDatum) do {                          \
     if ((acl) && ((Pointer)(acl) != DatumGetPointer((aclDatum)))) {     \
@@ -815,6 +814,18 @@ static List *objectNamesToOids(GrantObjectType objtype, List *objnames)
 
                 oid = typenameTypeId(NULL, makeTypeNameFromNameList(typname));
                 objects = lappend_oid(objects, oid);
+#ifndef ENABLE_MULTIPLE_NODES
+                /* don't allow to alter package or procedure type */
+                if (IsPackageDependType(oid, InvalidOid)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmodule(MOD_PLSQL),
+                            errmsg("Not allowed to GRANT/REVOKE type \"%s\"", NameListToString(typname)),
+                            errdetail("\"%s\" is a package or procedure type", NameListToString(typname)),
+                            errcause("feature not supported"),
+                            erraction("check type name")));
+                }
+#endif
             }
             break;
         case ACL_OBJECT_FUNCTION:
@@ -927,15 +938,9 @@ static List *objectNamesToOids(GrantObjectType objtype, List *objnames)
             }
             break;
         case ACL_OBJECT_GLOBAL_SETTING:
-#ifdef ENABLE_MULTIPLE_NODES
-            DATA_NODE_CHECK();
-#endif
             get_global_objects(objnames, &objects);
             break;
         case ACL_OBJECT_COLUMN_SETTING:
-#ifdef ENABLE_MULTIPLE_NODES
-            DATA_NODE_CHECK();
-#endif
             get_column_objects(objnames, &objects);
             break;
 
@@ -986,6 +991,8 @@ static List* objectsInSchemaToOids(GrantObjectType objtype, List* nspnames)
                 break;
             case ACL_OBJECT_SEQUENCE:
                 objs = getRelationsInNamespace(namespaceId, RELKIND_SEQUENCE);
+                objects = list_concat(objects, objs);
+                objs = getRelationsInNamespace(namespaceId, RELKIND_LARGE_SEQUENCE);
                 objects = list_concat(objects, objs);
                 break;
             case ACL_OBJECT_FUNCTION: {
@@ -2018,7 +2025,7 @@ static void ExecGrantRelationTypeCheck(Form_pg_class classTuple, const InternalG
                     erraction("Check GRANT/REVOKE syntax to obtain the supported object types.")));
 
     /* Used GRANT SEQUENCE on a non-sequence? */
-    if (istmt->objtype == ACL_OBJECT_SEQUENCE && classTuple->relkind != RELKIND_SEQUENCE)
+    if (istmt->objtype == ACL_OBJECT_SEQUENCE && !RELKIND_IS_SEQUENCE(classTuple->relkind))
         ereport(ERROR, (errmodule(MOD_SEC_FE), errcode(ERRCODE_WRONG_OBJECT_TYPE),
             errmsg("wrong object type"), errdetail("\"%s\" is not a sequence", NameStr(classTuple->relname)),
                 errcause("GRANT/REVOKE SEQUENCE only support sequence objects."),
@@ -2026,7 +2033,7 @@ static void ExecGrantRelationTypeCheck(Form_pg_class classTuple, const InternalG
 
     /* Adjust the default permissions based on object type */
     if (istmt->all_privs && istmt->privileges == ACL_NO_RIGHTS && istmt->ddl_privileges == ACL_NO_DDL_RIGHTS) {
-        if (classTuple->relkind == RELKIND_SEQUENCE) {
+        if (RELKIND_IS_SEQUENCE(classTuple->relkind)) {
             *privileges = ACL_ALL_RIGHTS_SEQUENCE;
             *ddlPrivileges = (t_thrd.proc->workingVersionNum >= PRIVS_VERSION_NUM) ?
                 ACL_ALL_DDL_RIGHTS_SEQUENCE : ACL_NO_DDL_RIGHTS;
@@ -2043,7 +2050,7 @@ static void ExecGrantRelationTypeCheck(Form_pg_class classTuple, const InternalG
 
 static void ExecGrantRelationPrivilegesCheck(Form_pg_class tuple, AclMode* privileges, AclMode* ddlprivileges)
 {
-    if (tuple->relkind == RELKIND_SEQUENCE) {
+    if (RELKIND_IS_SEQUENCE(tuple->relkind)) {
         /*
             * For backward compatibility, just throw a warning for
             * invalid sequence permissions when using the non-sequence
@@ -2174,6 +2181,7 @@ static void ExecGrant_Relation(InternalGrant* istmt)
         if (isNull) {
             switch (pg_class_tuple->relkind) {
                 case RELKIND_SEQUENCE:
+                case RELKIND_LARGE_SEQUENCE:
                     old_acl = acldefault(ACL_OBJECT_SEQUENCE, ownerId);
                     break;
                 default:
@@ -2222,6 +2230,7 @@ static void ExecGrant_Relation(InternalGrant* istmt)
 
             switch (pg_class_tuple->relkind) {
                 case RELKIND_SEQUENCE:
+                case RELKIND_LARGE_SEQUENCE:
                     aclkind = ACL_KIND_SEQUENCE;
                     break;
                 default:
@@ -2299,7 +2308,7 @@ static void ExecGrant_Relation(InternalGrant* istmt)
                             erraction("Check GRANT/REVOKE syntax to obtain the supported privilege types "
                                 "for column object.")));
 
-            if (pg_class_tuple->relkind == RELKIND_SEQUENCE && (privileges & ~((AclMode)ACL_SELECT))) {
+            if (RELKIND_IS_SEQUENCE(pg_class_tuple->relkind) && (privileges & ~((AclMode)ACL_SELECT))) {
                 /*
                  * The only column privilege allowed on sequences is SELECT.
                  * This is a warning not error because we do it that way for
@@ -4428,7 +4437,8 @@ static void ExecGrant_Directory(InternalGrant* istmt)
     errno_t rc;
     if (istmt->all_privs && istmt->privileges == ACL_NO_RIGHTS && istmt->ddl_privileges == ACL_NO_DDL_RIGHTS) {
         istmt->privileges = ACL_ALL_RIGHTS_DIRECTORY;
-        istmt->ddl_privileges = ACL_ALL_DDL_RIGHTS_DIRECTORY;
+        istmt->ddl_privileges = (t_thrd.proc->workingVersionNum >= PRIVS_DIRECTORY_VERSION_NUM) ?
+            ACL_ALL_DDL_RIGHTS_DIRECTORY : ACL_NO_DDL_RIGHTS;
     }
 
     relation = heap_open(PgDirectoryRelationId, RowExclusiveLock);
@@ -5100,6 +5110,7 @@ AclMode pg_class_aclmask(Oid table_oid, Oid roleid, AclMode mask, AclMaskHow how
         /* No ACL, so build default ACL */
         switch (classForm->relkind) {
             case RELKIND_SEQUENCE:
+            case RELKIND_LARGE_SEQUENCE:
                 acl = acldefault(ACL_OBJECT_SEQUENCE, ownerId);
                 break;
             default:
@@ -5245,10 +5256,13 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
 {
     AclMode result;
     HeapTuple tuple = NULL;
+    HeapTuple pkgTuple = NULL;
     Datum aclDatum;
+    Datum packageOidDatum;
     bool isNull = false;
     Acl* acl = NULL;
-    Oid ownerId;
+    Oid ownerId = InvalidOid;
+    Oid packageOid = InvalidOid;
 
     if(IsSystemObjOid(proc_oid) && isOperatoradmin(roleid) && u_sess->attr.attr_security.operation_mode){
         return REMOVE_DDL_FLAG(mask);
@@ -5264,7 +5278,10 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
                 errcause("System error."), erraction("Contact engineer to support.")));
 
     ownerId = ((Form_pg_proc)GETSTRUCT(tuple))->proowner;
-
+    packageOidDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_packageid, &isNull);
+    if (!isNull) {
+        packageOid = DatumGetObjectId(packageOidDatum);
+    }
     /* For procs in schema dbe_perf and schema snapshot,
      * initial user and monitorsdmin bypass all permission-checking.
      */
@@ -5279,8 +5296,17 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
         ReleaseSysCache(tuple);
         return REMOVE_DDL_FLAG(mask);
     }
-
-    aclDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_proacl, &isNull);
+    if (!OidIsValid(packageOid)) {
+        aclDatum = SysCacheGetAttr(PROCOID, tuple, Anum_pg_proc_proacl, &isNull);
+    } else {
+        pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(packageOid));
+        if (!HeapTupleIsValid(pkgTuple)) {
+            ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
+                errmsg("package with OID %u does not exist", packageOid), errdetail("N/A"),
+                    errcause("System error."), erraction("Contact engineer to support.")));
+        }
+        aclDatum = SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgacl, &isNull);
+    }
     if (isNull) {
         /* No ACL, so build default ACL */
         acl = acldefault(ACL_OBJECT_FUNCTION, ownerId);
@@ -5302,11 +5328,65 @@ AclMode pg_proc_aclmask(Oid proc_oid, Oid roleid, AclMode mask, AclMaskHow how, 
 
     /* if we have a detoasted copy, free it */
     FREE_DETOASTED_ACL(acl, aclDatum);
-
+    if (HeapTupleIsValid(pkgTuple)) {
+        ReleaseSysCache(pkgTuple);
+    }
     ReleaseSysCache(tuple);
 
     return result;
 }
+
+/*
+ * Exported routine for examining a user's privileges for a package
+ */
+AclMode pg_package_aclmask(Oid packageOid, Oid roleid, AclMode mask, AclMaskHow how)
+{
+    AclMode result;
+    HeapTuple tuple = NULL;
+    HeapTuple pkgTuple = NULL;
+    Datum aclDatum;
+    bool isNull = false;
+    Acl* acl = NULL;
+    Oid ownerId = InvalidOid;
+
+    /*
+     * Get the package's ACL from gs_package
+     */
+    tuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(packageOid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_PACKAGE),
+            errmsg("package with OID %u does not exist", packageOid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
+    }
+    ownerId = ((Form_gs_package)GETSTRUCT(tuple))->pkgowner;
+
+    pkgTuple = SearchSysCache1(PACKAGEOID, ObjectIdGetDatum(packageOid));
+    if (!HeapTupleIsValid(pkgTuple)) {
+        ReleaseSysCache(pkgTuple);
+        ereport(ERROR, (errmodule(MOD_SEC), errcode(ERRCODE_UNDEFINED_FUNCTION),
+            errmsg("package with OID %u does not exist", packageOid), errdetail("N/A"),
+                errcause("System error."), erraction("Contact engineer to support.")));
+    }
+    aclDatum = SysCacheGetAttr(PACKAGEOID, pkgTuple, Anum_gs_package_pkgacl, &isNull);
+    if (isNull) {
+        /* No ACL, so build default ACL */
+        acl = acldefault(ACL_OBJECT_PACKAGE, ownerId);
+        aclDatum = (Datum)0;
+    } else {
+        /* detoast ACL if necessary */
+        acl = DatumGetAclP(aclDatum);
+    }
+    result = aclmask(acl, roleid, ownerId, mask, how);
+    /* if we have a detoasted copy, free it */
+    FREE_DETOASTED_ACL(acl, aclDatum);
+    if (HeapTupleIsValid(pkgTuple)) {
+        ReleaseSysCache(pkgTuple);
+    }
+    ReleaseSysCache(tuple);
+
+    return result;
+}
+
 
 /*
  * Exported routine for examining a user's privileges for a client master key
@@ -6154,6 +6234,17 @@ AclResult pg_directory_aclcheck(Oid dir_oid, Oid roleid, AclMode mode)
 AclResult pg_proc_aclcheck(Oid proc_oid, Oid roleid, AclMode mode, bool check_nodegroup)
 {
     if (pg_proc_aclmask(proc_oid, roleid, mode, ACLMASK_ANY, check_nodegroup) != 0)
+        return ACLCHECK_OK;
+    else
+        return ACLCHECK_NO_PRIV;
+}
+
+/*
+ * Exported routine for checking a user's access privileges to a package
+ */
+AclResult pg_package_aclcheck(Oid pkgOid, Oid roleid, AclMode mode, bool checkNodegroup)
+{
+    if (pg_package_aclmask(pkgOid, roleid, mode, ACLMASK_ANY) != 0)
         return ACLCHECK_OK;
     else
         return ACLCHECK_NO_PRIV;
@@ -7185,7 +7276,7 @@ bool independent_priv_aclcheck(AclMode mask, char relkind)
          */
         if (u_sess->proc_cxt.clientIsGsredis && ClusterResizingInProgress()) {
             return true;
-        } else if (u_sess->proc_cxt.clientIsGsdump && relkind == RELKIND_SEQUENCE) {
+        } else if (u_sess->proc_cxt.clientIsGsdump && RELKIND_IS_SEQUENCE(relkind)) {
             return true;
         } else {
             return false;

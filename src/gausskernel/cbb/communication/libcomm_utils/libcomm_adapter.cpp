@@ -764,6 +764,11 @@ static int gs_connect_by_unix_domain()
         return -1;
     }
 
+    if (g_instance.comm_cxt.g_unix_path == NULL) {
+        LIBCOMM_ELOG(WARNING, "(SendUnixDomainMsg)\tCould not get unix path.");
+        return -1;
+    }
+
     // STEP2 set unix addr
     struct sockaddr_un unp;
     ss_rc = memset_s(&unp, sizeof(unp), 0x0, sizeof(struct sockaddr_un));

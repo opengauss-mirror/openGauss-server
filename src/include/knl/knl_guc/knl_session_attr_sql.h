@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -80,6 +81,7 @@ typedef struct knl_session_attr_sql {
     bool enable_remotegroup;
     bool enable_remotesort;
     bool enable_remotelimit;
+    bool enable_startwith_debug;
     bool gtm_backup_barrier;
     bool explain_allow_multinode;
     bool enable_stream_operator;
@@ -227,9 +229,9 @@ typedef struct knl_session_attr_sql {
     char* db4ai_snapshot_mode;
     char* db4ai_snapshot_version_delimiter;
     char* db4ai_snapshot_version_separator;
-#ifndef ENABLE_MULTIPLE_NODES
-    bool enable_custom_parser;
-#endif
+    int pldebugger_timeout;
+	bool for_print_tuple;
+    bool numeric_out_for_format;
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */

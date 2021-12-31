@@ -45,6 +45,9 @@ void rto_get_standby_info_text(char *info, uint32 max_info_len)
     securec_check_ss(errorno, "", "");
 
     for (int i = 0; i < g_instance.attr.attr_storage.max_wal_senders; ++i) {
+        if (strstr(g_instance.rto_cxt.rto_standby_data[i].id, "hadr_") != NULL) {
+            continue;
+        }
         if (strlen(g_instance.rto_cxt.rto_standby_data[i].id) == 0) {
             if (show_line == false) {
                 errorno = snprintf_s(info + strlen(info), max_info_len - strlen(info), max_info_len - strlen(info) - 1,
@@ -91,6 +94,9 @@ RTOStandbyData *GetDCFRTOStat(uint32 *num)
             rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.dcf_rto_standby_data[i].id,
                            strlen(g_instance.rto_cxt.dcf_rto_standby_data[i].id));
             securec_check(rc, "\0", "\0");
+            if (strstr(standby_names, "hadr_") != NULL) {
+                continue;
+            }
             ereport(LOG, (errmsg("Step into GetDCFRTOStat and id is %s.",
                 g_instance.rto_cxt.dcf_rto_standby_data[i].id)));
             char *local_ip = (char *)(result[readDCFNode].source_ip);
@@ -132,11 +138,16 @@ RTOStandbyData *GetRTOStat(uint32 *num)
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        SpinLockAcquire(&walsnd->mutex);
         if (walsnd->pid != 0) {
             char *standby_names = (char *)(result[readWalSnd].id);
             rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.rto_standby_data[i].id,
                            strlen(g_instance.rto_cxt.rto_standby_data[i].id));
             securec_check(rc, "\0", "\0");
+            if (strstr(standby_names, "hadr_") != NULL) {
+                SpinLockRelease(&walsnd->mutex);
+                continue;
+            }
 
             char *local_ip = (char *)(result[readWalSnd].source_ip);
             rc = strncpy_s(local_ip, IP_LEN, (char *)walsnd->wal_sender_channel.localhost,
@@ -158,6 +169,55 @@ RTOStandbyData *GetRTOStat(uint32 *num)
                 result[readWalSnd].current_sleep_time = g_instance.rto_cxt.rto_standby_data[i].current_sleep_time;
             }
             result[readWalSnd].target_rto = u_sess->attr.attr_storage.target_rto;
+            readWalSnd++;
+        }
+        SpinLockRelease(&walsnd->mutex);
+    }
+
+    *num = readWalSnd;
+    return result;
+}
+
+HadrRTOAndRPOData *HadrGetRTOStat(uint32 *num)
+{
+    HadrRTOAndRPOData *result =
+        (HadrRTOAndRPOData *)palloc((int64)(g_instance.attr.attr_storage.max_wal_senders) * sizeof(HadrRTOAndRPOData));
+    int i;
+    int rc;
+    int readWalSnd = 0;
+
+    for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
+        /* use volatile pointer to prevent code rearrangement */
+        volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        if (walsnd->pid != 0 && (strstr(g_instance.rto_cxt.rto_standby_data[i].id, "hadr_") != NULL)) {
+            char *standby_names = (char *)(result[readWalSnd].id);
+            rc = strncpy_s(standby_names, IP_LEN, g_instance.rto_cxt.rto_standby_data[i].id,
+                           strlen(g_instance.rto_cxt.rto_standby_data[i].id));
+            securec_check(rc, "\0", "\0");
+
+            char *local_ip = (char *)(result[readWalSnd].source_ip);
+            rc = strncpy_s(local_ip, IP_LEN, (char *)walsnd->wal_sender_channel.localhost,
+                           strlen((char *)walsnd->wal_sender_channel.localhost));
+            securec_check(rc, "\0", "\0");
+
+            char *remote_ip = (char *)(result[readWalSnd].dest_ip);
+            rc = strncpy_s(remote_ip, IP_LEN, (char *)walsnd->wal_sender_channel.remotehost,
+                           strlen((char *)walsnd->wal_sender_channel.remotehost));
+            securec_check(rc, "\0", "\0");
+
+            result[readWalSnd].source_port = walsnd->wal_sender_channel.localport;
+            result[readWalSnd].dest_port = walsnd->wal_sender_channel.remoteport;
+            result[readWalSnd].current_rto = g_instance.rto_cxt.rto_standby_data[i].current_rto;
+            result[readWalSnd].current_rpo = walsnd->log_ctrl.current_RPO < 0 ? 0 : walsnd->log_ctrl.current_RPO;
+
+            if (u_sess->attr.attr_storage.hadr_recovery_time_target == 0 &&
+                u_sess->attr.attr_storage.hadr_recovery_point_target == 0) {
+                result[readWalSnd].current_sleep_time = 0;
+            } else {
+                result[readWalSnd].current_sleep_time = g_instance.rto_cxt.rto_standby_data[i].current_sleep_time;
+            }
+            result[readWalSnd].target_rto = u_sess->attr.attr_storage.hadr_recovery_time_target;
+            result[readWalSnd].target_rpo = u_sess->attr.attr_storage.hadr_recovery_point_target;
             readWalSnd++;
         }
     }

@@ -56,6 +56,7 @@ typedef struct LogCtrlData {
     TimestampTz prev_reply_time;
     uint64 pre_rate1;
     uint64 pre_rate2;
+    uint64 pre_rpo_rate;
     int64 prev_RPO;
     int64 current_RPO;
     TimestampTz prev_send_time;
@@ -76,6 +77,7 @@ typedef struct WalSnd {
                                   * reloaded? */
     bool sendKeepalive;          /* do we send keepalives on this connection? */
     bool replSender;             /* is the walsender a normal replication or building */
+    bool is_cross_cluster;       /* is the walsender from another cluster? */
 
     ServerMode peer_role;
     DbState peer_state;

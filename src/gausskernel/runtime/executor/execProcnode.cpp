@@ -10,6 +10,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -266,6 +267,8 @@ PlanState* ExecInitNodeByType(Plan* node, EState* estate, int eflags)
             return (PlanState*)ExecInitMergeAppend((MergeAppend*)node, estate, eflags);
         case T_RecursiveUnion:
             return (PlanState*)ExecInitRecursiveUnion((RecursiveUnion*)node, estate, eflags);
+        case T_StartWithOp:
+            return (PlanState*)ExecInitStartWithOp((StartWithOp*)node, estate, eflags);
         case T_BitmapAnd:
             return (PlanState*)ExecInitBitmapAnd((BitmapAnd*)node, estate, eflags);
         case T_BitmapOr:
@@ -622,6 +625,8 @@ TupleTableSlot* ExecProcNodeByType(PlanState* node)
             return ExecMergeAppend((MergeAppendState*)node);
         case T_RecursiveUnionState:
             return ExecRecursiveUnion((RecursiveUnionState*)node);
+        case T_StartWithOpState:
+            return ExecStartWithOp((StartWithOpState*)node);
         case T_SeqScanState:
             return ExecSeqScan((SeqScanState*)node);
         case T_IndexScanState:
@@ -790,6 +795,11 @@ static inline TupleTableSlot *ExecRecursiveUnionWrap(PlanState *node)
     return ExecRecursiveUnion((RecursiveUnionState*)node);
 };
 
+static inline TupleTableSlot *ExecStartWithOpWrap(PlanState *node)
+{
+    return ExecStartWithOp((StartWithOpState*)node);
+};
+
 static inline TupleTableSlot *ExecSeqScanWrap(PlanState *node)
 {
     return ExecSeqScan((SeqScanState *)node);
@@ -934,6 +944,7 @@ ExecProcFuncType g_execProcFuncTable[] = {
     ExecPartIteratorWrap,
     ExecMergeAppendWrap,
     ExecRecursiveUnionWrap,
+    ExecStartWithOpWrap,
     DefaultExecProc,
     DefaultExecProc,
     DefaultExecProc,
@@ -1266,18 +1277,25 @@ void cleanup_sensitive_information()
     extern THR_LOCAL unsigned char derive_vector_saved[RANDOM_LEN];
     extern THR_LOCAL unsigned char mac_vector_saved[RANDOM_LEN];
     extern THR_LOCAL unsigned char input_saved[RANDOM_LEN];
+    errno_t errorno = EOK;
 
     if (encryption_function_call == true) {
-        CleanupBuffer(derive_vector_saved, RANDOM_LEN);
-        CleanupBuffer(input_saved, RANDOM_LEN);
-        CleanupBuffer(mac_vector_saved, RANDOM_LEN);
+        errorno = memset_s(derive_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
+        securec_check(errorno, "", "");
+        errorno = memset_s(input_saved, RANDOM_LEN, 0, RANDOM_LEN);
+        securec_check(errorno, "", "");
+        errorno = memset_s(mac_vector_saved, RANDOM_LEN, 0, RANDOM_LEN);
+        securec_check(errorno, "", "");
         encryption_function_call = false;
     }
     if (decryption_function_call == true) {
         for (int i = 0; i < NUMBER_OF_SAVED_DERIVEKEYS; ++i) {
-            CleanupBuffer(derive_vector_used[i], RANDOM_LEN);
-            CleanupBuffer(user_input_used[i], RANDOM_LEN);
-            CleanupBuffer(mac_vector_used[i], RANDOM_LEN);
+            errorno = memset_s(derive_vector_used[i], RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check(errorno, "", "");
+            errorno = memset_s(user_input_used[i], RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check(errorno, "", "");
+            errorno = memset_s(mac_vector_used[i], RANDOM_LEN, 0, RANDOM_LEN);
+            securec_check(errorno, "", "");
         }
         decryption_function_call = false;
     }
@@ -1329,6 +1347,10 @@ static void ExecEndNodeByType(PlanState* node)
 
         case T_RecursiveUnionState:
             ExecEndRecursiveUnion((RecursiveUnionState*)node);
+            break;
+
+        case T_StartWithOpState:
+            ExecEndStartWithOp((StartWithOpState*)node);
             break;
 
         case T_BitmapAndState:

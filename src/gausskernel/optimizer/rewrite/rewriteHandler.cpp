@@ -41,6 +41,7 @@
 #include "utils/rel_gs.h"
 #include "catalog/pg_constraint.h"
 #include "catalog/namespace.h"
+#include "client_logic/client_logic.h"
 
 #ifdef PGXC
 #include "pgxc/locator.h"
@@ -2856,6 +2857,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     foreach (col, tlist) {
         TargetEntry* tle = (TargetEntry*)lfirst(col);
         ColumnDef* coldef = NULL;
+        ClientLogicColumnRef *coldef_enc = NULL;
         TypeName* tpname = NULL;
     
         if (IsA(tle->expr, Var)) {
@@ -2878,7 +2880,7 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         /* Ignore junk columns from the targetlist */
         if (tle->resjunk)
             continue;
-    
+
         coldef = makeNode(ColumnDef);
         tpname = makeNode(TypeName);
     
@@ -2900,14 +2902,31 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
         coldef->raw_default = NULL;
         coldef->cooked_default = NULL;
         coldef->constraints = NIL;
-    
+
         /*
          * Set typeOid and typemod. The name of the type is derived while
          * generating query
          */
         tpname->typeOid = exprType((Node*)tle->expr);
         tpname->typemod = exprTypmod((Node*)tle->expr);
-    
+
+        /* 
+         * If the column of source relation is encrypted
+         * instead of copying its typeOid directly
+         * we should get its original defination from the catalog
+         */
+        if (is_enc_type(tpname->typeOid)) {
+            coldef_enc = get_column_enc_def(tle->resorigtbl, tle->resname);
+            if (coldef_enc != NULL) { /* should never be NULL */
+                coldef_enc->dest_typname = makeTypeNameFromOid(tpname->typeOid, -1);
+                
+                tpname->typeOid = coldef_enc->orig_typname->typeOid;
+                tpname->typemod = coldef_enc->orig_typname->typemod;
+            }
+
+            coldef->clientLogicColumnRef = coldef_enc;
+        }
+
         coldef->typname = tpname;
     
         tableElts = lappend(tableElts, coldef);
@@ -2970,6 +2989,14 @@ char* GetCreateTableStmt(Query* parsetree, CreateTableAsStmt* stmt)
     return cquery->data;
 }
 
+static bool selectNeedRecovery(Query* query)
+{
+    if (!query->hasRecursive || query->sql_statement == NULL) {
+        return false;
+    }
+    return strcasestr(query->sql_statement, "CONNECT") != NULL;
+}
+
 char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
 {
     /* Get the SELECT query string */
@@ -2987,7 +3014,16 @@ char* GetInsertIntoStmt(CreateTableAsStmt* stmt)
     StringInfo cquery = makeStringInfo();
     deparse_query((Query*)stmt->query, cquery, NIL, false, false, stmt->parserSetupArg);
     char* selectstr = pstrdup(cquery->data);
-    
+
+    /*
+     * Check if we should recover from the rewriting performed on the select part,
+     * e.g. for START WITH cases we need to do this after rewriting
+     */
+    Query* select_query = (Query*)stmt->query;
+    if (selectNeedRecovery(select_query)) {
+        selectstr = pstrdup(select_query->sql_statement);
+    }
+
     /* Now, finally build the INSERT INTO statement */
     initStringInfo(cquery);
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -149,6 +150,7 @@ static void knl_t_log_init(knl_t_log_context* log_cxt)
     }
 
     log_cxt->error_context_stack = NULL;
+    log_cxt->call_stack = NULL;
     log_cxt->PG_exception_stack = NULL;
     log_cxt->thd_bt_symbol = NULL;
     log_cxt->flush_message_immediately = false;
@@ -411,6 +413,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->recoveryTargetBarrierId = NULL;
     xlog_cxt->recoveryTargetName = NULL;
     xlog_cxt->recoveryTargetLSN = InvalidXLogRecPtr;
+    xlog_cxt->isRoachSingleReplayDone = false;
     xlog_cxt->StandbyModeRequested = false;
     xlog_cxt->PrimaryConnInfo = NULL;
     xlog_cxt->TriggerFile = NULL;
@@ -434,6 +437,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->RedoStartLSN = InvalidXLogRecPtr;
     xlog_cxt->server_mode = UNKNOWN_MODE;
     xlog_cxt->is_cascade_standby = false;
+    xlog_cxt->is_hadr_main_standby = false;
     xlog_cxt->startup_processing = false;
     xlog_cxt->openLogFile = -1;
     xlog_cxt->readfrombuffer = false;
@@ -508,6 +512,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->max_page_flush_lsn = MAX_XLOG_REC_PTR;
     xlog_cxt->redoInterruptCallBackFunc = NULL;
     xlog_cxt->xlog_atomic_op = NULL;
+    xlog_cxt->currentRetryTimes = 0;
 }
 
 static void knl_t_index_init(knl_t_index_context* index_cxt)
@@ -717,6 +722,9 @@ static void knl_t_libwalreceiver_init(knl_t_libwalreceiver_context* libwalreceiv
 {
     libwalreceiver_cxt->streamConn = NULL;
     libwalreceiver_cxt->recvBuf = NULL;
+    libwalreceiver_cxt->shared_storage_buf = NULL;
+    libwalreceiver_cxt->shared_storage_read_buf = NULL;
+    libwalreceiver_cxt->xlogreader = NULL;
 }
 
 static void knl_t_sig_init(knl_t_sig_context* sig_cxt)
@@ -983,7 +991,8 @@ static void knl_t_walwriterauxiliary_init(knl_t_walwriterauxiliary_context *cons
 
 static void knl_t_poolcleaner_init(knl_t_poolcleaner_context* poolcleaner_cxt)
 {
-    poolcleaner_cxt->shutdown_requested;
+    poolcleaner_cxt->shutdown_requested = false;
+    poolcleaner_cxt->got_SIGHUP = false;
 }
 
 static void knl_t_catchup_init(knl_t_catchup_context* catchup_cxt)
@@ -1119,8 +1128,6 @@ static void knl_t_bgwriter_init(knl_t_bgwriter_context* bgwriter_cxt)
 {
     bgwriter_cxt->got_SIGHUP = false;
     bgwriter_cxt->shutdown_requested = false;
-    bgwriter_cxt->thread_id = -1;
-    bgwriter_cxt->next_flush_time = 0;
 }
 
 static void knl_t_pagewriter_init(knl_t_pagewriter_context* pagewriter_cxt)
@@ -1130,6 +1137,19 @@ static void knl_t_pagewriter_init(knl_t_pagewriter_context* pagewriter_cxt)
     pagewriter_cxt->page_writer_after = WRITEBACK_MAX_PENDING_FLUSHES;
     pagewriter_cxt->pagewriter_id = -1;
 }
+
+static void knl_t_xlogcopybackend_init(knl_t_sharestoragexlogcopyer_context* cxt)
+{
+    cxt->got_SIGHUP = false;
+    cxt->shutdown_requested = false;
+    cxt->wakeUp = false;
+    cxt->readFile = -1;
+    cxt->readOff = 0;
+    cxt->readSegNo = 0;
+    cxt->buf = NULL;
+    cxt->originBuf = NULL;
+}
+
 
 extern bool HeapTupleSatisfiesNow(HeapTuple htup, Snapshot snapshot, Buffer buffer);
 extern bool HeapTupleSatisfiesSelf(HeapTuple htup, Snapshot snapshot, Buffer buffer);
@@ -1223,6 +1243,9 @@ static void knl_t_walreceiver_init(knl_t_walreceiver_context* walreceiver_cxt)
     walreceiver_cxt->AmWalReceiverForFailover = false;
     walreceiver_cxt->AmWalReceiverForStandby = false;
     walreceiver_cxt->control_file_writed = 0;
+    walreceiver_cxt->checkConsistencyOK = false;
+    walreceiver_cxt->hasReceiveNewData = false;
+    walreceiver_cxt->termChanged = false;
 }
 
 static void knl_t_storage_init(knl_t_storage_context* storage_cxt)
@@ -1430,6 +1453,13 @@ static void knl_t_postmaster_init(knl_t_postmaster_context* postmaster_cxt)
     rc = memset_s(postmaster_cxt->ReplConnChanged, MAX_REPLNODE_NUM * sizeof(bool), 0, MAX_REPLNODE_NUM * sizeof(bool));
     securec_check(rc, "\0", "\0");
 
+    rc = memset_s(postmaster_cxt->CrossClusterReplConnArray, MAX_REPLNODE_NUM * sizeof(replconninfo*), 0,
+        MAX_REPLNODE_NUM * sizeof(replconninfo*));
+    securec_check(rc, "\0", "\0");
+    rc = memset_s(postmaster_cxt->CrossClusterReplConnChanged, MAX_REPLNODE_NUM * sizeof(bool), 0, 
+                  MAX_REPLNODE_NUM * sizeof(bool));
+    securec_check(rc, "\0", "\0");
+
     postmaster_cxt->HaShmData = NULL;
     postmaster_cxt->LocalIpNum = 0;
     postmaster_cxt->IsRPCWorkerThread = false;
@@ -1517,6 +1547,8 @@ static void knl_t_heartbeat_init(knl_t_heartbeat_context* heartbeat_cxt)
     heartbeat_cxt->got_SIGHUP = false;
     heartbeat_cxt->shutdown_requested = false;
     heartbeat_cxt->state = NULL;
+    heartbeat_cxt->total_failed_times = 0;
+    heartbeat_cxt->last_failed_timestamp = 0;
 }
 
 static void knl_t_streaming_init(knl_t_streaming_context* streaming_cxt)
@@ -1543,6 +1575,7 @@ static void knl_t_security_policy_init(knl_t_security_policy_context *const poli
     policy_cxt->VectorMemoryContext = NULL;
     policy_cxt->MapMemoryContext = NULL;
     policy_cxt->SetMemoryContext = NULL;
+    policy_cxt->OidRBTreeMemoryContext = NULL;
     policy_cxt->node_location = 0;
     policy_cxt->prepare_stmt_name = "";
 }
@@ -1633,6 +1666,7 @@ void knl_thread_init(knl_thread_role role)
     knl_t_aiocompleter_init(&t_thrd.aio_cxt);
     knl_t_alarmchecker_init(&t_thrd.alarm_cxt);
     knl_t_arch_init(&t_thrd.arch);
+    knl_t_xlogcopybackend_init(&t_thrd.sharestoragexlogcopyer_cxt);
     knl_t_barrier_arch_init(&t_thrd.barrier_arch);
     knl_t_async_init(&t_thrd.asy_cxt);
     knl_t_audit_init(&t_thrd.audit);

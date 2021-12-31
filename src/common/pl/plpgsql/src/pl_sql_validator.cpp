@@ -127,6 +127,7 @@ void pl_validate_function_sql(PLpgSQL_function* func, bool is_replace)
     {
         old_owner = create_temp_resourceowner("pl_validator");
         int rc = 0;
+        SPI_STACK_LOG("connect", NULL, NULL);
         if ((rc = SPI_connect()) != SPI_OK_CONNECT) {
             /* rethrow for clean up */
             PG_RE_THROW();
@@ -182,6 +183,7 @@ void pl_validate_function_sql(PLpgSQL_function* func, bool is_replace)
         if (is_rethrow_exeption) {
             PG_RE_THROW();
         }
+        SPI_STACK_LOG("end", NULL, plan);
         if (plan) {
             SPI_freeplan(plan);
         }
@@ -195,6 +197,7 @@ void pl_validate_function_sql(PLpgSQL_function* func, bool is_replace)
     PG_END_TRY();
 
     func->pre_parse_trig = stored_prepase_trig;
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() == SPI_ERROR_UNCONNECTED) {
         SPICleanup();
     }

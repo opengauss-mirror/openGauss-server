@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/libpq/pqformat.h
  *
@@ -40,6 +41,7 @@ extern void pq_putemptymessage_noblock(char msgtype);
 extern int pq_getmsgbyte(StringInfo msg);
 extern unsigned int pq_getmsgint(StringInfo msg, int b);
 extern int64 pq_getmsgint64(StringInfo msg);
+extern int128 pq_getmsgint128(StringInfo msg);
 extern float4 pq_getmsgfloat4(StringInfo msg);
 extern float8 pq_getmsgfloat8(StringInfo msg);
 extern const char* pq_getmsgbytes(StringInfo msg, int datalen);
@@ -47,6 +49,35 @@ extern void pq_copymsgbytes(StringInfo msg, char* buf, int datalen);
 extern char* pq_getmsgtext(StringInfo msg, int rawbytes, int* nbytes);
 extern const char* pq_getmsgstring(StringInfo msg);
 extern void pq_getmsgend(StringInfo msg);
+
+static inline uint128 pg_bswap128(uint128 x)
+{
+    return
+    ((x << 120) & ((uint128)0xff) << 120) |
+    ((x << 104) & ((uint128)0xff) << 112) |
+    ((x <<  88) & ((uint128)0xff) << 104) |
+    ((x <<  72) & ((uint128)0xff) << 96) |
+    ((x <<  56) & ((uint128)0xff) << 88) |
+    ((x <<  40) & ((uint128)0xff) << 80) |
+    ((x <<  24) & ((uint128)0xff) << 72) |
+    ((x <<   8) & ((uint128)0xff) << 64) |
+    ((x >>   8) & ((uint128)0xff) << 56) |
+    ((x >>  24) & ((uint128)0xff) << 48) |
+    ((x >>  40) & ((uint128)0xff) << 40) |
+    ((x <<  56) & ((uint128)0xff) << 32) |
+    ((x <<  72) & ((uint128)0xff) << 24) |
+    ((x <<  88) & ((uint128)0xff) << 16) |
+    ((x << 104) & ((uint128)0xff) << 8) |
+    ((x << 120) & 0xff);
+}
+
+#ifdef WORDS_BIGENDIAN
+#define pg_hton128(x) (x)
+#define pg_ntoh128(x) (x)
+#else
+#define pg_hton128(x) pg_bswap128(x)
+#define pg_ntoh128(x) pg_bswap128(x)
+#endif /* WORDS_BIGENDIAN */
 
 /*
  * Append a [u]int8 to a StringInfo buffer, which already has enough space
@@ -123,6 +154,21 @@ static inline void pq_writeint64(StringInfoData* pg_restrict buf, uint64 i)
 }
 
 /*
+ * Append a [u]int128 to a StringInfo buffer, which already has enough space
+ * preallocated.
+ */
+static inline void pq_writeint128(StringInfoData *pg_restrict buf, uint64 i)
+{
+    uint128 ni = pg_hton128(i);
+    errno_t rc = EOK;
+    Assert(buf->len + (int) sizeof(uint128) <= buf->maxlen);
+    rc = memcpy_s((char *pg_restrict)(buf->data + buf->len), sizeof(uint128), &ni, sizeof(uint128));
+    securec_check(rc, "\0", "\0");
+    buf->len += sizeof(uint128);
+}
+
+
+/*
  * Append a null-terminated text string (with conversion) to a buffer with
  * preallocated space.
  *
@@ -176,6 +222,13 @@ static inline void pq_sendint64(StringInfo buf, uint64 i)
 {
     enlargeStringInfo(buf, sizeof(uint64));
     pq_writeint64(buf, i);
+}
+
+/* append a binary [u]int128 to a StringInfo buffer */
+static inline void pq_sendint128(StringInfo buf, uint64 i)
+{
+    enlargeStringInfo(buf, sizeof(uint128));
+    pq_writeint128(buf, i);
 }
 
 /* append a binary byte to a StringInfo buffer */

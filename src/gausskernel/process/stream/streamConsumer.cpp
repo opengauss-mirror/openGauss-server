@@ -408,6 +408,12 @@ void StreamConsumer::waitProducerReady()
                     global_node_definition ? global_node_definition->num_nodes : -1);
 
                 if (ntimes == 300) {
+                    if (t_thrd.int_cxt.QueryCancelPending) {
+                        ereport(WARNING, (errmodule(MOD_STREAM),
+                                      errcode(ERRCODE_CONNECTION_TIMED_OUT),
+                                      errmsg("Did not handle interrupt signal, with InterruptHoldoffCount(%u),",
+                                             t_thrd.int_cxt.InterruptHoldoffCount)));
+                    }
                     resetStringInfo(&str);
                     findUnconnectProducer(&str);
                     ereport(ERROR,

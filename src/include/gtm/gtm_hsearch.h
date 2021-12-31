@@ -128,9 +128,9 @@ extern HTAB *hash_create(const char *tabname, long nelem, HASHCTL *info, int fla
 extern void hash_destroy(HTAB *hashp);
 extern void hash_remove(HTAB *hashp);
 extern void hash_stats(const char *where, HTAB *hashp);
-extern void *hash_search(HTAB *hashp, const void *keyPtr, HASHACTION action, bool *foundPtr);
+extern void *hash_search(HTAB *hashpPtr, const void *keyPtr, HASHACTION action, bool *foundPtr);
 extern uint32 get_hash_value(HTAB *hashp, const void *keyPtr);
-extern void *hash_search_with_hash_value(HTAB *hashp, const void *keyPtr, uint32 hashvalue, HASHACTION action,
+extern void *hash_search_with_hash_value(HTAB *hashpPtr, const void *keyPtr, uint32 hashvalue, HASHACTION action,
                                          bool *foundPtr);
 extern long hash_get_num_entries(HTAB *hashp);
 extern void hash_seq_init(HASH_SEQ_STATUS *status, HTAB *hashp);

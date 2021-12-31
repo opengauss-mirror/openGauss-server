@@ -320,7 +320,8 @@ void UBTree2Desc(StringInfo buf, XLogReaderState* record)
         case XLOG_UBTREE2_FREEZE: {
             xl_ubtree2_freeze *xlrec = (xl_ubtree2_freeze *)rec;
             appendStringInfo(buf, "freeze page: blkno %u, nfrozen: %d, latestRemovedXid: %lu",
-                xlrec->blkno, xlrec->nfrozen, xlrec->latestRemovedXid);
+                xlrec->blkno, xlrec->nfrozen, xlrec->oldestXmin);
+            break;
         }
         default:
             appendStringInfo(buf, "UNKNOWN");

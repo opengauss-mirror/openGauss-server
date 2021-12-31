@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -47,6 +48,7 @@
 #include "utils/datetime.h"
 #include "utils/int8.h"
 #include "utils/lsyscache.h"
+#include "utils/partcache.h"
 #include "utils/partitionmap.h"
 #include "utils/partitionmap_gs.h"
 #include "utils/partitionkey.h"
@@ -330,55 +332,6 @@ void constCompare(Const* value1, Const* value2, int& compare)
         MemoryContextReset(t_thrd.utils_cxt.gValueCompareContext);
     }
 }
-
-#define partitonKeyCompareForRouting(value1, value2, len, compare)                                                  \
-    do {                                                                                                            \
-        uint32 i = 0;                                                                                                \
-        Const* v1 = NULL;                                                                                           \
-        Const* v2 = NULL;                                                                                           \
-        for (; i < (len); i++) {                                                                                    \
-            v1 = *((value1) + i);                                                                                   \
-            v2 = *((value2) + i);                                                                                   \
-            if (v1 == NULL || v2 == NULL) {                                                                         \
-                if (v1 == NULL && v2 == NULL) {                                                                     \
-                    ereport(                                                                                        \
-                        ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("NULL can not be compared with NULL"))); \
-                } else if (v1 == NULL) {                                                                            \
-                    compare = -1;                                                                                   \
-                } else {                                                                                            \
-                    compare = 1;                                                                                    \
-                }                                                                                                   \
-                break;                                                                                              \
-            }                                                                                                       \
-            if (constIsMaxValue(v1) || constIsMaxValue(v2)) {                                                       \
-                if (constIsMaxValue(v1) && constIsMaxValue(v2)) {                                                   \
-                    compare = 0;                                                                                    \
-                    continue;                                                                                       \
-                } else if (constIsMaxValue(v1)) {                                                                   \
-                    compare = 1;                                                                                    \
-                } else {                                                                                            \
-                    compare = -1;                                                                                   \
-                }                                                                                                   \
-                break;                                                                                              \
-            }                                                                                                       \
-            if (v1->constisnull || v2->constisnull) {                                                               \
-                if (v1->constisnull && v2->constisnull) {                                                           \
-                    ereport(ERROR,                                                                                  \
-                        (errcode(ERRCODE_UNEXPECTED_NULL_VALUE),                                                    \
-                            errmsg("null value can not be compared with null value.")));                            \
-                } else if (v1->constisnull) {                                                                       \
-                    compare = 1;                                                                                    \
-                } else {                                                                                            \
-                    compare = -1;                                                                                   \
-                }                                                                                                   \
-                break;                                                                                              \
-            }                                                                                                       \
-            constCompare(v1, v2, compare);                                                                          \
-            if ((compare) != 0) {                                                                                   \
-                break;                                                                                              \
-            }                                                                                                       \
-        }                                                                                                           \
-    } while (0)
 
 #define BuildRangeElement(range, type, typelen, relid, attrno, tuple, desc, isInter) \
     do {                                                                             \
@@ -754,6 +707,19 @@ int2vector* getPartitionKeyAttrNo(
     return partkey;
 }
 
+char GetSubPartitionStrategy(List* partition_list, Form_pg_partition partitioned_form, bool isSubPartition)
+{
+    char partstrategy;
+    if (isSubPartition) {
+        HeapTuple subPartitionTuple = (HeapTuple)list_nth(partition_list, 0);
+        Form_pg_partition subPartitionForm = (Form_pg_partition)GETSTRUCT(subPartitionTuple);
+        partstrategy = subPartitionForm->partstrategy;
+    } else {
+        partstrategy = partitioned_form->partstrategy;
+    }
+    return partstrategy;
+}
+
 /*
  * @@GaussDB@@
  * Brief		:
@@ -763,7 +729,7 @@ int2vector* getPartitionKeyAttrNo(
  *			: two access. So it is reasonable if
  *			: partitioned_form->intervalnum + partitioned_form->rangenum !=  partition_list->length
  */
-void RelationInitPartitionMap(Relation relation)
+void RelationInitPartitionMap(Relation relation, bool isSubPartition)
 {
     List* partition_list = NIL;
     Relation pg_partition = NULL;
@@ -798,7 +764,12 @@ void RelationInitPartitionMap(Relation relation)
     old_context = MemoryContextSwitchTo(tmp_context);
 
     pg_partition = relation_open(PartitionRelationId, AccessShareLock);
-    partitioned_tuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, relation->rd_id);
+    if (isSubPartition) {
+        partitioned_tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(relation->rd_id));
+    } else {
+        partitioned_tuple = searchPgPartitionByParentIdCopy(PART_OBJ_TYPE_PARTED_TABLE, relation->rd_id);
+    }
+    
     if (!HeapTupleIsValid(partitioned_tuple)) {
         if (RecoveryInProgress()) {
             ereport(ERROR,
@@ -821,7 +792,6 @@ void RelationInitPartitionMap(Relation relation)
 
         relation->partMap = (PartitionMap*)buildValuePartitionMap(relation, pg_partition, partitioned_tuple);
 
-        /* release the partition_list and partitioined_table_tuple */
         heap_freetuple_ext(partitioned_tuple);
         freePartList(partition_list);
 
@@ -849,14 +819,21 @@ void RelationInitPartitionMap(Relation relation)
     }
 
     /* read out patition tuples from pg_partition */
-    partition_list = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relation->rd_id);
+    if (isSubPartition) {
+        partition_list = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, relation->rd_id);
+    } else {
+        partition_list = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relation->rd_id);
+    }
 
     /*
      * Fail to get relation tuple for the partitioned table
      * Never happen, just to be self-contained
      */
     if (!PointerIsValid(partition_list)) {
-        heap_freetuple_ext(partitioned_tuple);
+        if (isSubPartition)
+            ReleaseSysCache(partitioned_tuple);
+        else
+            heap_freetuple_ext(partitioned_tuple);
         relation_close(pg_partition, AccessShareLock);
 
         (void)MemoryContextSwitchTo(old_context);
@@ -868,7 +845,9 @@ void RelationInitPartitionMap(Relation relation)
                 errdetail("Could not find partition for the partitioned table.")));
     }
 
-    switch (partitioned_form->partstrategy) {
+    char partstrategy = GetSubPartitionStrategy(partition_list, partitioned_form, isSubPartition);
+
+    switch (partstrategy) {
         case PART_STRATEGY_RANGE:
         case PART_STRATEGY_INTERVAL:
             buildRangePartitionMap(relation, partitioned_form, partitioned_tuple, pg_partition, partition_list);
@@ -894,7 +873,10 @@ void RelationInitPartitionMap(Relation relation)
     relation->partMap->isDirty = false;
 
     /* release the partition_list and partitioined_table_tuple */
-    heap_freetuple_ext(partitioned_tuple);
+    if (isSubPartition)
+        ReleaseSysCache(partitioned_tuple);
+    else
+        heap_freetuple_ext(partitioned_tuple);
     freePartList(partition_list);
 
     /* close pg_partition */
@@ -1064,6 +1046,131 @@ void DestroyListElements(ListPartElement* src, int elementNum)
     pfree_ext(src);
 }
 
+/*
+ * @@GaussDB@@
+ * Target		: data partition
+ * Brief		:
+ * Description	        :
+ * Notes		:
+ */
+void partitionMapDestroyRangeArray(RangeElement* rangeArray, int arrLen)
+{
+    int i, j;
+    RangeElement* range = NULL;
+    Const* maxConst = NULL;
+
+    if (rangeArray == NULL || arrLen < 1) {
+        return;
+    }
+
+    /* before free range array, free max array in each rangeElement */
+    for (i = 0; i < arrLen; i++) {
+        range = &(rangeArray[i]);
+        for (j = 0; j < range->len; j++) {
+            maxConst = range->boundary[j];
+            if (PointerIsValid(maxConst)) {
+                if (!maxConst->constbyval && !maxConst->constisnull &&
+                    PointerIsValid(DatumGetPointer(maxConst->constvalue))) {
+                    pfree(DatumGetPointer(maxConst->constvalue));
+                }
+
+                pfree_ext(maxConst);
+                maxConst = NULL;
+            }
+        }
+    }
+
+    /* free range array */
+    pfree_ext(rangeArray);
+}
+
+void PartitionMapDestroyHashArray(HashPartElement* hashArray, int arrLen)
+{
+    int i;
+    HashPartElement* hashValues = NULL;
+    Const* value = NULL;
+
+    if (hashArray == NULL || arrLen < 1) {
+        return;
+    }
+
+    /* before free hash array, free max array in each hashElement */
+    for (i = 0; i < arrLen; i++) {
+        hashValues = &(hashArray[i]);
+
+        value = hashValues->boundary[0];
+        if (PointerIsValid(value)) {
+            if (!value->constbyval && !value->constisnull &&
+                PointerIsValid(DatumGetPointer(value->constvalue))) {
+                pfree(DatumGetPointer(value->constvalue));
+            }
+
+            pfree_ext(value);
+            value = NULL;
+        } 
+    }
+    pfree_ext(hashArray);
+}
+
+void RelationDestroyPartitionMap(PartitionMap* partMap)
+{
+    /* already a non-partitioned relation, just return */
+    if (!partMap)
+        return;
+
+    /* partitioned relation, destroy the partition map */
+    if (partMap->type == PART_TYPE_RANGE || partMap->type == PART_TYPE_INTERVAL) {
+        RangePartitionMap* range_map = ((RangePartitionMap*)(partMap));
+
+        /* first free partKeyNum/partitionKeyDataType/ranges in the range map */
+        if (range_map->partitionKey) {
+            pfree_ext(range_map->partitionKey);
+        }
+        if (range_map->partitionKeyDataType) {
+            pfree_ext(range_map->partitionKeyDataType);
+        }
+        if (range_map->intervalValue) {
+            pfree_ext(range_map->intervalValue);
+        }
+        if (range_map->intervalTablespace) {
+            pfree_ext(range_map->intervalTablespace);
+        }
+        if (range_map->rangeElements) {
+            partitionMapDestroyRangeArray(range_map->rangeElements, range_map->rangeElementsNum);
+        }
+    }  else if (partMap->type == PART_TYPE_LIST) {
+        ListPartitionMap* list_map = (ListPartitionMap*)(partMap);
+        if (list_map->partitionKey) {
+            pfree_ext(list_map->partitionKey);
+            list_map->partitionKey = NULL;
+        }
+        if (list_map->partitionKeyDataType) {
+            pfree_ext(list_map->partitionKeyDataType);
+            list_map->partitionKeyDataType = NULL;
+        }
+        if (list_map->listElements) {
+            DestroyListElements(list_map->listElements, list_map->listElementsNum);
+            list_map->listElements = NULL;
+        }
+    } else if (partMap->type == PART_TYPE_HASH) {
+        HashPartitionMap* hash_map = (HashPartitionMap*)(partMap);
+        if (hash_map->partitionKey) {
+            pfree_ext(hash_map->partitionKey);
+            hash_map->partitionKey = NULL;
+        }
+        if (hash_map->partitionKeyDataType) {
+            pfree_ext(hash_map->partitionKeyDataType);
+            hash_map->partitionKeyDataType = NULL;
+        }
+        if (hash_map->hashElements) {
+            PartitionMapDestroyHashArray(hash_map->hashElements, hash_map->hashElementsNum);
+            hash_map->hashElements = NULL;
+        }
+    }
+    pfree_ext(partMap);
+    return;
+}
+
 static HashPartElement* CopyHashElements(HashPartElement* src, int elementNum, int partkeyNum)
 {
     int i = 0;
@@ -1183,6 +1290,15 @@ oidvector* ReadIntervalTablespace(HeapTuple tuple, TupleDesc tupleDesc)
     return buildoidvector(values, arraySize);
 }
 
+Oid GetRootPartitionOid(Relation relation)
+{
+    Oid relid = RelationGetRelid(relation);
+    if (relid != relation->parentId && OidIsValid(relation->parentId)) {
+        relid = relation->parentId;
+    }
+    return relid;
+}
+
 static void BuildListPartitionMap(Relation relation, Form_pg_partition partitioned_form, HeapTuple partitioned_tuple,
     Relation pg_partition, List* partition_list)
 {
@@ -1225,6 +1341,11 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
     /* allocate range element array */
     list_eles = (ListPartElement*)palloc0(sizeof(ListPartElement) * (list_map->listElementsNum));
 
+    /* we will use reloid to get the column information from pg_attribute.
+     * Only rootPartitionOid is in pg_attribute, so we can only use it.
+     */
+    Oid rootPartitionOid = GetRootPartitionOid(relation);
+
     /* iterate partition tuples, build RangeElement for per partition tuple */
     list_itr = 0;
     foreach (tuple_cell, partition_list) {
@@ -1244,7 +1365,7 @@ static void BuildListPartitionMap(Relation relation, Form_pg_partition partition
         buildListElement(&(list_eles[list_itr]),
             list_map->partitionKeyDataType,
             list_map->partitionKey->dim1,
-            RelationGetRelid(relation),
+            rootPartitionOid,
             list_map->partitionKey,
             partition_tuple,
             RelationGetDescr(pg_partition));
@@ -1329,6 +1450,11 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
     /* allocate hash element array */
     hash_eles = (HashPartElement*)palloc0(sizeof(HashPartElement) * (hash_map->hashElementsNum));
 
+    /* we will use reloid to get the column information from pg_attribute.
+     * Only rootPartitionOid is in pg_attribute, so we can only use it.
+     */
+    Oid rootPartitionOid = GetRootPartitionOid(relation);
+
     /* iterate partition tuples, build RangeElement for per partition tuple */
     hash_itr = 0;
     foreach (tuple_cell, partition_list) {
@@ -1348,7 +1474,7 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
         buildHashElement(&(hash_eles[hash_itr]),
             hash_map->partitionKeyDataType,
             hash_map->partitionKey->dim1,
-            RelationGetRelid(relation),
+            rootPartitionOid,
             hash_map->partitionKey,
             partition_tuple,
             RelationGetDescr(pg_partition));
@@ -1369,6 +1495,7 @@ static void BuildHashPartitionMap(Relation relation, Form_pg_partition partition
     securec_check(rc, "\0", "\0");
 
     (void)MemoryContextSwitchTo(old_context);
+    PartitionMapDestroyHashArray(hash_eles, hash_map->hashElementsNum);
 }
 
 /*
@@ -1428,6 +1555,11 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
     /* allocate range element array */
     range_eles = (RangeElement*)palloc0(sizeof(RangeElement) * (range_map->rangeElementsNum));
 
+    /* we will use reloid to get the column information from pg_attribute.
+     * Only rootPartitionOid is in pg_attribute, so we can only use it.
+     */
+    Oid rootPartitionOid = GetRootPartitionOid(relation);
+
     /* iterate partition tuples, build RangeElement for per partition tuple */
     range_itr = 0;
     foreach (tuple_cell, partition_list) {
@@ -1448,7 +1580,7 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
         BuildRangeElement(&(range_eles[range_itr]),
             range_map->partitionKeyDataType,
             range_map->partitionKey->dim1,
-            RelationGetRelid(relation),
+            rootPartitionOid,
             range_map->partitionKey,
             partition_tuple,
             RelationGetDescr(pg_partition),
@@ -1467,6 +1599,7 @@ static void buildRangePartitionMap(Relation relation, Form_pg_partition partitio
     securec_check(rc, "\0", "\0");
 
     (void)MemoryContextSwitchTo(old_context);
+    partitionMapDestroyRangeArray(range_eles, range_map->rangeElementsNum);
 }
 
 /*
@@ -1699,7 +1832,7 @@ Oid getRangePartitionOid(PartitionMap *partitionmap, Const** partKeyValue, int32
     return result;
 }
 
-Oid getListPartitionOid(Relation relation, Const** partKeyValue, int32* partSeq, bool topClosed)
+Oid getListPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* partSeq, bool topClosed)
 {
     ListPartitionMap* listPartMap = NULL;
     Oid result = InvalidOid;
@@ -1707,18 +1840,26 @@ Oid getListPartitionOid(Relation relation, Const** partKeyValue, int32* partSeq,
     int hit = -1;
     int compare = 0;
     Const** boundary = NULL;
+    Oid defaultPartitionOid = InvalidOid;
+    bool existDefaultPartition = false;
+    int defaultPartitionHit = -1;
 
-    Assert(PointerIsValid(relation->partMap));
+    Assert(PointerIsValid(partMap));
     Assert(PointerIsValid(partKeyValue));
 
-    incre_partmap_refcount(relation->partMap);
-    listPartMap = (ListPartitionMap*)(relation->partMap);
+    incre_partmap_refcount(partMap);
+    listPartMap = (ListPartitionMap*)(partMap);
     keyNums = listPartMap->partitionKey->dim1;
     
     int i = 0;
     while (i < listPartMap->listElementsNum && hit < 0) {
         boundary = listPartMap->listElements[i].boundary;
         int list_len = listPartMap->listElements[i].len;
+        if (list_len == 1 && ((Const*)boundary[0])->ismaxvalue) {
+            defaultPartitionOid = listPartMap->listElements[i].partitionOid;
+            existDefaultPartition = true;
+            defaultPartitionHit = i;
+        }
         int j = 0;
         while (j < list_len) {
             partitonKeyCompareForRouting(partKeyValue, boundary + j, (uint32)keyNums, compare);
@@ -1737,24 +1878,27 @@ Oid getListPartitionOid(Relation relation, Const** partKeyValue, int32* partSeq,
 
     if (hit >= 0) {
         result = listPartMap->listElements[hit].partitionOid;
+    } else if (existDefaultPartition) {
+        result = defaultPartitionOid;
+        *partSeq = defaultPartitionHit;
     }
 
-    decre_partmap_refcount(relation->partMap);
+    decre_partmap_refcount(partMap);
     return result;
 }
 
-Oid getHashPartitionOid(Relation relation, Const** partKeyValue, int32* partSeq, bool topClosed)
+Oid getHashPartitionOid(PartitionMap* partMap, Const** partKeyValue, int32* partSeq, bool topClosed)
 {
     HashPartitionMap* hashPartMap = NULL;
     Oid result = InvalidOid;
     int keyNums = 0;
     int hit = -1;
 
-    Assert(PointerIsValid(relation->partMap));
+    Assert(PointerIsValid(partMap));
     Assert(PointerIsValid(partKeyValue));
 
-    incre_partmap_refcount(relation->partMap);
-    hashPartMap = (HashPartitionMap*)(relation->partMap);
+    incre_partmap_refcount(partMap);
+    hashPartMap = (HashPartitionMap*)(partMap);
 
     keyNums = hashPartMap->partitionKey->dim1;
     
@@ -1765,7 +1909,7 @@ Oid getHashPartitionOid(Relation relation, Const** partKeyValue, int32* partSeq,
             if (PointerIsValid(partSeq)) {
                 *partSeq = hit;
             }
-            decre_partmap_refcount(relation->partMap);
+            decre_partmap_refcount(partMap);
             return result;
         }
         hash_value = hashValueCombination(hash_value, partKeyValue[i]->consttype, partKeyValue[i]->constvalue, false,
@@ -1783,7 +1927,7 @@ Oid getHashPartitionOid(Relation relation, Const** partKeyValue, int32* partSeq,
         result = hashPartMap->hashElements[hit].partitionOid;
     }
 
-    decre_partmap_refcount(relation->partMap);
+    decre_partmap_refcount(partMap);
     return result;
 }
 
@@ -1821,6 +1965,43 @@ static Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
         lowValue,
         upBoundary->constisnull,
         upBoundary->constbyval);
+}
+
+void getFakeReationForPartitionOid(HTAB **fakeRels, MemoryContext cxt, Relation rel, Oid partOid,
+                                   Relation *fakeRelation, Partition *partition, LOCKMODE lmode)
+{
+    PartRelIdCacheKey _key = {partOid, -1};
+    Relation partParentRel = rel;
+    if (PointerIsValid(*partition)) {
+        return;
+    }
+    if (RelationIsNonpartitioned(partParentRel)) {
+        *fakeRelation = NULL;
+        *partition = NULL;
+        return;
+    }
+    if (PointerIsValid(*fakeRels)) {
+        FakeRelationIdCacheLookup((*fakeRels), _key, *fakeRelation, *partition);
+        if (!RelationIsValid(*fakeRelation)) {
+            *partition = partitionOpen(partParentRel, partOid, lmode);
+            *fakeRelation = partitionGetRelation(partParentRel, *partition);
+            FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
+        }
+    } else {
+        HASHCTL ctl;
+        errno_t errorno = EOK;
+        errorno = memset_s(&ctl, sizeof(ctl), 0, sizeof(ctl));
+        securec_check_c(errorno, "\0", "\0");
+        ctl.keysize = sizeof(PartRelIdCacheKey);
+        ctl.entrysize = sizeof(PartRelIdCacheEnt);
+        ctl.hash = tag_hash;
+        ctl.hcxt = cxt;
+        *fakeRels = hash_create("fakeRelationCache by OID", FAKERELATIONCACHESIZE, &ctl,
+                                HASH_ELEM | HASH_FUNCTION | HASH_CONTEXT);
+        *partition = partitionOpen(partParentRel, partOid, lmode);
+        *fakeRelation = partitionGetRelation(partParentRel, *partition);
+        FakeRelationCacheInsert((*fakeRels), (*fakeRelation), (*partition), -1);
+    }
 }
 
 int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Interval* intervalValue)
@@ -1936,7 +2117,7 @@ int getNumberOfPartitions(Relation rel)
             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                 errmsg("CAN NOT get number of partition against NON-PARTITIONED relation")));
     }
-    
+
     if (rel->partMap->type == PART_TYPE_LIST) {
         ranges = getNumberOfListPartitions(rel);
     } else if (rel->partMap->type == PART_TYPE_HASH) {
@@ -2099,132 +2280,6 @@ int partOidGetPartSequence(Relation rel, Oid partOid)
     return resultPartSequence;
 }
 
-/* IMPORTANT: This function will case invalidation message process,  the relation may
-              be rebuild,  and the relation->partMap may be changed.
-              After call this founction,  should not call getNumberOfRangePartitions/getNumberOfPartitions,
-              using list_length(partitionList) instead
- */
-List* relationGetPartitionList(Relation relation, LOCKMODE lockmode)
-{
-    List* partitionOidList = NIL;
-    List* partitionList = NIL;
-
-    partitionOidList = relationGetPartitionOidList(relation);
-
-    if (PointerIsValid(partitionOidList)) {
-        ListCell* cell = NULL;
-        Oid partitionId = InvalidOid;
-        Partition partition = NULL;
-
-        foreach (cell, partitionOidList) {
-            partitionId = lfirst_oid(cell);
-            Assert(OidIsValid(partitionId));
-            partition = partitionOpen(relation, partitionId, lockmode);
-            partitionList = lappend(partitionList, partition);
-        }
-
-        list_free_ext(partitionOidList);
-    }
-
-    return partitionList;
-}
-
-// give one partitioned index  relation,
-// return a list, consisting of oid of all its index partition
-List* indexGetPartitionOidList(Relation indexRelation)
-{
-    List* indexPartitionOidList = NIL;
-    List* indexPartitionTupleList = NIL;
-    ListCell* cell = NULL;
-
-    if (indexRelation->rd_rel->relkind != RELKIND_INDEX || RelationIsNonpartitioned(indexRelation))
-        return indexPartitionOidList;
-    indexPartitionTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, indexRelation->rd_id);
-    foreach (cell, indexPartitionTupleList) {
-        Oid indexPartOid = HeapTupleGetOid((HeapTuple)lfirst(cell));
-        if (OidIsValid(indexPartOid)) {
-            indexPartitionOidList = lappend_oid(indexPartitionOidList, indexPartOid);
-        }
-    }
-
-    freePartList(indexPartitionTupleList);
-    return indexPartitionOidList;
-}
-
-List* indexGetPartitionList(Relation indexRelation, LOCKMODE lockmode)
-{
-    List* indexPartitionList = NIL;
-    List* indexPartitionTupleList = NIL;
-    ListCell* cell = NULL;
-
-    if (indexRelation->rd_rel->relkind != RELKIND_INDEX || RelationIsNonpartitioned(indexRelation))
-        return indexPartitionList;
-    indexPartitionTupleList = searchPgPartitionByParentId(PART_OBJ_TYPE_INDEX_PARTITION, indexRelation->rd_id);
-    foreach (cell, indexPartitionTupleList) {
-        Partition indexPartition = NULL;
-        Oid indexPartOid = HeapTupleGetOid((HeapTuple)lfirst(cell));
-
-        if (OidIsValid(indexPartOid)) {
-            indexPartition = partitionOpen(indexRelation, indexPartOid, lockmode);
-            indexPartitionList = lappend(indexPartitionList, indexPartition);
-        }
-    }
-
-    freePartList(indexPartitionTupleList);
-    return indexPartitionList;
-}
-
-void releasePartitionList(Relation relation, List** partList, LOCKMODE lockmode, bool validCheck)
-{
-    ListCell* cell = NULL;
-    Partition partition = NULL;
-
-    foreach (cell, *partList) {
-        partition = (Partition)lfirst(cell);
-        Assert(!validCheck || PointerIsValid(partition));
-        if (PointerIsValid(partition)) {
-            partitionClose(relation, partition, lockmode);
-        }
-    }
-
-    list_free_ext(*partList);
-    *partList = NULL;
-}
-
-List* relationGetPartitionOidList(Relation rel)
-{
-    List* result = NIL;
-    Oid partitionId = InvalidOid;
-
-    if (rel == NULL || rel->partMap == NULL) {
-        return NIL;
-    }
-
-    PartitionMap* map = rel->partMap;
-    int sumtotal = getPartitionNumber(map);
-    for (int conuter = 0; conuter < sumtotal; ++conuter) {
-        if (map->type == PART_TYPE_LIST) {
-            partitionId = ((ListPartitionMap*)map)->listElements[conuter].partitionOid;
-        } else if (map->type == PART_TYPE_HASH) {
-            partitionId = ((HashPartitionMap*)map)->hashElements[conuter].partitionOid;
-        } else {
-            partitionId = ((RangePartitionMap*)map)->rangeElements[conuter].partitionOid;
-        }
-        result = lappend_oid(result, partitionId);
-    }
-
-    return result;
-}
-
-void releasePartitionOidList(List** partList)
-{
-    if (PointerIsValid(partList)) {
-        list_free_ext(*partList);
-
-        *partList = NIL;
-    }
-}
-
 /*
  * @Description: compare two const,datatype of const must be one of datatype partition key supported,
  * 	and the datatype is bpchar varchar or text,the collation id of two consts must be same.
@@ -2299,50 +2354,6 @@ int constCompare_constType(Const* value1, Const* value2)
     return ret;
 }
 
-int partitonKeyCompare(Const** value1, Const** value2, int len)
-{
-    uint8 i = 0;
-    int compare = 0;
-    Const* v1 = NULL;
-    Const* v2 = NULL;
-
-    for (; i < len; i++) {
-        v1 = *(value1 + i);
-        v2 = *(value2 + i);
-
-        if (v1 == NULL && v2 == NULL)
-            ereport(ERROR, (errcode(ERRCODE_DATATYPE_MISMATCH), errmsg("NULL can not be compared with NULL")));        
-        if (v1 == NULL || v2 == NULL) {
-            compare = (v1 == NULL) ? -1 : 1;
-            break;
-        }
-
-        if (constIsMaxValue(v1) && constIsMaxValue(v2)) {
-            compare = 0;
-            continue;
-        }
-        if (constIsMaxValue(v1) || constIsMaxValue(v2)) {
-            compare = (constIsMaxValue(v1)) ? 1 : -1;
-            break;
-        }
-
-        if (v1->constisnull && v2->constisnull)
-            ereport(ERROR,
-                (errcode(ERRCODE_NULL_VALUE_NOT_ALLOWED),
-                    errmsg("null value can not be compared with null value.")));
-        if (v1->constisnull || v2->constisnull) {
-            compare = (v1->constisnull) ? 1 : -1;
-            break;
-        }
-
-        constCompare(v1, v2, compare);
-        if (0 != compare)
-            break;
-    }
-
-    return compare;
-}
-
 int rangeElementCmp(const void* a, const void* b)
 {
     const RangeElement* rea = (const RangeElement*)a;
@@ -2395,83 +2406,28 @@ int getPartitionNumber(PartitionMap* map)
     return result;
 }
 
-/*
- * @@GaussDB@@
- * Target		: data partition
- * Brief		: check the partition key in the targetlist
- * Description	:
- * Notes		:
- */
-bool targetListHasPartitionKey(List* targetList, Oid partitiondtableid)
+int GetSubPartitionNumber(Relation rel)
 {
-    bool ret = false;
-    Relation rel;
-
-    rel = heap_open(partitiondtableid, NoLock);
-
-    if (RELATION_IS_PARTITIONED(rel)) {
-        RangePartitionMap* map = (RangePartitionMap*)rel->partMap;
-        int2vector* partKey = map->partitionKey;
-        ListCell* lc = NULL;
-        int j = 0;
-
-        foreach (lc, targetList) {
-            TargetEntry* entry = (TargetEntry*)lfirst(lc);
-
-            if (entry->resjunk) {
-                continue;
-            }
-
-            /* check partkey has the column */
-            for (j = 0; j < partKey->dim1; j++) {
-                if (partKey->values[j] == entry->resno) {
-                    heap_close(rel, NoLock);
-                    return true;
-                }
-            }
+    PartitionMap* map = rel->partMap;
+    int result = getPartitionNumber(map);
+    Oid partOid = InvalidOid;
+    int subPartNum = 0;
+    for (int conuter = 0; conuter < result; ++conuter) {
+        if (map->type == PART_TYPE_LIST) {
+            partOid = ((ListPartitionMap *)map)->listElements[conuter].partitionOid;
+        } else if (map->type == PART_TYPE_HASH) {
+            partOid = ((HashPartitionMap *)map)->hashElements[conuter].partitionOid;
+        } else {
+            partOid = ((RangePartitionMap *)map)->rangeElements[conuter].partitionOid;
         }
+        Partition part = partitionOpen(rel, partOid, AccessShareLock);
+        Relation partRel = partitionGetRelation(rel, part);
+        subPartNum += getPartitionNumber(partRel->partMap);
+        releaseDummyRelation(&partRel);
+        partitionClose(rel, part, AccessShareLock);
     }
 
-    heap_close(rel, NoLock);
-    return ret;
-}
-
-bool isPartKeyValuesInPartition(RangePartitionMap* partMap, Const** partKeyValues, int partkeyColumnNum, int partSeq)
-{
-    Assert(partMap && partKeyValues);
-    Assert(partkeyColumnNum == partMap->partitionKey->dim1);
-
-    int compareBottom = 0;
-    int compareTop = 0;
-    bool greaterThanBottom = false;
-    bool lessThanTop = false;
-
-    if (0 == partSeq) {
-        /* is in first partition (-inf, boundary) */
-        greaterThanBottom = true;
-        partitonKeyCompareForRouting(partKeyValues, partMap->rangeElements[0].boundary, 
-                                    (uint32)partkeyColumnNum, compareTop);
-        if (compareTop < 0) {
-            lessThanTop = true;
-        }
-    } else {
-        /* is in [last_partiton_boundary,  boundary) */
-        partitonKeyCompareForRouting(
-            partKeyValues, partMap->rangeElements[partSeq - 1].boundary, (uint32)partkeyColumnNum, compareBottom);
-
-        if (compareBottom >= 0) {
-            greaterThanBottom = true;
-        }
-
-        partitonKeyCompareForRouting(
-            partKeyValues, partMap->rangeElements[partSeq].boundary, (uint32)partkeyColumnNum, compareTop);
-
-        if (compareTop < 0) {
-            lessThanTop = true;
-        }
-    }
-
-    return greaterThanBottom && lessThanTop;
+    return subPartNum;
 }
 
 // check the partition has toast
@@ -2480,7 +2436,6 @@ bool partitionHasToast(Oid partOid)
     HeapTuple tuple = NULL;
     Form_pg_partition partForm = NULL;
     bool result = false;
-
     tuple = SearchSysCache1(PARTRELID, ObjectIdGetDatum(partOid));
     if (!HeapTupleIsValid(tuple)) {
         Assert(0);
@@ -2498,17 +2453,6 @@ bool partitionHasToast(Oid partOid)
     ReleaseSysCache(tuple);
 
     return result;
-}
-
-int comparePartitionKey(RangePartitionMap* partMap, Const** values1, Const** values2, int partKeyNum)
-{
-    int compare = 0;
-
-    incre_partmap_refcount((PartitionMap*)partMap);
-    partitonKeyCompareForRouting(values1, values2, (uint32)partKeyNum, compare);
-    decre_partmap_refcount((PartitionMap*)partMap);
-
-    return compare;
 }
 
 void incre_partmap_refcount(PartitionMap* map)
@@ -2567,15 +2511,3 @@ Oid GetNeedDegradToRangePartOid(Relation rel, Oid partOid)
     ereport(ERROR, (errcode(ERRCODE_CASE_NOT_FOUND), errmsg("Not find the target partiton %u", partOid)));
     return InvalidOid;
 }
-
-int2vector* GetPartitionKey(const PartitionMap* partMap)
-{
-    if (partMap->type == PART_TYPE_LIST) {
-        return ((ListPartitionMap*)partMap)->partitionKey;
-    } else if (partMap->type == PART_TYPE_HASH) {
-        return ((HashPartitionMap*)partMap)->partitionKey;
-    } else {
-        return ((RangePartitionMap*)partMap)->partitionKey;
-    }
-}
-

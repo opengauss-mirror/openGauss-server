@@ -362,6 +362,8 @@ DATA(insert ( 4439 raw_ops             PGNSP PGUID 8806  86 t 0 ));
 DATA(insert ( 4439 int1_ops            PGNSP PGUID 9535  5545 t 0 ));
 DATA(insert ( 4439 smalldatetime_ops   PGNSP PGUID 9570  9003 t 0 ));
 DATA(insert ( 4439 byteawithoutorderwithequalcol_ops PGNSP PGUID 5436  4402 t 0 ));
+
+/* jsonb */
 DATA(insert ( 403     jsonb_ops        PGNSP    PGUID  4033  3802 t 0 ));
 DATA(insert ( 405     jsonb_ops        PGNSP    PGUID  4034  3802 t 0 ));
 DATA(insert ( 2742    jsonb_ops        PGNSP    PGUID  4036  3802 t 25 ));

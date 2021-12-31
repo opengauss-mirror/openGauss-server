@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * IDENTIFICATION
  *	  src/gausskernel/process/tcop/pquery.cpp
@@ -1113,6 +1114,10 @@ bool PortalRun(
         WLMInitQueryPlan(queryDesc);
         dywlm_client_manager(queryDesc);
     }
+    /* save flag for nest plpgsql compile */
+    PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
+    int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
+    int save_compile_status = u_sess->plsql_cxt.compile_status;
 
     PG_TRY();
     {
@@ -1198,15 +1203,19 @@ bool PortalRun(
         MarkPortalFailed(portal);
 
         /* Restore global vars and propagate error */
-        if (saveMemoryContext == saveTopTransactionContext)
+        if (saveMemoryContext == saveTopTransactionContext ||
+            saveTopTransactionContext != u_sess->top_transaction_mem_cxt) {
             MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-        else
+        } else if (ResourceOwnerIsValid(saveResourceOwner)) {
             MemoryContextSwitchTo(saveMemoryContext);
+        }
         ActivePortal = saveActivePortal;
-        if (saveResourceOwner == saveTopTransactionResourceOwner)
+        if (saveResourceOwner == saveTopTransactionResourceOwner ||
+            saveTopTransactionResourceOwner != t_thrd.utils_cxt.TopTransactionResourceOwner) {
             t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
-        else
+        } else if (ResourceOwnerIsValid(saveResourceOwner)) {
             t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
+        }
         t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
 
         if (ENABLE_WORKLOAD_CONTROL) {
@@ -1226,6 +1235,12 @@ bool PortalRun(
                 pfree_ext(t_thrd.wlm_cxt.collect_info->sdetail.msg);
             }
         }
+        ereport(DEBUG3, (errmodule(MOD_NEST_COMPILE), errcode(ERRCODE_LOG),
+            errmsg("%s clear curr_compile_context because of error.", __func__)));
+        /* reset nest plpgsql compile */
+        u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+        u_sess->plsql_cxt.compile_status = save_compile_status;
+        clearCompileContextList(save_compile_list_length);
 
         PG_RE_THROW();
     }
@@ -1245,15 +1260,23 @@ bool PortalRun(
         }
     }
 
-    if (saveMemoryContext == saveTopTransactionContext)
+    /*
+     * switch to topTransaction if (1) it is TopTransactionContext, (2) Top transaction was changed.
+     * While subtransaction was terminated inside statement running, its ResourceOwner should be reserved.
+     */
+    if (saveMemoryContext == saveTopTransactionContext ||
+        saveTopTransactionContext != u_sess->top_transaction_mem_cxt) {
         MemoryContextSwitchTo(u_sess->top_transaction_mem_cxt);
-    else
+    } else if (ResourceOwnerIsValid(saveResourceOwner)) {
         MemoryContextSwitchTo(saveMemoryContext);
+    }
     ActivePortal = saveActivePortal;
-    if (saveResourceOwner == saveTopTransactionResourceOwner)
+    if (saveResourceOwner == saveTopTransactionResourceOwner ||
+        saveTopTransactionResourceOwner != t_thrd.utils_cxt.TopTransactionResourceOwner) {
         t_thrd.utils_cxt.CurrentResourceOwner = t_thrd.utils_cxt.TopTransactionResourceOwner;
-    else
+    } else if (ResourceOwnerIsValid(saveResourceOwner)) {
         t_thrd.utils_cxt.CurrentResourceOwner = saveResourceOwner;
+    }
     t_thrd.mem_cxt.portal_mem_cxt = savePortalContext;
 
     if (portal->strategy != PORTAL_MULTI_QUERY) {
@@ -1776,9 +1799,11 @@ static void PortalRunMulti(
     combine.data[0] = '\0';
 #endif
 
+    AssertEreport(PortalIsValid(portal), MOD_EXECUTOR, "portal not valid");
+
     bool force_local_snapshot = false;
     
-    if ((portal!= NULL) && (portal->cplan != NULL)) {
+    if (portal->cplan != NULL) {
         /* copy over the single_shard_stmt into local variable force_local_snapshot */
         force_local_snapshot = portal->cplan->single_shard_stmt;
     }

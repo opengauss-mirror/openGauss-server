@@ -1,0 +1,90 @@
+-- setup
+create table SQLLDR_TBL
+(
+    ID   NUMBER,
+    NAME VARCHAR2(20),
+    CON  VARCHAR2(20),
+    DT   DATE
+);
+-- testcase1 basic
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+-- testcase2 invalid datafile
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: data file is empty, or don't have permission
+-- testcase3 invalid contrlfile
+\! @abs_bindir@/gs_loader data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4
+ERROR: control file is empty
+-- testcase4 invalid db
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ errors=4 passwd=gauss@123
+ERROR: check db connection failed
+-- testcase5 invalid users and passwd
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 user="xxx" passwd="xxx"
+ERROR: check db connection failed
+-- testcase6 invalid host
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 host=1212
+ERROR: check db connection failed
+-- testcase7 invalid port
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data db=regression passwd=gauss@123 errors=4 port=0
+ERROR: check db connection failed
+-- testcase8 invalid errors
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=-1
+ERROR: invalid param:errors=-1
+-- testcase9 invalid skip
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 skip=-1
+ERROR: invalid param:skip=-1
+-- testcase10 invalid bad file path
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 discard=@abs_srcdir@/data/gs_loader_basic.dis bad=@abs_srcdir@/data/c/a.bad
+WARNING: bad file path @abs_srcdir@/data/c/a.bad is invalid
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+-- testcase11 invalid discard file path
+\! @abs_bindir@/gs_loader control=@abs_srcdir@/data/gs_loader_basic.ctl data=@abs_srcdir@/data/gs_loader_basic.data port=@portstring@ db=regression passwd=gauss@123 errors=4 bad=@abs_srcdir@/data/gs_loader_basic.bad discard=@abs_srcdir@/data/c/a.dis
+WARNING: discard file path @abs_srcdir@/data/c/a.dis is invalid
+gs_loader: version 0.1
+
+ 5 Rows successfully loaded. 
+
+log file is: 
+ @abs_srcdir@/data/gs_loader_basic.log
+select * from SQLLDR_TBL order by 1,2,3,4;
+ id | name | con  |            dt            
+----+------+------+--------------------------
+  1 | OK   | 1-OK | Sun Jul 08 00:00:00 2007
+  2 | OK   | 2-OK | Tue Jul 08 00:00:00 2008
+  3 | OK   | 3-OK | Wed Jul 08 00:00:00 2009
+  4 | OK   | 4-OK | Sun Jul 08 00:00:00 2007
+  5 | OK   | 5-OK | Fri Jul 30 00:00:00 2021
+(5 rows)
+
+-- teardown
+drop table SQLLDR_TBL;

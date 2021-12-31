@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -1564,11 +1565,6 @@ bool ExecCheckIndexConstraints(TupleTableSlot *slot, EState *estate, Relation ta
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                              errmsg("INSERT ON DUPLICATE KEY UPDATE does not support deferrable"
                                     " unique constraints/exclusion constraints.")));
-
-        /*
-         * We consider a partitioned table with a global index as a normal table,
-         * because conflicts can be between multiple partitions.
-         */
         if (isPartitioned && !isgpi) {
             partitionedindexid = RelationGetRelid(indexRelation);
 
@@ -2203,6 +2199,7 @@ void RegisterExprContextCallback(ExprContext* econtext, ExprContextCallbackFunct
 
     ecxt_callback->function = function;
     ecxt_callback->arg = arg;
+    ecxt_callback->resowner = t_thrd.utils_cxt.CurrentResourceOwner;
 
     /* link to front of list for appropriate execution order */
     ecxt_callback->next = econtext->ecxt_callbacks;
@@ -2258,12 +2255,25 @@ static void ShutdownExprContext(ExprContext* econtext, bool isCommit)
     /*
      * Call each callback function in reverse registration order.
      */
-    while ((ecxt_callback = econtext->ecxt_callbacks) != NULL) {
-        econtext->ecxt_callbacks = ecxt_callback->next;
-        if (isCommit)
-            (*ecxt_callback->function)(ecxt_callback->arg);
-        pfree_ext(ecxt_callback);
+    ResourceOwner oldOwner = t_thrd.utils_cxt.CurrentResourceOwner;
+    PG_TRY();
+    {
+        while ((ecxt_callback = econtext->ecxt_callbacks) != NULL) {
+            econtext->ecxt_callbacks = ecxt_callback->next;
+            if (isCommit) {
+                t_thrd.utils_cxt.CurrentResourceOwner = ecxt_callback->resowner;
+                (*ecxt_callback->function)(ecxt_callback->arg);
+            }
+            pfree_ext(ecxt_callback);
+        }
     }
+    PG_CATCH();
+    {
+        t_thrd.utils_cxt.CurrentResourceOwner = oldOwner;
+        PG_RE_THROW();
+    }
+    PG_END_TRY();
+    t_thrd.utils_cxt.CurrentResourceOwner = oldOwner;
 
     MemoryContextSwitchTo(oldcontext);
 }

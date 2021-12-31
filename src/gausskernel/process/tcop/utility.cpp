@@ -108,6 +108,8 @@
 #include "db4ai/create_model.h"
 #include "gs_ledger/userchain.h"
 #include "gs_ledger/ledger_utils.h"
+#include "libpq/libpq.h"
+
 #ifdef ENABLE_MULTIPLE_NODES
 #include "pgxc/pgFdwRemote.h"
 #include "pgxc/globalStatistic.h"
@@ -138,7 +140,7 @@
 #include "catalog/pgxc_node.h"
 #include "workload/workload.h"
 #include "streaming/init.h"
-#include "replication/obswalreceiver.h"
+#include "replication/archive_walreceiver.h"
 
 static RemoteQueryExecType ExecUtilityFindNodes(ObjectType object_type, Oid rel_id, bool* is_temp);
 static RemoteQueryExecType exec_utility_find_nodes_relkind(Oid rel_id, bool* is_temp);
@@ -155,6 +157,9 @@ static bool is_stmt_allowed_in_locked_mode(Node* parse_tree, const char* query_s
 static ExecNodes* assign_utility_stmt_exec_nodes(Node* parse_tree);
 
 #endif
+
+static void TransformLoadDataToCopy(LoadStmt* stmt);
+
 
 static void add_remote_query_4_alter_stmt(bool is_first_node, AlterTableStmt* atstmt, const char* query_string, List** stmts,
     char** drop_seq_string, ExecNodes** exec_nodes);
@@ -188,6 +193,8 @@ extern void ts_check_feature_disable();
 
 /* only check the case where the vacuum list just contains one temp object */
 static bool IsAllTempObjectsInVacuumStmt(Node* parsetree);
+static int64 getCopySequenceMaxval(const char *nspname, const char *relname, const char *colname);
+static int64 getCopySequenceCountval(const char *nspname, const char *relname);
 
 /* the hash value of extension script */
 #define POSTGIS_VERSION_NUM 2
@@ -197,6 +204,8 @@ static bool IsAllTempObjectsInVacuumStmt(Node* parsetree);
 #define HALF_AMOUNT 0.5
 #define BIG_MEM_RATIO 1.2
 #define SMALL_MEM_RATIO 1.1
+
+static const int LOADER_COL_BUF_CNT = 5;
 
 Oid GetNamespaceIdbyRelId(const Oid relid)
 {
@@ -608,7 +617,7 @@ static bool DropObjectsInSameNodeGroup(DropStmt* stmt)
             goid = GetFunctionNodeGroupByFuncid(address.objectId);
             if (!OidIsValid(goid))
                 goid = ins_group_oid;
-        } else if (object_type == OBJECT_SEQUENCE) {
+        } else if (OBJECT_IS_SEQUENCE(object_type)) {
             Oid tableId = InvalidOid;
             int32 colId;
             if (!sequenceIsOwned(address.objectId, &tableId, &colId))
@@ -1497,7 +1506,8 @@ bool isAllTempObjects(Node* parse_tree, const char* query_string, bool sent_to_r
                 case OBJECT_TABLE:
                 case OBJECT_VIEW:
                 case OBJECT_CONTQUERY:
-                case OBJECT_SEQUENCE: {
+                case OBJECT_SEQUENCE:
+                case OBJECT_LARGE_SEQUENCE: {
                     bool is_all_temp = false;
                     RemoteQueryExecType exec_type = EXEC_ON_ALL_NODES;
                     DropStmt* new_stmt = (DropStmt*)copyObject(parse_tree);
@@ -2199,6 +2209,7 @@ void CreateCommand(CreateStmt *parse_tree, const char *query_string, ParamListIn
         u_sess->catalog_cxt.setCurCreateSchema = false;
         pfree_ext(u_sess->catalog_cxt.curCreateSchema);
     }
+    list_free_ext(stmts);
 }
 
 void ReindexCommand(ReindexStmt* stmt, bool is_top_level)
@@ -2719,7 +2730,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 case TRANS_STMT_RELEASE:
                     RequireTransactionChain(is_top_level, "RELEASE SAVEPOINT");
 
-                    ReleaseSavepoint(stmt->options);
+                    ReleaseSavepoint(GetSavepointName(stmt->options), false);
 
 #ifdef ENABLE_DISTRIBUTE_TEST
                     /* CN send xid for remote nodes for it assignning parentxid when need. */
@@ -2754,7 +2765,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 
                 case TRANS_STMT_ROLLBACK_TO:
                     RequireTransactionChain(is_top_level, "ROLLBACK TO SAVEPOINT");
-                    RollbackToSavepoint(stmt->options);
+                    RollbackToSavepoint(GetSavepointName(stmt->options), false);
 
 #ifdef ENABLE_DISTRIBUTE_TEST
                     if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
@@ -3193,6 +3204,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 }
                     /* fall through */
                 case OBJECT_SEQUENCE:
+                case OBJECT_LARGE_SEQUENCE:
                 case OBJECT_VIEW:
                 case OBJECT_CONTQUERY:
 #ifdef PGXC
@@ -4461,6 +4473,29 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             }
         } break;
 
+        case T_TableOfTypeStmt: /* CREATE TYPE AS TABLE OF */
+        {
+            TableOfTypeStmt* stmt = (TableOfTypeStmt*)parse_tree;
+
+            if (IS_PGXC_COORDINATOR) {
+                char* first_exec_node = find_first_exec_cn();
+                bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
+
+                if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false, first_exec_node);
+                    DefineTableOfType(stmt);
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(
+                        query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES, false, first_exec_node);
+                } else {
+                    DefineTableOfType(stmt);
+                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
+                }
+            } else {
+                DefineTableOfType(stmt);
+            }
+        } break;
+
         case T_CreateEnumStmt: /* CREATE TYPE AS ENUM */
         {
 #ifdef PGXC
@@ -4907,7 +4942,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     }
                 }
 
-                DefineSequence((CreateSeqStmt*)parse_tree);
+                DefineSequenceWrapper((CreateSeqStmt*)parse_tree);
 
                 if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
                     /* In case this query is related to a SERIAL execution, just bypass */
@@ -4945,10 +4980,10 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 pfree_ext(query_stringWithUUID);
                 FreeExecNodes(&exec_nodes);
             } else {
-                DefineSequence((CreateSeqStmt*)parse_tree);
+                DefineSequenceWrapper((CreateSeqStmt*)parse_tree);
             }
 #else
-        DefineSequence((CreateSeqStmt*)parse_tree);
+        DefineSequenceWrapper((CreateSeqStmt*)parse_tree);
 #endif
 
             ClearCreateSeqStmtUUID((CreateSeqStmt*)parse_tree);
@@ -4984,7 +5019,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                         }
                     }
 
-                    AlterSequence((AlterSeqStmt*)parse_tree);
+                    AlterSequenceWrapper((AlterSeqStmt*)parse_tree);
 #ifdef ENABLE_MULTIPLE_NODES
                     /* In case this query is related to a SERIAL execution, just bypass */
                     if (IS_MAIN_COORDINATOR && !stmt->is_serial) {
@@ -5012,7 +5047,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     }
 #endif
                 } else {
-                    AlterSequence((AlterSeqStmt*)parse_tree);
+                    AlterSequenceWrapper((AlterSeqStmt*)parse_tree);
 
 #ifdef ENABLE_MULTIPLE_NODES
                     /* In case this query is related to a SERIAL execution, just bypass */
@@ -5035,11 +5070,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 }
                 FreeExecNodes(&exec_nodes);
             } else {
-                AlterSequence((AlterSeqStmt*)parse_tree);
+                AlterSequenceWrapper((AlterSeqStmt*)parse_tree);
             }
 #else
         PreventAlterSeqInTransaction(is_top_level, (AlterSeqStmt*)parse_tree);
-        AlterSequence((AlterSeqStmt*)parse_tree);
+        AlterSequenceWrapper((AlterSeqStmt*)parse_tree);
 #endif
             break;
 
@@ -5205,11 +5240,20 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_LoadStmt:
+        {
+            LoadStmt* stmt = (LoadStmt*)parse_tree;
+            if (stmt->is_load_data) {
+                if (IS_PGXC_COORDINATOR) {
+                    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                        errmsg("LOAD DATA statement is not yet supported.")));
+                }
+                TransformLoadDataToCopy(stmt);
+                break;
+            }
+
 #ifdef PGXC
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("LOAD statement is not yet supported.")));
 #endif /* PGXC */
-            {
-                LoadStmt* stmt = (LoadStmt*)parse_tree;
 
                 closeAllVfds(); /* probably not necessary... */
                 /* Allowed names are restricted if you're not superuser */
@@ -5424,6 +5468,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
                 Relation matview = NULL;
 
+                PushActiveSnapshot(GetTransactionSnapshot());
+
                 /* if current node are not fist node, then need to send to first node first */
                 if (u_sess->attr.attr_sql.enable_parallel_ddl && !is_first_node) {
                     ExecUtilityStmtOnNodes_ParallelDDLMode(query_string,
@@ -5456,6 +5502,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     EXEC_ON_DATANODES,
                     false);
  
+                 /* Pop active snapshow */
+                if (ActiveSnapshotSet()) {
+                    PopActiveSnapshot();
+                }
+
                 heap_close(matview, NoLock);
             } else if (IS_PGXC_COORDINATOR) {
                 /* attach lock on matview and its table */
@@ -5566,7 +5617,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         case T_VariableShowStmt: {
             VariableShowStmt* n = (VariableShowStmt*)parse_tree;
 
-            GetPGVariable(n->name, dest);
+            GetPGVariable(n->name, n->likename, dest);
         } break;
         case T_ShutdownStmt: {
             ShutdownStmt* n = (ShutdownStmt*)parse_tree;
@@ -5615,10 +5666,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreatePLangStmt:
-#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("new language is not yet supported.")));
-#endif /* ENABLE_MULTIPLE_NODES */
             CreateProceduralLanguage((CreatePLangStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)
@@ -5630,10 +5679,8 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
              * ******************************** DOMAIN statements ****
              */
         case T_CreateDomainStmt:
-#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
-#endif
             DefineDomain((CreateDomainStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)
@@ -6342,6 +6389,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateResourcePoolStmt:
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
             if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6398,6 +6448,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_AlterResourcePoolStmt:
+#ifndef ENABLE_MULTIPLE_NODES
+            DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
             if (IS_PGXC_COORDINATOR) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6418,6 +6471,9 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_DropResourcePoolStmt:
+#ifndef ENABLE_MULTIPLE_NODES
+    DISTRIBUTED_FEATURE_NOT_SUPPORTED();
+#endif
             if (IS_PGXC_COORDINATOR) {
                 char* first_exec_node = find_first_exec_cn();
                 bool is_first_node = (strcmp(first_exec_node, g_instance.attr.attr_common.PGXCNodeName) == 0);
@@ -6785,12 +6841,16 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
         /* Client Logic */
         case T_CreateClientLogicGlobal: 
+#ifdef ENABLE_MULTIPLE_NODES
+            if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
+#else
+            if (!u_sess->attr.attr_common.enable_full_encryption) {
+#endif
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                        errmsg("Un-support to create client master key when client encryption is disabled.")));
+            }
             if (IS_PGXC_COORDINATOR) {
-                if (!IsConnFromCoord() && !u_sess->attr.attr_common.enable_full_encryption) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
-                            errmsg("Un-support to create client master key when client encryption is disabled.")));
-                }
                 char *FirstExecNode = find_first_exec_cn();
                 bool isFirstNode = (strcmp(FirstExecNode, g_instance.attr.attr_common.PGXCNodeName) == 0);
 
@@ -6798,21 +6858,27 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     ExecUtilityStmtOnNodes_ParallelDDLMode(query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS,
                         false, FirstExecNode);
                     (void)process_global_settings((CreateClientLogicGlobal *)parse_tree);
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES,
+                        false, FirstExecNode);
                 } else {
                     (void)process_global_settings((CreateClientLogicGlobal *)parse_tree);
-                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false);
+                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
                 }
             } else {
                 (void)process_global_settings((CreateClientLogicGlobal *)parse_tree);
             }
             break;
-        case T_CreateClientLogicColumn: 
+        case T_CreateClientLogicColumn:
+#ifdef ENABLE_MULTIPLE_NODES
+            if (IS_MAIN_COORDINATOR && !u_sess->attr.attr_common.enable_full_encryption) {
+#else
+            if (!u_sess->attr.attr_common.enable_full_encryption) {
+#endif
+                ereport(ERROR,
+                    (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
+                        errmsg("Un-support to create column encryption key when client encryption is disabled.")));
+            }
             if (IS_PGXC_COORDINATOR) {
-                if (!IsConnFromCoord() && !u_sess->attr.attr_common.enable_full_encryption) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_OPERATE_NOT_SUPPORTED),
-                            errmsg("Un-support to create column encryption key when client encryption is disabled.")));
-                }
                 char *FirstExecNode = find_first_exec_cn();
                 bool isFirstNode = (strcmp(FirstExecNode, g_instance.attr.attr_common.PGXCNodeName) == 0);
 
@@ -6820,9 +6886,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     ExecUtilityStmtOnNodes_ParallelDDLMode(query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS,
                         false, FirstExecNode);
                     (void)process_column_settings((CreateClientLogicColumn *)parse_tree);
+                    ExecUtilityStmtOnNodes_ParallelDDLMode(query_string, NULL, sent_to_remote, false, EXEC_ON_DATANODES,
+                        false, FirstExecNode);
                 } else {
                     (void)process_column_settings((CreateClientLogicColumn *)parse_tree);
-                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_COORDS, false);
+                    ExecUtilityStmtOnNodes(query_string, NULL, sent_to_remote, false, EXEC_ON_ALL_NODES, false);
                 }
             } else {
                 (void)process_column_settings((CreateClientLogicColumn *)parse_tree);
@@ -7213,6 +7281,7 @@ static RemoteQueryExecType ExecUtilityFindNodes(ObjectType object_type, Oid obje
 
     switch (object_type) {
         case OBJECT_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE:
             exec_type = set_exec_type(object_id, is_temp);
             break;
 
@@ -7287,6 +7356,7 @@ static RemoteQueryExecType exec_utility_find_nodes_relkind(Oid rel_id, bool* is_
 
     switch (relkind_str) {
         case RELKIND_SEQUENCE:
+        case RELKIND_LARGE_SEQUENCE:
             *is_temp = IsTempTable(rel_id);
             exec_type = CHOOSE_EXEC_NODES(*is_temp);
             break;
@@ -7643,6 +7713,9 @@ static const char* AlterObjectTypeCommandTag(ObjectType obj_type)
         case OBJECT_SEQUENCE:
             tag = "ALTER SEQUENCE";
             break;
+        case OBJECT_LARGE_SEQUENCE:
+            tag = "ALTER LARGE SEQUENCE";
+            break;
         case OBJECT_TABLE:
             tag = "ALTER TABLE";
             break;
@@ -7936,6 +8009,9 @@ const char* CreateCommandTag(Node* parse_tree)
                 case OBJECT_SEQUENCE:
                     tag = "DROP SEQUENCE";
                     break;
+                case OBJECT_LARGE_SEQUENCE:
+                    tag = "DROP LARGE SEQUENCE";
+                    break;
                 case OBJECT_VIEW:
 #ifdef ENABLE_MULTIPLE_NODES
                     if (range_var_list_include_streaming_object(((DropStmt*)parse_tree)->objects))
@@ -8184,6 +8260,10 @@ const char* CreateCommandTag(Node* parse_tree)
         case T_CompositeTypeStmt:
             tag = "CREATE TYPE";
             break;
+        
+        case T_TableOfTypeStmt:
+            tag = "CREATE TYPE";
+            break;
 
         case T_CreateEnumStmt:
             tag = "CREATE TYPE";
@@ -8237,11 +8317,19 @@ const char* CreateCommandTag(Node* parse_tree)
             break;
 
         case T_CreateSeqStmt:
-            tag = "CREATE SEQUENCE";
+            if (((CreateSeqStmt*)parse_tree)->is_large) {
+                tag = "CREATE LARGE SEQUENCE";
+            } else {
+                tag = "CREATE SEQUENCE";
+            }
             break;
 
         case T_AlterSeqStmt:
-            tag = "ALTER SEQUENCE";
+            if (((AlterSeqStmt*)parse_tree)->is_large) {
+                tag = "ALTER LARGE SEQUENCE";
+            } else {
+                tag = "ALTER SEQUENCE";
+            }
             break;
 
         case T_DoStmt:
@@ -9648,7 +9736,6 @@ static void drop_stmt_pre_treatment(
             foreach (cell, stmt->objects) {
                 RangeVar* rel = makeRangeVarFromNameList((List*)lfirst(cell));
                 Oid rel_id = RangeVarGetRelid(rel, AccessShareLock, true);
-
                 if (is_ledger_hist_table(rel_id)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -9674,6 +9761,13 @@ static void drop_stmt_pre_treatment(
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("DROP not supported for sqladvisor schema.")));
+                } else if (!u_sess->attr.attr_common.IsInplaceUpgrade && IsPackageSchemaName(name)) {
+                    ereport(ERROR,
+                        (errmodule(MOD_COMMAND), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for %s schema.", name),
+                            errdetail("Schemas in a package cannot be deleted."),
+                            errcause("The schema in the package does not support object drop."),
+                            erraction("N/A")));
                 }
             }
         } break;
@@ -9698,6 +9792,7 @@ static void drop_stmt_pre_treatment(
     switch (stmt->removeType) {
         case OBJECT_TABLE:
         case OBJECT_SEQUENCE:
+        case OBJECT_LARGE_SEQUENCE:
         case OBJECT_VIEW:
         case OBJECT_MATVIEW:
         case OBJECT_CONTQUERY:
@@ -9780,6 +9875,14 @@ static void drop_stmt_pre_treatment(
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("DROP not supported for sqladvisor schema.")));
+                } else if (!u_sess->attr.attr_common.IsInplaceUpgrade && IsPackageSchemaName(name)) {
+                    ereport(ERROR,
+                        (errmodule(MOD_COMMAND), errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            errmsg("DROP not supported for %s schema.", name),
+                            errdetail("Schemas in a package cannot be deleted."),
+                            errcause("The schema in the package does not support object drop."),
+                            erraction("N/A")));
+
                 }
 
                 if (has_temp && has_nontemp)
@@ -9858,32 +9961,6 @@ bool IsVariableinBlackList(const char* name)
     }
 
     return isInBlackList;
-}
-
-/*
- * return true if the extension can be uninstall
- */
-bool DropExtensionIsSupported(const char* query_string)
-{
-    char* lower_string = lowerstr(query_string);
-
-#ifndef ENABLE_MULTIPLE_NODES
-    if (strstr(lower_string, "drop") && 
-        (strstr(lower_string, "postgis") || strstr(lower_string, "packages") ||
-         strstr(lower_string, "mysql_fdw") || strstr(lower_string, "oracle_fdw") ||
-         strstr(lower_string, "postgres_fdw") || strstr(lower_string, "dblink") ||
-         strstr(lower_string, "security_plugin") ||
-         strstr(lower_string, "db_b_parser") || strstr(lower_string, "db_a_parser") ||
-         strstr(lower_string, "db_c_parser") || strstr(lower_string, "db_pg_parser"))) {
-#else
-    if (strstr(lower_string, "drop") && (strstr(lower_string, "postgis") || strstr(lower_string, "packages"))) {
-#endif
-        pfree_ext(lower_string);
-        return true;
-    } else {
-        pfree_ext(lower_string);
-        return false;
-    }
 }
 
 /*
@@ -11855,6 +11932,18 @@ void DoVacuumMppTable(VacuumStmt* stmt, const char* query_string, bool is_top_le
         return;
     }
 
+    if (stmt->relation != NULL && (stmt->options & VACOPT_FULL)){
+        Oid relId = RangeVarGetRelid(stmt->relation, NoLock, false);
+        Relation targRel = heap_open(relId, AccessShareLock);
+        bool isSegmentTable = targRel->storage_type == SEGMENT_PAGE;
+        heap_close(targRel, AccessShareLock);
+        if (isSegmentTable) {
+            ereport(LOG, (errmsg("skipping segment table \"%s\" --- please use gs_space_shrink "
+                "to recycle segment space.", stmt->relation->relname)));
+            return;
+        }
+    }
+
     /* we choose to allow this during "read only" transactions */
     PreventCommandDuringRecovery(cmdname);
 
@@ -12713,4 +12802,496 @@ static bool IsAllTempObjectsInVacuumStmt(Node* parsetree)
         }
     }
     return isTemp;
+}
+
+static void SendCopySqlToClient(StringInfo copy_sql)
+{
+    StringInfoData buf;
+
+    /* Send a RowDescription message */
+    pq_beginmessage(&buf, 'T');
+    pq_sendint16(&buf, 1); /* 1 fields */
+
+    /* first field */
+    pq_sendstring(&buf, "LOAD TRANSFORM TO COPY RESULT"); /* col name */
+    pq_sendint32(&buf, 0);           /* table oid */
+    pq_sendint16(&buf, 0);           /* attnum */
+    pq_sendint32(&buf, TEXTOID);     /* type oid */
+    pq_sendint16(&buf, UINT16_MAX);  /* typlen */
+    pq_sendint32(&buf, 0);           /* typmod */
+    pq_sendint16(&buf, 0);           /* format code */
+    pq_endmessage_noblock(&buf);
+
+    /* Send a DataRow message */
+    pq_beginmessage(&buf, 'D');
+    pq_sendint16(&buf, 1);             /* # of columns */
+    pq_sendint32(&buf, copy_sql->len); /* col1 len */
+    pq_sendbytes(&buf, (char *)copy_sql->data, copy_sql->len);
+    pq_endmessage_noblock(&buf);
+
+    /* Send CommandComplete and ReadyForQuery messages */
+    EndCommand_noblock("LOAD", DestTuplestore);
+}
+
+static void TransformLoadGetRelation(LoadStmt* stmt, StringInfo buf)
+{
+    RangeVar* relation = stmt->relation;
+
+    if (relation->schemaname && relation->schemaname[0]) {
+        appendStringInfo(buf, "%s.", quote_identifier(relation->schemaname));
+    }
+    appendStringInfo(buf, "%s ", quote_identifier(relation->relname));
+}
+
+static void TransformLoadGetFiledList(LoadStmt* stmt, StringInfo buf)
+{
+    ListCell* option = NULL;
+    ListCell* field_option = NULL;
+    int special_filed = 0;
+
+    foreach (option, stmt->rel_options) {
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "fields_list") == 0) {
+            List* field_list = (List *)def->arg;
+            appendStringInfo(buf, "(");
+            foreach (field_option, field_list) {
+                SqlLoadColExpr* coltem = (SqlLoadColExpr *)lfirst(field_option);
+                special_filed += ((coltem->const_info != NULL) || (coltem->sequence_info != NULL) ||
+                                         (coltem->is_filler == true) ||
+                                         ((coltem->scalar_spec != NULL) &&
+                                          ((SqlLoadScalarSpec *)coltem->scalar_spec)->position_info != NULL))
+                                     ? 1
+                                     : 0;
+                appendStringInfo(buf, " %s,", coltem->colname);
+            }
+            buf->data[buf->len - 1] = ' ';
+            appendStringInfo(buf, ") ");
+            stmt->is_only_special_filed = (special_filed == list_length(field_list));
+            break;
+        }
+    }
+}
+
+static void TransformLoadType(LoadStmt* stmt, StringInfo buf)
+{
+    switch (stmt->load_type) {
+        case LOAD_DATA_APPEND: {
+            // COPY's default mode, no need to handle
+            break;
+        }
+        case LOAD_DATA_REPLACE:
+        case LOAD_DATA_TRUNCATE: {
+            appendStringInfo(buf, "TRUNCATE TABLE ");
+            TransformLoadGetRelation(stmt, buf);
+            appendStringInfo(buf, "; ");
+            break;
+        }
+        case LOAD_DATA_INSERT: {
+            appendStringInfo(buf, "SELECT 'has_data_in_table' FROM ");
+            TransformLoadGetRelation(stmt, buf);
+            appendStringInfo(buf, "LIMIT 1; ");
+            break;
+        }
+        default: {
+            elog(ERROR, "load type(%d) is not supported", stmt->load_type);
+            break;
+        }
+    }
+}
+
+static char * TransformPreLoadOptionsData(LoadStmt* stmt, StringInfo buf)
+{
+    ListCell* option = NULL;
+
+    foreach (option, stmt->pre_load_options) {
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "data") == 0) {
+            char* data = defGetString(def);
+            return data;
+        }
+    }
+
+    return NULL;
+}
+
+static void TransformLoadDatafile(LoadStmt* stmt, StringInfo buf)
+{
+    ListCell* option = NULL;
+    char* filename = NULL;
+
+    appendStringInfo(buf, "FROM ");
+
+    // has datafile in options
+    filename = TransformPreLoadOptionsData(stmt, buf);
+    if (filename == NULL) {
+        foreach (option, stmt->load_options) {
+            DefElem* def = (DefElem*)lfirst(option);
+            if (strcmp(def->defname, "infile") == 0) {
+                filename = defGetString(def);
+                break;
+            }
+        }
+    }
+
+    if (filename != NULL) {
+        appendStringInfo(buf, "\'%s\' LOAD ", filename);
+    }
+    else {
+        appendStringInfo(buf, "STDIN LOAD ");
+    }
+}
+
+static void TransformFieldsListScalar(SqlLoadColExpr* coltem, StringInfo transformbuf, StringInfo formatterbuf)
+{
+    SqlLoadScalarSpec* scalarSpec = (SqlLoadScalarSpec *)coltem->scalar_spec;
+    if (scalarSpec->nullif_col != NULL) {
+        appendStringInfo(transformbuf, "%s AS nullif(trim(%s), \'\'),", quote_identifier(coltem->colname),
+                                                                        quote_identifier(scalarSpec->nullif_col));
+    }
+    if (scalarSpec->sqlstr != NULL) {
+        appendStringInfo(transformbuf, "%s", quote_identifier(coltem->colname));
+        A_Const* colexprVal = (A_Const *)scalarSpec->sqlstr;
+        appendStringInfo(transformbuf, " AS %s,", colexprVal->val.val.str);
+    }
+    if (scalarSpec->position_info) {
+        appendStringInfo(formatterbuf, "%s", quote_identifier(coltem->colname));
+        SqlLoadColPosInfo* posInfo = (SqlLoadColPosInfo *)scalarSpec->position_info;
+        int offset = posInfo->start - 1;
+        int length = posInfo->end - posInfo->start + 1;
+        appendStringInfo(formatterbuf, "(%d, %d),", offset, length);
+    }
+}
+
+static void TransformFieldsListSeque(const char *schemaname, const char *relname,
+                                     SqlLoadColExpr* coltem, StringInfo sequencebuf)
+{
+    SqlLoadSequInfo* sequenceInfo = (SqlLoadSequInfo *)coltem->sequence_info;
+    int64 start_num = sequenceInfo->start;
+    int64 step_num = sequenceInfo->step;
+
+    if (start_num == LOADER_SEQUENCE_COUNT_FLAG) {
+        start_num = getCopySequenceCountval(schemaname, relname) + step_num;
+    } else if (start_num == LOADER_SEQUENCE_MAX_FLAG) {
+        start_num = getCopySequenceMaxval(schemaname, relname, coltem->colname) + step_num;
+    }
+
+    appendStringInfo(sequencebuf, "%s", quote_identifier(coltem->colname));
+    appendStringInfo(sequencebuf, "(%ld, %ld),", start_num, step_num);
+}
+
+static void TransformFieldsListAppInfo(StringInfo fieldDataBuf, int dataBufCnt, StringInfo buf)
+{
+    if (dataBufCnt < LOADER_COL_BUF_CNT) {
+        return;
+    }
+
+    StringInfo constantbuf = &fieldDataBuf[0];
+    StringInfo formatterbuf = &fieldDataBuf[1];
+    StringInfo transformbuf = &fieldDataBuf[2];
+    StringInfo sequencebuf = &fieldDataBuf[3];
+    StringInfo fillerbuf = &fieldDataBuf[4];
+
+    if (constantbuf->len) {
+        constantbuf->data[constantbuf->len - 1] = '\0';
+        appendStringInfo(buf, "CONSTANT(%s) ", constantbuf->data);
+    }
+
+    if (formatterbuf->len) {
+        formatterbuf->data[formatterbuf->len - 1] = '\0';
+        appendStringInfo(buf, "fixed FORMATTER(%s) ", formatterbuf->data);
+    }
+
+    if (sequencebuf->len) {
+        sequencebuf->data[sequencebuf->len - 1] = '\0';
+        appendStringInfo(buf, "SEQUENCE(%s) ", sequencebuf->data);
+    }
+    if (fillerbuf->len) {
+        fillerbuf->data[fillerbuf->len - 1] = '\0';
+        appendStringInfo(buf, "FILLER(%s) ", fillerbuf->data);
+    }
+    if (transformbuf->len) {
+        transformbuf->data[transformbuf->len - 1] = '\0';
+        appendStringInfo(buf, "TRANSFORM(%s) ", transformbuf->data);
+    }
+}
+
+static void TransformFieldsListOpt(LoadStmt* stmt, DefElem* def, StringInfo buf)
+{
+    List* field_list = (List *)def->arg;
+    ListCell* option = NULL;
+    StringInfoData fieldDataBuf[LOADER_COL_BUF_CNT];
+    RangeVar* relation = stmt->relation;
+    const char *schemaname = NULL;
+    const char *relname = quote_identifier(relation->relname);
+    if (relation->schemaname && relation->schemaname[0]) {
+        schemaname = quote_identifier(relation->schemaname);
+    }
+
+    for (int i = 0; i < LOADER_COL_BUF_CNT; i++) {
+        initStringInfo(&fieldDataBuf[i]);
+    }
+
+    StringInfo constantbuf = &fieldDataBuf[0];
+    StringInfo formatterbuf = &fieldDataBuf[1];
+    StringInfo transformbuf = &fieldDataBuf[2];
+    StringInfo sequencebuf = &fieldDataBuf[3];
+    StringInfo fillerbuf = &fieldDataBuf[4];
+
+    foreach (option, field_list) {
+        SqlLoadColExpr* coltem = (SqlLoadColExpr *)lfirst(option);
+        if (coltem->const_info != NULL) {
+            appendStringInfo(constantbuf, "%s", quote_identifier(coltem->colname));
+            A_Const* constVal = (A_Const *)coltem->const_info;
+            appendStringInfo(constantbuf, " \'%s\',", constVal->val.val.str);
+        }
+        else if (coltem->sequence_info != NULL) {
+            TransformFieldsListSeque(schemaname, relname, coltem, sequencebuf);
+        }else if (coltem->is_filler == true) {
+            appendStringInfo(fillerbuf, " %s,", quote_identifier(coltem->colname));
+        }
+        else if (coltem->scalar_spec != NULL) {
+            TransformFieldsListScalar(coltem, transformbuf, formatterbuf);
+        }
+    }
+
+    TransformFieldsListAppInfo(fieldDataBuf, LOADER_COL_BUF_CNT, buf);
+}
+
+static void TransformLoadOptions(LoadStmt* stmt, StringInfo buf)
+{
+    ListCell* option = NULL;
+
+    foreach (option, stmt->load_options) {
+
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "characterset") == 0) {
+            char* encoding = defGetString(def);
+            if (pg_strcasecmp(encoding, "AL32UTF8") == 0) {
+                encoding = "utf8";
+            }
+            if (pg_strcasecmp(encoding, "zhs16gbk") == 0) {
+                encoding = "gbk";
+            }
+            if (pg_strcasecmp(encoding, "zhs32gb18030") == 0) {
+                encoding = "gb18030";
+            }
+            appendStringInfo(buf, "ENCODING \'%s\' ", encoding);
+            break;
+        }
+    }
+}
+
+static void TransformLoadRelationOptionsWhen(List *when_list, StringInfo buf)
+{
+    ListCell* lc = NULL;
+    bool is_frist = true;
+
+    foreach (lc, when_list) {
+        LoadWhenExpr *when = (LoadWhenExpr *)lfirst(lc);
+        CheckCopyWhenExprOptions(when);
+
+        if (is_frist == true) {
+            appendStringInfo(buf, "WHEN ");
+            is_frist = false;
+        } else {
+            appendStringInfo(buf, "AND ");
+        }
+
+        if (when->whentype == 0) {
+            appendStringInfo(buf, "(%d-%d) ", when->start, when->end);
+            appendStringInfo(buf, "%s ", when->oper);
+            appendStringInfo(buf, "\'%s\' ", when->val);
+        } else {
+            appendStringInfo(buf, "%s ", quote_identifier(when->attname));
+            appendStringInfo(buf, "%s ", when->oper);
+            appendStringInfo(buf, "\'%s\' ", when->val);
+        }
+    }
+}
+
+static void TransformLoadRelationOptions(LoadStmt* stmt, StringInfo buf)
+{
+    ListCell* option = NULL;
+    bool fields_csv = false;
+    bool optionally_enclosed_by = false;
+
+    foreach (option, stmt->rel_options) {
+
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "when_expr") == 0) {
+            List *when_list = (List*)(def->arg);
+            TransformLoadRelationOptionsWhen(when_list, buf);
+        }
+        else if (strcmp(def->defname, "fields_csv") == 0) {
+            if (stmt->is_only_special_filed == false) {
+                appendStringInfo(buf, "csv ");
+                fields_csv = true;
+            }
+        } else if (strcmp(def->defname, "trailing_nullcols") == 0) {
+            appendStringInfo(buf, "FILL_MISSING_FIELDS 'multi' ");
+        } else if (strcmp(def->defname, "fields_terminated_by") == 0) {
+            if (stmt->is_only_special_filed == false) {
+                char* terminated_by = defGetString(def);
+                appendStringInfo(buf, "DELIMITER \'%s\' ", terminated_by);
+            }
+        } else if (strcmp(def->defname, "optionally_enclosed_by") == 0) {
+            if (stmt->is_only_special_filed == false) {
+                char *quote = defGetString(def);
+                appendStringInfo(buf, "QUOTE \'%s\' ", quote);
+                optionally_enclosed_by = true;
+            }
+        } else if (strcmp(def->defname, "fields_list") == 0) {
+            TransformFieldsListOpt(stmt, def, buf);
+        } else {
+            ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("option \"%s\" not recognized", def->defname)));
+        }
+    }
+
+    if (optionally_enclosed_by && !fields_csv && stmt->is_only_special_filed == false) {
+        appendStringInfo(buf, "csv ");
+    }
+}
+
+static bool LoadDataHasWhenExpr(LoadStmt* stmt)
+{
+    ListCell* option = NULL;
+
+    foreach (option, stmt->rel_options) {
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "when_expr") == 0) {
+            return list_length((List*)(def->arg)) != 0;
+        }
+    }
+
+    return false;
+}
+
+
+static void TransformPreLoadOptions(LoadStmt* stmt, StringInfo buf)
+{
+    ListCell* option = NULL;
+
+    int64 errors = 0;
+
+    foreach (option, stmt->pre_load_options) {
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "errors") == 0) {
+            errors = defGetInt64(def);
+            if (errors < 0) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("ERRORS=%ld in OPTIONS should be >= 0", errors)));
+            }
+            else if (errors > 0) {
+                appendStringInfo(buf, "LOG ERRORS DATA REJECT LIMIT \'%ld\' ", errors);
+            }
+        }
+    }
+
+    if (errors == 0 && LoadDataHasWhenExpr(stmt)) {
+        appendStringInfo(buf, "LOG ERRORS DATA ");
+    }
+
+    foreach (option, stmt->pre_load_options) {
+        DefElem* def = (DefElem*)lfirst(option);
+        if (strcmp(def->defname, "skip") == 0) {
+            int64 skip = defGetInt64(def);
+            if (skip < 0) {
+                ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("SKIP=%ld in OPTIONS should be >= 0", skip)));
+            }
+            appendStringInfo(buf, "SKIP %ld ", skip);
+        }
+    }
+}
+
+static void TransformLoadDataToCopy(LoadStmt* stmt)
+{
+    StringInfoData bufData;
+    StringInfo buf = &bufData;
+
+    initStringInfo(buf);
+
+    TransformLoadType(stmt, buf);
+
+    appendStringInfo(buf, "\\COPY ");
+
+    TransformLoadGetRelation(stmt, buf);
+
+    TransformLoadGetFiledList(stmt, buf);
+
+    TransformLoadDatafile(stmt, buf);
+
+    TransformPreLoadOptions(stmt, buf);
+
+    TransformLoadOptions(stmt, buf);
+
+    TransformLoadRelationOptions(stmt, buf);
+
+    appendStringInfo(buf, "IGNORE_EXTRA_DATA;");
+
+    elog(LOG, "load data is recv type: %d tablename:%s\ncopy sql:%s",
+        stmt->type, stmt->relation->relname, buf->data);
+
+    SendCopySqlToClient(buf);
+}
+
+static int64 getCopySequenceCountval(const char *nspname, const char *relname)
+{
+    StringInfoData buf;
+    int ret;
+    bool isnull;
+    Datum attval;
+    if (relname == NULL) {
+        return 0;
+    }
+    initStringInfo(&buf);
+    if (nspname == NULL) {
+        appendStringInfo(&buf, "select cast(count(*) as bigint) from %s", quote_identifier(relname));
+    } else {
+        appendStringInfo(&buf, "select cast(count(*) as bigint) from %s.%s", quote_identifier(nspname),
+                         quote_identifier(relname));
+    }
+    if ((ret = SPI_connect()) < 0) {
+        /* internal error */
+        ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI connect failure - returned %d", ret)));
+    }
+    ret = SPI_execute(buf.data, true, INT_MAX);
+    if (ret != SPI_OK_SELECT)
+        ereport(ERROR, (errcode(ERRCODE_SPI_EXECUTE_FAILURE), errmsg("SPI_execute failed: error code %d", ret)));
+    attval = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    if (isnull) {
+        attval = 0;
+    }
+    SPI_finish();
+    return DatumGetInt64(attval);
+}
+
+static int64 getCopySequenceMaxval(const char *nspname, const char *relname, const char *colname)
+{
+    StringInfoData buf;
+    int ret;
+    bool isnull;
+    Datum attval;
+    if (relname == NULL || colname == NULL) {
+        return 0;
+    }
+    initStringInfo(&buf);
+    if (nspname == NULL) {
+        appendStringInfo(&buf, "select cast(nvl(max(%s),0) as bigint) from %s ", quote_identifier(colname),
+                         quote_identifier(relname));
+    } else {
+        appendStringInfo(&buf, "select cast(nvl(max(%s),0) as bigint) from %s.%s ", quote_identifier(colname),
+                         quote_identifier(nspname), quote_identifier(relname));
+    }
+    if ((ret = SPI_connect()) < 0) {
+        /* internal error */
+        ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI connect failure - returned %d", ret)));
+    }
+    ret = SPI_execute(buf.data, true, INT_MAX);
+    if (ret != SPI_OK_SELECT)
+        ereport(ERROR, (errcode(ERRCODE_SPI_EXECUTE_FAILURE), errmsg("SPI_execute failed: error code %d", ret)));
+    attval = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+    if (isnull) {
+        attval = 0;
+    }
+    SPI_finish();
+    return DatumGetInt64(attval);
 }

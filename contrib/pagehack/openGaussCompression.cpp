@@ -46,9 +46,12 @@ bool OpenGaussCompression::TryOpen()
     header = pc_mmap(fileno(pcaFd), chunkSize, false);
     return true;
 }
+constexpr int MAX_RETRY_LIMIT = 60;
+constexpr long RETRY_SLEEP_TIME = 1000000L;
 bool OpenGaussCompression::ReadChunkOfBlock(char *dst, size_t *dstLen, BlockNumber blockNumber)
 {
     auto currentAddr = GET_PAGE_COMPRESS_ADDR(header, chunkSize, blockNumber);
+    size_t tryCount = 0;
     do {
         auto chunkNum = currentAddr->nchunks;
         for (uint8 i = 0; i < chunkNum; i++) {
@@ -66,8 +69,18 @@ bool OpenGaussCompression::ReadChunkOfBlock(char *dst, size_t *dstLen, BlockNumb
             }
             *dstLen += readAmount;
         }
-        if (chunkNum == 0 || DecompressPage(dst, decompressedBuffer, header->algorithm) == BLCKSZ) {
+        if (chunkNum == 0) {
             break;
+        }
+        if (DecompressPage(dst, decompressedBuffer, header->algorithm) == BLCKSZ) {
+            break;
+        }
+
+        if (tryCount < MAX_RETRY_LIMIT) {
+            ++tryCount;
+            pg_usleep(RETRY_SLEEP_TIME);
+        } else {
+            return false;
         }
     } while (true);
     if (PageIs8BXidHeapVersion(dst)) {
@@ -98,6 +111,13 @@ bool OpenGaussCompression::WriteBackCompressedData(char *source, size_t sourceLe
     }
     fflush(this->pcdFd);
     return true;
+}
+
+void OpenGaussCompression::MarkCompressedDirty(char *source, size_t sourceLen)
+{
+    int rc = memset_s(source + SizeOfHeapPageHeaderData, sourceLen - SizeOfHeapPageHeaderData, 0xFF,
+                      sourceLen - SizeOfHeapPageHeaderData);
+    securec_check(rc, "\0", "\0");
 }
 
 void OpenGaussCompression::MarkUncompressedDirty()
@@ -172,6 +192,5 @@ bool OpenGaussCompression::WriteBackUncompressedData()
     }
     return this->WriteBackCompressedData(work_buffer, compress_buffer_size, blockNumber);
 }
-
 
 #include "compression_algorithm.ini"

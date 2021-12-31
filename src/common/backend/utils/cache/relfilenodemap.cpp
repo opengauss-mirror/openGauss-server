@@ -34,6 +34,7 @@
 #include "utils/relfilenodemap.h"
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
+#include "utils/syscache.h"
 
 const int HASH_ELEM_SIZE = 1024;
 
@@ -461,7 +462,31 @@ Oid PartitionRelidByRelfilenode(Oid reltablespace, Oid relfilenode, Oid &partati
         Form_pg_partition partForm = (Form_pg_partition)GETSTRUCT(ntp);
         partationReltoastrelid = partForm->reltoastrelid;
         relid = partForm->parentid;
-        StorageType st = PartitionGetStorageType(relid);
+        if (partForm->parttype == PART_OBJ_TYPE_TABLE_SUB_PARTITION) {
+            HeapTuple partitionTupleRaw = NULL;
+            Form_pg_partition partitionTuple = NULL;
+            partitionTupleRaw = SearchSysCache1((int)PARTRELID, ObjectIdGetDatum(relid));
+            if (!PointerIsValid(partitionTupleRaw)) {
+                relid = InvalidOid;
+                ReleaseSysCache(partitionTupleRaw);
+                break;
+            }
+            partitionTuple = (Form_pg_partition)GETSTRUCT(partitionTupleRaw);
+            relid = partitionTuple->parentid;
+            ReleaseSysCache(partitionTupleRaw);
+        }
+
+        HeapTuple pg_class_tuple = ScanPgRelation(relid, true, false);
+        if (!HeapTupleIsValid(pg_class_tuple)) {
+            /* parent is removed from pg_class. */
+            relid = InvalidOid;
+            break;
+        }
+        bool isNull;
+        heap_getattr(pg_class_tuple, Anum_pg_class_relbucket, GetDefaultPgClassDesc(), &isNull);
+        StorageType st = isNull ? HEAP_DISK : SEGMENT_PAGE;
+        heap_freetuple_ext(pg_class_tuple);
+
         if ((st == SEGMENT_PAGE && !segment) || (st == HEAP_DISK && segment)) {
             relid = InvalidOid;
             continue;

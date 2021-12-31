@@ -90,7 +90,7 @@ def get_workload_template(templates, sqls):
 
 def output_valid_sql(sql):
     is_quotation_valid = sql.count("'") % 2
-    if 'from pg_' in sql.lower() or is_quotation_valid:
+    if 'from pg_' in sql.lower() or 'gs_index_advise' in sql.lower() or is_quotation_valid:
         return ''
     if any(tp in sql.lower() for tp in SQL_TYPE[1:]) or \
             (SQL_TYPE[0] in sql.lower() and 'from ' in sql.lower()):
@@ -221,7 +221,7 @@ def extract_sql_from_log(args):
         try:
             with open(args.f, 'r') as output_file:
                 templates = json.load(output_file)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, FileNotFoundError) as e: 
             templates = {}
         record_sql(valid_files, args, templates)
         with open(args.f, 'w') as output_file:

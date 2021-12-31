@@ -21,6 +21,7 @@ import global_vars
 from cert import get_agent_ssl_context
 from task import database_exporter, os_exporter, wdr
 from utils import TimeString
+from utils import getpasswd
 from deamon import handle_sigterm
 from .channel import MemoryChannel
 from .db_source import DBSource
@@ -69,9 +70,8 @@ def _extract_params():
         params['agent_cert'] = os.path.realpath(config.get('security', 'agent_cert'))
         params['agent_key'] = os.path.realpath(config.get('security', 'agent_key'))
         params['ca'] = os.path.realpath(config.get('security', 'ca'))
-        pwd_file = os.path.join(global_vars.CURRENT_DIRNAME, 'certificate/pwf')
-        with open(pwd_file, mode='r') as f:
-            params['cert_pwd'] = f.read().strip()
+        pwd_path = os.path.dirname(params['agent_cert'])
+        params['cert_pwd'] = getpasswd(pwd_path)
 
     return params
 

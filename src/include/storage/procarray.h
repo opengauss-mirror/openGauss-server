@@ -32,7 +32,6 @@ extern void InitRoleIdHashTable();
 extern int GetRoleIdCount(Oid roleoid);
 extern int IncreaseUserCount(Oid roleoid);
 extern int DecreaseUserCount(Oid roleoid);
-extern void RemoveUserCount(Oid roleoid);
 
 extern void SyncLocalXidWait(TransactionId xid);
 
@@ -70,7 +69,6 @@ extern Snapshot GetSnapshotData(Snapshot snapshot, bool force_local_snapshot);
 #endif
 
 extern Snapshot GetLocalSnapshotData(Snapshot snapshot);
-extern void ReleaseSnapshotData(Snapshot snapshot);
 
 extern bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourcexid);
 extern RunningTransactions GetRunningTransactionData(void);

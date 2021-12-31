@@ -128,6 +128,24 @@ select * from hw_list_partition_dml_t3 order by 1, 2;
 drop table hw_list_partition_dml_t1;
 drop table hw_list_partition_dml_t2;
 drop table hw_list_partition_dml_t3;
+
+drop table test_index_lt;
+create table test_index_lt (a int, b int, c int)
+partition by list(a)
+(
+ PARTITION p1 VALUES (3, 4, 5),
+ PARTITION p2 VALUES (1, 2)
+);
+insert into test_index_lt select generate_series(1,4);
+explain (costs off, verbose on) select * from test_index_lt order by 1;
+select * from test_index_lt order by 1;
+create index test_exchange_index_lt_a on test_index_lt (a) local;
+set enable_seqscan = off;
+set enable_bitmapscan = off;
+explain (costs off, verbose on) select * from test_index_lt order by 1;
+select * from test_index_lt order by 1;
+drop table test_index_lt;
+
 drop schema FVT_COMPRESS_QWER cascade;
 create schema fvt_other_cmd;
 CREATE TABLE FVT_OTHER_CMD.IDEX_LIST_PARTITION_TABLE_001(COL_INT int)

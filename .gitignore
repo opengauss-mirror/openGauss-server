@@ -10,12 +10,15 @@
 *.sgml
 *.log
 *.inc
+*.rej
 
 objfiles.txt
 
+/tmp_build/
+/output/
+/mppdb_temp_install/
 /GNUmakefile
 /config.status
 /ereport.txt
 
 /build/script/version.cfg
-/src/Makefile.global

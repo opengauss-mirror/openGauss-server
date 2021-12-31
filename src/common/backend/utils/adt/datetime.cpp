@@ -158,23 +158,29 @@ static datetkn deltatktbl[] = {
     {"@", IGNORE_DTF, 0},                 /* openGauss relative prefix */
     {DAGO, AGO, 0},                       /* "ago" indicates negative time offset */
     {"c", UNITS, DTK_CENTURY},            /* "century" relative */
+    {"cc", UNITS, DTK_CENTURY},           /* "century" relative */
     {"cent", UNITS, DTK_CENTURY},         /* "century" relative */
     {"centuries", UNITS, DTK_CENTURY},    /* "centuries" relative */
     {DCENTURY, UNITS, DTK_CENTURY},       /* "century" relative */
     {"d", UNITS, DTK_DAY},                /* "day" relative */
     {DDAY, UNITS, DTK_DAY},               /* "day" relative */
     {"days", UNITS, DTK_DAY},             /* "days" relative */
+    {"dd", UNITS, DTK_DAY},               /* "day" relative */
+    {"ddd", UNITS, DTK_DAY},              /* "day" relative */
     {"dec", UNITS, DTK_DECADE},           /* "decade" relative */
     {DDECADE, UNITS, DTK_DECADE},         /* "decade" relative */
     {"decades", UNITS, DTK_DECADE},       /* "decades" relative */
     {"decs", UNITS, DTK_DECADE},          /* "decades" relative */
     {"h", UNITS, DTK_HOUR},               /* "hour" relative */
+    {"hh", UNITS, DTK_HOUR},              /* "hour" relative */
     {DHOUR, UNITS, DTK_HOUR},             /* "hour" relative */
     {"hours", UNITS, DTK_HOUR},           /* "hours" relative */
     {"hr", UNITS, DTK_HOUR},              /* "hour" relative */
     {"hrs", UNITS, DTK_HOUR},             /* "hours" relative */
     {INVALID, RESERV, DTK_INVALID},       /* reserved for invalid time */
+    {"j", UNITS, DTK_DAY},                /* "day" relative */
     {"m", UNITS, DTK_MINUTE},             /* "minute" relative */
+    {"mi", UNITS, DTK_MINUTE},            /* "minute" relative */
     {"microsecon", UNITS, DTK_MICROSEC},  /* "microsecond" relative */
     {"mil", UNITS, DTK_MILLENNIUM},       /* "millennium" relative */
     {"millennia", UNITS, DTK_MILLENNIUM}, /* "millennia" relative */
@@ -185,6 +191,7 @@ static datetkn deltatktbl[] = {
     {"mins", UNITS, DTK_MINUTE},          /* "minutes" relative */
     {DMINUTE, UNITS, DTK_MINUTE},         /* "minute" relative */
     {"minutes", UNITS, DTK_MINUTE},       /* "minutes" relative */
+    {"mm", UNITS, DTK_MONTH},             /* "month" relative */
     {"mon", UNITS, DTK_MONTH},            /* "months" relative */
     {"mons", UNITS, DTK_MONTH},           /* "months" relative */
     {DMONTH, UNITS, DTK_MONTH},           /* "month" relative */
@@ -194,6 +201,7 @@ static datetkn deltatktbl[] = {
     {DMILLISEC, UNITS, DTK_MILLISEC},
     {"mseconds", UNITS, DTK_MILLISEC},
     {"msecs", UNITS, DTK_MILLISEC},
+    {"q", UNITS, DTK_QUARTER},      /* "quarter" relative */
     {"qtr", UNITS, DTK_QUARTER},    /* "quarter" relative */
     {DQUARTER, UNITS, DTK_QUARTER}, /* "quarter" relative */
     {"s", UNITS, DTK_SECOND},
@@ -217,7 +225,8 @@ static datetkn deltatktbl[] = {
     {DYEAR, UNITS, DTK_YEAR},             /* "year" relative */
     {"years", UNITS, DTK_YEAR},           /* "years" relative */
     {"yr", UNITS, DTK_YEAR},              /* "year" relative */
-    {"yrs", UNITS, DTK_YEAR}              /* "years" relative */
+    {"yrs", UNITS, DTK_YEAR},             /* "years" relative */
+    {"yyyy", UNITS, DTK_YEAR}             /* "year" relative */
 };
 
 static int szdeltatktbl = sizeof deltatktbl / sizeof deltatktbl[0];

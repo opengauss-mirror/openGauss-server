@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -32,6 +33,7 @@
 #include "catalog/catalog.h"
 #include "catalog/dependency.h"
 #include "catalog/dfsstore_ctlg.h"
+#include "catalog/pg_partition_fn.h"
 #include "catalog/storage.h"
 #include "catalog/storage_gtt.h"
 #include "catalog/storage_xlog.h"

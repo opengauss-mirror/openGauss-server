@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/nodes/execnodes.h
  *
@@ -113,6 +114,7 @@ typedef void (*ExprContextCallbackFunction)(Datum arg);
 typedef struct ExprContext_CB {
     struct ExprContext_CB* next;
     ExprContextCallbackFunction function;
+    ResourceOwner resowner;
     Datum arg;
 } ExprContext_CB;
 
@@ -1452,6 +1454,7 @@ typedef struct MergeAppendState {
  *		intermediate_table	current recursive output (next generation of WT)
  * ----------------
  */
+struct StartWithOpState;
 struct RecursiveUnionController;
 typedef struct RecursiveUnionState {
     PlanState ps; /* its first field is NodeTag */
@@ -1466,6 +1469,7 @@ typedef struct RecursiveUnionState {
     MemoryContext tempContext;  /* short-term context for comparisons */
     TupleHashTable hashtable;   /* hash table for tuples already seen */
     MemoryContext tableContext; /* memory context containing hash table */
+    MemoryContext convertContext; /* memory context for start with convert tuple */
 
     /*
      * MPP with-recursive support
@@ -1483,7 +1487,71 @@ typedef struct RecursiveUnionState {
      * stage.
      */
     MemoryContext shareContext;
+
+    /* support start with*/
+    StartWithOpState *swstate;
+
+    /*
+     * tuple's index of relative order position in current iteration level
+     * only useful once start with...connect by..siblings all exist.
+     */
+    uint64 sw_tuple_idx;
 } RecursiveUnionState;
+
+/* ----------------
+ *	 StartWithOpState information
+ * ----------------
+ */
+#define PSEUDO_COLUMN_NUM 4
+typedef struct StartWithOpState
+{
+    PlanState ps;
+
+    /* other attributes */
+    int    swop_status;
+    /*
+     * An array of TargetEntry reference to store the entry for start-with pseudo
+     * return columns's TLE
+     * - entry[0]  LEVEL
+     * - entry[1]  CONNECT_BY_ISLEAF
+     * - entry[2]  CONNECT_BY_ISCYCLE
+     * - entry[3]  ROWNUM
+     */
+    TargetEntry *sw_pseudoCols[PSEUDO_COLUMN_NUM];
+
+    /* variables to help calculate pseodu return columns */
+    TupleTableSlot      *sw_workingSlot;  /* A dedicate slot to hold tuple-2-tuple
+                                             conversion in side of StartWithOp node,
+                                             basically do not share use result tuple
+                                             to to avoid to tuple store,fetch,
+                                             conversion mess up */
+    Tuplestorestate     *sw_workingTable; /* Hold incoming tuple slto from RU and processed
+                                             one-by-on and store into resultTable */
+
+    Tuplestorestate     *sw_backupTable;  /* Hold a copy of sw_workingTable*/
+
+    Tuplestorestate     *sw_resultTable;  /* final calculated result stored int */
+
+    AttrNumber           sw_keyAttnum;
+    const char          *sw_curKeyArrayStr;
+
+    /* tuple slot value array for conversion (to avoid per-tupe process memory alloc/free) */
+    Datum               *sw_values;
+    bool                *sw_isnull;
+    int                 sw_connect_by_level;
+    uint64              sw_rownum;
+    int                 sw_level;
+    int                 sw_numtuples;       /* number of tuples in current level */
+
+    /*
+     * nocycle stop flag, normally is used to handle nocycle stop on order siblings
+     * case, as order-siblings add a sort operator on top of RU
+     */
+    bool                sw_nocycleStopOrderSiblings;
+
+    MemoryContext       sw_context;
+    List*               sw_cycle_rowmarks;
+} StartWithOpState;
 
 /* ----------------
  *	 BitmapAndState information
@@ -1570,12 +1638,14 @@ typedef struct ScanState {
     int currentSlot; /* current iteration position */
     ScanDirection partScanDirection;
     List* partitions; /* list of Partition */
+    List* subpartitions; /* list of SubPartition */
     LOCKMODE lockMode;
     List* runTimeParamPredicates;
     bool runTimePredicatesReady;
     bool is_scan_end; /* @hdfs Mark whether iterator is over or not, if the scan uses informational constraint. */
     SeqScanAccessor* ss_scanaccessor; /* prefetch related */
     int part_id;
+    List* subPartLengthList;
     int startPartitionId;            /* start partition id for parallel threads. */
     int endPartitionId;              /* end partition id for parallel threads. */
     RangeScanInRedis rangeScanInRedis;         /* if it is a range scan in redistribution time */
@@ -2425,6 +2495,7 @@ typedef struct LimitState {
 typedef struct PartIteratorState {
     PlanState ps;   /* its first field is NodeTag */
     int currentItr; /* the sequence number for processing partition */
+    int subPartCurrentItr; /* the sequence number for processing partition */
 } PartIteratorState;
 
 struct VecLimitState : public LimitState {

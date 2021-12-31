@@ -311,6 +311,10 @@ static ProcessPolicy create_cmk_obj_hookfunc(CmkIdentity *cmk_identity)
         return POLICY_CONTINUE;
     }
 
+    if (!init_gs_ktool()) {
+        return POLICY_ERROR;
+    }
+
     if (cmk_identity->cmk_id_str == NULL) {
         cmkem_errmsg("failed to create client master key, failed to find arg: KEY_PATH.");
         return POLICY_ERROR;
@@ -350,6 +354,10 @@ static ProcessPolicy encrypt_cek_plain_hookfunc(CmkemUStr *cek_plain, CmkIdentit
         return POLICY_CONTINUE;
     }
 
+    if (!init_gs_ktool()) {
+        return POLICY_ERROR;
+    }
+
     get_cmk_id_from_key_path(cmk_identity->cmk_id_str, &cmk_id);
 
     ret = read_cmk_plain(cmk_id, &cmk_plain);
@@ -376,6 +384,10 @@ static ProcessPolicy decrypt_cek_cipher_hookfunc(CmkemUStr *cek_cipher, CmkIdent
 
     if (cmk_identity->cmk_store == NULL || strcasecmp(cmk_identity->cmk_store, "gs_ktool") != 0) {
         return POLICY_CONTINUE;
+    }
+
+    if (!init_gs_ktool()) {
+        return POLICY_ERROR;
     }
 
     get_cmk_id_from_key_path(cmk_identity->cmk_id_str, &cmk_id);
@@ -411,6 +423,14 @@ int reg_cmke_manager_gs_ktool_main()
     };
 
     return (reg_cmk_entity_manager(gs_ktool) == CMKEM_SUCCEED) ? 0 : -1;
+}
+
+void exit_cmke_manager_gs_ktool()
+{
+    free_cmk_cache_list(cmk_cache_list);
+    cmk_cache_list = NULL;
+    
+    deinit_gs_ktool();
 }
 
 #endif /* ENABLE_GS_KTOOL */

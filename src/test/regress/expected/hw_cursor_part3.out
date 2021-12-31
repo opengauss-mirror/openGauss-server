@@ -2,6 +2,8 @@
 ----- test the mixed use of implicit and explicit cursor attributes -------------
 ----- test the effect of the explicit cursor use to implicit cursor attributes --
 ---------------------------------------------------------------------------------
+create database pl_test_cursor_part3 DBCOMPATIBILITY 'pg';
+\c pl_test_cursor_part3;
 CREATE schema hw_cursor_part3;
 set current_schema = hw_cursor_part3; 
 create table t1(v1 int,v2 varchar2(100));
@@ -180,6 +182,7 @@ begin
     close cur;
 end;
 /
+\set VERBOSITY terse
 call sp_testsp_delete();
 NOTICE:  test delete: sql%isopen=false
 NOTICE:  test delete: sql%notfound=true
@@ -192,6 +195,7 @@ NOTICE:  test delete: sql%rowcount=3
  
 (1 row)
 
+\set VERBOSITY default
 create table JOINT_DEBUG_CURSOR_FUNC_TABLE_012(C_INT integer,C_CHAR char(10))  ;
 insert into JOINT_DEBUG_CURSOR_FUNC_TABLE_012 values(10,'hello');
 insert into JOINT_DEBUG_CURSOR_FUNC_TABLE_012 values(10,'nihao');
@@ -214,12 +218,11 @@ begin
     end ;
 end;
 /
+ERROR:  type name too long
+--?.*
+CONTEXT:  compilation of PL/pgSQL function "joint_debug_cursor_func_procedure_012" near line 7
 call     JOINT_DEBUG_CURSOR_FUNC_PROCEDURE_012();
- joint_debug_cursor_func_procedure_012 
----------------------------------------
- 
-(1 row)
-
+ERROR:  function "joint_debug_cursor_func_procedure_012" doesn't exist 
 drop table if exists cursor_vl_tb10;
 NOTICE:  table "cursor_vl_tb10" does not exist, skipping
 create unlogged table cursor_vl_tb10(c1 int,c2 varchar,c3 numeric,c4 date,c5 text);
@@ -262,22 +265,9 @@ NOTICE:  11,12,11
 (1 row)
 
 select * from i_refcursor10_1('');
-NOTICE:  1,2,1
-NOTICE:  2,3,2
-NOTICE:  3,4,3
-NOTICE:  4,5,4
-NOTICE:  5,6,5
-NOTICE:  6,7,6
-NOTICE:  7,8,7
-NOTICE:  8,9,8
-NOTICE:  9,10,9
-NOTICE:  10,11,10
-NOTICE:  11,12,11
- i_refcursor10_1 
------------------
- 
-(1 row)
-
+ERROR:  invalid input syntax for integer: ""
+LINE 1: select * from i_refcursor10_1('');
+                                      ^
 select * from i_refcursor10_1(0);
 NOTICE:  1,2,1
 NOTICE:  2,3,2
@@ -527,11 +517,10 @@ ERROR:  relation "cursor_vl_tb10" does not exist on datanode1
 LINE 1: select * from cursor_vl_tb10;
                       ^
 DROP SCHEMA hw_cursor_part3 CASCADE;
-NOTICE:  drop cascades to 11 other objects
+NOTICE:  drop cascades to 10 other objects
 DETAIL:  drop cascades to table t1
 drop cascades to function sp_testsp_delete()
 drop cascades to table joint_debug_cursor_func_table_012
-drop cascades to function joint_debug_cursor_func_procedure_012()
 drop cascades to function i_refcursor10_1(integer)
 drop cascades to function i_refcursor10_2(integer)
 drop cascades to function i_refcursor10_3()
@@ -539,3 +528,5 @@ drop cascades to function i_refcursor10_4(integer)
 drop cascades to function i_refcursor10_5()
 drop cascades to function i_refcursor10_6()
 drop cascades to function i_refcursor10_7()
+\c regression;
+drop database IF EXISTS pl_test_cursor_part3;

@@ -25,8 +25,10 @@ set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_SOURCE_DIR}/scripts
     ${CMAKE_CURRENT_SOURCE_DIR}/pg_rewind
     ${CMAKE_CURRENT_SOURCE_DIR}/gs_plan_simulator
+    ${CMAKE_CURRENT_SOURCE_DIR}/gs_loader
 )
 if("${ENABLE_MULTIPLE_NODES}" STREQUAL "ON")
+    add_subdirectory(gs_cgroup)
     add_subdirectory(gs_log)
     add_subdirectory(pg_upgrade)
     add_subdirectory(pgxc_clean)
@@ -42,8 +44,8 @@ add_subdirectory(psql)
 add_subdirectory(pg_config)
 add_subdirectory(pg_controldata)
 add_subdirectory(pg_resetxlog)
-add_subdirectory(gs_cgroup)
 add_subdirectory(gs_guc)
 add_subdirectory(gsqlerr)
 add_subdirectory(pg_basebackup)
 add_subdirectory(pg_probackup)
+add_subdirectory(gs_loader)

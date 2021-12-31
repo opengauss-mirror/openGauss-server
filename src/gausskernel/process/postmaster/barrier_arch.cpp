@@ -35,9 +35,10 @@
 #include "pgxc/barrier.h"
 #include "postmaster/barrier_creator.h"
 #include "access/obs/obs_am.h"
+#include "access/archive/archive_am.h"
 #include "tcop/tcopprot.h"
 #include "replication/slot.h"
-#include "replication/obswalreceiver.h"
+#include "replication/archive_walreceiver.h"
 #include "securec.h"
 #include "port.h"
 #include "utils/postinit.h"
@@ -51,20 +52,20 @@
 
 #define atolsn(x) ((XLogRecPtr)strtoul((x), NULL, 0))
 
-static void write_barrier_id_to_obs(const char* barrier_name, ObsArchiveConfig *archive_obs)
+static void write_barrier_id_to_obs(const char* barrier_name, ArchiveConfig *archive_obs)
 {
     errno_t rc = 0;
-    ObsArchiveConfig obsConfig;
+    ArchiveConfig obsConfig;
     char pathPrefix[MAXPGPATH] = {0};
 
     ereport(LOG, (errmsg("Write barrierId <%s> to obs start", barrier_name)));
 
     /* copy OBS configs to temporary variable for customising file path */
-    rc = memcpy_s(&obsConfig, sizeof(ObsArchiveConfig), archive_obs, sizeof(ObsArchiveConfig));
+    rc = memcpy_s(&obsConfig, sizeof(ArchiveConfig), archive_obs, sizeof(ArchiveConfig));
     securec_check(rc, "", "");
 
     if (!IS_PGXC_COORDINATOR) {
-        rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.obs_prefix);
+        rc = strcpy_s(pathPrefix, MAXPGPATH, obsConfig.archive_prefix);
         securec_check(rc, "\0", "\0");
         char *p = strrchr(pathPrefix, '/');
         if (p == NULL) {
@@ -72,10 +73,10 @@ static void write_barrier_id_to_obs(const char* barrier_name, ObsArchiveConfig *
                     errmsg("Obs path prefix is invalid")));
         }
         *p = '\0';
-        obsConfig.obs_prefix = pathPrefix;
+        obsConfig.archive_prefix = pathPrefix;
     }
 
-    obsWrite(BARRIER_FILE, barrier_name, MAX_BARRIER_ID_LENGTH - 1, &obsConfig);
+    ArchiveWrite(BARRIER_FILE, barrier_name, MAX_BARRIER_ID_LENGTH - 1, &obsConfig);
 }
 
 static void WaitBarrierArch(XLogRecPtr barrierLsn, const char *slotName) 
@@ -92,11 +93,16 @@ static void WaitBarrierArch(XLogRecPtr barrierLsn, const char *slotName)
         }
         
         if (XLByteLE(pg_atomic_read_u64(&barrierLsn),
-            pg_atomic_read_u64(&archive_task_status->archive_task.targetLsn))) {
+            pg_atomic_read_u64(&archive_task_status->archived_lsn))) {
             break;
         }
         
         CHECK_FOR_INTERRUPTS();
+        /* Also check stop flag */
+        if (t_thrd.barrier_arch.ready_to_stop) {
+            ereport(ERROR, (errcode(ERRCODE_ADMIN_SHUTDOWN), errmsg("[BarrierArch] terminating barrier arch"
+                " due to administrator command")));
+        }
         pg_usleep(100000L);
         cnt++;
         
@@ -288,7 +294,7 @@ static void CheckBarrierArchCommandStatus(const PGXCNodeAllHandles* conn_handles
             id)));
 }
 
-static void QueryBarrierArch(PGXCNodeAllHandles* handles, ObsArchiveConfig *archive_obs)
+static void QueryBarrierArch(PGXCNodeAllHandles* handles, ArchiveConfig *archive_obs)
 {
     int connCnt = handles->co_conn_count + handles->dn_conn_count;
     if (connCnt >= g_instance.archive_obs_cxt.max_node_cnt) {
@@ -334,7 +340,7 @@ static void QueryBarrierArch(PGXCNodeAllHandles* handles, ObsArchiveConfig *arch
 }
 
 #else
-static void SingleBarrierArch(ObsArchiveConfig *archive_obs)
+static void SingleBarrierArch(ArchiveConfig *archive_obs)
 {
     XLogRecPtr barrierLsn;
     
@@ -455,7 +461,7 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
 
     pg_usleep_retry(1000000L, 0);
     
-    obsArchiveSlot = getObsReplicationSlotWithName(t_thrd.barrier_arch.slot_name);
+    obsArchiveSlot = getArchiveReplicationSlotWithName(t_thrd.barrier_arch.slot_name);
     if (obsArchiveSlot == NULL) {
         t_thrd.barrier_arch.ready_to_stop = true;
         ereport(WARNING, (errmsg("[BarrierArch] obs slot not created.")));
@@ -504,11 +510,11 @@ NON_EXEC_STATIC void BarrierArchMain(knl_thread_arg* arg)
         }
         PGXCNodeAllHandles* handles = GetAllNodesHandles();
         
-        QueryBarrierArch(handles, &obsArchiveSlot->archive_obs);
+        QueryBarrierArch(handles, &obsArchiveSlot->archive_config);
         
         pfree_pgxc_all_handles(handles);
 #else
-        SingleBarrierArch(&obsArchiveSlot->archive_obs);
+        SingleBarrierArch(&obsArchiveSlot->archive_config);
 #endif
     }
     ereport(LOG, (errmsg("[BarrierArch] barrier arch thread exits.")));

@@ -240,8 +240,11 @@ void check_access_table(const policy_set *policy_ids, RangeVar *rel, int access_
     if (rel == NULL) {
         return;
     }
-    PolicyLabelItem item(rel->schemaname, rel->relname, "", object_type);
+
+    /* PolicyLabelItem construction will append schema oid by relid */
+    PolicyLabelItem item;
     PolicyLabelItem view_item(0, 0, O_VIEW);
+    gen_policy_labelitem(item, (const ListCell *)rel, object_type);
     policy_result pol_result;
     int block_behaviour = 0;
     check_audit_policy_access(&item, &view_item, access_type, policy_ids, &pol_result,
@@ -257,18 +260,17 @@ void audit_open_relation(List *list, Var *col_att, PolicyLabelItem *full_column,
     }
     RangeTblEntry *rte = (RangeTblEntry *)list_nth(list, relation_pos);
     if (rte && rte->relid > 0) {
-        if (rte->relid > 0) {
-            Relation tbl_rel = relation_open(rte->relid, AccessShareLock);
-            if (tbl_rel) {
-                /* schema */
-                if (tbl_rel->rd_rel) {
-                    full_column->m_schema = tbl_rel->rd_rel->relnamespace;
-                }
-                relation_close(tbl_rel, AccessShareLock);
-            }
+        Relation tbl_rel = relation_open(rte->relid, AccessShareLock);
+        if (tbl_rel->rd_rel) {
+            /* schema */
+            full_column->m_schema = tbl_rel->rd_rel->relnamespace;
         }
-        /* subquery  in from */
-        if (rte->rtekind == RTE_SUBQUERY) {
+        relation_close(tbl_rel, AccessShareLock);
+
+        if (rte->rtekind == RTE_REMOTE_DUMMY) {
+            return;
+        } else if (rte->rtekind == RTE_SUBQUERY) { 
+            /* subquery  in from */
             if (rte->subquery) {
                 audit_open_relation(rte->subquery->rtable, col_att, full_column, is_found);
             }
@@ -450,12 +452,15 @@ void handle_subquery(RangeTblEntry *rte, int commandType, policy_result *pol_res
     }
     ListCell *lc = NULL;
     foreach(lc, rte->subquery->rtable) {
-        RangeTblEntry *sub_rte = (RangeTblEntry *) lfirst(lc);
-        if (sub_rte == NULL)
+        RangeTblEntry *sub_rte = (RangeTblEntry *)lfirst(lc);
+        if (sub_rte == NULL) {
             break;
+        }
 
-        /* recursive call handle_subquery till find a table object */
-        if (sub_rte->rtekind == RTE_SUBQUERY && sub_rte->subquery) {
+        if (sub_rte->rtekind == RTE_REMOTE_DUMMY) {
+            continue;
+        } else if (sub_rte->rtekind == RTE_SUBQUERY && sub_rte->subquery) {
+            /* recursive call handle_subquery till find a table object */
             handle_subquery(sub_rte, commandType, pol_result, checked_tables, policy_ids,
                             security_policy_ids, &(++(*recursion_deep)));
         } else if (sub_rte->relname) {
@@ -465,12 +470,66 @@ void handle_subquery(RangeTblEntry *rte, int commandType, policy_result *pol_res
             if (checked_tables->insert(sub_rte->relname).second) {
                 CmdType cmd_type = get_rte_commandtype(rte);
                 cmd_type = (cmd_type == CMD_UNKNOWN) ? (CmdType)commandType : cmd_type;
-                if (!handle_table_entry(sub_rte, cmd_type, policy_ids,
-                                        security_policy_ids, pol_result))
+                if (!handle_table_entry(sub_rte, cmd_type, policy_ids, security_policy_ids, pol_result)) {
                     continue;
+                }
 
                 flush_policy_result(pol_result, cmd_type);
             }
         }
     }
+}
+
+void access_audit_policy_run(const List* rtable, CmdType cmd_type)
+{
+    if (rtable == NULL) {
+        return;
+    }
+    /* filt audit policys by application info */
+    policy_set policy_ids;
+    IPV6 ip;
+    get_remote_addr(&ip);
+    FilterData filter_item(get_session_app_name(), ip);
+    check_audit_policy_filter(&filter_item, &policy_ids);
+
+    ListCell *lc = NULL;
+    policy_set security_policy_ids;
+    _checked_tables checked_tables;
+    foreach (lc, rtable) {
+        /* table object */
+        RangeTblEntry *rte = (RangeTblEntry *)lfirst(lc);
+        policy_result pol_result;
+        if (rte == NULL || rte->relname == NULL || rte->rtekind == RTE_REMOTE_DUMMY) {
+            continue;
+        }
+
+        if (rte->rtekind == RTE_SUBQUERY && rte->subquery) { /* relation is subquery */
+            int recursion_deep = 0;
+            handle_subquery(rte, rte->subquery->commandType, &pol_result, &checked_tables, &policy_ids,
+                &security_policy_ids, &recursion_deep);
+        } else if (checked_tables.insert(rte->relname).second) { /* verify if table object already checked */
+            /* use query plan commandtype here but not get it from rte directly */
+            if (!handle_table_entry(rte, cmd_type, &policy_ids, &security_policy_ids, &pol_result)) {
+                continue;
+            }
+            flush_policy_result(&pol_result, cmd_type);
+        }
+    }
+
+    flush_access_logs(AUDIT_OK);
+}
+
+void opfusion_unified_audit_executor(const PlannedStmt *plannedstmt)
+{
+    /* verify parameter and audit policy */
+    if (!u_sess->attr.attr_security.Enable_Security_Policy || u_sess->proc_cxt.IsInnerMaintenanceTools ||
+        IsConnFromCoord() || !is_audit_policy_exist_load_policy_info()) {
+        return;
+    }
+
+    ereport(DEBUG1, (errmsg("opfusion_unified_audit_executor routine enter")));
+    if (!plannedstmt) {
+        return;
+    }
+    access_audit_policy_run(plannedstmt->rtable, plannedstmt->commandType);
 }

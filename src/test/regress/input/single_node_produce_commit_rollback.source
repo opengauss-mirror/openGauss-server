@@ -763,9 +763,10 @@ call test_rollback();
 select * from test_commit;
 drop table test_commit;
 
-create or replace procedure test_commit_inout(p inout int)
+create or replace procedure test_commit_inout()
 as
 declare
+p int;
 begin
 	p = 3;
 	commit;
@@ -775,9 +776,10 @@ end;
 
 call test_commit_inout();
 
-create or replace procedure test_rollback_inout(p inout int)
+create or replace procedure test_rollback_inout()
 as
 declare
+p int;
 begin
 	p = 3;
 	rollback;
@@ -787,9 +789,10 @@ end;
 
 call test_rollback_inout();
 
-create or replace procedure test_rollback_out(p out int)
+create or replace procedure test_rollback_out()
 as
 declare
+p int;
 begin
 	p = 3;
 	rollback;

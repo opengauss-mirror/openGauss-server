@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -64,6 +65,9 @@ void GetPlanNodePlainText(
             break;
         case T_RecursiveUnion:
             *pname = *sname = *pt_operation = "Recursive Union";
+            break;
+        case T_StartWithOp:
+            *pname = *sname = *pt_operation = "StartWith Operator";
             break;
         case T_BitmapAnd:
             *pname = *sname = "BitmapAnd";

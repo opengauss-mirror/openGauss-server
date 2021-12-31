@@ -84,7 +84,7 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
      * namespace, if the owner of the namespce has the same name as the namescpe
      */
     bool isAlter = false;
-
+    u_sess->plsql_cxt.sourceText = pstrdup(queryString);
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
@@ -123,10 +123,19 @@ void CreatePackageCommand(CreatePackageStmt* stmt, const char* queryString)
                 errcause("package name is null"),
                 erraction("rename package")));
     }
-    packageId = PackageSpecCreate(namespaceId, pkgname, pkgOwner, pkgspecsrc, stmt->replace);
+    packageId = PackageSpecCreate(namespaceId, pkgname, pkgOwner, pkgspecsrc, stmt->replace, stmt->pkgsecdef);
 
     /* Advance cmd counter to make the package visible */
-    CommandCounterIncrement();
+    if (OidIsValid(packageId)) {
+        CommandCounterIncrement();
+    } else {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_NAME),
+                errmsg("package spec has error"),
+                errdetail("empty package spec is not allowed"),
+                errcause("debug mode"),
+                erraction("check package spec")));   
+    }
 }
 
 
@@ -151,7 +160,7 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
      * namespace, if the owner of the namespce has the same name as the namescpe
      */
     bool isAlter = false;
-
+    u_sess->plsql_cxt.sourceText = pstrdup(queryString);
     /* Check we have creation rights in target namespace */
     aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
     if (aclresult != ACLCHECK_OK)
@@ -181,8 +190,18 @@ void CreatePackageBodyCommand(CreatePackageBodyStmt* stmt, const char* queryStri
     }
 
     /* Create the package */
-    PackageBodyCreate(namespaceId, pkgname, pkgOwner, pkgBodySrc , stmt->pkginit, stmt->replace);
+    Oid packageOid = InvalidOid;
+    packageOid = PackageBodyCreate(namespaceId, pkgname, pkgOwner, pkgBodySrc , stmt->pkginit, stmt->replace);
 
     /* Advance cmd counter to make the package visible */
-    CommandCounterIncrement();
+    if (OidIsValid(packageOid)) {
+        CommandCounterIncrement();
+    } else {
+        ereport(ERROR,
+            (errmodule(MOD_PLSQL), errcode(ERRCODE_INVALID_NAME),
+                errmsg("package body has error"),
+                errdetail("empty package body is not allowed"),
+                errcause("package body is null"),
+                erraction("check package body")));   
+    }
 }

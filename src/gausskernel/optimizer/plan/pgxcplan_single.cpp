@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -141,7 +142,7 @@ PlannedStmt* pgxc_planner(Query* query, int cursorOptions, ParamListInfo boundPa
     MemoryContext current_context = CurrentMemoryContext;
     ResourceOwner currentOwner = t_thrd.utils_cxt.CurrentResourceOwner;
     ResourceOwner tempOwner = ResourceOwnerCreate(t_thrd.utils_cxt.CurrentResourceOwner, "pgxc_planner",
-        u_sess->top_transaction_mem_cxt);
+        SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_OPTIMIZER));
     t_thrd.utils_cxt.CurrentResourceOwner = tempOwner;
 
     /* we need Coordinator for evaluation, invoke standard planner */

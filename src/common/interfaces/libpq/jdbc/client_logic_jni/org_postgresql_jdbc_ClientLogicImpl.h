@@ -67,11 +67,19 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runClien
 
 /*
  * Class:     org_postgresql_jdbc_ClientLogicImpl
+ * Method:    getRecordIDsImpl
+ * Signature: (JLjava/lang/String;I)[Ljava/lang/Object;
+ */
+JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_getRecordIDsImpl(JNIEnv *, jobject, jlong,
+    jstring, jint);
+
+/*
+ * Class:     org_postgresql_jdbc_ClientLogicImpl
  * Method:    runClientLogic4RecordImpl
- * Signature: (JLjava/lang/String;IILjava/lang/String;)[Ljava/lang/Object;
+ * Signature: (JLjava/lang/String;[I)[Ljava/lang/Object;
  */
 JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_runClientLogic4RecordImpl(JNIEnv *, jobject,
-    jlong, jstring, jint, jint, jstring);
+    jlong, jstring, jintArray);
 
 /*
  * Class:     org_postgresql_jdbc_ClientLogicImpl
@@ -96,6 +104,13 @@ JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceS
  */
 JNIEXPORT jobjectArray JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_replaceErrorMessageImpl(JNIEnv *, jobject,
     jlong, jstring);
+
+/*
+ * Class:     Java_org_postgresql_jdbc_ClientLogicImpl_reloadCacheIfNeededImpl
+ * Method:    reloadCache
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_org_postgresql_jdbc_ClientLogicImpl_reloadCacheIfNeededImpl (JNIEnv *, jobject, jlong);
 
 /*
  * Class:     org_postgresql_jdbc_ClientLogicImpl

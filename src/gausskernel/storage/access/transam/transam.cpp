@@ -400,6 +400,24 @@ bool TransactionIdDidCommit(TransactionId transactionId) /* true if given transa
 }
 
 /*
+ * For ustore, clog is truncated based on oldestXidInUndo. Therefore, we need to perform a quick check
+ * first. If the transaction is smaller than oldestXidInUndo, the transaction must be committed.
+ *
+ *      true iff given transaction committed
+ */
+bool UHeapTransactionIdDidCommit(TransactionId transactionId)
+{
+    if (transactionId == FrozenTransactionId) {
+        return true;
+    }
+    if (TransactionIdIsNormal(transactionId) &&
+        TransactionIdPrecedes(transactionId, pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo))) {
+        return true;
+    }
+    return TransactionIdDidCommit(transactionId);
+}
+
+/*
  * TransactionIdDidAbort
  *		True iff transaction associated with the identifier did abort.
  *
@@ -447,6 +465,27 @@ bool TransactionIdDidAbort(TransactionId transactionId) /* true if given transac
      * It's not aborted.
      */
     return false;
+}
+
+/*
+ * For ustore, clog is truncated based on oldestXidInUndo. Therefore, we need to perform a quick check
+ * first. If the transaction is smaller than oldestXidInUndo, the transaction must be committed.
+ *
+ *      true iff given transaction aborted
+ */
+bool UHeapTransactionIdDidAbort(TransactionId transactionId)
+{
+    if (transactionId == FrozenTransactionId) {
+        return false;
+    }
+    TransactionId oldestXidInUndo = pg_atomic_read_u64(&g_instance.proc_base->oldestXidInUndo);
+    if (TransactionIdIsNormal(transactionId) && TransactionIdPrecedes(transactionId, oldestXidInUndo)) {
+        /* The transaction must be committed or rollback finish, not abort. */
+        ereport(PANIC, (errmsg("The transaction cannot rollback, transactionId = %lu, oldestXidInUndo = %lu.",
+            transactionId, oldestXidInUndo)));
+        return false;
+    }
+    return TransactionIdDidAbort(transactionId);
 }
 
 /*

@@ -1351,17 +1351,26 @@ void encryptBlockOrCUData(const char* plainText, const size_t plainLength,
     unsigned char key[KEY_128BIT_LEN] = {0};
     const char* plain_key = NULL;
     unsigned int i, j;
+    errno_t ret = 0;
 
+#ifndef ENABLE_UT
     /* get dek plaintext by cmk_id and dek_cipher from TDE Key Manager */
     TDEKeyManager *tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
     tde_key_manager->init();
     plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
+#else
+    /* ugly hook for TDEKeyManager->get_key() function, gs_strdup should be mocked in ut */
+    plain_key = (const char*)gs_strdup("0123456789abcdef0123456789abcdef");
+#endif
     Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
+
     /* transform tde plaintext from hex string to int array */
     for (i = 0, j = 0; i < KEY_128BIT_LEN && j < strlen(plain_key); i++, j += 2) {
         key[i] = hex2int(plain_key[j]) << 4 | hex2int(plain_key[j + 1]);
     }
+#ifndef ENABLE_UT
     DELETE_EX2(tde_key_manager);
+#endif
 
     do {
         if (encrypt_partial_mode(plainText, plainLength, cipherText, cipherLength, key, iv, algo)) {
@@ -1369,6 +1378,9 @@ void encryptBlockOrCUData(const char* plainText, const size_t plainLength,
         }
         retryCnt--;
     } while (retryCnt > 0);
+
+    ret = memset_s(key, KEY_128BIT_LEN, 0, KEY_128BIT_LEN);
+    securec_check(ret, "\0", "\0");
 
     if (retryCnt == 0) {
         ereport(PANIC,
@@ -1396,17 +1408,26 @@ void decryptBlockOrCUData(const char* cipherText, const size_t cipherLength,
     unsigned char key[KEY_128BIT_LEN] = {0};
     const char* plain_key = NULL;
     unsigned int i, j;
+    errno_t ret = 0;
 
+#ifndef ENABLE_UT
     /* get dek plaintext by cmk_id and dek_cipher from TDE Key Manager */
     TDEKeyManager *tde_key_manager = New(CurrentMemoryContext) TDEKeyManager();
     tde_key_manager->init();
     plain_key = tde_key_manager->get_key(tdeInfo->cmk_id, tdeInfo->dek_cipher);
+#else
+    /* ugly hook for TDEKeyManager->get_key() function, gs_strdup should be mocked in ut */
+    plain_key = (const char*)gs_strdup("0123456789abcdef0123456789abcdef");
+#endif
     Assert(strlen(plain_key) == KEY_128BIT_LEN * 2);
+
     /* transform tde plaintext from hex string to int array */
     for (i = 0, j = 0; i < KEY_128BIT_LEN && j < strlen(plain_key); i++, j += 2) {
         key[i] = hex2int(plain_key[j]) << 4 | hex2int(plain_key[j + 1]);
     }
+#ifndef ENABLE_UT
     DELETE_EX2(tde_key_manager);
+#endif
 
     do {
         if (decrypt_partial_mode(cipherText, cipherLength, plainText, plainLength, key, iv, algo)) {
@@ -1414,6 +1435,9 @@ void decryptBlockOrCUData(const char* cipherText, const size_t cipherLength,
         }
         retryCnt--;
     } while (retryCnt > 0);
+
+    ret = memset_s(key, KEY_128BIT_LEN, 0, KEY_128BIT_LEN);
+    securec_check(ret, "\0", "\0");
 
     if (retryCnt == 0) {
         ereport(PANIC,

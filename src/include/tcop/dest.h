@@ -169,5 +169,9 @@ extern void NullCommand(CommandDest dest);
 extern void ReadyForQuery(CommandDest dest);
 extern void ReadyForQuery_noblock(CommandDest dest, int timeout);
 
+extern void init_sess_dest(DestReceiver* initdonothingDR,
+                           DestReceiver* initdebugtupDR,
+                           DestReceiver* initspi_printtupDR);
+
 #endif /* !FRONTEND_PARSER */
 #endif /* DEST_H */

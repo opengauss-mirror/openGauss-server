@@ -41,16 +41,26 @@
 #define HADR_IN_NORMAL "hadr_normal"
 #define HADR_IN_FAILOVER "hadr_promote"
 #define HADR_BARRIER_ID_HEAD "hadr"
+#define CSN_BARRIER_ID_HEAD "csn"
 #define HADR_KEY_CN_FILE "hadr_key_cn"
 #define HADR_DELETE_CN_FILE "hadr_delete_cn"
+#define HADR_SWITCHOVER_BARRIER_ID "hadr_switchover_000000000_0000000000000"
 #define BARRIER_LSN_FILE_LENGTH 17
+#define BARRIER_CSN_FILE_LENGTH 39
 #define MAX_BARRIER_ID_LENGTH 40
+#define BARRIER_ID_WITHOUT_TIMESTAMP_LEN 25
+#define BARRIER_ID_TIMESTAMP_LEN 13
 #define MAX_DEFAULT_LENGTH 255
 #define WAIT_ARCHIVE_TIMEOUT 6000
 #define MAX_BARRIER_SQL_LENGTH 60
 #define BARRIER_LSN_LENGTH 30
-
+#define MAX_BARRIER_PREFIX_LEHGTH 25
 #define XLOG_BARRIER_CREATE 0x00
+#define IS_CSN_BARRIER(id) (strncmp(id, CSN_BARRIER_ID_HEAD, strlen(CSN_BARRIER_ID_HEAD)) == 0)
+
+#define BARRIER_EQ(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) == 0)
+#define BARRIER_GT(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) > 0)
+#define BARRIER_LT(barrier1, barrier2) (strcmp((char *)barrier1, (char *)barrier2) < 0)
 
 extern void ProcessCreateBarrierPrepare(const char* id);
 extern void ProcessCreateBarrierEnd(const char* id);
@@ -61,5 +71,14 @@ extern void barrier_redo(XLogReaderState* record);
 extern void barrier_desc(StringInfo buf, XLogReaderState* record);
 extern void DisasterRecoveryRequestBarrier(const char* id, bool isSwitchoverBarrier = false);
 extern void ProcessBarrierQueryArchive(char* id);
+extern void ConnectETCD();
+
+extern void SendETCDLocalNewestBarrierInXlog();
+
+extern void UpdateRedoBarrierTargetFromETCD();
+#ifndef ENABLE_MULTIPLE_NODES
+extern void CreateHadrSwitchoverBarrier();
+#endif
+
 
 #endif

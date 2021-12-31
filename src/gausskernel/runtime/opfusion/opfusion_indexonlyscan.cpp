@@ -322,11 +322,11 @@ void IndexOnlyScanFusion::End(bool isCompleted)
     }
     if (m_index != NULL) {
         if (m_node->scan.isPartTbl) {
-            partitionClose(m_parentIndex, m_partIndex, AccessShareLock);
-            if (!ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+            partitionClose(m_parentIndex, m_partIndex, NoLock);
+            if (!PARTITION_ENABLE_CACHE_OPFUSION) {
                 releaseDummyRelation(&m_index);
             }
-            index_close(m_parentIndex, AccessShareLock);
+            index_close(m_parentIndex, NoLock);
         } else {
             index_close(m_index, AccessShareLock);
         }
@@ -334,11 +334,11 @@ void IndexOnlyScanFusion::End(bool isCompleted)
     }
     if (m_rel != NULL) {
         if (m_node->scan.isPartTbl) {
-            partitionClose(m_parentRel, m_partRel, AccessShareLock);
-            if (!ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+            partitionClose(m_parentRel, m_partRel, NoLock);
+            if (!PARTITION_ENABLE_CACHE_OPFUSION) {
                 releaseDummyRelation(&m_rel);
             }
-            heap_close(m_parentRel, AccessShareLock);
+            heap_close(m_parentRel, NoLock);
         } else {
             heap_close(m_rel, AccessShareLock);
         }

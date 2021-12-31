@@ -1294,6 +1294,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     }
 
     min_IO_cost = Min(min_IO_cost, max_IO_cost);
+
     /*
      * Now interpolate based on estimated index order correlation to get total
      * disk I/O cost for main table accesses.
@@ -5707,6 +5708,12 @@ void set_rel_width(PlannerInfo* root, RelOptInfo* rel)
                     ispartition = true;
                 }
 
+                if (rte->isContainSubPartition) {
+                    Assert(OidIsValid(rte->partitionOid));
+                    targetid = rte->subpartitionOid;
+                    ispartition = true;
+                }
+
                 item_width = get_attavgwidth(targetid, var->varattno, ispartition);
                 if (item_width > 0) {
                     rel->attr_widths[ndx] = item_width;
@@ -5769,6 +5776,11 @@ void set_rel_width(PlannerInfo* root, RelOptInfo* rel)
                     MOD_OPT,
                     "The partitionOid is invalid when setting the estimated output width of a base relation.");
                 partid = rte->partitionOid;
+            }
+
+            if (rte->isContainSubPartition) {
+                Assert(OidIsValid(rte->partitionOid));
+                partid = rte->subpartitionOid;
             }
 
             /* Real relation, so estimate true tuple width */

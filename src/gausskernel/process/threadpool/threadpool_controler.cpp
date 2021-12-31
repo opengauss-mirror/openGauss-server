@@ -69,6 +69,8 @@ ThreadPoolControler* g_threadPoolControler = NULL;
 #define INVALID_ATTR_ERROR(detail) \
     ereport(FATAL, (errcode(ERRCODE_OPERATE_INVALID_PARAM), errmsg("Invalid attribute for thread pool."), detail))
 
+static const long one_hundred_micro_sec = 100;
+
 ThreadPoolControler::ThreadPoolControler()
 {
     m_threadPoolContext = NULL;
@@ -590,6 +592,9 @@ ThreadPoolStat* ThreadPoolControler::GetThreadPoolStat(uint32* num)
 
 void ThreadPoolControler::CloseAllSessions()
 {
+    ereport(LOG, (errmodule(MOD_THREAD_POOL),
+                    errmsg("pmState:%d, start to close all sessions in threadpool.", pmState)));
+
     m_sessCtrl->MarkAllSessionClose();
     (void)SignalCancelAllBackEnd();
 
@@ -608,8 +613,11 @@ void ThreadPoolControler::CloseAllSessions()
         for (int i = 0; i < m_groupNum; i++) {
             allclose = (m_groups[i]->AllSessionClosed() && allclose);
         }
-        pg_usleep(100);
+        pg_usleep(one_hundred_micro_sec);
     }
+
+    ereport(LOG, (errmodule(MOD_THREAD_POOL),
+                    errmsg("pmState:%d, all threadpool sessions already closed.", pmState)));
 }
 
 void ThreadPoolControler::ShutDownThreads(bool forceWait)
@@ -617,6 +625,9 @@ void ThreadPoolControler::ShutDownThreads(bool forceWait)
     for (int i = 0; i < m_groupNum; i++) {
         m_groups[i]->ShutDownThreads();
     }
+
+    ereport(LOG, (errmodule(MOD_THREAD_POOL),
+                    errmsg("pmState:%d, shut down all threadpool threads.", pmState)));
 
     if (forceWait) {
         /* Check until all groups have shut down their workers. */
@@ -626,8 +637,11 @@ void ThreadPoolControler::ShutDownThreads(bool forceWait)
             for (int i = 0; i < m_groupNum; i++) {
                 allshut = (m_groups[i]->AllThreadShutDown() && allshut);
             }
-            pg_usleep(100);
+            pg_usleep(one_hundred_micro_sec);
         }
+
+        ereport(LOG, (errmodule(MOD_THREAD_POOL),
+                        errmsg("pmState:%d, all threadpool threads already shut down.", pmState)));
     }
 }
 
@@ -643,21 +657,32 @@ void ThreadPoolControler::ShutDownListeners(bool forceWait)
             for (int i = 0; i < m_groupNum; i++) {
                 allshut = (m_groups[i]->GetListener()->GetThreadId() == 0) && allshut;
             }
-            pg_usleep(100);
+            pg_usleep(one_hundred_micro_sec);
         }
     }
 }
 
-void ThreadPoolControler::ShutDownScheduler(bool forceWait)
+void ThreadPoolControler::ShutDownScheduler(bool forceWait, bool noAdjust)
 {
+    if (noAdjust) {
+        pg_memory_barrier();
+        m_scheduler->m_canAdjustPool = false;
+    }
+
     m_scheduler->ShutDown();
     if (forceWait) {
         bool allshut = false;
         while (!allshut) {
             allshut = m_scheduler->HasShutDown();
-            pg_usleep(100);
+            pg_usleep(one_hundred_micro_sec);
         }
     }
+}
+
+void ThreadPoolControler::EnableAdjustPool()
+{
+    pg_memory_barrier();
+    m_scheduler->m_canAdjustPool = true;
 }
 
 void ThreadPoolControler::AddWorkerIfNecessary()
@@ -668,6 +693,7 @@ void ThreadPoolControler::AddWorkerIfNecessary()
         m_scheduler->StartUp();
         m_scheduler->SetShutDown(false);
     }
+    EnableAdjustPool();
 }
 
 ThreadPoolGroup* ThreadPoolControler::FindThreadGroupWithLeastSession()

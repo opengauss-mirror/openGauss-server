@@ -692,10 +692,11 @@ bool checkDMLRelation(const Relation rel, const PlannedStmt *plannedstmt, bool i
 {
     bool result = false;
     if (rel->rd_rel->relkind != RELKIND_RELATION || rel->rd_rel->relhasrules || rel->rd_rel->relhastriggers ||
-        rel->rd_rel->relhasoids || rel->rd_rel->relhassubclass || RelationIsColStore(rel) ||
-        RelationIsTsStore(rel) || RelationInRedistribute(rel) || plannedstmt->hasReturning) {
+        rel->rd_rel->relhasoids || rel->rd_rel->relhassubclass || RelationIsColStore(rel) || RelationIsTsStore(rel) ||
+        RelationInRedistribute(rel) || plannedstmt->hasReturning || RelationIsSubPartitioned(rel)) {
         result = true;
     }
+
     if (isInsert) {
         return result;
     } else if (!isPartTbl && RELATION_IS_PARTITIONED(rel)) {
@@ -1214,7 +1215,7 @@ Relation InitPartitionIndexInFusion(Oid parentIndexOid, Oid partOid, Partition *
     *partIndex = partitionOpen(*parentIndex, partIndexOid, AccessShareLock);
 
     Relation index;
-    if (ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+    if (PARTITION_ENABLE_CACHE_OPFUSION) {
         if (!(*partIndex)->partrel) {
             (*partIndex)->partrel = partitionGetRelation(*parentIndex, *partIndex);
             /* in function partitionGetRelation, owner->nfakerelrefs plus one due to ResourceOwnerRememberFakerelRef,
@@ -1236,7 +1237,7 @@ void InitPartitionRelationInFusion(Oid partOid, Relation parentRel, Partition* p
     *partRel = partitionOpen(parentRel, partOid, AccessShareLock);
     (void)PartitionGetPartIndexList(*partRel);
 
-    if (ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+    if (PARTITION_ENABLE_CACHE_OPFUSION) {
         if (!(*partRel)->partrel) {
             (*partRel)->partrel = partitionGetRelation(parentRel, *partRel);
             /* in function partitionGetRelation, owner->nfakerelrefs plus one due to ResourceOwnerRememberFakerelRef,
@@ -1259,12 +1260,12 @@ void ExeceDoneInIndexFusionConstruct(bool isPartTbl, Relation* parentRel, Partit
         partitionClose(*parentRel, *part, AccessShareLock);
         *part = NULL;
         if (*index != NULL) {
-            if (!ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+            if (!PARTITION_ENABLE_CACHE_OPFUSION) {
                 releaseDummyRelation(index);
             }
             *index = NULL;
         }
-        if (!ENABLE_SQL_BETA_FEATURE(PARTITION_OPFUSION)) {
+        if (!PARTITION_ENABLE_CACHE_OPFUSION) {
             releaseDummyRelation(rel);
         }
         heap_close(*parentRel, AccessShareLock);

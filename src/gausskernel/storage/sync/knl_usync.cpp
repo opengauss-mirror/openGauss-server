@@ -383,9 +383,17 @@ void ProcessSyncRequests(void)
              * but only if we didn't fail already on this file.
              */
             if (!FILE_POSSIBLY_DELETED(errno) || failures > 0) {
-                if (check_unlink_rel_hashtbl(entry->tag.rnode)) {
+                if (check_unlink_rel_hashtbl(entry->tag.rnode, entry->tag.forknum)) {
                     ereport(DEBUG1,
                         (errmsg("could not fsync file \"%s\": %m, this relation has been remove", path)));
+                    break;
+                }
+                /*
+                 * Absorb incoming requests and check to see if a cancel arrived
+                 * for this relation fork.
+                 */
+                AbsorbFsyncRequests();
+                if (entry->canceled) {
                     break;
                 }
                 /* treat it as truncate */

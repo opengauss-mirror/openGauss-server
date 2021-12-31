@@ -98,7 +98,7 @@ select * from test order by mes1;
    2 | yyds180.883 | 181.883 | Sun Jan 01 00:00:00 2012 PST | 32768
 (2 rows)
 
-drop procedure copy_in_procedure;
+drop function copy_in_procedure;
 drop table test;
 drop table test1;
 create table copy_transform_explicit_cast (

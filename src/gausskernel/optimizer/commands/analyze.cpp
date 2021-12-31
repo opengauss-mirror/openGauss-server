@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -466,6 +467,25 @@ void analyze_concurrency_process(Oid relid, int16 attnum, MemoryContext oldconte
     }
 }
 
+BlockNumber GetSubPartitionNumberOfBlocks(Relation rel, Partition part, LOCKMODE lockmode)
+{
+    Relation partRel = partitionGetRelation(rel, part);
+    List *subPartList = NIL;
+    ListCell *partCell = NULL;
+    BlockNumber relpages = 0;
+
+    subPartList = relationGetPartitionList(partRel, lockmode);
+
+    foreach (partCell, subPartList) {
+        Partition subPart = (Partition)lfirst(partCell);
+        relpages += PartitionGetNumberOfBlocks(partRel, subPart);
+    }
+
+    releasePartitionList(partRel, &subPartList, NoLock);
+    releaseDummyRelation(&partRel);
+    return relpages;
+}
+
 /*
  * Description: Analyze one relation
  *
@@ -573,7 +593,12 @@ static void analyze_rel_internal(Relation onerel, VacuumStmt* vacstmt, BufferAcc
 
             foreach (partCell, partList) {
                 part = (Partition)lfirst(partCell);
-                relpages += PartitionGetNumberOfBlocks(onerel, part);
+
+                if (RelationIsSubPartitioned(onerel)) {
+                    relpages += GetSubPartitionNumberOfBlocks(onerel, part, lockmode);
+                } else {
+                    relpages += PartitionGetNumberOfBlocks(onerel, part);
+                }
             }
         } else {
             relpages = RelationGetNumberOfBlocks(onerel);
@@ -4384,6 +4409,24 @@ static int64 acquire_dfsstored_sample_rows(Relation onerel, int elevel, HeapTupl
     return numrows;
 }
 
+void PartitionGePartRelationList(Relation onerel, Relation partRel, List** partList)
+{
+    if (RelationIsSubPartitioned(onerel)) {
+        List *subPartList = relationGetPartitionList(partRel, NoLock);
+        ListCell *lc = NULL;
+        foreach (lc, subPartList) {
+            Partition subPart = (Partition)lfirst(lc);
+            Relation subPartRel = partitionGetRelation(partRel, subPart);
+            *partList = lappend(*partList, subPartRel);
+        }
+
+        releasePartitionList(partRel, &subPartList, NoLock);
+        releaseDummyRelation(&partRel);
+    } else {
+        *partList = lappend(*partList, partRel);
+    }
+}
+
 /*
  * @@GaussDB@@
  * Target		: data partition
@@ -4432,8 +4475,22 @@ static int64 acquirePartitionedSampleRows(Relation onerel, VacuumStmt* vacstmt, 
                 List* partbuckets = NIL;
 
                 Partition temp_part = (Partition)lfirst(partCell);
-                partbuckets = relationGetBucketRelList(onerel, temp_part);
-                partList = list_concat(partList, partbuckets);
+                if (RelationIsSubPartitioned(onerel)) {
+                    partRel = partitionGetRelation(onerel, temp_part);
+                    List *subPartList = relationGetPartitionList(partRel, NoLock);
+                    ListCell *lc = NULL;
+                    foreach (lc, subPartList) {
+                        Partition subPart = (Partition)lfirst(lc);
+                        partbuckets = relationGetBucketRelList(partRel, subPart);
+                        partList = list_concat(partList, partbuckets);
+                    }
+
+                    releasePartitionList(partRel, &subPartList, NoLock);
+                    releaseDummyRelation(&partRel);
+                } else {
+                    partbuckets = relationGetBucketRelList(onerel, temp_part);
+                    partList = list_concat(partList, partbuckets);
+                }
             }
         } else {
             /*
@@ -4447,7 +4504,7 @@ static int64 acquirePartitionedSampleRows(Relation onerel, VacuumStmt* vacstmt, 
 
             part = (Partition)lfirst(partCell);
             partRel = partitionGetRelation(onerel, part);
-            partList = lappend(partList, partRel);
+            PartitionGePartRelationList(onerel, partRel, &partList);
         }
     }
     /*
@@ -6670,13 +6727,26 @@ static BlockNumber GetOneRelNBlocks(
         Oid partOid = InvalidOid;
         Oid partIndexOid = InvalidOid;
         Partition indexPart = NULL;
+        Relation partRel = NULL;
 
         indexOid = RelationGetRelid(Irel);
 
         foreach (partCell, vacstmt->partList) {
             part = (Partition)lfirst(partCell);
             partOid = PartitionGetPartid(part);
-            partIndexOid = getPartitionIndexOid(indexOid, partOid);
+            if (RelationIsSubPartitioned(onerel)) {
+                partRel = partitionGetRelation(onerel, part);
+                List *subPartOidList = relationGetPartitionOidList(partRel);
+                ListCell *lc = NULL;
+                foreach (lc, subPartOidList) {
+                    Oid subPartOid = (Oid)lfirst_oid(lc);
+                    partIndexOid = getPartitionIndexOid(indexOid, subPartOid);
+                }
+                releasePartitionOidList(&subPartOidList);
+                releaseDummyRelation(&partRel);
+            } else {
+                partIndexOid = getPartitionIndexOid(indexOid, partOid);
+            }
             indexPart = partitionOpen(Irel, partIndexOid, AccessShareLock);
             nblocks += PartitionGetNumberOfBlocks(Irel, indexPart);
             partitionClose(Irel, indexPart, AccessShareLock);

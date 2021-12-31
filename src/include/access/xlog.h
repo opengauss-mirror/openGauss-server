@@ -393,7 +393,7 @@ extern void SetRecoveryPause(bool recoveryPause);
 extern TimestampTz GetLatestXTime(void);
 extern TimestampTz GetCurrentChunkReplayStartTime(void);
 extern char* XLogFileNameP(TimeLineID tli, XLogSegNo segno);
-extern pg_crc32 GetXlogRecordCrc(XLogRecPtr RecPtr, bool& crcvalid);
+extern pg_crc32 GetXlogRecordCrc(XLogRecPtr RecPtr, bool& crcvalid, XLogPageReadCB pagereadfunc, Size bufAlignSize);
 extern bool IsCheckPoint(XLogReaderState* record);
 extern bool IsRestartPointSafe(const XLogRecPtr checkPoint);
 extern bool HasTimelineUpdate(XLogReaderState* record, bool bOld);
@@ -411,6 +411,7 @@ extern int XLogSemas(void);
 extern void InitWalSemaphores(void);
 extern void StartupXLOG(void);
 extern void ShutdownXLOG(int code, Datum arg);
+extern void ShutdownShareStorageXLogCopy();
 extern void InitXLOGAccess(void);
 extern void StartupDummyStandby(void);
 extern void CreateCheckPoint(int flags);
@@ -423,6 +424,7 @@ extern XLogRecPtr GetRedoRecPtr(void);
 extern XLogRecPtr GetInsertRecPtr(void);
 extern XLogRecPtr GetFlushRecPtr(void);
 extern TimeLineID GetRecoveryTargetTLI(void);
+extern TimeLineID GetThisTargetTLI(void);
 extern void DummyStandbySetRecoveryTargetTLI(TimeLineID timeLineID);
 
 extern bool CheckFinishRedoSignal(void);
@@ -519,6 +521,22 @@ void SetSwitchHistoryFile(XLogRecPtr switchLsn, XLogRecPtr catchLsn, uint32 term
 void CheckMaxPageFlushLSN(XLogRecPtr reqLsn);
 bool CheckForForceFinishRedoTrigger(TermFileData *term_file);
 void close_readFile_if_open();
+void InitShareStorageCtlInfo(ShareStorageXLogCtl *ctlInfo, uint64 sysidentifier);
+void UpdateShareStorageCtlInfo(const ShareStorageXLogCtl *ctlInfo);
+void ReadShareStorageCtlInfo(ShareStorageXLogCtl* ctlInfo);
+pg_crc32c CalShareStorageCtlInfoCrc(const ShareStorageXLogCtl *ctlInfo);
+int ReadXlogFromShareStorage(XLogRecPtr startLsn, char *buf, int expectReadLen);
+int WriteXlogToShareStorage(XLogRecPtr startLsn, char *buf, int writeLen);
+void FsyncXlogToShareStorage();
+Size SimpleValidatePage(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, char* page);
+void ShareStorageInit();
+void FindLastRecordCheckInfoOnShareStorage(XLogRecPtr *lastRecordPtr, pg_crc32 *lastRecordCrc,
+    int *lastRecordLen);
+int SharedStorageXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, int reqLen, 
+    XLogRecPtr targetRecPtr, char *readBuf, TimeLineID *readTLI);
+void ShareStorageSetBuildErrorAndExit(HaRebuildReason reason, bool setRcvDone = true);
+void ReserveKeyForApp();
+void rename_recovery_conf_for_roach();
 
 extern XLogRecPtr XlogRemoveSegPrimary;
 
@@ -551,6 +569,7 @@ typedef struct delayddlrange {
 #define ROACH_BACKUP_PREFIX "gs_roach"
 #define ROACH_FULL_BAK_PREFIX "gs_roach_full"
 #define ROACH_INC_BAK_PREFIX "gs_roach_inc"
+#define CSN_BARRIER_PREFIX "csn"
 
 static const uint64 INVALID_READ_OFF = 0xFFFFFFFF;
 
@@ -591,5 +610,7 @@ void RecoveryDropSegsFromRemainSegsFile(struct HTAB* drop_segs_hbtl, char* buf, 
 void RecoveryShrinkExtentsFromRemainSegsFile(struct HTAB* shrink_extents_htbl, char* buf, uint32* used_len);
 void WriteRemainSegsFile(int fd, const char* buffer, uint32 used_len);
 void InitXlogStatuEntryTblSize();
+void CheckShareStorageWriteLock();
+XLogRecPtr GetFlushMainStandby();
 
 #endif /* XLOG_H */

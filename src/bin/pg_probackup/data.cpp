@@ -684,8 +684,6 @@ restore_data_file(parray *parent_chain, pgFile *dest_file, FILE *out,
     /* start with full backup */
         backup_seq = parray_num(parent_chain) - 1;
 
-    //  for (i = parray_num(parent_chain) - 1; i >= 0; i--)
-    //  for (i = 0; i < parray_num(parent_chain); i++)
     while (backup_seq >= 0 && (size_t)backup_seq < parray_num(parent_chain))
     {
         char     from_root[MAXPGPATH];
@@ -1928,9 +1926,11 @@ open_local_file_rw(const char *to_fullpath, char **out_buf, uint32 buf_size)
     FILE *out = NULL;
     /* open backup file for write  */
     out = fopen(to_fullpath, PG_BINARY_W);
-    if (out == NULL)
+    if (out == NULL) {
         elog(ERROR, "Cannot open backup file \"%s\": %s",
             to_fullpath, strerror(errno));
+        exit(1);
+    }
 
     /* update file permission */
     if (chmod(to_fullpath, FILE_PERMISSION) == -1)

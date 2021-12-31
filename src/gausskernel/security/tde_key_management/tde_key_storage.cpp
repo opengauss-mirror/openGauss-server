@@ -325,7 +325,7 @@ bool TDEBufferCache::insert_cache(RelFileNode tde_rnode, TdeInfo *tde_info)
     RelFileNode tde_key = tde_rnode;
 
     /* insert hash table */
-    LWLockAcquire(TDEKeyCacheLock, LW_SHARED);
+    LWLockAcquire(TDEKeyCacheLock, LW_EXCLUSIVE);
     TdeFileNodeEntry *entry = NULL;
     entry = reinterpret_cast<TdeFileNodeEntry*>(hash_search(tde_buffer_cache, (const void*)&tde_key, 
         HASH_FIND, &found));
@@ -339,22 +339,36 @@ bool TDEBufferCache::insert_cache(RelFileNode tde_rnode, TdeInfo *tde_info)
         }
         /* insert new cache key-value */
         entry->tde_info = (TdeInfo*)palloc0(sizeof(TdeInfo));
+        rc = strcpy_s(entry->tde_info->dek_cipher, DEK_CIPHER_LEN, tde_info->dek_cipher);
+        securec_check(rc, "\0", "\0");
+        rc = strcpy_s(entry->tde_info->cmk_id, CMK_ID_LEN, tde_info->cmk_id);
+        securec_check(rc, "\0", "\0");
+        entry->tde_info->algo = tde_info->algo;
+    } else {
+        /* update cache key-value */
+        if (strncmp(entry->tde_info->dek_cipher, tde_info->dek_cipher, DEK_CIPHER_LEN) != 0) {
+            rc = strcpy_s(entry->tde_info->dek_cipher, DEK_CIPHER_LEN, tde_info->dek_cipher);
+            securec_check(rc, "\0", "\0");
+        }
+        if (strncmp(entry->tde_info->cmk_id, tde_info->cmk_id, CMK_ID_LEN) != 0) {
+            rc = strcpy_s(entry->tde_info->cmk_id, CMK_ID_LEN, tde_info->cmk_id);
+            securec_check(rc, "\0", "\0");
+        }
+        if (entry->tde_info->algo != tde_info->algo) {
+            entry->tde_info->algo = tde_info->algo;
+        }
     }
-    /* update cache key-value */
-    rc = strcpy_s(entry->tde_info->dek_cipher, DEK_CIPHER_LEN, tde_info->dek_cipher);
-    securec_check(rc, "\0", "\0");
-    rc = strcpy_s(entry->tde_info->cmk_id, CMK_ID_LEN, tde_info->cmk_id);
-    securec_check(rc, "\0", "\0");
-    entry->tde_info->algo = tde_info->algo;
     MemoryContextSwitchTo(old);
     LWLockRelease(TDEKeyCacheLock);
     return true;
 }
 
-TdeInfo* TDEBufferCache::search_cache(RelFileNode tde_rnode)
+void TDEBufferCache::search_cache(RelFileNode tde_rnode, TdeInfo *tde_info)
 {
     bool found = false;
-
+    if (tde_rnode.bucketNode != InvalidBktId) {
+        tde_rnode.bucketNode = SegmentBktId;
+    }
     MemoryContext old = MemoryContextSwitchTo(tde_buffer_mem);
     LWLockAcquire(TDEKeyCacheLock, LW_SHARED);
     TdeFileNodeEntry* entry = NULL;
@@ -363,10 +377,13 @@ TdeInfo* TDEBufferCache::search_cache(RelFileNode tde_rnode)
     if (!found) {
         MemoryContextSwitchTo(old);
         LWLockRelease(TDEKeyCacheLock);
-        return NULL;
+        return;
     }
+
+    errno_t rc = memcpy_s(tde_info, sizeof(TdeInfo), entry->tde_info, sizeof(TdeInfo));
+    securec_check(rc, "\0", "\0");
     MemoryContextSwitchTo(old);
     LWLockRelease(TDEKeyCacheLock);
-    return entry->tde_info;
+    return;
 }
 }

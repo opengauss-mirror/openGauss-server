@@ -35,6 +35,12 @@ extern const uint32 EXTRA_SLOT_VERSION_NUM;
  */
 typedef enum ReplicationSlotPersistency { RS_PERSISTENT, RS_EPHEMERAL, RS_BACKUP } ReplicationSlotPersistency;
 
+typedef enum ArchiveMediaType {
+    ARCHIVE_NONE,
+    ARCHIVE_OBS,
+    ARCHIVE_NAS
+} ArchiveMediaType;
+
 
 /*
  * On-Disk data of a replication slot, preserved across restarts.
@@ -93,15 +99,20 @@ typedef struct ReplicationSlotOnDisk {
     ReplicationSlotPersistentData slotdata;
 } ReplicationSlotOnDisk;
 
-typedef struct ObsArchiveConfig {
+typedef struct ArchiveConnConfig {
     char *obs_address;
     char *obs_bucket;
     char *obs_ak;
     char *obs_sk;
-    char *obs_prefix;
+} ArchiveConnConfig;
+
+typedef struct ArchiveConfig {
+    ArchiveMediaType media_type;
+    ArchiveConnConfig *conn_config;
+    char *archive_prefix;
     bool is_recovery;
     bool vote_replicate_first;
-} ObsArchiveConfig;
+} ArchiveConfig;
 
 /*
  * Shared memory state of a single replication slot.
@@ -152,7 +163,7 @@ typedef struct ReplicationSlot {
     XLogRecPtr candidate_xmin_lsn;
     XLogRecPtr candidate_restart_valid;
     XLogRecPtr candidate_restart_lsn;
-    ObsArchiveConfig* archive_obs;
+    ArchiveConfig* archive_config;
     bool is_recovery;
     char* extra_content;
 } ReplicationSlot;
@@ -162,7 +173,7 @@ typedef struct ArchiveSlotConfig {
     bool in_use;
     int slot_tline;
     slock_t mutex;
-    ObsArchiveConfig archive_obs;
+    ArchiveConfig archive_config;
 }ArchiveSlotConfig;
 
 
@@ -202,6 +213,7 @@ typedef struct ReplicationSlotState {
     XLogRecPtr min_required;
     XLogRecPtr max_required;
     XLogRecPtr quorum_min_required;
+    XLogRecPtr min_tools_required;
     bool exist_in_use;
 } ReplicationSlotState;
 /*
@@ -225,6 +237,7 @@ typedef struct ArchiveTaskStatus {
     volatile unsigned int pitr_task_status;
     /* for standby */
     ArchiveXlogMessage archive_task;
+    XLogRecPtr archived_lsn;
     slock_t mutex;
     int sync_walsender_term;
     char slotname[NAMEDATALEN];
@@ -285,13 +298,13 @@ extern void log_slot_drop(const char* name);
 extern void LogCheckSlot();
 extern Size GetAllLogicalSlot(LogicalPersistentData*& LogicalSlot);
 extern char* get_my_slot_name();
-extern ObsArchiveConfig* formObsConfigFromStr(char *content, bool encrypted);
-extern char *formObsConfigStringFromStruct(ObsArchiveConfig *obs_config);
+extern ArchiveConfig* formArchiveConfigFromStr(char *content, bool encrypted);
+extern char *formArchiveConfigStringFromStruct(ArchiveConfig *obs_config);
 extern bool is_archive_slot(ReplicationSlotPersistentData data);
 extern void log_slot_create(const ReplicationSlotPersistentData *slotInfo, char* extra_content = NULL);
-extern void advanceObsSlot(XLogRecPtr restart_pos);
+extern void AdvanceArchiveSlot(XLogRecPtr restart_pos);
 extern void redo_slot_reset_for_backup(const ReplicationSlotPersistentData *xlrec);
-extern void markObsSlotOperate();
+extern void MarkArchiveSlotOperate();
 extern void init_instance_slot();
 extern void init_instance_slot_thread();
 extern void add_archive_slot_to_instance(ReplicationSlot *slot);
@@ -299,12 +312,12 @@ extern void remove_archive_slot_from_instance_list(const char *slot_name);
 extern ArchiveSlotConfig* find_archive_slot_from_instance_list(const char* name);
 extern void release_archive_slot(ArchiveSlotConfig** archive_conf);
 extern ArchiveSlotConfig* copy_archive_slot(ArchiveSlotConfig* archive_conf_origin);
-extern ArchiveSlotConfig *getObsReplicationSlotWithName(const char *slot_name);
-extern ArchiveSlotConfig *getObsRecoverySlotWithName(const char *slot_name);
-extern ArchiveSlotConfig* getObsReplicationSlot();
-extern ArchiveSlotConfig* getObsRecoverySlot();
-extern List *get_all_archive_obs_slots_name();
-extern List *get_all_recovery_obs_slots_name();
+extern ArchiveSlotConfig *getArchiveReplicationSlotWithName(const char *slot_name);
+extern ArchiveSlotConfig *getArchiveRecoverySlotWithName(const char *slot_name);
+extern ArchiveSlotConfig* getArchiveReplicationSlot();
+extern ArchiveSlotConfig* GetArchiveRecoverySlot();
+extern List *GetAllArchiveSlotsName();
+extern List *GetAllRecoverySlotsName();
 extern ArchiveTaskStatus* find_archive_task_status(const char* name);
 extern ArchiveTaskStatus* find_archive_task_status(int *idx);
 extern ArchiveTaskStatus* walreceiver_find_archive_task_status(unsigned int expected_pitr_task_status);

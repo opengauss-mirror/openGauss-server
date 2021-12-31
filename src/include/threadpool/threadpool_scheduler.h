@@ -48,6 +48,8 @@ public:
     }
     MemoryContext m_gpcContext;
     bool m_getSIGHUP;
+    volatile bool m_canAdjustPool;
+
 private:
     void AdjustWorkerPool(int idx);
     void AdjustStreamPool(int idx);

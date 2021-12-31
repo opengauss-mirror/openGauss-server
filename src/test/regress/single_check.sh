@@ -195,6 +195,8 @@ function real_hacheck()
             sh ./run_ha_multi_cascade.sh ;;
         hacheck_single)
             sh ./run_ha_single.sh 1 ${part} ;;
+        hacheck_decode)
+            sh ./run_ha_decode_single.sh ;;
         hacheck_multi_single)
             sh ./run_ha_multi_single.sh 1 ${part}
             sh ./run_ha_multi_cascade.sh ;;
@@ -359,7 +361,7 @@ case $DO_CMD in
     --wlmcheck_single|wlmcheck_single)
         args_val="-d 6 -c 3 -p $p -r ${runtest}"
         real_wmlcheck parallel_schedule${part}.wlm make_wlmcheck_postgresql.conf "${args_val}" ;;
-    --hacheck_single_all|hacheck_single_all|--hacheck_single|hacheck_single|--hacheck_multi_single|hacheck_multi_single|--hacheck_multi_single_mot|hacheck_multi_single_mot)
+    --hacheck_single_all|hacheck_single_all|--hacheck_single|hacheck_single|--hacheck_multi_single|hacheck_multi_single|--hacheck_multi_single_mot|hacheck_multi_single_mot|--hacheck_decode|hacheck_decode)
         args_val=$(echo $DO_CMD | sed 's\--\\g')
         real_hacheck "${args_val}";;
     --fastcheck_ledger_single|fastcheck_ledger_single)

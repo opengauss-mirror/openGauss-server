@@ -21,6 +21,7 @@
 #include "storage/lock/lock.h"
 #include "utils/relcache.h"
 #include "utils/snapshot.h"
+#include "utils/oidrbtree.h"
 #include "vecexecutor/vectorbatch.h"
 #include "access/ustore/knl_utuple.h"
 
@@ -182,12 +183,12 @@ HeapTuple systable_getnext_back(SysScanDesc sysscan);
  * global partition index access method support routines (in genam.c)
  */
 typedef struct GPIScanDescData {
-    HTAB* fakeRelationTable;     /* fake partition relation and partition hash table */
-    Bitmapset* invisiblePartMap; /* cache invisible partition oid in GPI */
-    Relation parentRelation;     /* parent relation of partition */
-    Relation fakePartRelation;   /* fake-relation using partition */
-    Partition partition;         /* partition use to fake partition rel */
-    Oid currPartOid;             /* current partition oid in GPI */
+    HTAB* fakeRelationTable;       /* fake partition relation and partition hash table */
+    OidRBTree* invisiblePartTree;  /* cache invisible partition oid in GPI */
+    Relation parentRelation;       /* parent relation of partition */
+    Relation fakePartRelation;     /* fake-relation using partition */
+    Partition partition;           /* partition use to fake partition rel */
+    Oid currPartOid;               /* current partition oid in GPI */
 } GPIScanDescData;
 
 typedef GPIScanDescData* GPIScanDesc;

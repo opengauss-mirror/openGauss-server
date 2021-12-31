@@ -768,7 +768,7 @@ bool JsonbDeepContains(JsonbIterator **val, JsonbIterator **mContained)
         Assert(rcont == WJB_BEGIN_OBJECT || rcont == WJB_BEGIN_ARRAY);
         return false;
     } else if (rcont == WJB_BEGIN_OBJECT) {
-        JsonbValue *lhsVal;     /* lhsVal is from pair in lhs object */
+        JsonbValue *lhsVal = NULL;     /* lhsVal is from pair in lhs object */
 
         Assert(vcontained.type == jbvObject);
 
@@ -1035,12 +1035,12 @@ void JsonbHashScalarValue(const JsonbValue * scalarVal, uint32 * hash)
             return;
         case jbvString:
             tmp = hash_any((unsigned char *) scalarVal->string.val, scalarVal->string.len);
-            *hash ^= tmp;
+            *hash ^= (uint32)tmp;
             return;
         case jbvNumeric:
             /* Must be unaffected by trailing zeroes */
             tmp = DatumGetInt32(DirectFunctionCall1(hash_numeric, NumericGetDatum(scalarVal->numeric)));
-            *hash ^= tmp;
+            *hash ^= (uint32)tmp;
             return;
         case jbvBool:
             *hash ^= scalarVal->boolean? 0x02:0x04;
@@ -1230,7 +1230,7 @@ static void putJsonbValueConversion(convertState *cstate, JsonbValue *val, uint3
         cstate->contPtr->i = 0;
 
         if (val->type == jbvArray) {
-            *cstate->contPtr->header = val->array.nElems | JB_FARRAY;
+            *cstate->contPtr->header = (uint32)val->array.nElems | JB_FARRAY;
             cstate->ptr += sizeof(JEntry) * val->array.nElems;
 
             if (val->array.rawScalar) {
@@ -1239,7 +1239,7 @@ static void putJsonbValueConversion(convertState *cstate, JsonbValue *val, uint3
                 *cstate->contPtr->header |= JB_FSCALAR;
             }
         } else {
-            *cstate->contPtr->header = val->object.nPairs | JB_FOBJECT;
+            *cstate->contPtr->header = (uint32)val->object.nPairs | JB_FOBJECT;
             cstate->ptr += sizeof(JEntry) * val->object.nPairs * 2;
         }
     } else if (flags & WJB_ELEM) {
@@ -1331,10 +1331,10 @@ static void putScalarConversion(convertState *cstate, JsonbValue *scalarVal, uin
             cstate->ptr += scalarVal->string.len;
 
             if (i == 0) {
-                cstate->contPtr->meta[0].header |= scalarVal->string.len;
+                cstate->contPtr->meta[0].header |= (uint32)scalarVal->string.len;
             } else {
                 cstate->contPtr->meta[i].header |=
-                    (cstate->contPtr->meta[i - 1].header & JENTRY_POSMASK) + scalarVal->string.len;
+                    (uint32)((cstate->contPtr->meta[i - 1].header & JENTRY_POSMASK) + scalarVal->string.len);
             }
             break;
         case jbvNumeric:
@@ -1347,10 +1347,10 @@ static void putScalarConversion(convertState *cstate, JsonbValue *scalarVal, uin
 
             cstate->contPtr->meta[i].header |= JENTRY_ISNUMERIC;
             if (i == 0) {
-                cstate->contPtr->meta[0].header |= padlen + numlen;
+                cstate->contPtr->meta[0].header |= (uint32)(padlen + numlen);
             } else {
                 cstate->contPtr->meta[i].header |=
-                    (cstate->contPtr->meta[i - 1].header & JENTRY_POSMASK) + padlen + numlen;
+                   (uint32)((cstate->contPtr->meta[i - 1].header & JENTRY_POSMASK) + padlen + numlen);
             }
             break;
         case jbvBool:

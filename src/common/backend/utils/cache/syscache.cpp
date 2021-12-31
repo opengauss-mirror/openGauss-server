@@ -6,6 +6,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -33,6 +34,8 @@
 #include "catalog/gs_column_keys.h"
 #include "catalog/gs_encrypted_columns.h"
 #include "catalog/gs_encrypted_proc.h"
+#include "catalog/gs_job_argument.h"
+#include "catalog/gs_job_attribute.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
 #include "catalog/pg_auth_members.h"
@@ -385,6 +388,21 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         128},
+    {GsJobArgumentRelationId, /* JOBARGUMENTNAMEID */
+        GsJobArgumentNameIndexId,
+        2,
+        {Anum_gs_job_argument_job_name, Anum_gs_job_argument_argument_name, 0, 0},
+        128},
+    {GsJobArgumentRelationId, /* JOBARGUMENTNAMEID */
+        GsJobArgumentPositionIndexId,
+        2,
+        {Anum_gs_job_argument_job_name, Anum_gs_job_argument_argument_position, 0, 0},
+        128},
+    {GsJobAttributeRelationId, /* JOBATTRIBUTENAMEID */
+        GsJobAttributeNameIndexId,
+        2,
+        {Anum_gs_job_attribute_job_name, Anum_gs_job_attribute_attribute_name, 0, 0},
+        128},
     {IndexRelationId, /* INDEXRELID */
         IndexRelidIndexId,
         1,
@@ -546,11 +564,24 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         1,
         {ObjectIdAttributeNumber, 0, 0, 0},
         256},
+#ifndef ENABLE_MULTIPLE_NODES
     {ProcedureRelationId, /* PROCNAMEARGSNSP */
-        ProcedureNameArgsNspIndexId,
+        ProcedureNameArgsNspNewIndexId,
         3,
         {Anum_pg_proc_proname, Anum_pg_proc_proargtypes, Anum_pg_proc_pronamespace, 0},
         2048},
+    {ProcedureRelationId, /* PROCALLARGS */
+        ProcedureNameAllArgsNspIndexId,
+        4,
+        {Anum_pg_proc_proname, Anum_pg_proc_allargtypes, Anum_pg_proc_pronamespace, Anum_pg_proc_packageid},
+        2048},
+#else
+    {ProcedureRelationId, /* PROCNAMEARGSNSP */
+        ProcedureNameArgsNspIndexId,
+        3,   
+        {Anum_pg_proc_proname, Anum_pg_proc_proargtypes, Anum_pg_proc_pronamespace, 0},
+        2048},
+#endif
     {ProcedureRelationId, /* PROCOID */
         ProcedureOidIndexId,
         1,

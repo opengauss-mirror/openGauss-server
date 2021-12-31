@@ -131,8 +131,9 @@ int ThreadPoolWorker::StartUp()
     }
     Backend* bn = CreateBackend();
     m_tid = initialize_worker_thread(THREADPOOL_WORKER, &port, (void*)this);
+    t_thrd.proc_cxt.MyPMChildSlot = 0;
     if (m_tid == InvalidTid) {
-        ReleasePostmasterChildSlot(t_thrd.proc_cxt.MyPMChildSlot);
+        ReleasePostmasterChildSlot(bn->child_slot);
         bn->pid = 0;
         return STATUS_ERROR;
     }
@@ -170,6 +171,11 @@ void ThreadPoolWorker::WaitMission()
     bool isRawSession = false;
 
     Assert(t_thrd.int_cxt.InterruptHoldoffCount == 0);
+    if (unlikely(t_thrd.int_cxt.InterruptHoldoffCount > 0)) {
+        ereport(PANIC,
+                (errmodule(MOD_THREAD_POOL),
+                 errmsg("InterruptHoldoffCount should be zero when get next session.")));
+    }
     /*
      * prevent any signal execep siguit.
      * reset any pending signal and timer.
@@ -222,7 +228,7 @@ bool ThreadPoolWorker::WakeUpToWork(knl_session_context* session)
 {
     bool succ = true;
     pthread_mutex_lock(m_mutex);
-    if (likely(m_threadStatus != THREAD_EXIT)) {
+    if (likely(m_threadStatus != THREAD_EXIT && m_threadStatus != THREAD_PENDING)) {
         m_currentSession = session;
         pthread_cond_signal(m_cond);
     } else {
@@ -240,6 +246,21 @@ void ThreadPoolWorker::WakeUpToUpdate(ThreadStatus status)
         pthread_cond_signal(m_cond);
     }
     pthread_mutex_unlock(m_mutex);
+}
+
+bool ThreadPoolWorker::WakeUpToPendingIfFree()
+{
+    bool ans = false;
+    pthread_mutex_lock(m_mutex);
+    if (m_threadStatus != THREAD_EXIT && m_threadStatus != THREAD_PENDING && m_currentSession == NULL) {
+        m_threadStatus = THREAD_PENDING;
+        pthread_cond_signal(m_cond);
+        ans = true;
+    } else {
+        ans = false;
+    }
+    pthread_mutex_unlock(m_mutex);
+    return ans;
 }
 
 /*
@@ -354,6 +375,14 @@ void ThreadPoolWorker::WaitNextSession()
         /* Wait if the thread was turned into pending mode. */
         if (unlikely(m_threadStatus == THREAD_PENDING)) {
             Pending();
+            /* pending thread must don't have session on it */
+            if (m_currentSession != NULL) {
+                u_sess = m_currentSession;
+                ereport(FATAL,
+                        (errmodule(MOD_THREAD_POOL),
+                         errmsg("pending thread should not have session %lu on it",
+                                 m_currentSession->session_id)));
+            }
         } else if (unlikely(m_threadStatus == THREAD_EXIT)) {
             ShutDownIfNecessary();
         } else if (m_currentSession != NULL) {
@@ -381,8 +410,8 @@ void ThreadPoolWorker::WaitNextSession()
             u_sess = t_thrd.fake_session;
             ereport(DEBUG2,
                     (errmodule(MOD_THREAD_POOL),
-                     errmsg("TryFeedWorker remove a session:%lu from m_readySessionList into worker",
-                            m_currentSession->session_id)));
+                     errmsg("TryFeedWorker remove a session:%lu from m_readySessionList into worker, status %d",
+                            m_currentSession->session_id, m_threadStatus)));
         }
     }
 }
@@ -418,21 +447,14 @@ void ThreadPoolWorker::ShutDownIfNecessary()
     /* there is time window which the cancle signal has arrived but ignored by prevent signal called before,
      * so we rebuild the signal status here in case that happens. */
     if (unlikely(m_currentSession != NULL && m_currentSession->status == KNL_SESS_CLOSE)) {
-        ereport(LOG, (errmodule(MOD_THREAD_POOL),
-                      errmsg("Cancle signal has arrived but ignored by prevent signal called before, rebuild it.")));
         t_thrd.int_cxt.ClientConnectionLost = true;
+        ereport(ERROR, (errmodule(MOD_THREAD_POOL),
+                        errmsg("Interrupt signal has been received, but ignored by preventSignal, rebuild it.")));
     }
 }
 
 void ThreadPoolWorker::CleanThread()
 {
-    if (m_currentSession != NULL && t_thrd.libpq_cxt.PqSendPointer > 0) {
-        int res = pq_flush();
-        if (res != 0) {
-            ereport(WARNING, (errmsg("[cleanup thread] failed to flush the remaining content. detail: %d", res)));
-        }
-    }
-
     /*
      * In thread pool mode, ensure that packet transmission must be completed before thread switchover.
      * Otherwise, packet format disorder may occurs.
@@ -857,6 +879,9 @@ static void ResetSignalHandle()
     (void)gspqsignal(SIGALRM, handle_sig_alarm);
     (void)gspqsignal(SIGQUIT, quickdie); /* hard crash time */
     (void)gspqsignal(SIGTERM, die);      /* cancel current query and exit */
+    gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
+    /* not necessary, unblock for sure */
+    gs_signal_unblock_sigusr2();
 }
 
 static void SessionSetBackendOptions()

@@ -51,6 +51,7 @@
 #include "hotpatch/hotpatch_client.h"
 #include "hotpatch/hotpatch.h"
 #include "pg_rewind.h"
+#include "fetch.h"
 #include "common/fe_memutils.h"
 #include "logging.h"
 
@@ -108,7 +109,8 @@ typedef enum {
     ADD_MEMBER_COMMAND,
     REMOVE_MEMBER_COMMAND,
     CHANGE_ROLE_COMMAND,
-    MINORITY_START_COMMAND
+    MINORITY_START_COMMAND,
+    COPY_COMMAND
 } CtlCommand;
 
 typedef enum {
@@ -136,13 +138,14 @@ typedef enum {
 #define MAX_DISPLAY_STRING_LEN 1024
 #define PG_CTL_LOCKFILE_SIZE 1024
 #define FORMATTED_TS_LEN 128
+static const int MAX_STOP_BARRIER_LEN = MAX_BARRIER_ID_LENGTH + 3;
 static bool do_wait = false;
 static bool wait_set = false;
 static int wait_seconds = DEFAULT_WAIT;
 
 static bool silent_mode = false;
 static ShutdownMode shutdown_mode = FAST_MODE;
-static BuildMode build_mode = AUTO_BUILD; /* default */
+BuildMode build_mode = AUTO_BUILD; /* default */
 static char* stop_mode = "fast";
 static DemoteMode switch_mode = FastDemote; /* default */
 static int sig = SIGTERM;                   /* default */
@@ -151,6 +154,7 @@ char* pg_data = NULL;
 static char* pg_config = NULL;
 static char* pgdata_opt = NULL;
 static char* post_opts = NULL;
+static char* xlog_overwrite_opt = NULL;
 const char* progname = "gs_ctl";
 static char* log_file = NULL;
 static char* key_cn = NULL;
@@ -162,7 +166,8 @@ static char* register_servicename = "gaussdb";
 static char g_hotpatch_action[g_max_length_act] = {0};
 static char g_hotpatch_name[g_max_length_path] = {0};
 static bool clear_backup_dir = false;
-
+static char barrier_id[MAX_STOP_BARRIER_LEN] = {0};
+static char* stop_barrier = NULL;
 static char* argv0 = NULL;
 static bool allow_core_files = false;
 static time_t start_time;
@@ -208,10 +213,12 @@ static char new_node_ip[IP_LEN] = {0};
 static unsigned int new_node_id = 0;
 static bool g_dcfEnabled = false;
 bool no_need_fsync = false;
+bool need_copy_upgrade_file = false;
 pid_t process_id = 0;
 
 const int g_length_stop_char = 2;
 const int g_length_suffix = 3;
+const static int INC_BUILD_RETRY_TIMES = 3;
 
 bool g_is_obsmode = false;
 
@@ -319,11 +326,12 @@ static PGconn* get_connectionex(void);
 static ServerMode get_runmode(void);
 static void freefile(char** lines);
 static char* get_localrole_string(ServerMode mode);
-static void do_actual_build(uint32 term = 0);
-static void do_incremental_build(uint32 term = 0);
-static void do_incremental_build_xlog();
+static bool do_actual_build(uint32 term = 0);
+static bool do_incremental_build(uint32 term = 0);
+static bool do_incremental_build_xlog();
 static void do_build(uint32 term = 0);
 static void do_restore(void);
+static void do_overwrite(void);
 static void do_full_restore(void);
 static void kill_proton_force(void);
 static void SigAlarmHandler(int arg);
@@ -335,6 +343,7 @@ static char* get_string_by_sync_mode(bool syncmode);
 static void free_ctl();
 extern int GetLengthAndCheckReplConn(const char* ConnInfoList);
 extern BuildErrorCode gs_increment_build(const char* pgdata, const char* connstr, char* sysidentifier, uint32 timeline, uint32 term);
+const char *BuildModeToString(BuildMode mode);
 
 void check_input_for_security(char* input_env_value)
 {
@@ -723,6 +732,8 @@ static ServerMode get_runmode(void)
         return STANDBY_MODE;
     if (!strncmp(run_mode, "Cascade Standby", MAXRUNMODE))
         return CASCADE_STANDBY_MODE;
+    if (!strncmp(run_mode, "Main Standby", MAXRUNMODE))
+        return STANDBY_MODE;
     if (!strncmp(run_mode, "Pending", MAXRUNMODE))
         return PENDING_MODE;
     if (!strncmp(run_mode, "Unknown", MAXRUNMODE))
@@ -840,13 +851,14 @@ static pgpid_t start_postmaster(void)
             ret = snprintf_s(cmd,
                 MAXPGPATH,
                 MAXPGPATH - 1,
-                "exec \"%s\" -u %u %s %s %s %s < \"%s\" >> \"%s\" 2>&1",
+                "exec \"%s\" -u %u %s %s %s %s %s < \"%s\" >> \"%s\" 2>&1",
                 exec_path,
                 (uint32)undocumented_version,
                 pgxcCommand,
                 pgdata_opt,
                 post_opts,
                 pgha_opt ? pgha_opt : "",
+                stop_barrier ? stop_barrier : "",
                 DEVNULL,
                 log_file);
             securec_check_ss_c(ret, "\0", "\0");
@@ -854,12 +866,13 @@ static pgpid_t start_postmaster(void)
             ret = snprintf_s(cmd,
                 MAXPGPATH,
                 MAXPGPATH - 1,
-                "exec \"%s\" %s %s %s %s < \"%s\" >> \"%s\" 2>&1",
+                "exec \"%s\" %s %s %s %s %s < \"%s\" >> \"%s\" 2>&1",
                 exec_path,
                 pgxcCommand,
                 pgdata_opt,
                 post_opts,
                 pgha_opt ? pgha_opt : "",
+                stop_barrier ? stop_barrier : "",
                 DEVNULL,
                 log_file);
             securec_check_ss_c(ret, "\0", "\0");
@@ -884,25 +897,27 @@ static pgpid_t start_postmaster(void)
             ret = snprintf_s(cmd,
                 MAXPGPATH,
                 MAXPGPATH - 1,
-                "exec \"%s\" -u %u %s %s %s %s < \"%s\" 2>&1",
+                "exec \"%s\" -u %u %s %s %s %s %s < \"%s\" 2>&1",
                 exec_path,
                 (uint32)undocumented_version,
                 pgxcCommand,
                 pgdata_opt,
                 post_opts,
                 pgha_opt ? pgha_opt : "",
+                stop_barrier ? stop_barrier : "",
                 DEVNULL);
             securec_check_ss_c(ret, "\0", "\0");
         } else {
             ret = snprintf_s(cmd,
                 MAXPGPATH,
                 MAXPGPATH - 1,
-                "exec \"%s\" %s %s %s %s < \"%s\" 2>&1",
+                "exec \"%s\" %s %s %s %s %s < \"%s\" 2>&1",
                 exec_path,
                 pgxcCommand,
                 pgdata_opt,
                 post_opts,
                 pgha_opt ? pgha_opt : "",
+                stop_barrier ? stop_barrier : "",
                 DEVNULL);
             securec_check_ss_c(ret, "\0", "\0");
         }
@@ -3515,7 +3530,7 @@ static void do_help(void)
     printf(_("  %s restart [-w] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"
              "                 [-o \"OPTIONS\"]\n"),
         progname);
-    printf(_("  %s build   [-D DATADIR] [-b MODE] [-r SECS] [-q] [-M SERVERMODE]\n"), progname);
+    printf(_("  %s build   [-D DATADIR] [-b MODE] [-r SECS] [-C CONNECTOR] [-q] [-M SERVERMODE]\n"), progname);
 #endif
 
     printf(_("  %s stop    [-W] [-t SECS] [-D DATADIR] [-s] [-m SHUTDOWN-MODE]\n"), progname);
@@ -3536,6 +3551,7 @@ static void do_help(void)
     printf(_("  %s unregister [-N SERVICENAME]\n"), progname);
 #endif
     (void)printf(_("  %s querybuild   [-D DATADIR]\n"), progname);
+    printf(_("  %s copy   [-D DATADIR] [-Q COPYMODE]\n"), progname);
 #if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_PRIVATEGAUSS)
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
 #endif
@@ -3545,7 +3561,8 @@ static void do_help(void)
 
     printf(_("\nCommon options:\n"));
     printf(_("  -b,  --mode=MODE	 the mode of building the datanode.MODE can be \"full\", \"incremental\", "
-             "\"auto\"\n"));
+             "\"auto\", \"standby_full\", \"copy_secure_files\", \"copy_upgrade_file\", \"cross_cluster_full\", "
+             "\"cross_cluster_incremental\", \"cross_cluster_standby_full\"\n"));
     printf(_("  -D, --pgdata=DATADIR   location of the database storage area\n"));
     printf(_("  -s, --silent           only print errors, no informational messages\n"));
     printf(_("  -t, --timeout=SECS     seconds to wait when using -w option\n"));
@@ -3566,10 +3583,11 @@ static void do_help(void)
     printf(_("  -k, --keycn=KEYCN          which cn used to restore\n"));
     printf(_("  -I, --taskid=TASKID        obs build task result file in obs\n"));
     printf(_("  -E, --dbport=DBPORT        database port\n"));
+    printf(_("  -X, --barrierid=BARRIERID  recovery target for standby\n"));
 #else
     printf(_("  -Z NODE-TYPE           can be \"single_node\"\n"));
 #endif
-    printf(_("  -?, --help             show this help, then exit\n"));
+    printf(_("  -?, -h, --help             show this help, then exit\n"));
     printf(_("(The default is to wait for shutdown, start and restart.)\n\n"));
     printf(_("If the -D option is omitted, the environment variable PGDATA is used.\n"));
 
@@ -3587,6 +3605,9 @@ static void do_help(void)
     printf(_("  -m, --mode=MODE        MODE can be \"fast\" or \"immediate\"\n"));
     printf(_("\nOptions for restore:\n"));
     printf(_("  --remove-backup        Remove the pg_rewind_bak dir after restore with \"restore\" command\n"));
+    printf(_("\nOptions for xlog copy:\n"));
+    printf(_(
+        "  -Q, --mode=MODE        MODE can be \"copy_from_local\", \"force_copy_from_local\", \"copy_from_share\"\n"));
 
 #if defined(ENABLE_MULTIPLE_NODES) || defined(ENABLE_PRIVATEGAUSS)
     printf(_("\nOptions for hotpatch:\n"));
@@ -3632,7 +3653,9 @@ static void do_help(void)
 #endif
     printf(_("\nBuild connection option:\n"));
     printf(_("  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"));
+#ifdef ENABLE_MULTIPLE_NODES
     printf(_("  -C, connector    CN/DN connect to CN for build\n"));
+#endif
 
 #if ((defined(ENABLE_MULTIPLE_NODES)) || (defined(ENABLE_PRIVATEGAUSS)))
     printf("\nReport bugs to GaussDB support.\n");
@@ -3901,7 +3924,8 @@ static void do_build_stop(pgpid_t pid)
     }
 
     do_wait = true;
-    if (build_mode == FULL_BUILD || build_mode == STANDBY_FULL_BUILD) {
+    if (build_mode == FULL_BUILD || build_mode == CROSS_CLUSTER_FULL_BUILD || 
+        build_mode == STANDBY_FULL_BUILD || build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD) {
         shutdown_mode = IMMEDIATE_MODE;
         sig = SIGQUIT;
         do_stop(true);
@@ -3954,6 +3978,111 @@ static void createRewindFile(char* prefixPath)
     fd = NULL;
 }
 
+static void BackupHbaConf()
+{
+    char path[MAXPGPATH];
+    char newpath[MAXPGPATH];
+    struct stat st;
+    int ret = EOK;
+    ret = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/pg_hba.conf", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+    ret = snprintf_s(newpath, MAXPGPATH, MAXPGPATH - 1, "%s/pg_hba.conf.old", pg_data);
+    securec_check_ss_c(ret, "\0", "\0");
+
+    if (build_mode == AUTO_BUILD || build_mode == FULL_BUILD || build_mode == INC_BUILD ||
+        build_mode == STANDBY_FULL_BUILD) {
+        if (stat(path, &st) == 0 && stat(newpath, &st) != 0) {
+            copy_file(path, newpath);
+        }
+    }
+}
+
+void ResetBuildInfo()
+{
+    increment_return_code = BUILD_SUCCESS;
+    if (datadir_target != NULL) {
+        pg_free(datadir_target);
+        datadir_target = NULL;
+    }
+
+    if (connstr_source != NULL) {
+        pg_free(connstr_source);
+        connstr_source = NULL;
+    }
+    replication_type = RT_WITH_DUMMY_STANDBY;
+}
+
+static bool DoIncBuild(uint32 term)
+{
+    bool buildSuccess = false;
+    for (int i = 0; i < INC_BUILD_RETRY_TIMES; ++i) {
+        if (conn_str == NULL) {
+            buildSuccess = do_incremental_build(term);
+        } else {
+            buildSuccess = do_incremental_build_xlog();
+        }
+        if (buildSuccess) {
+            break;
+        }
+        ResetBuildInfo();
+    }
+
+    return buildSuccess;
+}
+
+static bool DoAutoBuild(uint32 term)
+{
+    bool buildSuccess = DoIncBuild(term);
+    if (!buildSuccess) {
+        pg_log(PG_WARNING, _("inc build failed, change to full build.\n"));
+        buildSuccess = do_actual_build(term);
+    }
+    return buildSuccess;
+}
+
+static bool DoStandbyBuild(uint32 term)
+{
+    bool buildSuccess = false;
+    pg_log(PG_WARNING, "%s: change build mode to CROSS_CLUSTER_INC_BUILD.\n", progname);
+    build_mode = CROSS_CLUSTER_INC_BUILD;
+    for (int i = 0; i < INC_BUILD_RETRY_TIMES; ++i) {
+        buildSuccess = do_incremental_build(term);
+        if (buildSuccess) {
+            break;
+        }
+        ResetBuildInfo();
+    }
+
+    if (!buildSuccess) {
+        pg_log(PG_WARNING, "%s:cross inc build failed, change build mode to standby full build.\n", progname);
+        build_mode = STANDBY_FULL_BUILD;
+        buildSuccess = do_actual_build(term);
+        if (!buildSuccess) {
+            pg_log(PG_WARNING, "%s:standby full build failed, change build mode to cross full build.\n", progname);
+            build_mode = CROSS_CLUSTER_FULL_BUILD;
+            buildSuccess = do_actual_build(term);
+        }
+        if (!buildSuccess) {
+            pg_log(PG_WARNING,
+                   "%s:standby full build failed, change build mode to cross standby full build.\n", progname);
+            build_mode = CROSS_CLUSTER_STANDBY_FULL_BUILD;
+            buildSuccess = do_actual_build(term);
+        }
+    }
+    return buildSuccess;
+}
+
+static bool DoCopySecureFileBuild(uint32 term)
+{
+    bool buildSuccess = false;
+    buildSuccess = CopySecureFilesMain(pg_data, term);
+    if (!buildSuccess) {
+        pg_log(PG_WARNING, _("%s failed(%s).\n"), BuildModeToString(build_mode), pg_data);
+    }
+    pg_log(PG_WARNING, _("%s build completed(%s).\n"), BuildModeToString(build_mode), pg_data);
+    return buildSuccess;
+}
+
 static void do_build(uint32 term)
 {
     /* Prevent incremental build in DCF mode */
@@ -3971,31 +4100,38 @@ static void do_build(uint32 term)
         pg_log(PG_WARNING, "%s: Invalid coordinator connector: %s.\n", progname, conn_str);
         exit(1);
     }
-    if (pid > 0) {
+    if (pid > 0 && build_mode != COPY_SECURE_FILES_BUILD) {
         do_build_stop(pid);
-    } else {
+    } else if (pid <= 0 && build_mode != COPY_SECURE_FILES_BUILD) {
         kill_proton_force();
     }
 
-    /* Standby DN incremental build from Primary DN */
-    if (((build_mode == INC_BUILD) || (build_mode == AUTO_BUILD)) && (conn_str == NULL)) {
-        createRewindFile(pg_data);
-        do_incremental_build(term);
+    createRewindFile(pg_data);
+    bool buildSuccess = false;
+    BackupHbaConf();
+    /* Standby DN auto build */
+    if ((build_mode == AUTO_BUILD)) {
+        buildSuccess = DoAutoBuild(term);
     }
     /* Standby DN full build from Primary DN or CN/DN full build from CN */
-    else if (build_mode == FULL_BUILD) {
-        createRewindFile(pg_data);
-        do_actual_build(term);
+    else if ((build_mode == FULL_BUILD) || (build_mode == CROSS_CLUSTER_FULL_BUILD)) {
+        buildSuccess = do_actual_build(term);
     }
-    /* CN/DN incremental build from CN */
-    else if (build_mode == INC_BUILD && conn_str != NULL) {
-        createRewindFile(pg_data);
-        do_incremental_build_xlog();
+    /* CN/DN incremental build */
+    else if (((build_mode == INC_BUILD) || (build_mode == CROSS_CLUSTER_INC_BUILD))) {
+        buildSuccess = DoIncBuild(term);
     }
     /* standby DN full build from standby DN */
-    else if (build_mode == STANDBY_FULL_BUILD) {
-        createRewindFile(pg_data);
-        do_actual_build(term);
+    else if (build_mode == STANDBY_FULL_BUILD || build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD) {
+        buildSuccess = DoStandbyBuild(term);
+    }
+    /* disaster cluster copy secure file from remote */
+    else if (build_mode == COPY_SECURE_FILES_BUILD) {
+        buildSuccess = DoCopySecureFileBuild(term);
+    }
+
+    if (!buildSuccess) {
+        exit(1);
     }
 }
 
@@ -4012,6 +4148,27 @@ static void do_restore(void)
     }
 
     restore_target_dir(pg_data, clear_backup_dir);
+    return;
+}
+
+static void do_xlog_copy(void)
+{
+    pgpid_t pid = get_pgpid();
+    if (pid != 0 && postmaster_is_alive((pid_t)pid)
+#ifndef WIN32
+        && IsMyPostmasterPid((pid_t)pid, pg_config)
+#endif
+    ) {
+        pg_log(PG_WARNING, _("terminating xlog copy process due to gaussdb is still alive"));
+        return;
+    }
+
+    if (xlog_overwrite_opt != NULL) {
+        do_overwrite();
+    } else {
+        pg_log(PG_WARNING, _("no copy mode specified.\n"));
+    }
+
     return;
 }
 
@@ -4158,7 +4315,12 @@ static void do_full_backup(uint32 term)
         "select * from gs_upload_obs_file('%s', 'base.tar.gz', '%s/base.tar.gz')", slotname, pgxc_node_name);
     securec_check_ss_c(ret, "\0", "\0");
 
-    backup_main(pg_data, term, false);
+    bool buildSuccess = backup_main(pg_data, term, false);
+    if (!buildSuccess) {
+        pg_log(PG_WARNING, _("build failed \n"));
+        close_connection();
+        exit(1);
+    }
 
     if (ExecuteCmd(tar_cmd, timeOut)) {
         pg_log(PG_WARNING, _("execute command [%s] failed \n"), tar_cmd);
@@ -4357,7 +4519,8 @@ static void do_full_restore(void)
 static void CheckBuildParameter()
 {
     if ((pgha_str != NULL) && (strncmp(pgha_str, "standby", strlen("standby")) != 0) &&
-        (strncmp(pgha_str, "cascade_standby", strlen("cascade_standby")) != 0)) {
+        (strncmp(pgha_str, "cascade_standby", strlen("cascade_standby")) != 0) &&
+        (strncmp(pgha_str, "hadr_main_standby", strlen("hadr_main_standby")) != 0)) {
         pg_log(PG_WARNING, _(" the parameter of build is not recognized\n"));
         exit(1);
     }
@@ -4369,7 +4532,7 @@ static void CheckBuildParameter()
                     build instead.
  *		INC_BUILD: do gs_rewind only.
  */
-static void do_incremental_build(uint32 term)
+static bool do_incremental_build(uint32 term)
 {
     errno_t tnRet = 0;
     BuildErrorCode status = BUILD_SUCCESS;
@@ -4393,7 +4556,7 @@ static void do_incremental_build(uint32 term)
     streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
     if (streamConn == NULL) {
         pg_log(PG_WARNING, _("could not connect to server.\n"));
-        exit(1);
+        return false;
     }
 
     /* Concate connection str to primary host for performing rewind. */
@@ -4413,14 +4576,14 @@ static void do_incremental_build(uint32 term)
         PQfinish(streamConn);
         streamConn = NULL;
         PQclear(res);
-        exit(1);
+        return false;
     }
     if (PQntuples(res) != 1 || PQnfields(res) != 4) {
         pg_log(PG_WARNING, _("could not identify system, got %d rows and %d fields\n"), PQntuples(res), PQnfields(res));
         PQfinish(streamConn);
         streamConn = NULL;
         PQclear(res);
-        exit(1);
+        return false;
     }
     sysidentifier = pg_strdup(PQgetvalue(res, 0, 0));
     timeline = atoi(PQgetvalue(res, 0, 1));
@@ -4433,9 +4596,11 @@ static void do_incremental_build(uint32 term)
     /* Pretend to be gs_rewind and perform rewind. */
     progname = "gs_rewind";
     status = gs_increment_build(pg_data, connstrSource, sysidentifier, timeline, term);
+    libpqDisconnect();
 
     if (sysidentifier != NULL) {
         pg_free(sysidentifier);
+        sysidentifier = NULL;
     }
     if (bgchild > 0) {
         (void)kill(bgchild, SIGTERM);
@@ -4448,7 +4613,7 @@ static void do_incremental_build(uint32 term)
             streamConn = check_and_conn(standby_connect_timeout, standby_recv_timeout, term);
             if (streamConn == NULL) {
                 pg_log(PG_WARNING, _("fetch MOT checkpoint: could not connect to server.\n"));
-                exit(1);
+                return false;
             }
         }
 
@@ -4471,7 +4636,8 @@ static void do_incremental_build(uint32 term)
 
     if (status == BUILD_SUCCESS) {
         /* cascade standby will use use pgha_opt directly */
-        if (pgha_opt == NULL || strstr(pgha_opt, "cascade_standby") == NULL) {
+        if (pgha_opt == NULL || (strstr(pgha_opt, "cascade_standby") == NULL &&
+            strstr(pgha_opt, "hadr_main_standby") == NULL)) {
             /* pg_ctl start -M standby */
             FREE_AND_RESET(pgha_opt);
             pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
@@ -4483,15 +4649,13 @@ static void do_incremental_build(uint32 term)
             do_start();
         }
         set_build_pid(0);
-        return;
+        return true;
     } else if (status == BUILD_FATAL || status == BUILD_ERROR) {
-        if (build_mode == INC_BUILD) {
-            return;
-        } else {
-            do_actual_build(term);
-            return;
-        }
+        pg_log(PG_WARNING, _("inc build failed.\n"));
+        return false;
     }
+
+    return false;
 }
 
 /*
@@ -4553,7 +4717,78 @@ static void read_ssl_confval(void)
     optlines = NULL;
 }
 
-static void do_actual_build(uint32 term)
+static void do_overwrite()
+{
+    char cmd[MAX_PATH_LEN] = {0};
+    int nRet = 0;
+    
+    nRet = snprintf_s(
+        cmd, sizeof(cmd), sizeof(cmd) - 1, "gaussdb --single -Q %s postgres", xlog_overwrite_opt);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (xlog_overwrite_opt != NULL && strcmp(xlog_overwrite_opt, "copy_from_local") == 0) {
+        pg_log(PG_WARNING,
+            _("start to overwrite xlog from local pg_xlog to shared storage.\n"));
+    } else if (xlog_overwrite_opt != NULL && strcmp(xlog_overwrite_opt, "force_copy_from_local") == 0) {
+        pg_log(PG_WARNING,
+            _("start to force overwrite xlog local pg_xlog to shared storage.\n"));
+    } else if (xlog_overwrite_opt != NULL && strcmp(xlog_overwrite_opt, "copy_from_share") == 0) {
+        pg_log(PG_WARNING,
+            _("start to overwrite xlog from shared storage to local pg_xlog.\n"));
+    } else {
+        pg_log(PG_WARNING, _(" unrecognized xlog copy mode \"%s\"\n"), xlog_overwrite_opt);
+        FREE_AND_RESET(xlog_overwrite_opt);
+        return;
+    }
+    FREE_AND_RESET(xlog_overwrite_opt);
+
+    nRet = system(cmd);
+    if (nRet != 0) {
+        pg_log(PG_WARNING,
+            _("overwrite xlog: fail.\n"));
+    } else {
+        pg_log(PG_WARNING,
+            _("overwrite xlog: success.\n"));
+    }
+}
+
+const char *BuildModeToString(BuildMode mode)
+{
+    switch (mode) {
+        case NONE_BUILD:
+            return "none build";
+            break;
+        case AUTO_BUILD:
+            return "auto build";
+            break;
+        case FULL_BUILD:
+            return "full build";
+            break;
+        case INC_BUILD:
+            return "inc build";
+            break;
+        case STANDBY_FULL_BUILD:
+            return "standby full build";
+            break;
+        case CROSS_CLUSTER_FULL_BUILD:
+            return "cross cluster full build";
+            break;
+        case CROSS_CLUSTER_INC_BUILD:
+            return "cross cluster inc build";
+            break;
+        case CROSS_CLUSTER_STANDBY_FULL_BUILD:
+            return "cross cluster standby full build";
+            break;
+        case COPY_SECURE_FILES_BUILD:
+            return "copy secure files build";
+        default:
+            return "unkwon";
+            break;
+    }
+    return "unkwon";
+}
+
+static bool do_actual_build(uint32 term)
 {
     GaussState state;
     errno_t tnRet = 0;
@@ -4580,18 +4815,25 @@ static void do_actual_build(uint32 term)
     state.build_info.build_mode = FULL_BUILD;
     UpdateDBStateFile(gaussdb_state_file, &state);
     pg_log(PG_WARNING,
-        _("set gaussdb state file when full build:"
-          "db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(FULL_BUILD).\n"));
+           _("set gaussdb state file when %s build:"
+             "db state(BUILDING_STATE), server mode(STANDBY_MODE), build mode(FULL_BUILD).\n"),
+           BuildModeToString(build_mode));
 
     read_ssl_confval();
 
-    if (build_mode == STANDBY_FULL_BUILD) {
-        backup_main(pg_data, term, true);
-    } else {
-        backup_main(pg_data, term, false);
+    bool is_from_standby = (build_mode == STANDBY_FULL_BUILD || build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD);
+    bool buildSuccess = backup_main(pg_data, term, is_from_standby);
+    if (!buildSuccess) {
+        pg_log(PG_WARNING, _("%s failed(%s).\n"), BuildModeToString(build_mode), pg_data);
+        return buildSuccess;
     }
 
-    pg_log(PG_WARNING, _("build completed(%s).\n"), pg_data);
+    pg_log(PG_WARNING, _("%s build completed(%s).\n"), BuildModeToString(build_mode), pg_data);
+
+    /* xlog overwrite */
+    if (xlog_overwrite_opt != NULL) {
+        do_overwrite();
+    }
 
     /*
      * CN Build CN or CN Build DN cannot auto start,for update pgxc_node by start in restore mode.
@@ -4600,7 +4842,8 @@ static void do_actual_build(uint32 term)
      */
     if (conn_str == NULL || (build_mode == STANDBY_FULL_BUILD && conn_str != NULL)) {
         /* cascade standby will use use pgha_opt directly */
-        if (pgha_opt == NULL || strstr(pgha_opt, "cascade_standby") == NULL) {
+        if (pgha_opt == NULL || (strstr(pgha_opt, "cascade_standby") == NULL &&
+            strstr(pgha_opt, "hadr_main_standby") == NULL)) {
             /* pg_ctl start -M standby  */
             FREE_AND_RESET(pgha_opt);
             pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
@@ -4617,13 +4860,15 @@ static void do_actual_build(uint32 term)
         }
         set_build_pid(0);
     }
+
+    return true;
 }
 
 /*
  * used to CN build DN,get connect string from command line.find xlog position and copy
  * xlog from CN start with this position.
  */
-static void do_incremental_build_xlog()
+static bool do_incremental_build_xlog()
 {
     /* save progress info */
     GaussState state;
@@ -4648,11 +4893,13 @@ static void do_incremental_build_xlog()
     /* check ssl mode opened */
     read_ssl_confval();
 
+    bool buildSuccess = false;
     /* only copy xlog from CN to DN */
-    backup_incremental_xlog(pg_data);
+    buildSuccess = backup_incremental_xlog(pg_data);
     /* set pid to zero for cm can start DN */
     set_build_pid(0);
-    pg_log(PG_WARNING, _("build completed(%s).\n"), pg_data);
+    pg_log(PG_WARNING, _("build %s(%s).\n"), buildSuccess ? "success" : "failed", pg_data);
+    return buildSuccess;
 }
 
 static void kill_proton_force(void)
@@ -5046,6 +5293,105 @@ static void Help(int argc, const char** argv)
     }
 }
 
+#ifndef ENABLE_MULTIPLE_NODES
+/* Write one object with memsize into a file named filename as binary format */
+static bool WriteFileInfo(const char *filename, const void *content, size_t memsize)
+{
+    FILE* sofile = nullptr;
+    if ((sofile = fopen(filename, "wb")) == nullptr) {
+        pg_log(PG_WARNING, _("fail to open file \"%s\": %s\n"), filename, strerror(errno));
+        return false;
+    }
+    if (fwrite(content, memsize, 1, sofile) != 1) {
+        fclose(sofile);
+        pg_log(PG_WARNING, _("fail to write file \"%s\": %s.\n"), filename, strerror(errno));
+        return false;
+    }
+    if (fclose(sofile)) {
+        pg_log(PG_WARNING, _("fail to close file \"%s\": %s.\n"), filename, strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+static bool SendSigUsr1ToPM(void)
+{
+    pgpid_t pid;
+    pid = get_pgpid();
+    if (pid == 0) { /* no pid file */
+        pg_log(PG_WARNING, _(" PID file \"%s\" does not exist\n"), pid_file);
+        pg_log(PG_WARNING, _("Is server running?\n"));
+        return false;
+    } else if (pid < 0) { /* standalone backend, not postmaster */
+        pid = -pid;
+        pg_log(PG_WARNING,
+            _(" cannot run command; "
+              "single-user server is running (PID: %ld)\n"),
+            pid);
+        return false;
+    }
+    sig = SIGUSR1;
+    if (kill((pid_t)pid, sig) != 0) {
+        pg_log(PG_WARNING, _("could not send signal (PID: %ld): %s\n"), pid, strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+static bool RemoveFileIfExist(const char *filename)
+{
+    struct stat buffer;
+    if (stat(filename, &buffer)) {
+        return true;
+    }
+    if (unlink(filename)) {
+        pg_log(PG_WARNING, _("could not remove file \"%s\": %s\n"), filename, strerror(errno));
+        return false;
+    }
+    return true;
+}
+
+/*
+ * Check status in filename during timeout and param isTimeout keeps timeout result.
+ * Status: -1 demotes failed, 0 demotes success and 1 denotes timeout.
+ */
+static bool IsRightStatus(const char *filename, bool *isTimeout) {
+    int wait_count = 0;
+    FILE *sofile = nullptr;
+    *isTimeout = false;
+    while (wait_count++ < wait_seconds) {
+        if ((sofile = fopen(filename, "rb")) != nullptr) {
+            int status = -1;
+            pg_usleep(1000000); /* sleep 1 sec in case no value written */
+            int ret = fread(&status, sizeof(status), 1, sofile);
+            if (ret != 1) {
+                fclose(sofile);
+                pg_log(PG_WARNING, _("Read %s failed!\n"), filename);
+                return false;
+            }
+            fclose(sofile);
+            sofile = nullptr;
+            if (status == -1) {
+                pg_log(PG_WARNING, _("Failed status was read!\n"));
+                return false;
+            }
+            if (status == 1) {
+                *isTimeout = true;
+                pg_log(PG_WARNING, _("Timeout status was read!\n"));
+                return false;
+            }
+            if (status == 0) {
+                return true;
+            }
+            return false;
+        }
+        pg_log(PG_PRINT, ".");
+        pg_usleep(1000000); /* 1 sec */
+    }
+    *isTimeout = true;
+    return false;
+}
+
 void do_add_member(void)
 {
     if (!g_dcfEnabled) {
@@ -5063,9 +5409,6 @@ void do_add_member(void)
         pg_log(PG_WARNING, _("Were invalid node id, ip and port provided?\n"));
         exit(1);
     }
-
-    FILE* sofile = NULL;
-    pgpid_t pid;
     NewNodeInfo nodeInfo;
     nodeInfo.stream_id = 1;
     nodeInfo.node_id = new_node_id;
@@ -5077,45 +5420,19 @@ void do_add_member(void)
     pg_log(PG_WARNING, 
            _("Start adding a new member with node id %u ip %s port %u role %u timeout %u.\n"), 
            nodeInfo.node_id, nodeInfo.ip, nodeInfo.port, nodeInfo.role, nodeInfo.wait_timeout_ms);
-    if ((sofile = fopen(add_member_file, "w")) == NULL) {
-        pg_log(PG_WARNING, _("fail to open file \"%s\": %s\n"), add_member_file, strerror(errno));
+    if (!WriteFileInfo(add_member_file, &nodeInfo, sizeof(nodeInfo))) {
+        RemoveFileIfExist(add_member_file);
         exit(1);
     }
-    if (fwrite(&nodeInfo, 1, sizeof(nodeInfo), sofile) == 0) {
-        fclose(sofile);
-        unlink(add_member_file);
-        pg_log(PG_WARNING, _("fail to write file \"%s\": %s\n"), add_member_file, strerror(errno));
+
+    if (!SendSigUsr1ToPM()) {
+        RemoveFileIfExist(add_member_file);
+        pg_log(PG_WARNING, _("Adding member failed!"));
         exit(1);
+    } else {
+        pg_log(PG_WARNING, _("Please check adding member result by command 'gs_ctl query'"));
+        return;
     }
-    if (fclose(sofile)) {
-        unlink(add_member_file);
-        pg_log(PG_WARNING, _("fail to close file \"%s\": %s\n"), add_member_file, strerror(errno));
-        exit(1);
-    }
-    sofile = NULL;
-    pid = get_pgpid();
-    if (pid == 0) { /* no pid file */
-        unlink(add_member_file);
-        pg_log(PG_WARNING, _(" PID file \"%s\" does not exist\n"), pid_file);
-        pg_log(PG_WARNING, _("Is server running?\n"));
-        exit(1);
-    } else if (pid < 0) { /* standalone backend, not postmaster */
-        unlink(add_member_file);
-        pid = -pid;
-        pg_log(PG_WARNING,
-            _(" cannot add member; "
-              "single-user server is running (PID: %ld)\n"),
-            pid);
-        exit(1);
-    }
-    sig = SIGUSR1;
-    if (kill((pid_t)pid, sig) != 0) {
-        pg_log(PG_WARNING, _(" could not send add member signal (PID: %ld): %s\n"), pid, strerror(errno));
-        if (unlink(add_member_file) != 0)
-            pg_log(PG_WARNING, _(" could not send add member signal (PID: %ld): %s\n"), pid, strerror(errno));
-        exit(1);
-    }
-    return;
 }
 
 void do_remove_member(void)
@@ -5124,7 +5441,6 @@ void do_remove_member(void)
         pg_log(PG_WARNING, _("Can't run this command in non DCF mode!\n"));
         exit(1);
     }
-
     ServerMode run_mode = get_runmode();
     if (run_mode != PRIMARY_MODE) {
         pg_log(PG_WARNING, _("Can't remove a member in a non-primary node\n"));
@@ -5137,47 +5453,19 @@ void do_remove_member(void)
     }
 
     pg_log(PG_WARNING, _("Start removing a member with node id %u.\n"), new_node_id);
-    FILE* sofile = NULL;
-    pgpid_t pid;
-    if ((sofile = fopen(remove_member_file, "w")) == NULL) {
-        pg_log(PG_WARNING, _("fail to open file \"%s\": %s\n"), remove_member_file, strerror(errno));
+    if (!WriteFileInfo(remove_member_file, &new_node_id, sizeof(new_node_id))) {
+        RemoveFileIfExist(remove_member_file);
         exit(1);
     }
-    if (fwrite(&new_node_id, 1, sizeof(new_node_id), sofile) == 0) {
-        fclose(sofile);
-        unlink(remove_member_file);
-        pg_log(PG_WARNING, _("fail to write file \"%s\": %s\n"), remove_member_file, strerror(errno));
+
+    if (!SendSigUsr1ToPM()) {
+        RemoveFileIfExist(remove_member_file);
+        pg_log(PG_WARNING, _("Removing member failed!"));
         exit(1);
+    } else {
+        pg_log(PG_WARNING, _("Please check removing member result by command 'gs_ctl query'"));
+        return;
     }
-    if (fclose(sofile)) {
-        unlink(remove_member_file);
-        pg_log(PG_WARNING, _("fail to close file \"%s\": %s\n"), remove_member_file, strerror(errno));
-        exit(1);
-    }
-    sofile = NULL;
-    pid = get_pgpid();
-    if (pid == 0) { /* no pid file */
-        unlink(remove_member_file);
-        pg_log(PG_WARNING, _(" PID file \"%s\" does not exist\n"), pid_file);
-        pg_log(PG_WARNING, _("Is server running?\n"));
-        exit(1);
-    } else if (pid < 0) { /* standalone backend, not postmaster */
-        pid = -pid;
-        unlink(remove_member_file);
-        pg_log(PG_WARNING,\
-            _(" cannot remove member; "
-              "single-user server is running (PID: %ld)\n"),
-            pid);
-        exit(1);
-    }
-    sig = SIGUSR1;
-    if (kill((pid_t)pid, sig) != 0) {
-        pg_log(PG_WARNING, _(" could not send remove member signal (PID: %ld): %s\n"), pid, strerror(errno));
-        if (unlink(remove_member_file) != 0)
-            pg_log(PG_WARNING, _(" could not send remove member signal (PID: %ld): %s\n"), pid, strerror(errno));
-        exit(1);
-    }
-    return;
 }
 
 void do_change_role(void)
@@ -5186,9 +5474,9 @@ void do_change_role(void)
         pg_log(PG_WARNING, _("Can't run this command in non DCF mode!\n"));
         exit(1);
     }
-    FILE* sofile = NULL;
     int timeoutRet = 2;
-    pgpid_t pid;
+    bool isTimeout = false;
+    bool isSuccess = false;
     ServerMode run_mode = get_runmode();
     if (run_mode == PRIMARY_MODE) {
         pg_log(PG_WARNING, _("Can't change primary role.\n"));
@@ -5204,110 +5492,55 @@ void do_change_role(void)
         exit(1);
     }
     pg_log(PG_WARNING, _("Start changing local DCF node role.\n"));
+
     /* Write role into change_role_file */
-    sofile = fopen(change_role_file, "w");
-    if (sofile == NULL) {
-        pg_log(PG_WARNING, _("fail to open file \"%s\": %s\n"), change_role_file, strerror(errno));
+    if (!WriteFileInfo(change_role_file, new_role, strlen(new_role))) {
+        RemoveFileIfExist(change_role_file);
         exit(1);
     }
-    if (fwrite(new_role, sizeof(char), strlen(new_role), sofile) == 0) {
-        pg_log(PG_WARNING, _("fail to write file \"%s\": %s\n"), change_role_file, strerror(errno));
-        fclose(sofile);
-        unlink(change_role_file);
-        exit(1);
-    }
-    if (fclose(sofile)) {
-        pg_log(PG_WARNING, _("fail to close file \"%s\": %s\n"), change_role_file, strerror(errno));
-        unlink(change_role_file);
-        exit(1);
-    }
-    sofile = NULL;
 
     /* Write timeout into timeout file */
-    sofile = fopen(timeout_file, "w");
-    if (sofile == NULL) {
-        pg_log(PG_WARNING, _("fail to open file \"%s\": %s\n"), timeout_file, strerror(errno));
+    if (!WriteFileInfo(timeout_file, &wait_seconds, sizeof(wait_seconds))) {
+        RemoveFileIfExist(timeout_file);
         exit(1);
     }
-    if ((fwrite(&wait_seconds, sizeof(wait_seconds), 1, sofile)) == 0) {
-        pg_log(PG_WARNING, _("fail to write file \"%s\": %s\n"), timeout_file, strerror(errno));
-        fclose(sofile);
-        unlink(timeout_file);
+    /*
+     * Remove the changerole status file before sending signal
+     * in case the last one hasn't been deleted and read a wrong value.
+     */
+    if (!RemoveFileIfExist(g_changeroleStatusFile)) {
+        /* Clear env */
+        RemoveFileIfExist(change_role_file);
+        RemoveFileIfExist(timeout_file);
         exit(1);
     }
-    if (fclose(sofile)) {
-        pg_log(PG_WARNING, _("fail to close file \"%s\": %s\n"), timeout_file, strerror(errno));
-        unlink(timeout_file);
+    if (!SendSigUsr1ToPM()) {
+        /* Clear env */
+        RemoveFileIfExist(change_role_file);
+        RemoveFileIfExist(timeout_file);
         exit(1);
     }
-    sofile = NULL;
-
-    pid = get_pgpid();
-    if (pid == 0) { /* no pid file */
-        pg_log(PG_WARNING, _(" PID file \"%s\" does not exist\n"), pid_file);
-        pg_log(PG_WARNING, _("Is server running?\n"));
-        unlink(change_role_file);
-        exit(1);
-    } else if (pid < 0) { /* standalone backend, not postmaster */
-        pid = -pid;
-        pg_log(PG_WARNING,
-            _(" cannot change role; "
-              "single-user server is running (PID: %ld)\n"),
-            pid);
-        unlink(change_role_file);
-        exit(1);
-    }
-    /* Remove the changerole status file in case the last one hasn't been deleted. */
-    unlink(g_changeroleStatusFile);
-    sig = SIGUSR1;
-    if (kill((pid_t)pid, sig) != 0) {
-        pg_log(PG_WARNING, _("could not send change role signal (PID: %ld): %s\n"), pid, strerror(errno));
-        if (unlink(change_role_file) != 0)
-            pg_log(PG_WARNING, _("could not remove change role signal file \"%s\": %s\n"),
-                   change_role_file, strerror(errno));
-        exit(1);
-    }
-    int wait_count = 0;
-    while (wait_count++ < wait_seconds) {
-        /* Check change role file status in DCF mode */
-        if ((sofile = fopen(g_changeroleStatusFile, "r")) != NULL) {
-            int status = -1;
-            pg_usleep(1000000); /* 1 sec */
-            wait_count++;
-            int ret = fread(&status, sizeof(status), 1, sofile);
-            if (ret != 1) {
-                fclose(sofile);
-                sofile = NULL;
-                pg_log(PG_WARNING, _("Read %s failed!\n"), g_changeroleStatusFile);
-                unlink(g_changeroleStatusFile);
-                exit(1);
-            }
-            fclose(sofile);
-            sofile = NULL;
-            unlink(g_changeroleStatusFile);
-            if (status == -1) {
-                pg_log(PG_WARNING, _("Change role failed!\n"));
-                exit(1);
-            }
-            if (status == 1) {
-                pg_log(PG_WARNING, _("Change role timeout!\n"));
-                exit(timeoutRet);
-            }
-            pg_log(PG_WARNING, _("Change role success!\n"));
-            return;
+    isSuccess = IsRightStatus(g_changeroleStatusFile, &isTimeout);
+    RemoveFileIfExist(g_changeroleStatusFile);
+    if (isSuccess) {
+        pg_log(PG_WARNING, _("Change role success"));
+        return;
+    } else {
+        if (isTimeout) {
+            pg_log(PG_WARNING, _("Change role timeout after %d seconds!\n"), wait_seconds);
+            exit(timeoutRet);
         }
-        pg_log(PG_PRINT, ".");
-        pg_usleep(1000000); /* 1 sec */
+        pg_log(PG_WARNING, _("Change role failed!\n"));
     }
-    pg_log(PG_WARNING, _("Change role timeout after %d seconds!\n"), wait_seconds);
-    exit(timeoutRet);
+    exit(1);
 }
 
-void do_minority_start(void)
+void do_set_run_mode(void)
 {
     pg_log(PG_WARNING, _("Start set run mode.\n"));
-    FILE* sofile = NULL;
-    pgpid_t pid;
+    bool isTimeout = false;
+    bool isSuccess = false;
+    RunModeParam  param;
 
     if (!g_dcfEnabled) {
         pg_log(PG_WARNING, _("Can't run this command in non-DCF mode!\n"));
@@ -5334,82 +5567,37 @@ void do_minority_start(void)
     }
 
     pg_log(PG_WARNING, _("DCF going to set run mode with xmode %u vote num %u!\n"), xmode, vote_num);
-    sofile = fopen(start_minority_file, "w");
-    if (sofile == NULL) {
-        pg_log(PG_WARNING, _("fail to open file \"%s\": %s\n"), start_minority_file, strerror(errno));
+    param.voteNum = vote_num;
+    param.xMode = xmode;
+    /* Write set run mode signal file */
+    if (!WriteFileInfo(start_minority_file, &param, sizeof(param))) {
+        RemoveFileIfExist(start_minority_file);
         exit(1);
     }
-    if (fwrite(&vote_num, sizeof(vote_num), 1, sofile) == 0) {
-        pg_log(PG_WARNING, _("fail to write file \"%s\": %s\n"), start_minority_file, strerror(errno));
-        fclose(sofile);
-        unlink(start_minority_file);
+    /* Remove the status file in case reading status from the last one */
+    if (!RemoveFileIfExist(setrunmode_status_file)) {
         exit(1);
     }
-    if (fwrite(&xmode, sizeof(xmode), 1, sofile) == 0) {
-        pg_log(PG_WARNING, _("fail to write file \"%s\": %s\n"), start_minority_file, strerror(errno));
-        fclose(sofile);
-        unlink(start_minority_file);
+    if (!SendSigUsr1ToPM()) {
+        RemoveFileIfExist(start_minority_file);
         exit(1);
     }
-    if (fclose(sofile)) {
-        pg_log(PG_WARNING, _("fail to close file \"%s\": %s\n"), start_minority_file, strerror(errno));
-        unlink(start_minority_file);
-        exit(1);
-    }
-    sofile = NULL;
-    pid = get_pgpid();
-    if (pid == 0) { /* no pid file */
-        pg_log(PG_WARNING, _(" PID file \"%s\" does not exist\n"), pid_file);
-        pg_log(PG_WARNING, _("Is server running?\n"));
-        unlink(start_minority_file);
-        exit(1);
-    } else if (pid < 0) { /* standalone backend, not postmaster */
-        pid = -pid;
-        pg_log(PG_WARNING,
-            _(" cannot set run mode; "
-              "single-user server is running (PID: %ld)\n"),
-            pid);
-        unlink(start_minority_file);
-        exit(1);
-    }
-    sig = SIGUSR1;
-    if (kill((pid_t)pid, sig) != 0) {
-        pg_log(PG_WARNING, _("could not send set run mode signal (PID: %ld): %s\n"), pid, strerror(errno));
-        if (unlink(start_minority_file) != 0)
-            pg_log(PG_WARNING, _("could not remove set run mode signal file \"%s\": %s\n"), 
-                   start_minority_file, strerror(errno));
-        exit(1);
-    }
-    sofile = fopen(setrunmode_status_file, "r");
-    int wait_count = 0;
-    while (wait_count++ < wait_seconds) {
-        /* Check set run mode status in DCF mode */
-        if ((sofile = fopen(setrunmode_status_file, "r")) != NULL) {
-            int status = -1;
-            int ret = fread(&status, sizeof(status), 1, sofile);
-            if (ret != 1) {
-                fclose(sofile);
-                sofile = NULL;
-                pg_log(PG_WARNING, _("Read %s failed!\n"), setrunmode_status_file);
-                unlink(setrunmode_status_file);
-                exit(1);
-            }
-            fclose(sofile);
-            sofile = NULL;
-            unlink(setrunmode_status_file);
-            if (status != 0) {
-                pg_log(PG_WARNING, _("Set run mode failed!\n"));
-                exit(1);
-            }
-            pg_log(PG_WARNING, _("Set run mode success!\n"));
-            return;
+
+    isSuccess = IsRightStatus(setrunmode_status_file, &isTimeout);
+    RemoveFileIfExist(setrunmode_status_file);
+    if (isSuccess) {
+        pg_log(PG_WARNING, _("Set run mode success!\n"));
+        return;
+    } else {
+        if (isTimeout) {
+            pg_log(PG_WARNING, _("Setting run-mode timeout after %d seconds!\n"), wait_seconds);
+            exit(1);
         }
-        pg_log(PG_PRINT, ".");
-        pg_usleep(1000000); /* 1 sec */
+        pg_log(PG_WARNING, _("Set run mode failed!\n"));
     }
-    pg_log(PG_WARNING, _("Setting run-mode timeout after %d seconds!\n"), wait_seconds);
     exit(1);
 }
+#endif
 
 void check_ipv4_format(const char* ipv4)
 {
@@ -5443,6 +5631,72 @@ void check_num_input(char* input)
             exit(1);
         }
         tmp++;
+    }
+}
+
+void SetConfigFilePath()
+{
+    int ret;
+    if (pg_data != NULL) {
+        ret = snprintf_s(postopts_file, MAXPGPATH, MAXPGPATH - 1, "%s/postmaster.opts", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(pid_file, MAXPGPATH, MAXPGPATH - 1, "%s/postmaster.pid", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(backup_file, MAXPGPATH, MAXPGPATH - 1, "%s/backup_label", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(recovery_file, MAXPGPATH, MAXPGPATH - 1, "%s/recovery.conf", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(recovery_done_file, MAXPGPATH, MAXPGPATH - 1, "%s/recovery.done", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(failover_file, MAXPGPATH, MAXPGPATH - 1, "%s/failover", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(switchover_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(primary_file, MAXPGPATH, MAXPGPATH - 1, "%s/primary", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/standby", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(pg_ctl_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/pg_ctl.lock", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(pg_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(build_pid_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_build.pid", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(gaussdb_state_file, MAXPGPATH, MAXPGPATH - 1, "%s/gaussdb.state", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(postport_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s/postport.lock", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(g_hotpatch_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.cmd", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(g_hotpatch_tmp_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.cmd.tmp", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(g_hotpatch_ret_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.ret", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(g_hotpatch_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.lock", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        g_dcfEnabled = GetPaxosValue(pg_conf_file);
+        if (g_dcfEnabled) {
+            ret = snprintf_s(add_member_file, MAXPGPATH, MAXPGPATH - 1, "%s/addmember", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+            ret = snprintf_s(remove_member_file, MAXPGPATH, MAXPGPATH - 1, "%s/removemember", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+            ret = snprintf_s(timeout_file, MAXPGPATH, MAXPGPATH - 1, "%s/timeout", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+            ret = snprintf_s(switchover_status_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchoverstatus", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+
+            ret = snprintf_s(change_role_file, MAXPGPATH, MAXPGPATH - 1, "%s/changerole", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+
+            ret = snprintf_s(g_changeroleStatusFile, MAXPGPATH, MAXPGPATH - 1, "%s/changerolestatus", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+
+            ret = snprintf_s(start_minority_file, MAXPGPATH, MAXPGPATH - 1, "%s/startminority", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+
+            ret = snprintf_s(setrunmode_status_file, MAXPGPATH, MAXPGPATH - 1, "%s/setrunmodestatus", pg_data);
+            securec_check_ss_c(ret, "\0", "\0");
+        }
     }
 }
 
@@ -5538,18 +5792,18 @@ int main(int argc, char** argv)
     /* process command-line options */
     while (optind < argc) {
 #ifdef ENABLE_MULTIPLE_NODES
-        while ((c = getopt_long(
-                    argc, argv, "a:b:cD:fl:m:M:N:n:o:p:P:r:sS:t:U:wWZ:C:T:dqL:k:K:I:E:", long_options, &option_index)) != -1)
+        while ((c = getopt_long(argc, argv, "a:b:cD:fl:m:M:N:n:o:p:P:r:sS:t:U:wWZ:C:T:dqL:k:K:I:E:Q:X:", long_options,
+            &option_index)) != -1)
 #else
         // The node defaults to a datanode
         FREE_AND_RESET(pgxcCommand);
         pgxcCommand = xstrdup("--single_node");
 #ifdef ENABLE_PRIVATEGAUSS
-        while ((c = getopt_long(
-            argc, argv, "a:b:cD:e:fi:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:dqL:T:", long_options, &option_index)) != -1)
+        while ((c = getopt_long(argc, argv, "a:b:cD:e:fi:l:m:M:N:n:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:C:dqL:T:Q:", long_options,
+            &option_index)) != -1)
 #else
-        while ((c = getopt_long(
-            argc, argv, "b:cD:e:fi:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:dqL:T:", long_options, &option_index)) != -1)
+        while ((c = getopt_long(argc, argv, "b:cD:e:fi:l:m:M:N:o:O:p:P:r:R:v:x:sS:t:u:U:wWZ:dqL:T:Q:", long_options,
+            &option_index)) != -1)
 #endif
 #endif
         {
@@ -5559,14 +5813,24 @@ int main(int argc, char** argv)
                         build_mode = FULL_BUILD;
                     } else if (strcmp(optarg, "incremental") == 0) {
                         build_mode = INC_BUILD;
+                    } else if (strcmp(optarg, "cross_cluster_full") == 0) {
+                        build_mode = CROSS_CLUSTER_FULL_BUILD;
+                    } else if (strcmp(optarg, "cross_cluster_incremental") == 0) {
+                        build_mode = CROSS_CLUSTER_INC_BUILD;
                     } else if (strcmp(optarg, "standby_full") == 0) {
                         build_mode = STANDBY_FULL_BUILD;
+                    } else if (strcmp(optarg, "cross_cluster_standby_full") == 0) {
+                        build_mode = CROSS_CLUSTER_STANDBY_FULL_BUILD;
+                    } else if (strcmp(optarg, "copy_secure_files") == 0) {
+                        build_mode = COPY_SECURE_FILES_BUILD;
+                    } else if (strcmp(optarg, "copy_upgrade_file") == 0) {
+                        build_mode = COPY_SECURE_FILES_BUILD;
+                        need_copy_upgrade_file = true;
                     }
                     break;
                 }
                 case 'D': {
                     char* pgdata_D = NULL;
-
                     check_input_for_security(optarg);
                     if (strlen(optarg) > MAX_PATH_LEN) {
                         pg_log(PG_WARNING, _("max path length is exceeded\n"));
@@ -5658,6 +5922,27 @@ int main(int argc, char** argv)
                     register_password = xstrdup(optarg);
                     ret = memset_s(optarg, strlen(optarg), 0, strlen(optarg));
                     securec_check_c(ret, optarg, "\0");
+                    break;
+                case 'Q':
+                    check_input_for_security(optarg);
+                    FREE_AND_RESET(xlog_overwrite_opt);
+                    xlog_overwrite_opt = xstrdup(optarg);
+                    break;
+                case 'X':
+                    check_input_for_security(optarg);
+                    {
+                        int ret = 0;
+                        int opt_len = strlen(optarg);
+                        if (opt_len >= MAX_BARRIER_ID_LENGTH) {
+                            pg_log(PG_WARNING, _("invalid stop barrier command \n"));
+                            goto Error;
+                        }
+                        ret = memset_s(barrier_id, MAX_STOP_BARRIER_LEN, 0, MAX_STOP_BARRIER_LEN);
+                        securec_check(ret, "", "");
+                        ret = snprintf_s(barrier_id, MAX_STOP_BARRIER_LEN, MAX_STOP_BARRIER_LEN - 1, "-X %s", optarg);
+                        securec_check_ss_c(ret, "\0", "\0");
+                        stop_barrier = barrier_id;
+                    }
                     break;
                 case 'Z':
                     FREE_AND_RESET(pgxcCommand);
@@ -5939,6 +6224,8 @@ int main(int argc, char** argv)
                 ctl_command = HOTPATCH_COMMAND;
             else if (strcmp(argv[optind], "finishredo") == 0)
                 ctl_command = FINISH_REDO_COMMAND;
+            else if (strcmp(argv[optind], "copy") == 0)
+                ctl_command = COPY_COMMAND;
             else {
                 pg_log(PG_WARNING, _(" unrecognized operation mode \"%s\"\n"), argv[optind]);
                 do_advice();
@@ -6024,67 +6311,7 @@ int main(int argc, char** argv)
         do_wait = false;
     }
 
-    if (pg_data != NULL) {
-        ret = snprintf_s(postopts_file, MAXPGPATH, MAXPGPATH - 1, "%s/postmaster.opts", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(pid_file, MAXPGPATH, MAXPGPATH - 1, "%s/postmaster.pid", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(backup_file, MAXPGPATH, MAXPGPATH - 1, "%s/backup_label", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(recovery_file, MAXPGPATH, MAXPGPATH - 1, "%s/recovery.conf", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(recovery_done_file, MAXPGPATH, MAXPGPATH - 1, "%s/recovery.done", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(failover_file, MAXPGPATH, MAXPGPATH - 1, "%s/failover", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(switchover_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchover", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(primary_file, MAXPGPATH, MAXPGPATH - 1, "%s/primary", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/standby", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(pg_ctl_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/pg_ctl.lock", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(pg_conf_file, MAXPGPATH, MAXPGPATH - 1, "%s/postgresql.conf", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(build_pid_file, MAXPGPATH, MAXPGPATH - 1, "%s/gs_build.pid", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(gaussdb_state_file, MAXPGPATH, MAXPGPATH - 1, "%s/gaussdb.state", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(postport_lock_file, MAXPGPATH, MAXPGPATH - 1, "%s/postport.lock", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.cmd", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_tmp_cmd_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.cmd.tmp", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_ret_file, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.ret", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        ret = snprintf_s(g_hotpatch_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/hotpatch.lock", pg_data);
-        securec_check_ss_c(ret, "\0", "\0");
-        g_dcfEnabled = GetPaxosValue(pg_conf_file);
-        if (g_dcfEnabled) {
-            ret = snprintf_s(add_member_file, MAXPGPATH, MAXPGPATH - 1, "%s/addmember", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-            ret = snprintf_s(remove_member_file, MAXPGPATH, MAXPGPATH - 1, "%s/removemember", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-            ret = snprintf_s(timeout_file, MAXPGPATH, MAXPGPATH - 1, "%s/timeout", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-            ret = snprintf_s(switchover_status_file, MAXPGPATH, MAXPGPATH - 1, "%s/switchoverstatus", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(change_role_file, MAXPGPATH, MAXPGPATH - 1, "%s/changerole", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(g_changeroleStatusFile, MAXPGPATH, MAXPGPATH - 1, "%s/changerolestatus", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(start_minority_file, MAXPGPATH, MAXPGPATH - 1, "%s/startminority", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-
-            ret = snprintf_s(setrunmode_status_file, MAXPGPATH, MAXPGPATH - 1, "%s/setrunmodestatus", pg_data);
-            securec_check_ss_c(ret, "\0", "\0");
-        }
-    }
+    SetConfigFilePath();
 
     pg_host = getenv("PGHOST");
     check_input_for_security(pg_host);
@@ -6178,15 +6405,25 @@ int main(int argc, char** argv)
             break;
 #endif
         case BUILD_COMMAND:
+            if (build_mode == COPY_SECURE_FILES_BUILD && (conn_str == NULL || register_username == NULL ||
+                register_password == NULL)) {
+                pg_log(PG_PROGRESS, _("When copy secure files from remote, need remote host and authentication!\n"));
+                goto Error;
+            }
             if (conn_str != NULL) {
-                if (build_mode == FULL_BUILD) {
+                if (build_mode == FULL_BUILD || build_mode == CROSS_CLUSTER_FULL_BUILD) {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl full build ,datadir is %s,conn_str is \'%s\'\n"),
                         pg_data,
                         conn_str);
-                } else if (build_mode == STANDBY_FULL_BUILD) {
+                } else if (build_mode == STANDBY_FULL_BUILD || build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD) {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl standby full build ,datadir is %s,conn_str is \'%s\'\n"),
+                        pg_data,
+                        conn_str);
+                } else if (build_mode == COPY_SECURE_FILES_BUILD) {
+                    pg_log(PG_PROGRESS,
+                        _("gs_ctl copy secure files from remote build ,datadir is %s,conn_str is \'%s\'\n"),
                         pg_data,
                         conn_str);
                 } else {
@@ -6196,11 +6433,11 @@ int main(int argc, char** argv)
                         conn_str);
                 }
             } else {
-                if (build_mode == FULL_BUILD) {
+                if (build_mode == FULL_BUILD || build_mode == CROSS_CLUSTER_FULL_BUILD) {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl full build ,datadir is %s\n"),
                         pg_data);
-                } else if (build_mode == STANDBY_FULL_BUILD) {
+                } else if (build_mode == STANDBY_FULL_BUILD || build_mode == CROSS_CLUSTER_STANDBY_FULL_BUILD) {
                     pg_log(PG_PROGRESS,
                         _("gs_ctl standby full build ,datadir is %s\n"),
                         pg_data);
@@ -6234,6 +6471,7 @@ int main(int argc, char** argv)
                 pg_log(PG_PROGRESS, _("[PATCH-ERROR] Another gs_ctl command is still running,hotpatch failed !\n"));
             }
             break;
+#ifndef ENABLE_MULTIPLE_NODES
         case ADD_MEMBER_COMMAND:
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_add_member();
@@ -6263,13 +6501,14 @@ int main(int argc, char** argv)
             break;
         case MINORITY_START_COMMAND:
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
-                do_minority_start();
+                do_set_run_mode();
                 (void)pg_ctl_unlock(lockfile);
             } else {
                 pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, minority start failed.\n"));
                 goto Error;
             }
             break;
+#endif
         case RESTORE_COMMAND:
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 if (g_is_obsmode) {
@@ -6277,6 +6516,13 @@ int main(int argc, char** argv)
                 } else {
                     do_restore();
                 }
+                (void)pg_ctl_unlock(lockfile);
+            } else {
+                pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, restore failed.\n"));
+            }
+        case COPY_COMMAND:
+            if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
+                do_xlog_copy();
                 (void)pg_ctl_unlock(lockfile);
             } else {
                 pg_log(PG_PROGRESS, _("Another gs_ctl command is still running, restore failed.\n"));

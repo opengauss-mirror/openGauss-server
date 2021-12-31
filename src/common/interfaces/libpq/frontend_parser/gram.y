@@ -1,5 +1,4 @@
 %{
-/*#define YYDEBUG 1*/
 /*-------------------------------------------------------------------------
  *
  * gram.y
@@ -52,11 +51,6 @@
 #include <ctype.h>
 #include <limits.h>
 #include "datatypes.h"
-//#include "commands/defrem.h"
-//#include "parser/parser.h"
-//#include "storage/lmgr.h"
-//#include "utils/builtins.h"
-//#include "utils/datetime.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_attribute.h"
 #include "nodes/pg_list.h"
@@ -67,7 +61,6 @@
 #include "nodes/value.h"
 #include "nodes/parsenodes_common.h"
 #include "parser/gramparse.h"
-//#include "parser/analyze.h"
 #include "nodes/makefuncs.h"
 #include "catalog/pg_class.h"
 #include "commands/defrem.h"
@@ -167,9 +160,9 @@ static Node *makeCallFuncStmt(List* funcname, List* parameters, core_yyscan_t yy
 extern THR_LOCAL bool stmt_contains_operator_plus;
 %}
 
-%pure-parser
+%define api.pure
 %expect 1
-%name-prefix="base_yy"
+%name-prefix "base_yy"
 %locations
 
 %parse-param {core_yyscan_t yyscanner}
@@ -337,9 +330,9 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 %type <node>	columnDef columnOptions
 %type <defelt>  def_elem
 %type <defelt>	reloption_elem
-%type <node>	def_arg columnElem where_clause where_or_current_clause
+%type <node>	def_arg columnElem where_clause where_or_current_clause start_with_expr connect_by_expr
 				a_expr b_expr c_expr c_expr_noparen func_expr AexprConst indirection_el
-				columnref in_expr having_clause func_table array_expr
+				columnref in_expr start_with_clause having_clause func_table array_expr
 				ExclusionWhereClause
 %type <list>	ExclusionConstraintList ExclusionConstraintElem
 %type <list>	func_arg_list
@@ -500,16 +493,16 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 /* ordinary key words in alphabetical order */
 /* PGXC - added DISTRIBUTE, DIRECT, COORDINATOR, CLEAN,  NODE, BARRIER */
 %token <keyword> ABORT_P ABSOLUTE_P ACCESS ACCOUNT ACTION ADD_P ADMIN AFTER
-	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP ARCHIVE ARRAY AS ASC
+	AGGREGATE ALGORITHM ALL ALSO ALTER ALWAYS ANALYSE ANALYZE AND ANY APP APPEND ARCHIVE ARRAY AS ASC
 	ASSERTION ASSIGNMENT ASYMMETRIC AT ATTRIBUTE AUDIT AUDIT_POLICY AUTHID AUTHORIZATION AUTOEXTEND AUTOMAPPED
 
-	BACKWARD BARRIER BEFORE BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_FLOAT BINARY_INTEGER BIT BLOB_P BLOCKCHAIN BODY_P BOGUS
+	BACKWARD BARRIER BEFORE BEGIN_NON_ANOYBLOCK BEGIN_P BETWEEN BIGINT BINARY BINARY_DOUBLE BINARY_INTEGER BIT BLANKS BLOB_P BLOCKCHAIN BODY_P BOGUS
 	BOOLEAN_P BOTH BUCKETCNT BUCKETS BY BYTEAWITHOUTORDER BYTEAWITHOUTORDERWITHEQUAL
 
 	CACHE CALL CALLED CASCADE CASCADED CASE CAST CATALOG_P CHAIN CHAR_P
-	CHARACTER CHARACTERISTICS CHECK CHECKPOINT CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
-	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COLUMN_ARGS COLUMN_FUNCTION COMMENT COMMENTS COMMIT
-	COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPRESS CONDITION CONCURRENTLY CONFIGURATION CONNECTION CONSTRAINT CONSTRAINTS
+	CHARACTER CHARACTERISTICS CHARACTERSET CHECK CHECKPOINT CLASS CLEAN CLIENT CLIENT_MASTER_KEY CLIENT_MASTER_KEYS CLOB CLOSE
+	CLUSTER COALESCE COLLATE COLLATION COLUMN COLUMN_ENCRYPTION_KEY COLUMN_ENCRYPTION_KEYS COMMENT COMMENTS COMMIT
+	CONNECT COMMITTED COMPACT COMPATIBLE_ILLEGAL_CHARS COMPLETE COMPRESS CONDITION CONCURRENTLY CONFIGURATION CONNECTBY CONNECTION CONSTANT CONSTRAINT CONSTRAINTS
 	CONTENT_P CONTINUE_P CONTVIEW CONVERSION_P COORDINATOR COORDINATORS COPY COST CREATE
 	CROSS CSN CSV CUBE CURRENT_P
 	CURRENT_CATALOG CURRENT_DATE CURRENT_ROLE CURRENT_SCHEMA
@@ -522,21 +515,21 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 /* PGXC_END */
 	DROP DUPLICATE DISCONNECT
 
-	EACH ELASTIC ELSE ENABLE_P ENCODING ENCRYPTED ENCRYPTED_VALUE ENCRYPTION ENCRYPTION_TYPE
+	EACH ELASTIC ELSE ENABLE_P ENCLOSED ENCODING ENCRYPTED ENCRYPTED_VALUE ENCRYPTION ENCRYPTION_TYPE
 	END_P ENFORCED ENUM_P ERRORS ESCAPE EOL ESCAPING EVERY EXCEPT EXCHANGE
 	EXCLUDE EXCLUDED EXCLUDING EXCLUSIVE EXECUTE EXPIRED_P EXISTS EXPLAIN
 	EXTENSION EXTERNAL EXTRACT 
 
-	FALSE_P FAMILY FAST FENCED FETCH FILEHEADER_P FILL_MISSING_FIELDS FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOR FORCE FOREIGN FORMATTER FORWARD
+	FALSE_P FAMILY FAST FENCED FETCH FIELDS FILEHEADER_P FILL_MISSING_FIELDS FILLER FILTER FIRST_P FIXED_P FLOAT_P FOLLOWING FOR FORCE FOREIGN FORMATTER FORWARD
 	FEATURES // DB4AI
 	FREEZE FROM FULL FUNCTION FUNCTIONS
 
-	GENERATED GLOBAL GLOBAL_FUNCTION GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
+	GENERATED GLOBAL GRANT GRANTED GREATEST GROUP_P GROUPING_P GROUPPARENT
 
 	HANDLER HAVING HDFSDIRECTORY HEADER_P HOLD HOUR_P
 
 	IDENTIFIED IDENTITY_P IF_P IGNORE_EXTRA_DATA ILIKE IMMEDIATE IMMUTABLE IMPLICIT_P IN_P
-	INCLUDE INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
+	INCLUDE INCLUDING INCREMENT INCREMENTAL INDEX INDEXES INFILE INHERIT INHERITS INITIAL_P INITIALLY INITRANS INLINE_P
 	INNER_P INOUT INPUT_P INSENSITIVE INSERT INSTEAD INT_P INTEGER INTERNAL
 	INTERSECT INTERVAL INTO INVOKER IP IS ISNULL ISOLATION
 
@@ -550,9 +543,9 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 	MAPPING MASKING MASTER MASTR MATCH MATERIALIZED MATCHED MAXEXTENTS MAXSIZE MAXTRANS MAXVALUE MERGE MINUS_P MINUTE_P MINVALUE MINEXTENTS MODE MODIFY_P MONTH_P MOVE MOVEMENT
 	MODEL // DB4AI
 	NAME_P NAMES NATIONAL NATURAL NCHAR NEXT NLSSORT NO NOCOMPRESS NOCYCLE NODE NOLOGGING NOMAXVALUE NOMINVALUE NONE
-	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR NVARCHAR2 NVL
+	NOT NOTHING NOTIFY NOTNULL NOWAIT NULL_P NULLCOLS NULLIF NULLS_P NUMBER_P NUMERIC NUMSTR NVARCHAR2 NVL
 
-	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONS OR
+	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTIMIZATION OPTION OPTIONALLY OPTIONS OR
 	ORDER OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER
 
 	PACKAGE PARSER PARTIAL PARTITION PARTITIONS PASSING PASSWORD PCTFREE PER_P PERCENT PERFORMANCE PERM PLACING PLAN PLANS POLICY POSITION
@@ -563,29 +556,29 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 /* PGXC_BEGIN */
 	PREFERRED PREFIX PRESERVE PREPARE PREPARED PRIMARY
 /* PGXC_END */
-	PRIVATE PRIOR PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE PUBLICATION PUBLISH PURGE
+	PRIVATE PRIOR PRIORER PRIVILEGES PRIVILEGE PROCEDURAL PROCEDURE PROFILE PUBLICATION PUBLISH PURGE
 
 	QUERY QUOTE
 
 	RANDOMIZED RANGE RATIO RAW READ REAL REASSIGN REBUILD RECHECK RECURSIVE RECYCLEBIN REDISANYVALUE REF REFERENCES REFRESH REINDEX REJECT_P
 	RELATIVE_P RELEASE RELOPTIONS REMOTE_P REMOVE RENAME REPEATABLE REPLACE REPLICA
 	RESET RESIZE RESOURCE RESTART RESTRICT RETURN RETURNING RETURNS REUSE REVOKE RIGHT ROLE ROLES ROLLBACK ROLLUP
-	ROTATION ROW ROWNUM ROWS RULE
+	ROTATION ROW ROWNUM ROWS ROWTYPE_P RULE
 
 	SAMPLE SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
-	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF  SHARE SHIPPABLE SHOW SHUTDOWN
-	SIMILAR SIMPLE SIZE SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START
-	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBSCRIPTION SUBSTRING
+	SERIALIZABLE SERVER SESSION SESSION_USER SET SETS SETOF  SHARE SHIPPABLE SHOW SHUTDOWN SIBLINGS
+	SIMILAR SIMPLE SIZE SKIP SLICE SMALLDATETIME SMALLDATETIME_FORMAT_P SMALLINT SNAPSHOT SOME SOURCE_P SPACE SPILL SPLIT STABLE STANDALONE_P START STARTWITH
+	STATEMENT STATEMENT_ID STATISTICS STDIN STDOUT STORAGE STORE_P STORED STRATIFY STREAM STRICT_P STRIP_P SUBPARTITION SUBSCRIPTION SUBSTRING SWLEVEL SWNOCYCLE SWROWNUM
 	SYMMETRIC SYNONYM SYSDATE SYSID SYSTEM_P SYS_REFCURSOR
 
-	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
+	TABLE TABLES TABLESAMPLE TABLESPACE TARGET TEMP TEMPLATE TEMPORARY TERMINATED TEXT_P THAN THEN TIME TIME_FORMAT_P TIMECAPSULE TIMESTAMP TIMESTAMP_FORMAT_P TIMESTAMPDIFF TINYINT
 	TO TRAILING TRANSACTION TRANSFORM TREAT TRIGGER TRIM TRUE_P
 	TRUNCATE TRUSTED TSFIELD TSTAG TSTIME TYPE_P TYPES_P
 
 	UNBOUNDED UNCOMMITTED UNENCRYPTED UNION UNIQUE UNKNOWN UNLIMITED UNLISTEN UNLOCK UNLOGGED
-	UNTIL UNUSABLE UPDATE USER USING
+	UNTIL UNUSABLE UPDATE USEEOF USER USING
 
-	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIADIC VARRAY VARYING VCGROUP
+	VACUUM VALID VALIDATE VALIDATION VALIDATOR VALUE_P VALUES VARCHAR VARCHAR2 VARIABLES VARIADIC VARRAY VARYING VCGROUP
 	VERBOSE VERIFY VERSION_P VIEW VOLATILE
 
 	WEAK WHEN WHERE WHITESPACE_P WINDOW WITH WITHIN WITHOUT WORK WORKLOAD WRAPPER WRITE
@@ -610,7 +603,6 @@ extern THR_LOCAL bool stmt_contains_operator_plus;
 			REBUILD_PARTITION
 			MODIFY_PARTITION
 			NOT_ENFORCED
-			BEGIN_NON_ANOYBLOCK
 			VALID_BEGIN
 			DECLARE_CURSOR
 
@@ -6619,8 +6611,6 @@ MergeStmt:
 					m->join_condition = $8;
 					m->mergeWhenClauses = $9;
 
-					// m->hintState = create_hintstate($2);
-
 					$$ = (Node *)m;
 				}
 			;
@@ -6903,7 +6893,7 @@ select_clause:
  */
 simple_select:
 			SELECT hint_string opt_distinct target_list
-			into_clause from_clause where_clause
+			into_clause from_clause start_with_clause where_clause
 			group_clause having_clause window_clause
 				{
 					SelectStmt *n = makeNode(SelectStmt);
@@ -6911,10 +6901,11 @@ simple_select:
 					n->targetList = $4;
 					n->intoClause = $5;
 					n->fromClause = $6;
-					n->whereClause = $7;
-					n->groupClause = $8;
-					n->havingClause = $9;
-					n->windowClause = $10;
+                    			n->startWithClause = $7;
+					n->whereClause = $8;
+					n->groupClause = $9;
+					n->havingClause = $10;
+					n->windowClause = $11;
 					n->hasPlus = getOperatorPlusFlag();
 					$$ = (Node *)n;
 				}
@@ -7304,6 +7295,27 @@ having_clause:
 			HAVING a_expr							{ $$ = $2; }
 			| /*EMPTY*/								{ $$ = NULL; }
 		;
+
+start_with_clause:
+            STARTWITH start_with_expr CONNECT BY connect_by_expr
+                {
+                    StartWithClause *n = makeNode(StartWithClause);
+                    n->startWithExpr = $2;
+                    n->connectByExpr = $5;
+                    n->priorDirection = false;
+                    n->nocycle = false;
+                    $$ = (Node *) n;
+                }
+            | /*EMPTY*/                             { $$ = NULL; }
+        ;
+
+start_with_expr:
+            a_expr                                  { $$ = $1; }
+        ;
+
+connect_by_expr:
+            a_expr                                  { $$ = $1; }
+        ;
 
 for_locking_clause:
 			for_locking_items						{ $$ = $1; }
@@ -7994,11 +8006,6 @@ Numeric:	INT_P
 					$$ = SystemTypeName("float8");
 					$$->location = @1;
 				}
-			| BINARY_FLOAT
-				{
-					$$ = SystemTypeName("float4");
-					$$->location = @1;
-				}
 			| BINARY_INTEGER
 				{
 					$$ = SystemTypeName("int4");
@@ -8047,7 +8054,6 @@ opt_float:	'(' Iconst ')'
 					 * types - thomas 1997-09-18
 					 */
 					if ($2 < 1){
-						//feparser_printf("precision for type float must be at least 1 bit\n");
 						$$ = SystemTypeName("float4");
                         }
                         /*
@@ -8060,7 +8066,6 @@ opt_float:	'(' Iconst ')'
 					else if ($2 <= 53)
 						$$ = SystemTypeName("float8");
 					else{
-					    //feparser_printf("precision for type float must be less than 54 bits\n");
 						$$ = SystemTypeName("float4");
                         }
                         /*
@@ -8210,8 +8215,6 @@ character:	CHARACTER opt_varying
 			| CHAR_P opt_varying
 										{ $$ = (char *)($2 ? "varchar": "bpchar"); }
 			| NVARCHAR2
-										{ $$ = "nvarchar2"; }
-			| NVARCHAR
 										{ $$ = "nvarchar2"; }
 			| VARCHAR
 										{ $$ = "varchar"; }
@@ -10995,6 +10998,7 @@ unreserved_keyword:
 			| ALTER
 			| ALWAYS
 			| APP
+			| APPEND
 			| ASSERTION
 			| ASSIGNMENT
 			| AT
@@ -11010,6 +11014,7 @@ unreserved_keyword:
 			| BEFORE
 			| BEGIN_NON_ANOYBLOCK
 			| BEGIN_P
+			| BLANKS
 			| BLOB_P
 			| BLOCKCHAIN
 			| BODY_P
@@ -11022,6 +11027,7 @@ unreserved_keyword:
 			| CATALOG_P
 			| CHAIN
 			| CHARACTERISTICS
+			| CHARACTERSET
 			| CHECKPOINT
 			| CLASS
 			| CLEAN
@@ -11043,6 +11049,7 @@ unreserved_keyword:
 			| CONDITION
 			| CONFIGURATION
 			| CONNECTION
+			| CONSTANT
 			| CONSTRAINTS
 			| CONTENT_P
 			| CONTINUE_P
@@ -11089,6 +11096,7 @@ unreserved_keyword:
 			| DROP
 			| EACH
 			| ENABLE_P
+			| ENCLOSED
 			| ENCODING
 			| ENFORCED
 			| ENCRYPTED 
@@ -11113,8 +11121,10 @@ unreserved_keyword:
 			| FAMILY
 			| FAST
 			| FEATURES    // DB4AI
+			| FIELDS
 			| FILEHEADER_P
 			| FILL_MISSING_FIELDS
+			| FILLER
 			| FIRST_P
 			| FIXED_P
 			| FOLLOWING
@@ -11123,7 +11133,6 @@ unreserved_keyword:
 			| FORWARD
 			| GENERATED
 			| GLOBAL
-            | GLOBAL_FUNCTION
 			| GRANTED
 			| HANDLER
 			| HEADER_P
@@ -11142,6 +11151,7 @@ unreserved_keyword:
 			| INCREMENTAL
 			| INDEX
 			| INDEXES
+			| INFILE
 			| INHERIT
 			| INHERITS
 			| INITIAL_P
@@ -11212,6 +11222,7 @@ unreserved_keyword:
 			| NOTHING
 			| NOTIFY
 			| NOWAIT
+			| NULLCOLS
 			| NULLS_P
 			| NUMSTR
 			| OBJECT_P
@@ -11221,6 +11232,7 @@ unreserved_keyword:
 			| OPERATOR
 			| OPTIMIZATION
 			| OPTION
+			| OPTIONALLY
 			| OPTIONS
 			| OWNED
 			| OWNER
@@ -11310,6 +11322,7 @@ unreserved_keyword:
 			| SHUTDOWN
 			| SIMPLE
 			| SIZE
+			| SKIP
 			| SLICE
 			| SMALLDATETIME_FORMAT_P
 			| SNAPSHOT
@@ -11328,7 +11341,8 @@ unreserved_keyword:
 			| STORED
 			| STRICT_P
 			| STRIP_P
-			| SUBSCRIPTION
+			| SUBPARTITION
+            | SUBSCRIPTION
 			| SYNONYM
 			| SYS_REFCURSOR					{ $$ = "refcursor"; }
 			| SYSID
@@ -11339,6 +11353,7 @@ unreserved_keyword:
 			| TEMP
 			| TEMPLATE
 			| TEMPORARY
+			| TERMINATED
 			| TEXT_P
 			| THAN
 			| TIME_FORMAT_P
@@ -11364,12 +11379,14 @@ unreserved_keyword:
 			| UNTIL
 			| UNUSABLE
 			| UPDATE
+                        | USEEOF
 			| VACUUM
 			| VALID
 			| VALIDATE
 			| VALIDATION
 			| VALIDATOR
 			| VALUE_P
+			| VARIABLES
 			| VARYING
 			| VERSION_P
 			| VIEW
@@ -11402,7 +11419,6 @@ col_name_keyword:
 			  BETWEEN
 			| BIGINT
 			| BINARY_DOUBLE
-			| BINARY_FLOAT
 			| BINARY_INTEGER
 			| BIT
 			| BOOLEAN_P
@@ -11430,7 +11446,6 @@ col_name_keyword:
 			| NUMBER_P
 			| NUMERIC
 			| NVARCHAR2
-			| NVARCHAR
 			| NVL
 			| OUT_P
 			| OVERLAY
@@ -11526,6 +11541,8 @@ reserved_keyword:
 			| CHECK
 			| COLLATE
 			| COLUMN
+            | CONNECT
+            | CONNECTBY
 			| CONSTRAINT
 			| CREATE
 			| CURRENT_CATALOG
@@ -11576,7 +11593,8 @@ reserved_keyword:
 			| PERFORMANCE
 			| PLACING
 			| PRIMARY
-			| PROCEDURE
+		    | PRIORER
+            | PROCEDURE
 			| REFERENCES
 			| REJECT_P
 			| RETURN
@@ -11584,9 +11602,14 @@ reserved_keyword:
             | ROWNUM
 			| SELECT
 			| SESSION_USER
+			| SIBLINGS
 			| SOME
+            | STARTWITH
 			| SPLIT
-			| SYMMETRIC
+			| SWLEVEL
+            | SWNOCYCLE
+            | SWROWNUM
+            | SYMMETRIC
 			| SYSDATE
 			| TABLE
 			| THEN

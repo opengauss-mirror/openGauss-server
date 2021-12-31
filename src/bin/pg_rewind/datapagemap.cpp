@@ -22,15 +22,6 @@ struct datapagemap_iterator {
 };
 
 /*
- * clear a specified bitmap.
- */
-void datapagemap_clear(datapagemap_t* map)
-{
-    pg_free((void*)map->bitmap);
-    map->bitmapsize = 0;
-}
-
-/*
  * Add a block to the bitmap.
  */
 void datapagemap_add(datapagemap_t* map, BlockNumber blkno)
@@ -124,4 +115,5 @@ void datapagemap_print(datapagemap_t* map)
         pg_log(PG_DEBUG, "  block %u\n", blocknum);
 
     pg_free(iter);
+    iter = NULL;
 }

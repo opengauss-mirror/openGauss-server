@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -26,6 +27,7 @@
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
 #include "executor/functions.h"
+#include "executor/node/nodeCtescan.h"
 #include "executor/node/nodeModifyTable.h"
 #include "funcapi.h"
 #include "miscadmin.h"
@@ -95,6 +97,7 @@ typedef enum { CONTAIN_FUNCTION_ID, CONTAIN_MUTABLE_FUNCTION, CONTAIN_VOLATILE_F
 typedef struct {
     Oid funcid;
     checkFuntionType checktype;
+    bool deep;
 } check_function_context;
 
 typedef struct not_strict_context {
@@ -988,6 +991,7 @@ bool contain_mutable_functions(Node* clause)
 {
     check_function_context context;
     context.checktype = CONTAIN_MUTABLE_FUNCTION;
+    context.deep = false;
     return contain_specified_functions_walker<false>(clause, &context);
 }
 
@@ -1005,10 +1009,11 @@ bool contain_mutable_functions(Node* clause)
  * XXX we do not examine sub-selects to see if they contain uses of
  * volatile functions.	It's not real clear if that is correct or not...
  */
-bool contain_volatile_functions(Node* clause)
+bool contain_volatile_functions(Node* clause, bool deep)
 {
     check_function_context context;
     context.checktype = CONTAIN_VOLATILE_FUNTION;
+    context.deep = deep;
     return contain_specified_functions_walker<false>(clause, &context);
 }
 
@@ -1024,6 +1029,7 @@ bool contain_specified_function(Node* clause, Oid funcid)
     check_function_context context;
     context.funcid = funcid;
     context.checktype = CONTAIN_FUNCTION_ID;
+    context.deep = false;
     return contain_specified_functions_walker<false>(clause, &context);
 }
 
@@ -1135,6 +1141,9 @@ static bool contain_specified_functions_walker(Node* node, check_function_contex
     } else if (IsA(node, Rownum)) {
         /* ROWNUM is volatile */
         return context->checktype == CONTAIN_VOLATILE_FUNTION;
+    } else if (IsA(node, Query) && context->deep) {
+        /* Recurse into subselects */
+        return query_tree_walker((Query*)node, (bool (*)())contain_specified_functions_walker<isSimpleVar>, context, 0);
     }
     return expression_tree_walker(node, (bool (*)())contain_specified_functions_walker<isSimpleVar>, context);
 }
@@ -1154,6 +1163,7 @@ bool exec_simple_check_mutable_function(Node* clause)
 {
     check_function_context context;
     context.checktype = CONTAIN_MUTABLE_FUNCTION;
+    context.deep = false;
     return contain_specified_functions_walker<true>(clause, &context);
 }
 
@@ -3064,7 +3074,7 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
             Node* arg = NULL;
 
             arg = eval_const_expressions_mutator((Node*)ntest->arg, context);
-            if (arg && IsA(arg, RowExpr)) {
+            if (ntest->argisrow && arg && IsA(arg, RowExpr)) {
                 /*
                  * We break ROW(...) IS [NOT] NULL into separate tests on
                  * its component fields.  This form is usually more
@@ -3075,7 +3085,6 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
                 List* newargs = NIL;
                 ListCell* l = NULL;
 
-                AssertEreport(ntest->argisrow, MOD_OPT, "");
                 foreach (l, rarg->args) {
                     Node* relem = (Node*)lfirst(l);
 
@@ -3090,10 +3099,16 @@ Node* eval_const_expressions_mutator(Node* node, eval_const_expressions_context*
                             return makeBoolConst(false, false);
                         continue;
                     }
+                    /*
+                     * Else, make a scalar (argisrow == false) NullTest
+                     * for this field.  Scalar semantics are required
+                     * because IS [NOT] NULL doesn't recurse; see comments
+                     * in ExecEvalNullTest().
+                     */
                     newntest = makeNode(NullTest);
                     newntest->arg = (Expr*)relem;
                     newntest->nulltesttype = ntest->nulltesttype;
-                    newntest->argisrow = type_is_rowtype(exprType(relem));
+                    newntest->argisrow = false;
                     newargs = lappend(newargs, newntest);
                 }
                 /* If all the inputs were constants, result is TRUE */
@@ -4013,6 +4028,11 @@ static Expr* evaluate_function(Oid funcid, Oid result_type, int32 result_typmod,
     if (funcform->prorettype == RECORDOID)
         return NULL;
 
+    /* For hierarchical query the value is calculated in runtime stage, so just return */
+    if (IsHierarchicalQueryFuncOid(funcid)) {
+        return NULL;
+    }
+
     /*
      * Check for constant inputs and especially constant-NULL inputs.
      */
@@ -4568,73 +4588,6 @@ Expr* evaluate_expr(Expr* expr, Oid result_type, int32 result_typmod, Oid result
      */
     return (Expr*)makeConst(
         result_type, result_typmod, result_collation, resultTypLen, const_val, const_is_null, resultTypByVal);
-}
-
-/*
- * search_cte_by_parse_tree
- *	Attempt to find a CTE in parse tree of current level
- *
- * Parameters:
- *	@in root: planner info struct for current query level
- *	@in rte: cte table entry to substitute
- * Returns:
- *	substituted parse tree, or null if can't substituted
- */
-Query* search_cte_by_parse_tree(Query* parse, RangeTblEntry* rte, bool underRecursive)
-{
-    ListCell* lc = NULL;
-
-    /*
-     * Lookup current CTE by name
-     */
-    foreach (lc, parse->cteList) {
-        CommonTableExpr* cte = (CommonTableExpr*)lfirst(lc);
-
-        if (strcmp(cte->ctename, rte->ctename) == 0) {
-            Query* ctequery = (Query*)cte->ctequery;
-
-            /*
-             * For a recursive-cte and u_sess->attr.attr_sql.enable_stream_recursive is disabled, we disable
-             * streaming plan.
-             */
-            if (!u_sess->attr.attr_sql.enable_stream_recursive && cte->cterecursive) {
-                errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                    NOTPLANSHIPPING_LENGTH,
-                    "Unsupported CTE substitution causes SQL unshipped");
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
-                mark_stream_unsupport();
-            }
-
-            if (underRecursive && cte->cterecursive && !rte->self_reference) {
-                errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
-                    NOTPLANSHIPPING_LENGTH,
-                    "Recursive CTE references recursive CTE \"%s\"",
-                    cte->ctename);
-                securec_check_ss_c(sprintf_rc, "\0", "\0");
-                mark_stream_unsupport();
-            }
-
-            if (cte->cterecursive || !IsA(ctequery, Query) || ctequery->commandType != CMD_SELECT ||
-                ctequery->utilityStmt != NULL || ctequery->returningList != NIL) {
-                return NULL;
-            }
-
-            /*
-             * Always copy cte if it's referenced multiple times, to prevent other
-             * rewrite rules on some of cte. We don't know how many times it got
-             * referenced because the cte uses it can be referenced multiple times
-             */
-            ctequery = (Query*)copyObject(ctequery);
-
-            return ctequery;
-        }
-    }
-
-    ereport(ERROR,
-        (errmodule(MOD_OPT),
-            errcode(ERRCODE_OPTIMIZER_INCONSISTENT_STATE),
-            (errmsg("could not find CTE \"%s\"", rte->ctename))));
-    return NULL;
 }
 
 /*

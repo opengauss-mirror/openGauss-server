@@ -5,6 +5,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * src/include/executor/spi.h
  *
@@ -32,6 +33,8 @@ typedef struct _SPI_plan* SPIPlanPtr;
 typedef struct SPICachedPlanStack {
     CachedPlan* cplan;
     SPICachedPlanStack* previous;
+    SubTransactionId subtranid;
+    ResourceOwner owner;
 } SPIPlanStack;
 
 #define SPI_ERROR_CONNECT (-1)
@@ -132,7 +135,7 @@ extern void SPI_scroll_cursor_fetch(Portal, FetchDirection direction, long count
 extern void SPI_scroll_cursor_move(Portal, FetchDirection direction, long count);
 extern void SPI_cursor_close(Portal portal);
 extern void SPI_start_transaction(void);
-extern void SPI_stp_transaction_check(bool read_only);
+extern void SPI_stp_transaction_check(bool read_only, bool savepoint = false);
 extern void SPI_commit();
 extern void SPI_rollback();
 extern void SPI_save_current_stp_transaction_state();
@@ -157,8 +160,25 @@ extern List* _SPI_get_querylist(SPIPlanPtr plan);
 #ifdef PGXC
 extern int SPI_execute_direct(const char* src, char* nodename);
 #endif
+extern int _SPI_begin_call(bool execmem);
 extern int _SPI_end_call(bool procmem);
 extern void _SPI_hold_cursor();
 extern void _SPI_prepare_oneshot_plan_for_validator(const char* src, SPIPlanPtr plan);
 extern void InitSPIPlanCxt();
+extern void _SPI_prepare_plan(const char *src, SPIPlanPtr plan);
+extern ParamListInfo _SPI_convert_params(int nargs, Oid *argtypes, Datum *Values, const char *Nulls,
+    Cursor_Data *cursor_data = NULL);
+extern void _SPI_prepare_oneshot_plan(const char *src, SPIPlanPtr plan);
+extern int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot snapshot, Snapshot crosscheck_snapshot,
+    bool read_only, bool fire_triggers, long tcount, bool from_lock = false);
+
+extern int SPI_connectid();
+extern void SPI_disconnect(int connect);
+extern void SPI_savepoint_create(const char* spName);
+extern void SPI_savepoint_rollback(const char* spName);
+extern void SPI_savepoint_release(const char* spName);
+extern void SPI_savepoint_rollbackAndRelease(const char *spName, SubTransactionId subXid);
+
+extern ResourceOwner AddCplanRefAgainIfNecessary(SPIPlanPtr plan,
+    CachedPlanSource* plansource, CachedPlan* cplan, TransactionId oldTransactionId, ResourceOwner oldOwner);
 #endif /* SPI_H */

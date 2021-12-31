@@ -224,7 +224,6 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, IndexBu
         UBTreePagePruneExecute(page, prstate.previousdead, npreviousDead, &prstate);
         UBTreePagePruneExecute(page, prstate.nowdead, prstate.ndead, &prstate);
 
-
         UBTreePageRepairFragmentation(page);
 
         has_pruned = true;
@@ -233,7 +232,6 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, IndexBu
          * Update the page's pd_prune_xid field to either zero, or the lowest
          * XID of any soon-prunable tuple.
          */
-
         PageSetPruneXid(page, prstate.new_prune_xid);
         opaque->activeTupleCount = activeTupleCount;
 
@@ -268,8 +266,7 @@ bool UBTreePagePrune(Relation rel, Buffer buf, TransactionId oldestXmin, IndexBu
          * point in repeating the prune/defrag process until something else
          * happens to the page.
          */
-        if (PageGetPruneXid(page) != prstate.new_prune_xid ||
-            opaque->activeTupleCount != activeTupleCount) {
+        if (PageGetPruneXid(page) != prstate.new_prune_xid || opaque->activeTupleCount != activeTupleCount) {
             PageSetPruneXid(page, prstate.new_prune_xid);
             opaque->activeTupleCount = activeTupleCount;
             MarkBufferDirtyHint(buf, true);
@@ -293,7 +290,8 @@ bool UBTreePruneItem(Page page, OffsetNumber offnum, TransactionId oldestXmin, I
     bool xminCommitted = false;
     bool xmaxCommitted = false;
 
-    isDead = UBTreeItupGetXminXmax(page, offnum, oldestXmin, &xmin, &xmax, &xminCommitted, &xmaxCommitted);
+    isDead = UBTreeItupGetXminXmax(page, offnum, oldestXmin, &xmin, &xmax,
+        &xminCommitted, &xmaxCommitted);
     /*
     * INDEXTUPLE_DEAD: xmin invalid || xmax frozen
     * INDEXTUPLE_DELETED: xmax valid && xmax committed
@@ -1316,6 +1314,11 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
     /* Since we already have write-lock on both pages, ok to read cycleid */
     lopaque->btpo_cycleid = _bt_vacuum_cycleid(rel);
     ropaque->btpo_cycleid = lopaque->btpo_cycleid;
+    /* copy other fields */
+    lopaque->last_delete_xid = oopaque->last_delete_xid;
+    ropaque->last_delete_xid = oopaque->last_delete_xid;
+    lopaque->xid_base = oopaque->xid_base;
+    ropaque->xid_base = oopaque->xid_base;
     /* reset the active hint, update later */
     lopaque->activeTupleCount = 0;
     ropaque->activeTupleCount = 0;
@@ -1661,16 +1664,19 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
 
     /* XLOG stuff */
     if (RelationNeedsWAL(rel)) {
-        xl_btree_split xlrec;
+        xl_ubtree_split xlrec;
         uint8 xlinfo;
         XLogRecPtr recptr;
 
         xlrec.level = ropaque->btpo.level;
         xlrec.firstright = firstrightoff;
         xlrec.newitemoff = newitemoff;
+        xlrec.opaqueVersion = UBTREE_OPAQUE_VERSION_RCR;
+        xlrec.lopaque = *(UBTPageOpaqueInternal)PageGetSpecialPointer(origpage);
+        xlrec.ropaque = *ropaque;
 
         XLogBeginInsert();
-        XLogRegisterData((char *)&xlrec, SizeOfBtreeSplit);
+        XLogRegisterData((char *)&xlrec, SizeOfUBtreeSplit);
         XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
         XLogRegisterBuffer(1, rbuf, REGBUF_WILL_INIT);
         /* Log the right sibling, because we've changed its' prev-pointer. */
@@ -1723,7 +1729,7 @@ static Buffer UBTreeSplit(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber fi
         } else {
             xlinfo = newitemonleft ? XLOG_UBTREE_SPLIT_L : XLOG_UBTREE_SPLIT_R;
         }
-        recptr = XLogInsert(RM_UBTREE_ID, xlinfo);
+        recptr = XLogInsert(RM_UBTREE_ID, xlinfo | BTREE_SPLIT_OPAQUE_FLAG);
 
         PageSetLSN(origpage, recptr);
         PageSetLSN(rightpage, recptr);

@@ -1,3 +1,5 @@
+create database pl_test_llt DBCOMPATIBILITY 'pg';
+\c pl_test_llt
 --int1
 create table source(a int);
 insert into source values(1);
@@ -357,3 +359,5 @@ ALTER TEXT SEARCH DICTIONARY my_dict ( StopWords = newrussian );
 
 drop table t1 CASCADE;
 drop table test_raw cascade;
+\c regression;
+drop database IF EXISTS pl_test_llt;

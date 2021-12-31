@@ -6,6 +6,7 @@
  * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -21,6 +22,7 @@
 #include "knl/knl_variable.h"
 
 #include "access/transam.h"
+#include "catalog/dependency.h"
 #include "catalog/pg_type.h"
 #include "miscadmin.h"
 #include "parser/parse_type.h"
@@ -978,6 +980,18 @@ TupleDesc BuildDescForRelation(List *schema, Node *orientedFrom, char relkind)
         attname = entry->colname;
 
         typenameTypeIdAndMod(NULL, entry->typname, &atttypid, &atttypmod);
+#ifndef ENABLE_MULTIPLE_NODES
+    /* don't allow package or procedure type as column type */
+    if (u_sess->plsql_cxt.curr_compile_context == NULL && IsPackageDependType(atttypid, InvalidOid)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_DATATYPE_MISMATCH),
+                errmodule(MOD_PLSQL),
+                errmsg("type \"%s\" is not supported as column type", TypeNameToString(entry->typname)),
+                errdetail("\"%s\" is a package or procedure type", TypeNameToString(entry->typname)),
+                errcause("feature not supported"),
+                erraction("check type name")));
+    }
+#endif
         if (relkind == RELKIND_COMPOSITE_TYPE && IS_PGXC_COORDINATOR) {
             HeapTuple typTupe;
             Form_pg_type typForm;

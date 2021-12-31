@@ -36,6 +36,10 @@
 #include "comm_connection.h"
 #include "executor/executor.h"
 
+#ifdef ENABLE_UT
+#define static
+#endif
+
 static void ProcessControlRequest(ThreadPoolCommunicator* comm);
 static void ProcessRecvRequest(ThreadPoolCommunicator* comm);
 static void ProcessSendRequest(ThreadPoolCommunicator* comm);

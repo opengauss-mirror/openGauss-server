@@ -69,7 +69,6 @@ extern unsigned long DEFULTMSGLEN;
 extern unsigned long LIBCOMM_BUFFER_SIZE;
 
 #define QUEUE_SIZE 65535
-#define REPEAT 10
 #define BIG_REPEAT 1000000
 #define MAX_BIND_RETRYS 30
 #define BODYSIZE 10

@@ -7,7 +7,7 @@ set(TGT_alarmclient_INC
 )
 
 set(alarmclient_DEF_OPTIONS ${MACRO_OPTIONS})
-set(alarmclient_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} -g3 -ggdb3 -lsecurec ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${BIN_SECURE_OPTIONS} ${CHECK_OPTIONS} -O3)
+set(alarmclient_COMPILE_OPTIONS ${OPTIMIZE_OPTIONS} -g3 -ggdb3 -lsecurec ${OS_OPTIONS} ${PROTECT_OPTIONS} ${WARNING_OPTIONS} ${LIB_SECURE_OPTIONS} ${CHECK_OPTIONS} -O3)
 list(REMOVE_ITEM alarmclient_COMPILE_OPTIONS -O2)
 add_static_libtarget(alarmclient TGT_alarmclient_SRC TGT_alarmclient_INC "${alarmclient_DEF_OPTIONS}" "${alarmclient_COMPILE_OPTIONS}")
 target_link_directories(alarmclient_static PRIVATE ${SECURE_LIB_PATH})

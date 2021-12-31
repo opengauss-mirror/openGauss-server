@@ -337,19 +337,29 @@ static void AddPartcacheInvalidationMessage(InvalidationListHeader* hdr, Oid dbI
 }
 
 /* function invalid and it's plan cache is invalid, need be removed */
-static void AddFunctionCacheInvalidationMessage(InvalidationListHeader* hdr, Oid dbId, Oid funcOid)
+static void AddFunctionCacheInvalidationMessage(InvalidationListHeader* hdr, Oid dbId, Oid funcOid, Oid pkgOid)
 {
     SharedInvalidationMessage msg;
+    int cacheId = PACKAGEOID;
+    Oid objId = InvalidOid;
+    if (pkgOid == InvalidOid) {
+        cacheId = PROCOID;
+        objId = funcOid;
+    } else {
+        cacheId = PACKAGEOID;
+        objId = pkgOid;
+    }
 
     /* Don't add a duplicate item */
     /* We assume dbId need not be checked because it will never change */
     ProcessMessageList(hdr->rclist,
-        if (msg->fm.id == SHAREDINVALFUNC_ID && msg->fm.funcOid == funcOid) return );
+        if (msg->fm.id == SHAREDINVALFUNC_ID && msg->fm.cacheId == cacheId && msg->fm.objId == objId) return );
 
     /* OK, add the item */
     msg.fm.id = SHAREDINVALFUNC_ID;
     msg.fm.dbId = dbId;
-    msg.fm.funcOid = funcOid;
+    msg.fm.cacheId = cacheId;
+    msg.fm.objId = objId;
     AddInvalidationMessage(&hdr->rclist, &msg);
 }
 
@@ -553,7 +563,7 @@ void LocalExecuteInvalidationMessage(SharedInvalidationMessage* msg)
         }
     } else if (msg->id == SHAREDINVALFUNC_ID) {
         if (msg->fm.dbId == u_sess->proc_cxt.MyDatabaseId || msg->fm.dbId == InvalidOid) {
-            plpgsql_HashTableDeleteFunc(msg->fm.funcOid);
+            plpgsql_HashTableDeleteAndCheckFunc(msg->fm.cacheId, msg->fm.objId);
         }
     } else {
         ereport(FATAL, (errmsg("unrecognized SI message ID: %d", msg->id)));
@@ -1099,11 +1109,12 @@ void CacheInvalidateHeapTuple(Relation relation, HeapTuple tuple, HeapTuple newt
     RegisterRelcacheInvalidation(databaseId, relationId);
 }
 
-void CacheInvalidateFunction(Oid funcId)
+void CacheInvalidateFunction(Oid funcId, Oid pkgId)
 {
     AddFunctionCacheInvalidationMessage(&u_sess->inval_cxt.transInvalInfo->CurrentCmdInvalidMsgs,
-                                        u_sess->proc_cxt.MyDatabaseId, funcId);
+                                        u_sess->proc_cxt.MyDatabaseId, funcId, pkgId);
 }
+
 /*
  * CacheInvalidateCatalog
  *		Register invalidation of the whole content of a system catalog.

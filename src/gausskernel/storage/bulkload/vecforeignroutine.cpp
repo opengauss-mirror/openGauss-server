@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  * openGauss is licensed under Mulan PSL v2.
  * You can use this software according to the terms and conditions of the Mulan PSL v2.
@@ -74,6 +75,7 @@ bool TrySaveImportError(DistImportExecutionState *importState, ForeignScanState 
 
 bool TrySaveImportError(CopyState cstate)
 {
+    cstate->errorrows++;
     if ((ERRCODE_TO_CATEGORY((unsigned int)geterrcode()) == ERRCODE_DATA_EXCEPTION) && DoAcceptOneError(cstate)) {
         FormAndSaveImportError(cstate, cstate->err_table, cstate->copy_beginTime, cstate->logger);
         // clear error state

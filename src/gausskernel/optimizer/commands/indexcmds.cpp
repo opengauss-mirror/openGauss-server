@@ -7,6 +7,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  * Portions Copyright (c) 2010-2012 Postgres-XC Development Group
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -295,6 +296,27 @@ bool CheckIndexCompatible(Oid oldId, char* accessMethodName, List* attributeList
     return ret;
 }
 
+static void CheckPartitionUniqueKey(Relation rel, int2vector *partKey, IndexStmt *stmt, int numberOfAttributes)
+{
+    int j;
+
+    if (partKey->dim1 > numberOfAttributes) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                        errmsg("unique index columns must contain the partition key")));
+    }
+
+    for (j = 0; j < partKey->dim1; j++) {
+        int2 attNum = partKey->values[j];
+        Form_pg_attribute att_tup = rel->rd_att->attrs[attNum - 1];
+
+        if (!columnIsExist(rel, att_tup, stmt->indexParams)) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                            errmsg("unique index columns must contain the partition key and collation must be default "
+                                   "collation")));
+        }
+    }
+}
+
 /*
  * DefineIndex
  *		Creates a new index.
@@ -354,6 +376,11 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     StdRdOptions* index_relopts;
     int8 indexsplitMethod = INDEXSPLIT_NO_DEFAULT;
     int crossbucketopt = -1;
+    List *subPartTspList = NULL;
+    List *subPartitionIndexDef = NULL;
+    List *subPartitionTupleList = NULL;
+    List *subPartitionOidList = NULL;
+    List *partitionOidList = NULL;
 
     /*
      * Force non-concurrent build on temporary relations, even if CONCURRENTLY
@@ -368,6 +395,14 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         concurrent = true;
     } else {
         concurrent = false;
+    }
+
+    /* Don't suppport gin/gist index on global temporary table */
+    if (relPersistence == RELPERSISTENCE_GLOBAL_TEMP &&
+       (strcmp(stmt->accessMethod, "gin") == 0 || strcmp(stmt->accessMethod, "gist") == 0)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                errmsg("access method \"%s\" is not support for global temporary table index", stmt->accessMethod)));
     }
 
     /*
@@ -420,7 +455,21 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
              * If index key of unique or primary key index include the partition key,
              * default index is set to local index. Otherwise, set to global index.
              */
-            stmt->isGlobal = !CheckIdxParamsOwnPartKey(rel, stmt->indexParams);
+            if (RelationIsSubPartitioned(rel)) {
+                List *partOidList = relationGetPartitionOidList(rel);
+                Assert(list_length(partOidList) != 0);
+                Partition part = partitionOpen(rel, linitial_oid(partOidList), NoLock);
+                Relation partRel = partitionGetRelation(rel, part);
+                stmt->isGlobal = !(CheckIdxParamsOwnPartKey(rel, stmt->indexParams) &&
+                                   CheckIdxParamsOwnPartKey(partRel, stmt->indexParams));
+                releaseDummyRelation(&partRel);
+                partitionClose(rel, part, NoLock);
+                if (partOidList != NULL) {
+                    releasePartitionOidList(&partOidList);
+                }
+            } else {
+                stmt->isGlobal = !CheckIdxParamsOwnPartKey(rel, stmt->indexParams);
+            }
         } else if (!stmt->isPartitioned) {
             /* default partition index is set to Global index */
             stmt->isGlobal = (!DEFAULT_CREATE_LOCAL_INDEX ? true : stmt->isGlobal);
@@ -480,10 +529,12 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("non-partitioned table does not support %s partitioned indexes ",
                         stmt->isGlobal ? "global" : "local")));
+#ifdef ENABLE_MULTIPLE_NODES
         } else if (stmt->deferrable && stmt->unique) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Partition table does not support to set deferrable.")));
+#endif
         } else if (stmt->isGlobal && stmt->whereClause != NULL) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -594,7 +645,8 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     }
 
     /* Check permissions except when using database's default */
-    if (stmt->isPartitioned && !stmt->isGlobal) { // LOCAL partition index check
+    if (stmt->isPartitioned && !stmt->isGlobal) {
+        /* LOCAL partition index check */
         ListCell* cell = NULL;
 
         partitionTableList = searchPgPartitionByParentId(PART_OBJ_TYPE_TABLE_PARTITION, relationId);
@@ -603,6 +655,11 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
                     errmsg("when creating partitioned index, get table partitions failed")));
+        }
+
+        if (RelationIsSubPartitioned(rel)) {
+            subPartitionTupleList =
+                searchPgSubPartitionByParentId(PART_OBJ_TYPE_TABLE_SUB_PARTITION, partitionTableList);
         }
 
         if (PointerIsValid(stmt->partClause)) {
@@ -619,24 +676,79 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
                                "underlying table")));
             }
         } else {
-            /* construct the index list */
-            for (i = 0; i < partitionTableList->length; i++) {
-                RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
-                partitionIndexdef = lappend(partitionIndexdef, def);
+            if (!RelationIsSubPartitioned(rel)) {
+                /* construct the index list */
+                for (i = 0; i < partitionTableList->length; i++) {
+                    RangePartitionindexDefState* def = makeNode(RangePartitionindexDefState);
+                    partitionIndexdef = lappend(partitionIndexdef, def);
+                }
+            } else {
+                int j = 0;
+                /* construct the index list */
+                foreach (cell, subPartitionTupleList) {
+                    List *sub = (List *)lfirst(cell);
+                    List *partSubIndexDef = NULL;
+                    for (j = 0; j < sub->length; j++) {
+                        RangePartitionindexDefState *def = makeNode(RangePartitionindexDefState);
+                        partSubIndexDef = lappend(partSubIndexDef, def);
+                    }
+
+                    subPartitionIndexDef = lappend(subPartitionIndexDef, partSubIndexDef);
+                }
+                foreach (cell, partitionTableList) {
+                    HeapTuple tuple = (HeapTuple)lfirst(cell);
+                    Oid partOid = HeapTupleGetOid(tuple);
+                    partitionOidList = lappend_oid(partitionOidList, partOid);
+                }
+                foreach (cell, subPartitionTupleList) {
+                    List* subPartTuples = (List*)lfirst(cell);
+                    ListCell* lc = NULL;
+                    List* subPartOids = NIL;
+                    foreach (lc, subPartTuples) {
+                        HeapTuple tuple = (HeapTuple)lfirst(lc);
+                        Oid subPartOid = HeapTupleGetOid(tuple);
+                        subPartOids = lappend_oid(subPartOids, subPartOid);
+                    }
+                    subPartitionOidList = lappend(subPartitionOidList, subPartOids);
+                }
             }
         }
 
         freePartList(partitionTableList);
 
-        foreach (cell, partitionIndexdef) {
-            RangePartitionindexDefState* def = (RangePartitionindexDefState*)lfirst(cell);
+        if (subPartitionTupleList != NULL) {
+            freeSubPartList(subPartitionTupleList);
+        }
 
-            if (NULL != def->tablespace) {
-                /* use partition tablespace if user defines */
-                partitiontspList = lappend_oid(partitiontspList, get_tablespace_oid(def->tablespace, false));
-            } else {
-                /* use partitioned table' tablespace if user doesnt define */
-                partitiontspList = lappend_oid(partitiontspList, tablespaceId);
+        if (!RelationIsSubPartitioned(rel)) {
+            foreach (cell, partitionIndexdef) {
+                RangePartitionindexDefState* def = (RangePartitionindexDefState*)lfirst(cell);
+
+                if (NULL != def->tablespace) {
+                    /* use partition tablespace if user defines */
+                    partitiontspList = lappend_oid(partitiontspList, get_tablespace_oid(def->tablespace, false));
+                } else {
+                    /* use partitioned table' tablespace if user doesnt define */
+                    partitiontspList = lappend_oid(partitiontspList, tablespaceId);
+                }
+            }
+        } else {
+            for (i = 0; i < subPartitionIndexDef->length; i++) {
+                List *sub = (List *)list_nth(subPartitionIndexDef, i);
+                partitiontspList = NULL;
+                foreach (cell, sub)
+                {
+                    RangePartitionindexDefState* def = (RangePartitionindexDefState*)lfirst(cell);
+                    if (NULL != def->tablespace) {
+                        /* use partition tablespace if user defines */
+                        partitiontspList = lappend_oid(partitiontspList, get_tablespace_oid(def->tablespace, false));
+                    } else {
+                        /* use partitioned table' tablespace if user doesnt define */
+                        partitiontspList = lappend_oid(partitiontspList, tablespaceId);
+                    }
+                }
+
+                subPartTspList = lappend(subPartTspList, partitiontspList);
             }
         }
     }
@@ -687,25 +799,17 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
          * For global partition index, we cancel this check.
          */
         if (stmt->unique && !stmt->isGlobal) {
-            int2vector* partKey = ((RangePartitionMap*)rel->partMap)->partitionKey;
-            int j = 0;
-
-            if (partKey->dim1 > numberOfAttributes) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                        errmsg("unique index columns must contain the partition key")));
-            }
-
-            for (; j < partKey->dim1; j++) {
-                int2 attNum = partKey->values[j];
-                Form_pg_attribute att_tup = rel->rd_att->attrs[attNum - 1];
-
-                if (!columnIsExist(rel, att_tup, stmt->indexParams)) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                            errmsg("unique index columns must contain the partition key and collation must be default "
-                                   "collation")));
-                }
+            int2vector* partKey = GetPartitionKey(rel->partMap);
+            CheckPartitionUniqueKey(rel, partKey, stmt, numberOfAttributes);
+            if (RelationIsSubPartitioned(rel)) {
+                List *partOidList = relationGetPartitionOidList(rel);
+                Assert(list_length(partOidList) != 0);
+                Partition part = partitionOpen(rel, linitial_oid(partOidList), NoLock);
+                Relation partRel = partitionGetRelation(rel, part);
+                int2vector* subPartKey = GetPartitionKey(partRel->partMap);
+                CheckPartitionUniqueKey(partRel, subPartKey, stmt, numberOfAttributes);
+                releaseDummyRelation(&partRel);
+                partitionClose(rel, part, NoLock);
             }
         }
     }
@@ -1139,80 +1243,175 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             indexInfo->ii_BrokenHotChain = false;
             partExtra.crossbucket = stmt->crossbucket;
 
-            if (!PointerIsValid(partitionIndexdef)) {
-                ereport(ERROR,
-                    (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-                        errmsg("fail to get index info when create index partition")));
-            }
+            if (!RelationIsSubPartitioned(rel)) {
+                if (!PointerIsValid(partitionIndexdef)) {
+                    ereport(ERROR,
+                                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                                 errmsg("fail to get index info when create index partition")));
+                }
 
-            partitionidlist = relationGetPartitionOidList(rel);
+                partitionidlist = relationGetPartitionOidList(rel);
+            } else {
+                if (!PointerIsValid(subPartitionIndexDef)) {
+                    ereport(ERROR,
+                                (errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
+                                 errmsg("fail to get index info when create index partition")));
+                }
+            }
             pg_partition_rel = heap_open(PartitionRelationId, RowExclusiveLock);
 
             // switch to partition memory context
             oldMemContext = MemoryContextSwitchTo(partitionIndexMemContext);
 
-            forthree(tspcell, partitiontspList, indexcell, partitionIndexdef, partitioncell, partitionidlist)
-            {
-                partitionid = lfirst_oid(partitioncell);
-                partitiontspid = lfirst_oid(tspcell);
-                indexdef = (RangePartitionindexDefState*)lfirst(indexcell);
+            if (!RelationIsSubPartitioned(rel)) {
+                forthree(tspcell, partitiontspList, indexcell, partitionIndexdef, partitioncell, partitionidlist)
+                {
+                    partitiontspid = lfirst_oid(tspcell);
+                    indexdef = (RangePartitionindexDefState*)lfirst(indexcell);
+                    partitionid = lfirst_oid(partitioncell);
 
-                /* reset the extra arguments data. */
-                partExtra.existingPSortOid = InvalidOid;
+                    /* reset the extra arguments data. */
+                    partExtra.existingPSortOid = InvalidOid;
 
-                if (PointerIsValid(stmt->partIndexOldNodes)) {
-                    Assert(stmt->partIndexOldPSortOid);
-                    partIndexFileNode = list_nth_oid(stmt->partIndexOldNodes, count);
-                    partExtra.existingPSortOid = list_nth_oid(stmt->partIndexOldPSortOid, count);
-                    count++;
-                }
-                if (u_sess->attr.attr_sql.enable_cluster_resize && stmt->partIndexUsable &&
-                    !stmt->partIndexUsable[indexnum++]) {
-                    ereport(LOG, (errmsg("In redistribution, the %dth partition of source index is unusable, "
-                        "the tmp table will skip.", indexnum)));
-                    continue;
-                }
-
-                partition = partitionOpen(rel, partitionid, ShareLock);
-
-                if (PointerIsValid(indexdef->name)) {
-                    Oid indexid = InvalidOid;
-
-                    indexid = GetSysCacheOid3(PARTPARTOID,
-                        PointerGetDatum(indexdef->name),
-                        CharGetDatum(PART_OBJ_TYPE_INDEX_PARTITION),
-                        ObjectIdGetDatum(indexRelationId));
-                    if (OidIsValid(indexid)) {
-                        ereport(ERROR,
-                            (errcode(ERRCODE_UNDEFINED_OBJECT),
-                                errmsg("index partition with name \"%s\" already exists", indexdef->name)));
+                    if (PointerIsValid(stmt->partIndexOldNodes)) {
+                        Assert(stmt->partIndexOldPSortOid);
+                        partIndexFileNode = list_nth_oid(stmt->partIndexOldNodes, count);
+                        partExtra.existingPSortOid = list_nth_oid(stmt->partIndexOldPSortOid, count);
+                        count++;
                     }
-                }
+                    if (u_sess->attr.attr_sql.enable_cluster_resize && stmt->partIndexUsable &&
+                        !stmt->partIndexUsable[indexnum++]) {
+                        ereport(LOG, (errmsg("In redistribution, the %dth partition of source index is unusable, "
+                            "the tmp table will skip.", indexnum)));
+                        continue;
+                    }
 
-                /* get index partition's name */
-                indexname =
-                    (NULL != indexdef->name)
+                    partition = partitionOpen(rel, partitionid, ShareLock);
+
+                    if (PointerIsValid(indexdef->name)) {
+                        Oid indexid = InvalidOid;
+
+                        indexid = GetSysCacheOid3(PARTPARTOID, PointerGetDatum(indexdef->name),
+                                                  CharGetDatum(PART_OBJ_TYPE_INDEX_PARTITION),
+                                                  ObjectIdGetDatum(indexRelationId));
+                        if (OidIsValid(indexid)) {
+                            ereport(ERROR,
+                                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                         errmsg("index partition with name \"%s\" already exists", indexdef->name)));
+                        }
+                    }
+
+                    /* get index partition's name */
+                    indexname =
+                        (NULL != indexdef->name)
                         ? indexdef->name
                         : ChoosePartitionIndexName(
-                              PartitionGetPartitionName(partition), indexRelationId, indexColNames, false, false);
+                                    PartitionGetPartitionName(partition), indexRelationId, indexColNames, false, false);
 
-                /* create index partition */
-                (void)partition_index_create(indexname,
-                    partIndexFileNode,
-                    partition,
-                    partitiontspid,
-                    partitionedIndex,
-                    rel,
-                    pg_partition_rel,
-                    indexInfo,
-                    indexColNames,
-                    reloptions,
-                    skip_build,
-                    &partExtra);
-                partitionClose(rel, partition, NoLock);
+                    /* create index partition */
+                    (void)partition_index_create(indexname,
+                                partIndexFileNode,
+                                partition,
+                                partitiontspid,
+                                partitionedIndex,
+                                rel,
+                                pg_partition_rel,
+                                indexInfo,
+                                indexColNames,
+                                reloptions,
+                                skip_build,
+                                &partExtra);
+                    partitionClose(rel, partition, NoLock);
 
-                // reset memory context
-                MemoryContextReset(partitionIndexMemContext);
+                    // reset memory context
+                    MemoryContextReset(partitionIndexMemContext);
+                }
+            } else {
+                ListCell *subTspCell = NULL;
+                ListCell *subIndexCell = NULL;
+                ListCell *subPartCell = NULL;
+                int partIdx = 0;
+                forthree(subTspCell, subPartTspList, subIndexCell, subPartitionIndexDef, subPartCell,
+                         subPartitionOidList)
+                {
+                    partitiontspList = (List *)lfirst(subTspCell);
+                    partitionIndexdef = (List *)lfirst(subIndexCell);
+                    List *subpartitionidlist = (List *)lfirst(subPartCell);
+
+                    Oid partid = list_nth_oid(partitionOidList, partIdx++);
+                    Partition p = partitionOpen(rel, partid, ShareLock);
+                    Relation partRel = partitionGetRelation(rel, p);
+
+                    forthree(tspcell, partitiontspList, indexcell, partitionIndexdef, partitioncell, subpartitionidlist)
+                    {
+                        Oid subPartitionOid = lfirst_oid(partitioncell);
+                        partitiontspid = lfirst_oid(tspcell);
+                        indexdef = (RangePartitionindexDefState*)lfirst(indexcell);
+
+                        /* reset the extra arguments data. */
+                        partExtra.existingPSortOid = InvalidOid;
+
+                        if (PointerIsValid(stmt->partIndexOldNodes)) {
+                            Assert(stmt->partIndexOldPSortOid);
+                            partIndexFileNode = list_nth_oid(stmt->partIndexOldNodes, count);
+                            partExtra.existingPSortOid = list_nth_oid(stmt->partIndexOldPSortOid, count);
+                            count++;
+                        }
+
+                        partition = partitionOpen(partRel, subPartitionOid, ShareLock);
+
+                        if (PointerIsValid(indexdef->name)) {
+                            Oid indexid = InvalidOid;
+
+                            indexid = GetSysCacheOid3(PARTPARTOID, PointerGetDatum(indexdef->name),
+                                                      CharGetDatum(PART_OBJ_TYPE_INDEX_PARTITION),
+                                                      ObjectIdGetDatum(indexRelationId));
+                            if (OidIsValid(indexid)) {
+                                ereport(ERROR,
+                                        (errcode(ERRCODE_UNDEFINED_OBJECT),
+                                         errmsg("index subpartition with name \"%s\" already exists", indexdef->name)));
+                            }
+                        }
+
+                        /* get index partition's name */
+                        indexname = (NULL != indexdef->name)
+                                        ? indexdef->name
+                                        : ChoosePartitionIndexName(PartitionGetPartitionName(partition),
+                                                                   indexRelationId, indexColNames, false, false);
+
+                        /* create index partition */
+                        (void)partition_index_create(indexname,
+                                    partIndexFileNode,
+                                    partition,
+                                    partitiontspid,
+                                    partitionedIndex,
+                                    partRel,
+                                    pg_partition_rel,
+                                    indexInfo,
+                                    indexColNames,
+                                    reloptions,
+                                    skip_build,
+                                    &partExtra);
+                        partitionClose(partRel, partition, NoLock);
+
+                        // reset memory context
+                        MemoryContextReset(partitionIndexMemContext);
+                    }
+
+                    releaseDummyRelation(&partRel);
+                    partitionClose(rel, p, ShareLock);
+                }
+                if (subPartitionOidList != NULL) {
+                    ListCell* lc = NULL;
+                    foreach(lc, subPartitionOidList) {
+                        List* tmpList = (List*)lfirst(lc);
+                        list_free_ext(tmpList);
+                    }
+                    list_free_ext(subPartitionOidList);
+                }
+                if (partitionOidList != NULL) {
+                    list_free_ext(partitionOidList);
+                }
             }
 
             // delete memory context
@@ -2623,7 +2822,14 @@ void ReindexTable(RangeVar* relation, const char* partition_name, AdaptMem* mem_
         /* The lock level used here should match reindexPartition(). */
         heapOid = RangeVarGetRelidExtended(
             relation, AccessShareLock, false, false, false, false, RangeVarCallbackOwnsTable, NULL);
-
+        Relation rel = heap_open(heapOid, AccessShareLock);
+        if (RelationIsSubPartitioned(rel)) {
+            ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                            (errmsg("Un-support feature"),
+                             errdetail("For subpartition table, REBUILD UNUSABLE LOCAL INDEXES is not yet supported."),
+                             errcause("The function is not implemented."), erraction("Use other actions instead."))));
+        }
+        heap_close(rel, NoLock);
         TrForbidAccessRbObject(RelationRelationId, heapOid, relation->relname);
 
         heapPartOid = partitionNameGetPartitionOid(
@@ -2853,7 +3059,8 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
         PG_TRY();
         {
 
-            if (ReindexRelation(relid, REINDEX_REL_PROCESS_TOAST, REINDEX_ALL_INDEX, NULL, mem_info, true))
+            if (ReindexRelation(relid, REINDEX_REL_PROCESS_TOAST | REINDEX_REL_CHECK_CONSTRAINTS,
+                REINDEX_ALL_INDEX, NULL, mem_info, true))
                 ereport(NOTICE,
                     (errmsg("table \"%s.%s\" was reindexed",
                         get_namespace_name(get_rel_namespace(relid)),
@@ -2861,7 +3068,7 @@ void ReindexDatabase(const char* databaseName, bool do_system, bool do_user, Ada
         }
         PG_CATCH();
         {
-            if (NULL == get_rel_name(relid)) {
+            if (geterrcode() == ERRCODE_RELATION_OPEN_ERROR && NULL == get_rel_name(relid)) {
                 ereport(LOG,
                     (errmsg("Table with OID \"%u\" doesn't exit.", relid),
                         errhint("Please don't drop table when the operation of 'REINDEX DATABASE' is executed.")));

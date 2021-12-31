@@ -59,7 +59,6 @@ typedef enum {
     DO_TYPE,
     DO_SHELL_TYPE,
     DO_FUNC,
-    DO_PACKAGE,
     DO_AGG,
     DO_OPERATOR,
     DO_OPCLASS,
@@ -75,6 +74,7 @@ typedef enum {
     DO_FK_CONSTRAINT, /* see note for ConstraintInfo */
     DO_PROCLANG,
     DO_CAST,
+    DO_PACKAGE,
     DO_TABLE_DATA,
     DO_DUMMY_TYPE,
     DO_TSPARSER,

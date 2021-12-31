@@ -59,8 +59,8 @@ Indexes:
     "idx3_gpi_table1" btree (c2) LOCAL(PARTITION p0_gpi_table1_c2_idx, PARTITION p1_gpi_table1_c2_idx, PARTITION p2_gpi_table1_c2_idx, PARTITION p3_gpi_table1_c2_idx)  TABLESPACE pg_default
     "idx4_gpi_table1" btree ((c1 + 10)) LOCAL(PARTITION p0_gpi_table1_expr_idx, PARTITION p1_gpi_table1_expr_idx, PARTITION p2_gpi_table1_expr_idx, PARTITION p3_gpi_table1_expr_idx)  TABLESPACE pg_default
     "idx5_gpi_table1" btree (c1, c2) LOCAL(PARTITION p0_gpi_table1_c1_c2_idx, PARTITION p1_gpi_table1_c1_c2_idx, PARTITION p2_gpi_table1_c1_c2_idx, PARTITION p3_gpi_table1_c1_c2_idx)  TABLESPACE pg_default
-Range partition by(c1)
-Number of partition: 4 (View pg_partition to check each partition range.)
+Partition By RANGE(c1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
 
 CREATE TABLE gpi_table2
 (
@@ -118,8 +118,8 @@ CREATE INDEX idx1_gpi_table2_global_c2 ON gpi_table2 (c2) GLOBAL;
 Indexes:
     "idx1_gpi_table2" btree (c1) TABLESPACE pg_default
     "idx1_gpi_table2_global_c2" btree (c2) TABLESPACE pg_default
-Range partition by(c1)
-Number of partition: 4 (View pg_partition to check each partition range.)
+Partition By RANGE(c1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
 
 alter table gpi_table2 drop column c2;
 \d gpi_table2
@@ -130,8 +130,8 @@ alter table gpi_table2 drop column c2;
  c3     | integer | 
 Indexes:
     "idx1_gpi_table2" btree (c1) TABLESPACE pg_default
-Range partition by(c1)
-Number of partition: 4 (View pg_partition to check each partition range.)
+Partition By RANGE(c1)
+Number of partitions: 4 (View pg_partition to check each partition range.)
 
 create table gpi_table2_inherits (c4 int) INHERITS (gpi_table2);
 ERROR:  CREATE TABLE ... INHERITS is not yet supported.

@@ -47,13 +47,13 @@ static void syncrep_yyerror(YYLTYPE *yylloc,
 
 %}
 
-%pure-parser
+%define api.pure
 %parse-param {syncrep_scanner_yyscan_t yyscanner}
 %lex-param   {syncrep_scanner_yyscan_t yyscanner}
 %locations
 
 %expect 0
-%name-prefix="syncrep_yy"
+%name-prefix "syncrep_yy"
 
 
 %union

@@ -83,6 +83,7 @@ const char *excludeFiles[] = {
     "build_completed.done",
     "barrier_lsn",
     "pg_dw",
+    "pg_dw_single",
     "pg_dw.build",
     "cacert.pem",
     "server.crt",
@@ -102,7 +103,7 @@ static char* relpathbackend_t(RelFileNode rnode, BackendId backend, ForkNumber f
 static bool check_abs_tblspac_path(const char *fname, unsigned int *segNo, RelFileNode *rnode);
 static bool check_base_path(const char *fname, unsigned int *segNo, RelFileNode *rnode);
 static bool check_rel_tblspac_path(const char *fname, unsigned int *segNo, RelFileNode *rnode);
-static int get_cu_alignsize_columnId(int columnId);
+static void ResetOldFileMaps(void);
 static pthread_t targetfilestatpid;
 
 /*
@@ -117,11 +118,13 @@ filemap_t* filemap_create(void)
     map->nlist = 0;
     map->array = NULL;
     map->narray = 0;
+    map->arrayForSearch = NULL;
     return map;
 }
 
 void filemapInit(void)
 {
+    ResetOldFileMaps();
     Assert(filemap == NULL);
     Assert(filemaptarget == NULL);
     filemap = filemap_create();
@@ -679,6 +682,7 @@ void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blk
     else
         entry = NULL;
     pg_free(path);
+    path = NULL;
 
     if (entry != NULL) {
         Assert(entry->isrelfile);
@@ -732,93 +736,6 @@ void process_block_change(ForkNumber forknum, RelFileNode rnode, BlockNumber blk
             forknum,
             blkno);
     }
-}
-
-/*
- * This callback gets called while we read the WAL in the target, for every
- * replication data block need to be synchronized in the target system. It makes note of all the
- * replication data blocks in the pagemap of the file.
- */
-void process_waldata_change(
-    ForkNumber forknum, RelFileNode rnode, StorageEngine store, off_t file_offset, size_t data_size)
-{
-    char* path = NULL;
-    file_entry_t key;
-    file_entry_t* key_ptr = NULL;
-    file_entry_t* entry = NULL;
-    off_t data_offset;
-    int file_segno;
-    filemap_t* map = filemap;
-    file_entry_t** e;
-    uint64 max_file_size = 0;
-    uint32 cu_slice_index = 0;
-
-    Assert(map->array);
-
-    /* for ROW_STORE the file_offset means blkno, for COLUMN STORE the file_offset means cu_offset */
-    if (store == ROW_STORE)
-        max_file_size = RELSEG_SIZE;
-    else
-        max_file_size = MAX_FILE_SIZE;
-
-    file_segno = file_offset / max_file_size;
-    data_offset = file_offset % max_file_size;
-
-    /* for COLUMN_STORE the forknum = MAX_FORKNUM + attrid */
-    if (store == COLUMN_STORE)
-        Assert(forknum > MAX_FORKNUM);
-
-    path = datasegpath(rnode, forknum, file_segno);
-
-    key.path = (char*)path;
-    key_ptr = &key;
-
-    e = (file_entry_t**)bsearch(&key_ptr, map->array, map->narray, sizeof(file_entry_t*), path_cmp);
-    if (e != NULL)
-        entry = *e;
-    else
-        entry = NULL;
-
-    if (entry != NULL)
-        Assert(entry->isrelfile);
-    else {
-        /* Create a new entry for this file */
-        entry = (file_entry_t*)pg_malloc(sizeof(file_entry_t));
-        entry->path = pg_strdup(path);
-        entry->type = FILE_TYPE_REGULAR;
-        entry->action = FILE_ACTION_CREATE;
-        entry->oldsize = 0;
-        entry->newsize = 0;
-        entry->link_target = NULL;
-        entry->next = NULL;
-        entry->pagemap.bitmap = NULL;
-        entry->pagemap.bitmapsize = 0;
-        entry->isrelfile = isRelDataFile(path);
-        RewindCompressInfo *rewindCompressInfo = NULL;
-        COPY_REWIND_COMPRESS_INFO(entry, rewindCompressInfo, 0, 0)
-        if (map->last != NULL) {
-            map->last->next = entry;
-            map->last = entry;
-        } else
-            map->first = map->last = entry;
-        map->nlist++;
-    }
-
-    pg_free(path);
-    path = NULL;
-    uint32 align_size = (uint32)get_cu_alignsize_columnId(forknum - MAX_FORKNUM);
-    if (ROW_STORE == store)
-        pg_fatal("The Row Store Heap SHOULD BE NOT synchronized in the WAL Streaming.\n");
-    else
-        entry->block_size = align_size;
-
-    Assert(0 == data_size % align_size);
-    if (data_size % align_size != 0)
-        pg_fatal("unexpected CU data size %lu bytes which isn't aligned with the required CU data size.\n", data_size);
-    /* Here we just follow the ALIGNOF_CUSIZE(8192) of CU */
-    for (cu_slice_index = 0; cu_slice_index < data_size / align_size; cu_slice_index++)
-        datapagemap_add(&entry->pagemap, cu_slice_index);
-    return;
 }
 
 /*
@@ -920,6 +837,7 @@ void calculate_totals(void)
                 map->fetch_size += BLCKSZ;
 
             pg_free(iter);
+            iter = NULL;
         }
     }
 }
@@ -965,6 +883,7 @@ void print_filemap_to_file(FILE* file)
             while (datapagemap_next(iter, &blocknum))
                 fprintf(file, "  block %u\n", blocknum);
             pg_free(iter);
+            iter = NULL;
         }
     }
 }
@@ -1047,6 +966,7 @@ bool isRelDataFile(const char* path)
             matched = false;
 
         pg_free(check_path);
+        check_path = NULL;
     }
 
     return matched;
@@ -1066,6 +986,7 @@ static char* datasegpath(RelFileNode rnode, ForkNumber forknum, BlockNumber segn
     if (segno > 0 || forknum > MAX_FORKNUM) {
         segpath = format_text("%s.%u", path, segno);
         pg_free(path);
+        path = NULL;
         return segpath;
     } else {
         return path;
@@ -1226,6 +1147,7 @@ static char* format_text(const char* fmt, ...)
 
         /* Release buffer and loop around to try again with larger len. */
         pg_free(result);
+        result = NULL;
         len = newlen;
     }
 }
@@ -1625,12 +1547,56 @@ bool isPathInFilemap(const char* path)
     return true;
 }
 
-static int get_cu_alignsize_columnId(int columnId)
+static void ResetOldFileMaps(void)
 {
-    Assert(columnId > 0);
-    int align_size = ALIGNOF_CUSIZE;
-    if (columnId >= TS_COLUMN_ID_BASE) {
-        align_size = ALIGNOF_TIMESERIES_CUSIZE;
+    if (filemap != NULL) {
+        if (filemap->array != NULL) {
+            pg_free(filemap->array);
+            filemap->array = NULL;
+        }
+        if (filemap->arrayForSearch != NULL) {
+            pg_free(filemap->arrayForSearch);
+            filemap->arrayForSearch = NULL;
+        }
+        if (filemap->first != NULL) {
+            file_entry_t* currNode = filemap->first;
+            while (currNode != NULL) {
+                file_entry_t* needFreeNode = currNode;
+                currNode = currNode->next;
+                pg_free(needFreeNode->path);
+                needFreeNode->path = NULL;
+                pg_free(needFreeNode->link_target);
+                needFreeNode->link_target = NULL;
+                pg_free(needFreeNode->pagemap.bitmap);
+                needFreeNode->pagemap.bitmap = NULL;
+                pg_free(needFreeNode);
+                needFreeNode = NULL;
+            }
+        }
+        pg_free(filemap);
+        filemap = NULL;
     }
-    return align_size;
+    if (filemaptarget != NULL) {
+        if (filemaptarget->array != NULL) {
+            pg_free(filemaptarget->array);
+            filemaptarget->array = NULL;
+        }
+        if (filemaptarget->first != NULL) {
+            file_entry_t* currNode = filemaptarget->first;
+            while (currNode != NULL) {
+                file_entry_t* needFreeNode = currNode;
+                currNode = currNode->next;
+                pg_free(needFreeNode->path);
+                needFreeNode->path = NULL;
+                pg_free(needFreeNode->link_target);
+                needFreeNode->link_target = NULL;
+                pg_free(needFreeNode->pagemap.bitmap);
+                needFreeNode->pagemap.bitmap = NULL;
+                pg_free(needFreeNode);
+                needFreeNode = NULL;
+            }
+        }
+        pg_free(filemaptarget);
+        filemaptarget = NULL;
+    }
 }

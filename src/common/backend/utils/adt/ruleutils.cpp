@@ -6,6 +6,7 @@
  *
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
+ * Portions Copyright (c) 2021, openGauss Contributors
  *
  *
  * IDENTIFICATION
@@ -289,6 +290,7 @@ static void get_sublink_expr(SubLink* sublink, deparse_context* context);
 static void get_from_clause(Query* query, const char* prefix, deparse_context* context, List* fromlist = NIL);
 static void get_from_clause_item(Node* jtnode, Query* query, deparse_context* context);
 static void get_from_clause_partition(RangeTblEntry* rte, StringInfo buf, deparse_context* context);
+static void get_from_clause_subpartition(RangeTblEntry* rte, StringInfo buf);
 static void get_from_clause_bucket(RangeTblEntry* rte, StringInfo buf, deparse_context* context);
 static void get_from_clause_alias(Alias* alias, RangeTblEntry* rte, deparse_context* context);
 static void get_from_clause_coldeflist(
@@ -362,6 +364,7 @@ static char* pg_get_ruledef_worker(Oid ruleoid, int prettyFlags)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() != SPI_OK_CONNECT)
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -407,6 +410,7 @@ static char* pg_get_ruledef_worker(Oid ruleoid, int prettyFlags)
     /*
      * Disconnect from SPI manager
      */
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() != SPI_OK_FINISH)
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
     return buf.data;
@@ -535,6 +539,7 @@ char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() != SPI_OK_CONNECT)
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -583,6 +588,7 @@ char* pg_get_viewdef_worker(Oid viewoid, int prettyFlags, int wrapColumn)
     /*
      * Disconnect from SPI manager
      */
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() != SPI_OK_FINISH)
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -2165,6 +2171,7 @@ static Oid SearchSysTable(const char* query)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() != SPI_OK_CONNECT) {
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
     }
@@ -2184,6 +2191,7 @@ static Oid SearchSysTable(const char* query)
     /*
      * Disconnect from SPI manager
      */
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() != SPI_OK_FINISH) {
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
     }
@@ -2298,6 +2306,7 @@ static char* pg_get_tabledef_worker(Oid tableoid)
     /*
      * Connect to SPI manager
      */
+    SPI_STACK_LOG("connect", NULL, NULL);
     if (SPI_connect() != SPI_OK_CONNECT)
         ereport(ERROR, (errcode(ERRCODE_SPI_CONNECTION_FAILURE), errmsg("SPI_connect failed")));
 
@@ -2476,6 +2485,7 @@ static char* pg_get_tabledef_worker(Oid tableoid)
     /*
      * Disconnect from SPI manager
      */
+    SPI_STACK_LOG("finish", NULL, NULL);
     if (SPI_finish() != SPI_OK_FINISH)
         ereport(ERROR, (errcode(ERRCODE_SPI_FINISH_FAILURE), errmsg("SPI_finish failed")));
 
@@ -2851,11 +2861,23 @@ static void pg_get_indexdef_partitions(Oid indexrelid, Form_pg_index idxrec, boo
         heap_close(rel, NoLock);
         return;
     }
-    List *partList = relationGetPartitionOidList(rel);
-    ListCell *lc = NULL;
-    bool isFirst = true;
 
     appendStringInfo(buf, " LOCAL");
+    /* subpartition don't support creating index local on specifying partitions */
+    if (RelationIsSubPartitioned(rel)) {
+        heap_close(rel, NoLock);
+        return;
+    }
+
+    List *partList = NIL;
+    ListCell *lc = NULL;
+    bool isFirst = true;
+    if (RelationIsSubPartitioned(rel)) {
+        /* reserve this code, oneday we will support it */
+        partList = RelationGetSubPartitionOidList(rel);
+    } else {
+        partList = relationGetPartitionOidList(rel);
+    }
 
     appendStringInfoChar(buf, '(');
 
@@ -3569,7 +3591,7 @@ static text* pg_get_expr_worker(text* expr, Oid relid, const char* relname, int 
     exprstr = text_to_cstring(expr);
 
     /* Convert expression to node tree */
-    node = (Node*)stringToNode_skip_extern_fields(exprstr);
+    node = (Node*)stringToNode(exprstr);
 
     pfree_ext(exprstr);
 
@@ -3713,7 +3735,7 @@ Datum pg_get_serial_sequence(PG_FUNCTION_ARGS)
          * can also have auto dependencies on columns.)
          */
         if (deprec->classid == RelationRelationId && deprec->objsubid == 0 && deprec->deptype == DEPENDENCY_AUTO &&
-            get_rel_relkind(deprec->objid) == RELKIND_SEQUENCE) {
+            RELKIND_IS_SEQUENCE(get_rel_relkind(deprec->objid))) {
             sequenceId = deprec->objid;
             break;
         }
@@ -4579,12 +4601,10 @@ static void set_deparse_planstate(deparse_namespace* dpns, PlanState* ps)
 
 #ifdef ENABLE_MULTIPLE_NODES
     if (IsA(ps, ModifyTableState))
-#else
-    if (IsA(ps, ModifyTableState) && ((ModifyTableState*)ps)->mt_upsert != NULL &&
-        ((ModifyTableState*)ps)->mt_upsert->us_action != UPSERT_NONE)
-#endif
         dpns->inner_tlist = ((ModifyTableState*)ps)->mt_upsert->us_excludedtlist;
-    else if (dpns->inner_planstate != NULL)
+    else
+#endif
+    if (dpns->inner_planstate != NULL)
         dpns->inner_tlist = dpns->inner_planstate->plan->targetlist;
     else
         dpns->inner_tlist = NIL;
@@ -5336,7 +5356,23 @@ static void get_with_clause(Query* query, deparse_context* context)
             }
             appendStringInfoChar(buf, ')');
         }
-        appendStringInfoString(buf, " AS (");
+        appendStringInfoString(buf, " AS ");
+        switch (cte->ctematerialized)
+        {
+            case CTEMaterializeDefault:
+                break;
+            case CTEMaterializeAlways:
+                appendStringInfoString(buf, "MATERIALIZED ");
+                break;
+            case CTEMaterializeNever:
+                appendStringInfoString(buf, "NOT MATERIALIZED ");
+                break;
+            default:
+                ereport(ERROR,
+                    (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                        errmsg("unrecognized materialization option: %d", (int)cte->ctematerialized)));
+        }
+        appendStringInfoChar(buf, '(');
         if (PRETTY_INDENT(context))
             appendContextKeyword(context, "", 0, 0, 0);
         get_query_def((Query*)cte->ctequery,
@@ -5454,10 +5490,8 @@ static void get_select_query_def(Query* query, deparse_context* context, TupleDe
                     break;
             }
 #else
-            if (rc->forUpdate)
-                appendContextKeyword(context, " FOR UPDATE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
-            else
-                appendContextKeyword(context, " FOR SHARE", -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
+            appendContextKeyword(context, rc->forUpdate ? " FOR UPDATE" : " FOR SHARE",
+                -PRETTYINDENT_STD, PRETTYINDENT_STD, 0);
 #endif
             appendStringInfo(buf, " OF %s", quote_identifier(rte->eref->aliasname));
             if (rc->noWait)
@@ -5736,6 +5770,11 @@ static void get_target_list(Query* query, List* targetList, deparse_context* con
 
         if (tle->resjunk)
             continue; /* ignore junk entries */
+
+        /* Ignore junk columns from the targetlist in start with */
+        if (query->hasRecursive && IsPseudoReturnColumn(tle->resname)) {
+            continue;
+        }
 
 #ifdef PGXC
         /* Found at least one element in the target list */
@@ -7248,11 +7287,17 @@ static void get_utility_query_def(Query* query, deparse_context* context)
             if (IsA(node, ColumnDef)) {
                 ColumnDef* coldef = (ColumnDef*)node;
                 TypeName* tpname = coldef->typname;
+                ClientLogicColumnRef *coldef_enc = coldef->clientLogicColumnRef;
 
                 /* error out if we have no recourse at all */
                 if (!OidIsValid(tpname->typeOid))
                     ereport(
                         ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("improper type oid: \"%u\"", tpname->typeOid)));
+
+                /* if the column is encrypted, we should convert its data type */
+                if (coldef_enc != NULL && coldef_enc->dest_typname != NULL) {
+                    tpname = coldef_enc->dest_typname;
+                }
 
                 /* get typename from the oid */
                 appendStringInfo(buf,
@@ -7261,7 +7306,6 @@ static void get_utility_query_def(Query* query, deparse_context* context)
                     format_type_with_typemod(tpname->typeOid, tpname->typemod));
 
                 // add the compress mode for this column
-                //
                 switch (coldef->cmprs_mode) {
                     case ATT_CMPR_NOCOMPRESS:
                         appendStringInfoString(buf, " NOCOMPRESS ");
@@ -9446,18 +9490,41 @@ static void get_rule_expr(Node* node, deparse_context* context, bool showimplici
             if (!PRETTY_PAREN(context))
                 appendStringInfoChar(buf, '(');
             get_rule_expr_paren((Node*)ntest->arg, context, true, node, no_alias);
-            switch (ntest->nulltesttype) {
-                case IS_NULL:
-                    appendStringInfo(buf, " IS NULL");
-                    break;
-                case IS_NOT_NULL:
-                    appendStringInfo(buf, " IS NOT NULL");
-                    break;
-                default:
-                    ereport(ERROR,
-                        (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
-                            errmsg("unrecognized nulltesttype: %d", (int)ntest->nulltesttype)));
-            }
+            /*
+             * For scalar inputs, we prefer to print as IS [NOT] NULL,
+             * which is shorter and traditional.  If it's a rowtype input
+             * but we're applying a scalar test, must print IS [NOT]
+             * DISTINCT FROM NULL to be semantically correct.
+             */
+            if (ntest->argisrow || !type_is_rowtype(exprType((Node *) ntest->arg))) {
+                switch (ntest->nulltesttype)
+                {
+                    case IS_NULL:
+                        appendStringInfoString(buf, " IS NULL");
+                        break;
+                    case IS_NOT_NULL:
+                        appendStringInfoString(buf, " IS NOT NULL");
+                        break;
+                    default:
+                        ereport(ERROR,
+                            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                errmsg("unrecognized nulltesttype: %d", (int)ntest->nulltesttype)));
+                }
+            } else {
+                switch (ntest->nulltesttype)
+                {
+                    case IS_NULL:
+                        appendStringInfoString(buf, " IS NOT DISTINCT FROM NULL");
+                        break;
+                    case IS_NOT_NULL:
+                        appendStringInfoString(buf, " IS DISTINCT FROM NULL");
+                        break;
+                    default:
+                        ereport(ERROR,
+                            (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),
+                                errmsg("unrecognized nulltesttype: %d", (int)ntest->nulltesttype)));
+                }
+            }   
             if (!PRETTY_PAREN(context))
                 appendStringInfoChar(buf, ')');
         } break;
@@ -10568,6 +10635,18 @@ static void get_from_clause_partition(RangeTblEntry* rte, StringInfo buf, depars
     }
 }
 
+static void get_from_clause_subpartition(RangeTblEntry* rte, StringInfo buf)
+{
+    Assert(rte->ispartrel);
+
+    if (rte->pname) {
+        /* get the newest subpartition name from oid given */
+        pfree(rte->pname->aliasname);
+        rte->pname->aliasname = getPartitionName(rte->subpartitionOid, false);
+        appendStringInfo(buf, " SUBPARTITION(%s)", quote_identifier(rte->pname->aliasname));
+    }
+}
+
 static void get_from_clause_item(Node* jtnode, Query* query, deparse_context* context)
 {
     StringInfo buf = context->buf;
@@ -10635,6 +10714,9 @@ static void get_from_clause_item(Node* jtnode, Query* query, deparse_context* co
 
         if (rte->isContainPartition) {
             get_from_clause_partition(rte, buf, context);
+        }
+        if (rte->isContainSubPartition) {
+            get_from_clause_subpartition(rte, buf);
         }
         if (rte->isbucket) {
             get_from_clause_bucket(rte, buf, context);
@@ -11302,13 +11384,20 @@ static char* generate_function_name(
     int p_nvargs;
     Oid* p_true_typeids = NULL;
     Oid p_vatype;
-
+    NameData* pkgname = NULL;
+    Datum pkgOiddatum;
+    Oid pkgOid = InvalidOid;
+    bool isnull = true;
     proctup = SearchSysCache1(PROCOID, ObjectIdGetDatum(funcid));
     if (!HeapTupleIsValid(proctup))
         ereport(ERROR, (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for function %u", funcid)));
     procform = (Form_pg_proc)GETSTRUCT(proctup);
     proname = NameStr(procform->proname);
-
+    pkgOiddatum = SysCacheGetAttr(PROCOID, proctup, Anum_pg_proc_packageid, &isnull);
+    if (!isnull) {
+        pkgOid = DatumGetObjectId(pkgOiddatum);
+        pkgname = GetPackageName(pkgOid);
+    }
     /*
      * If this function's element type of variadic array is not ANY
      * or it was used originally, we should print VARIADIC.  We must do
@@ -11350,9 +11439,11 @@ static char* generate_function_name(
         nspname = NULL;
     else
         nspname = get_namespace_name(procform->pronamespace);
-
-    result = quote_qualified_identifier(nspname, proname);
-
+    if (OidIsValid(pkgOid)) {
+        result = quote_qualified_identifier(nspname, pkgname->data, proname);
+    } else {
+        result = quote_qualified_identifier(nspname, proname);
+    }
     ReleaseSysCache(proctup);
 
     return result;

@@ -60,19 +60,22 @@ IndexScanDesc GetIndexScanDesc(IndexScanDesc scan)
     }
 }
 
-List *hbkt_load_buckets(Relation relation, BucketInfo *bktInfo)
+oidvector *hbkt_load_buckets(Relation relation, BucketInfo *bktInfo)
 {
-    ListCell *bktIdCell = NULL;
-    List *bucketList = NULL;
+    ListCell  *bktIdCell = NULL;
+    oidvector *bucketList = NULL;
     oidvector *blist = searchHashBucketByOid(relation->rd_bucketoid);
 
     if (bktInfo == NULL || bktInfo->buckets == NIL) {
         // load all buckets
-        for (int i = 0; i < blist->dim1; i++) {
-            bucketList = lappend_int(bucketList, blist->values[i]);
-        }
+        bucketList = buildoidvector(blist->values, blist->dim1);
     } else {
         // load selected buckets
+        Oid  bucketTmp[BUCKETDATALEN];
+        bool needSort  = false;
+        int  bucketCnt = 0;
+        int  prevBktId = -1;
+
         foreach (bktIdCell, bktInfo->buckets) {
             int bktId = lfirst_int(bktIdCell);
             if (bktId < 0 || bktId >= BUCKETDATALEN) {
@@ -80,10 +83,21 @@ List *hbkt_load_buckets(Relation relation, BucketInfo *bktInfo)
                         (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
                          errmsg("buckets id %d of table is outsize range [%d,%d]", bktId, 0, BUCKETDATALEN - 1)));
             }
-            if (lookupHBucketid(blist, 0, bktId) == -1) {
-                continue;
+            if (lookupHBucketid(blist, 0, bktId) != -1) {
+                Assert(bktId != prevBktId);
+                if (bktId < prevBktId) {
+                    needSort = true;
+                }
+                bucketTmp[bucketCnt++] = bktId;
+                prevBktId = bktId;
             }
-            bucketList = lappend_int(bucketList, bktId);
+        }
+        /* Make sure bucketlist is in ascending order */
+        if (needSort) {
+            qsort(bucketTmp, bucketCnt, sizeof(Oid), bid_cmp);
+        }
+        if (bucketCnt != 0) {
+            bucketList = buildoidvector(bucketTmp, bucketCnt);
         }
     }
     return bucketList;
@@ -100,7 +114,7 @@ static void free_hbucket_scan(TableScanDesc bktScan, Relation bktRel)
 static TableScanDesc hbkt_tbl_create_scan(Relation relation, ScanState *state)
 {
     HBktTblScanDesc hpScan = NULL;
-    List *bucketlist = NULL;
+    oidvector *bucketlist = NULL;
     BucketInfo *bktInfo = NULL;
 
     if (state != NULL) {
@@ -138,7 +152,7 @@ static TableScanDesc hbkt_tbl_create_scan(Relation relation, ScanState *state)
     } else {
         /* Step 3: open first bucketed relation */
         hpScan->curr_slot = 0;
-        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
         hpScan->currBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
     }
 
@@ -260,7 +274,7 @@ static void hbkt_tbl_rescan(TableScanDesc scan, ScanKey key, bool is_bitmap_resc
     } else {
         /* Step 3: open first bucketed relation */
         hpScan->curr_slot = 0;
-        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
         hpScan->currBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
     }
 
@@ -295,13 +309,13 @@ static HeapTuple switch_and_scan_next_tbl_hbkt(TableScanDesc scan, ScanDirection
 
     while (true) {
         /* Step 1. To check whether all bucket have been scanned. */
-        if (hpScan->curr_slot + 1 >= list_length(hpScan->hBktList)) {
+        if (hpScan->curr_slot + 1 >=  hpScan->hBktList->dim1) {
             return NULL;
         }
 
         /* Step 2. Get the next bucket and its relation */
         hpScan->curr_slot++;
-        int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+        int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
         nextBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
 
         /* Step 3. Build a HeapScan to fetch tuples */
@@ -345,13 +359,13 @@ bool hbkt_sampling_scan_nextbucket(TableScanDesc scan)
     TableScanDesc currBktScan = hpScan->currBktScan;
 
     /* Step 1. To check whether all buckets have been scanned. */
-    if (hpScan->curr_slot + 1 >= list_length(hpScan->hBktList)) {
+    if (hpScan->curr_slot + 1 >= hpScan->hBktList->dim1) {
         return false;
     }
 
     /* Step 2. Get the next bucket and its relation */
     hpScan->curr_slot++;
-    int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+    int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
     nextBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
 
     /* Step 3. Build a HeapScan for new bucket */
@@ -382,13 +396,13 @@ bool hbkt_bitmapheap_scan_nextbucket(HBktTblScanDesc hpScan)
     TableScanDesc nextBktScan = NULL;
     TableScanDesc currBktScan = hpScan->currBktScan;
 
-    if (hpScan->curr_slot + 1 >= list_length(hpScan->hBktList)) {
+    if (hpScan->curr_slot + 1 >= hpScan->hBktList->dim1) {
         return false;
     }
 
     /* switch to next hash bucket */
     hpScan->curr_slot++;
-    int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+    int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
     nextBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
 
     nextBktScan = tableam_scan_begin_bm(nextBktRel, currBktScan->rs_snapshot, currBktScan->rs_nkeys, currBktScan->rs_key);
@@ -408,7 +422,7 @@ bool cbi_bitmapheap_scan_nextbucket(HBktTblScanDesc hpscan, GPIScanDesc gpiscan,
     TableScanDesc currbktscan, nextbktscan;
 
     /* vailidation check */
-    if (!list_member_int(hpscan->hBktList, cbiscan->bucketid)) {
+    if (lookupHBucketid(hpscan->hBktList, 0, cbiscan->bucketid) == -1) {
         cbiscan->bucketid = InvalidBktId;
         return false;
     }
@@ -440,7 +454,7 @@ Relation cbi_bitmapheap_scan_getbucket(const HBktTblScanDesc hpscan, const GPISc
     Assert(cbiscan != NULL);
 
     /* vailidation check */
-    if (!list_member_int(hpscan->hBktList, bucketid)) {
+    if (lookupHBucketid(hpscan->hBktList, 0, bucketid) == -1) {
         return NULL;
     } 
 
@@ -469,13 +483,13 @@ bool hbkt_tbl_tid_nextbucket(HBktTblScanDesc hpScan)
     Relation nextBktRel = NULL;
 
     /* Step 1. To check whether all buckets have been scanned. */
-    if (hpScan->curr_slot + 1 >= list_length(hpScan->hBktList)) {
+    if (hpScan->curr_slot + 1 >= hpScan->hBktList->dim1) {
         return false;
     }
 
     /* Step 2. Get the next bucket and its relation */
     hpScan->curr_slot++;
-    int2 bucketid = list_nth_int(hpScan->hBktList, hpScan->curr_slot);
+    int2 bucketid = hpScan->hBktList->values[hpScan->curr_slot];
     nextBktRel = bucketGetRelation(hpScan->rs_rd, NULL, bucketid);
 
     /* Step 3. If the next bucket has tuples, then we switch the old scan
@@ -903,7 +917,7 @@ void scan_handler_tbl_endscan(TableScanDesc scan)
         if (hp_scan->currBktRel != NULL && RelationIsBucket(hp_scan->currBktRel)) {
             free_hbucket_scan(hp_scan->currBktScan, hp_scan->currBktRel);
         }
-        list_free_ext(hp_scan->hBktList);
+        pfree_ext(hp_scan->hBktList);
         pfree(hp_scan);
     } else {
         tableam_scan_end(scan);

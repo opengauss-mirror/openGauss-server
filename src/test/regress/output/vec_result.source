@@ -422,7 +422,7 @@ create table location_type
     location_type_cd varchar(50) not null ,
     location_type_desc varchar(250) not null 
 )with (orientation=column);
-explain (costs off, verbose on) WITH WITH_345 AS (SELECT Table_037.location_type_desc Column_024 
+explain (costs off, verbose on) WITH WITH_345 AS MATERIALIZED (SELECT Table_037.location_type_desc Column_024 
 FROM (SELECT 1 Column_017
 FROM region Table_010 RIGHT OUTER JOIN job_classification Table_030 ON FALSE) Table_036,
 location_type Table_037 ) 
@@ -460,6 +460,42 @@ GROUP BY ROLLUP(Column_026);
          ->  CTE Scan on with_345
                Output: with_345.column_024
 (28 rows)
+
+explain (costs off, verbose on) WITH WITH_345 AS (SELECT Table_037.location_type_desc Column_024 
+FROM (SELECT 1 Column_017
+FROM region Table_010 RIGHT OUTER JOIN job_classification Table_030 ON FALSE) Table_036,
+location_type Table_037 ) 
+SELECT WITH_345.Column_024 Column_026
+FROM WITH_345
+GROUP BY ROLLUP(Column_026);
+                                           QUERY PLAN                                           
+------------------------------------------------------------------------------------------------
+ Row Adapter
+   Output: table_037.location_type_desc
+   ->  Vector Sort Aggregate
+         Output: table_037.location_type_desc
+         Group By Key: table_037.location_type_desc
+         Group By Key: ()
+         ->  Vector Sort
+               Output: table_037.location_type_desc
+               Sort Key: table_037.location_type_desc
+               ->  Vector Nest Loop
+                     Output: table_037.location_type_desc
+                     ->  Vector Nest Loop Left Join
+                           Output: ('Dummy')
+                           Join Filter: false
+                           ->  CStore Scan on vector_result_engine.job_classification table_030
+                                 Output: 'Dummy'
+                           ->  Vector Adapter
+                                 Output: ('Dummy')
+                                 ->  Result
+                                       Output: 'Dummy'
+                                       One-Time Filter: false
+                     ->  Vector Materialize
+                           Output: table_037.location_type_desc
+                           ->  CStore Scan on vector_result_engine.location_type table_037
+                                 Output: table_037.location_type_desc
+(25 rows)
 
 ----
 --- Clean Table and Resource

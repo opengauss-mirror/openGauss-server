@@ -1,3 +1,5 @@
+create database pl_test_func_default DBCOMPATIBILITY 'pg';
+\c pl_test_func_default;
 DROP FUNCTION IF EXISTS test_add1(INTEGER, INTEGER);
 DROP FUNCTION IF EXISTS test_select(INTEGER, INTEGER[]);
 CREATE OR REPLACE FUNCTION test_add1(i IN INTEGER, j IN INTEGER) RETURN INTEGER
@@ -1893,3 +1895,5 @@ DROP PROCEDURE func_outter7;
 DROP PROCEDURE func_outter8;
 DROP PROCEDURE test_default_out;
 DROP PROCEDURE SP_TESP;
+\c regression;
+drop database IF EXISTS pl_test_func_default;

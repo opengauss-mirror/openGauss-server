@@ -27,15 +27,20 @@ REG_CONF = --regconf=regress.conf
 hacheck_all: all
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_single.sh
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_single.sh
+	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_cascade.sh
 
 hacheck_single: all
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_single.sh 1 $(PART)
 
 hacheck_multi_single: all
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_single.sh 1 $(PART)
+	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_cascade.sh
 
 hacheck_multi_single_mot: all
 	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_single_mot.sh 1 $(PART)
+
+hacheck_multi_single_shared_storage: all
+	export prefix=$(prefix) && sh $(CURDIR)/run_ha_multi_single_shared_storage.sh 2 $(PART)
 
 ##
 ## Clean up

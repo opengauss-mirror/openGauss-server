@@ -158,6 +158,8 @@ static bool show_setting = false;
 static char* xlog_dir = "";
 static bool security = false;
 static char* dbcompatibility = "";
+static char* new_xlog_file_path = "";
+
 #ifdef PGXC
 /* Name of the PGXC node initialized */
 static char* nodename = NULL;
@@ -225,6 +227,8 @@ DB_CompatibilityAttr g_dbCompatArray[] = {
     "# the database sysadmin.  If you do not trust all your local users,\n"  \
     "# use another authentication method.\n"
 static char* authwarning = NULL;
+static const char* boot_options = NULL;
+static const char* backend_options = NULL;
 
 /*
  * Centralized knowledge of switches to pass to backend
@@ -233,8 +237,8 @@ static char* authwarning = NULL;
  * but here it is more convenient to pass it as an environment variable
  * (no quoting to worry about).
  */
-static const char* boot_options = "-F";
-static const char* backend_options = "--single "
+static const char* raw_boot_options = "-F";
+static const char* raw_backend_options = "--single "
 #ifdef PGXC
                                      "--localxid "
 #endif
@@ -477,9 +481,9 @@ static char** replace_token(char** lines, const char* token, const char* replace
     errno_t rc = 0;
     int toklen, replen, diff;
 
-    for (i = 0; lines[i] != NULL; i++)
+    for (i = 0; lines[i] != NULL; i++) {
         numlines++;
-
+    }
     result = (char**)pg_malloc(numlines * sizeof(char*));
 
     toklen = strlen(token);
@@ -518,6 +522,35 @@ static char** replace_token(char** lines, const char* token, const char* replace
     free(lines);
     return result;
 }
+
+static char** append_token(char** lines, const char* token)
+{
+    int numlines = 0;
+    int i;
+    char** result;
+    char* newline = NULL;
+    errno_t rc = 0;
+    int newlen;
+
+    for (i = 0; lines[i] != NULL; i++) {
+        numlines++;
+    }
+
+    result = (char**)pg_malloc((numlines + 2) * sizeof(char*));
+
+    for (i = 0; i < numlines; i++) {
+        result[i] = lines[i];
+    }
+    newlen = strlen(token) + 1;
+    newline = (char*)pg_malloc(newlen);
+    rc = strncpy_s(newline, newlen, token, strlen(token));
+    securec_check_c(rc, newline, "\0");
+    result[numlines] = newline;
+    result[numlines + 1] = NULL;
+    free(lines);
+    return result;
+}
+
 
 /*
  * make a copy of lines without any that contain the token
@@ -1233,6 +1266,7 @@ static void setup_config(void)
         securec_check_ss_c(nRet, "\0", "\0");
         conflines = replace_token(conflines, "#log_timezone = 'GMT'", repltok);
     }
+
 #ifndef ENABLE_MULTIPLE_NODES
     if (enableDCF) {
         nRet = strcpy_s(repltok, sizeof(repltok), "enable_dcf = on");
@@ -1240,6 +1274,15 @@ static void setup_config(void)
         conflines = replace_token(conflines, "#enable_dcf = off", repltok);
     }
 #endif
+
+    if (strlen(new_xlog_file_path) != 0) {
+        char* buf_xlog_file_path = NULL;
+        buf_xlog_file_path = escape_quotes(new_xlog_file_path);
+        nRet = sprintf_s(repltok, sizeof(repltok), "xlog_file_path = '%s'\n", buf_xlog_file_path);
+        securec_check_ss_c(nRet, "\0", "\0");
+        conflines = append_token(conflines, repltok);
+        FREE_AND_RESET(buf_xlog_file_path);
+    }
 
     nRet = sprintf_s(path, sizeof(path), "%s/postgresql.conf", pg_data);
     securec_check_ss_c(nRet, "\0", "\0");
@@ -2315,7 +2358,7 @@ static void setup_privileges(void)
     PG_CMD_DECL;
     char** line;
     char** priv_lines;
-    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 19);
+    static char** privileges_setup = (char**)pg_malloc(sizeof(char*) * 20);
     int nRet = 0;
 
     privileges_setup[0] = xstrdup("UPDATE pg_class "
@@ -2338,7 +2381,8 @@ static void setup_privileges(void)
     privileges_setup[15] = xstrdup("REVOKE ALL on gs_masking_policy_filters FROM public;\n");
     privileges_setup[16] = xstrdup("GRANT USAGE ON SCHEMA sqladvisor TO PUBLIC;\n");
     privileges_setup[17] = xstrdup("GRANT USAGE ON SCHEMA dbe_pldebugger TO PUBLIC;\n");
-    privileges_setup[18] = NULL;
+    privileges_setup[18] = xstrdup("GRANT USAGE ON SCHEMA dbe_pldeveloper TO PUBLIC;\n");
+    privileges_setup[19] = NULL;
     /* In security mode, we will revoke privilege of public on schema public. */
     if (security) {
         privileges_setup[7] = xstrdup("REVOKE ALL on schema public FROM public;\n");
@@ -3444,6 +3488,7 @@ static void usage(const char* prog_name)
     printf(_("  -C, --enpwdfiledir=DIR    get encrypted password of AES128 from cipher and rand file\n"));
     printf(_("  -X, --xlogdir=XLOGDIR     location for the transaction log directory\n"));
     printf(_("  -S, --security            remove normal user's privilege on public schema in security mode\n"));
+    printf(_("  -g, --xlogpath=XLOGPATH   xlog file path of shared storage\n"));
     printf(_("\nLess commonly used options:\n"));
     printf(_("  -d, --debug               generate lots of debugging output\n"));
     printf(_("  -L DIRECTORY              where to find the input files\n"));
@@ -3617,7 +3662,7 @@ int main(int argc, char* argv[])
 
     /* process command-line options */
 
-    while ((c = getopt_long(argc, argv, "cdD:E:L:nU:WA:SsT:X:C:w:H:", long_options, &option_index)) != -1) {
+    while ((c = getopt_long(argc, argv, "cdD:E:L:nU:WA:SsT:X:C:w:H:g:", long_options, &option_index)) != -1) {
 #define FREE_NOT_STATIC_ZERO_STRING(s)        \
     do {                                      \
         if ((s) && (char*)(s) != (char*)"") { \
@@ -3708,6 +3753,10 @@ int main(int argc, char* argv[])
             case 'd':
                 debug = true;
                 printf(_("Running in debug mode.\n"));
+                break;
+            case 'g':
+                FREE_NOT_STATIC_ZERO_STRING(new_xlog_file_path);
+                new_xlog_file_path = xstrdup(optarg);
                 break;
             case 'n':
                 noclean = true;
@@ -4401,6 +4450,40 @@ int main(int argc, char* argv[])
         }
         FREE_AND_RESET(path);
     }
+
+    if (strlen(new_xlog_file_path) == 0) {
+        boot_options = raw_boot_options;
+        backend_options = raw_backend_options;
+    } else {
+        size_t total_len = strlen(raw_boot_options) + strlen(new_xlog_file_path) + 10;
+        char *options = (char*)pg_malloc(total_len);
+        errno_t sret = sprintf_s(options, total_len, "%s -g %s", raw_boot_options, new_xlog_file_path);
+        securec_check_ss_c(sret, options, "\0");
+        boot_options = options;
+
+        total_len = strlen(raw_backend_options) + strlen(new_xlog_file_path) + 10;
+        options = (char*)pg_malloc(total_len);
+        sret = sprintf_s(options, total_len, "%s -g %s", raw_backend_options, new_xlog_file_path);
+        securec_check_ss_c(sret, options, "\0");
+        backend_options = options;
+
+        struct stat st;
+        if (stat(new_xlog_file_path, &st) < 0) {
+            if (errno == ENOENT) {
+                canonicalize_path(new_xlog_file_path);
+                int fd = open(new_xlog_file_path, O_RDWR | O_CREAT | O_EXCL | PG_BINARY, 0600);
+
+                close(fd);
+                write_log("create file:%s", new_xlog_file_path);
+            } else {
+                char errBuffer[ERROR_LIMIT_LEN];
+                write_stderr(_("%s: could not access file \"%s\": %s\n"), progname, new_xlog_file_path, 
+                             pqStrerror(errno, errBuffer, ERROR_LIMIT_LEN));
+                exit_nicely();
+            }
+        }
+    }
+    
     /* create or check pg_location path */
     mkdirForPgLocationDir();
     check_ok();
