@@ -1,6 +1,6 @@
 CREATE schema hw_cursor_part6;
 set current_schema = hw_cursor_part6;
-
+set behavior_compat_options = 'skip_insert_gs_source';
 create table company(name varchar(100), loc varchar(100), no integer);
 
 insert into company values ('macrosoft',    'usa',          001);

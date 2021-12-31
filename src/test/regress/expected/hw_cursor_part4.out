@@ -2,6 +2,7 @@
 --------------------------------------------------------------------------------
 CREATE schema hw_cursor_part4;
 set current_schema = hw_cursor_part4;
+set behavior_compat_options = 'skip_insert_gs_source';
 CREATE TABLE TBL(V1 INTEGER);
 INSERT INTO TBL VALUES(1);
 INSERT INTO TBL VALUES(2);

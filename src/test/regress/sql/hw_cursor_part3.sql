@@ -6,7 +6,7 @@ create database pl_test_cursor_part3 DBCOMPATIBILITY 'pg';
 \c pl_test_cursor_part3;
 CREATE schema hw_cursor_part3;
 set current_schema = hw_cursor_part3; 
-
+set behavior_compat_options = 'skip_insert_gs_source';
 create table t1(v1 int,v2 varchar2(100));
 insert into t1 values (1,'abc1');
 insert into t1 values (2,'abc2');
@@ -160,9 +160,7 @@ begin
     close cur;
 end;
 /
-\set VERBOSITY terse
 call sp_testsp_delete();
-\set VERBOSITY default
 
 create table JOINT_DEBUG_CURSOR_FUNC_TABLE_012(C_INT integer,C_CHAR char(10))  ;
 

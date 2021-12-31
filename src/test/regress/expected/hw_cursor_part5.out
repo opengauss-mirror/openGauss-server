@@ -1,5 +1,6 @@
 CREATE schema hw_cursor_part5;
 set current_schema = hw_cursor_part5;
+set behavior_compat_options = 'skip_insert_gs_source';
 CREATE TABLE TEST_TB(ID INTEGER);
 INSERT INTO TEST_TB VALUES(123);
 INSERT INTO TEST_TB VALUES(124);

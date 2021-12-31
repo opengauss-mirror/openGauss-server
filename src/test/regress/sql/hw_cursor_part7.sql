@@ -3,7 +3,7 @@
 ------------------------------------------------------------------------------
 create schema hw_cursor_part7;
 set current_schema = hw_cursor_part7;
-
+set behavior_compat_options = 'skip_insert_gs_source';
 create table t1(v1 int,v2 varchar2(100));
 insert into t1 values (1,'abc1');
 insert into t1 values (2,'abc2');
