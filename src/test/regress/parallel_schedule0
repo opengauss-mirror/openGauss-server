@@ -542,8 +542,7 @@ test: hw_function_p_3 hw_function_p_4
 test: create_c_function
 test: cstore_replication_table_delete
 
-test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part7
-#test: hw_cursor_part8 hw_cursor_part5 hw_cursor_part6
+test: hw_cursor_part1 hw_cursor_part2 hw_cursor_part3 hw_cursor_part4 hw_cursor_part7 hw_cursor_part8 hw_cursor_part5 hw_cursor_part6
 test: vec_append_part1 vec_append_part2 vec_append_part3
 test: vec_cursor_part1 vec_cursor_part2
 test: vec_delete_part1 vec_delete_part2

@@ -3,7 +3,7 @@ create database pl_test_cursor_part1 DBCOMPATIBILITY 'pg';
 
 create schema hw_cursor_part1;
 set current_schema = hw_cursor_part1;
-
+set behavior_compat_options = 'skip_insert_gs_source';
 create table company(name varchar(100), loc varchar(100), no integer);
 
 insert into company values ('macrosoft',    'usa',          001);
@@ -474,15 +474,15 @@ DECLARE
     CURSOR CURS1 IS SELECT * FROM TEST_TB order by 1;
  TEMP INTEGER:=0;
 BEGIN
-	if not CURS1%isopen then
+    if not CURS1%isopen then
                 raise notice '%','curosr is open';
-	end if;
-	FOR VARA IN CURS1 LOOP
+    end if;
+    FOR VARA IN CURS1 LOOP
                 raise notice '%',CURS1%ROWCOUNT;
-	END LOOP;
-	if not CURS1%isopen then
+    END LOOP;
+    if not CURS1%isopen then
                 raise notice '%','curosr is open';
-	end if;
+    end if;
 END;
 /
 
@@ -537,10 +537,10 @@ BEGIN
     sqlstr := 'select first_name,phone_number,salary from staffs
          where section_id = :1';
     OPEN my_cur FOR sqlstr USING '30'; 
-	if (my_cur%isopen) then
+    if (my_cur%isopen) then
                 raise notice '%','cursor is open';
-	end if;
-	
+    end if;
+
     FETCH my_cur INTO name, phone_number, salary; 
     WHILE my_cur%FOUND LOOP
           raise notice '% # % # %',name,phone_number,salary;
