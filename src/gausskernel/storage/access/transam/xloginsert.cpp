@@ -858,11 +858,10 @@ static XLogRecData *XLogRecordAssemble(RmgrId rmid, uint8 info, XLogFPWInfo fpw_
         }
 
         if (!samerel) {
-            if (IsSegmentFileNode(regbuf->rnode) || isCompressedTable) {
-                if (IsSegmentFileNode(regbuf->rnode)) {
-                    XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
-                    hashbucket_flag = true;
-                }
+            if (IsSegmentFileNode(regbuf->rnode)) {
+                XLOG_ASSEMBLE_ONE_ITEM(scratch, sizeof(RelFileNode), &regbuf->rnode, remained_size);
+                hashbucket_flag = true;
+            } else if (isCompressedTable) {
                 if (t_thrd.proc->workingVersionNum < PAGE_COMPRESSION_VERSION) {
                     Assert(!isCompressedTable);
                     RelFileNodeV2 relFileNodeV2;
