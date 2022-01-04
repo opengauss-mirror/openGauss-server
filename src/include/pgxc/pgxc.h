@@ -45,6 +45,7 @@ typedef enum {
 #define IS_SINGLE_NODE (g_instance.role == VSINGLENODE)
 #define REMOTE_CONN_TYPE u_sess->attr.attr_common.remoteConnType
 #define COORDINATOR_NOT_SINGLE (g_instance.role == VDATANODE && g_instance.role != VSINGLENODE)
+#define IS_SERVICE_NODE (g_instance.role == VCOORDINATOR || g_instance.role == VSINGLENODE)
 
 #define IsConnFromApp() (u_sess->attr.attr_common.remoteConnType == REMOTE_CONN_APP)
 #define IsConnFromCoord() (u_sess->attr.attr_common.remoteConnType == REMOTE_CONN_COORD)

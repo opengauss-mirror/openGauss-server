@@ -1456,6 +1456,12 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  6422 | numeric
  6433 | numeric
  6434 | numeric_bool
+ 6555 | array_remove
+ 6556 | array_replace
+ 6558 | first_transition
+ 6559 | last_transition
+ 6560 | first
+ 6561 | last
  6666 | network_larger
  6667 | network_smaller
  6668 | max

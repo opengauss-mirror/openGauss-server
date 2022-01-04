@@ -17959,6 +17959,7 @@ upsert_clause:
 						n->targetList = $5;
 						$$ = (Node *) n;
 					} else {
+#ifdef ENABLE_MULTIPLE_NODES
 						/* check subquery in set clause*/
 						ListCell* cell = NULL;
 						ResTarget* res = NULL;
@@ -17966,14 +17967,14 @@ upsert_clause:
 							res = (ResTarget*)lfirst(cell);
 							if (IsA(res->val,SubLink)) {
 								const char* message = "Update with subquery is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.";
-    							InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
+    								InsertErrorMessage(message, u_sess->plsql_cxt.plpgsql_yylloc);
 								ereport(errstate,
 									(errmodule(MOD_PARSER),
 									  errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 									  errmsg("Update with subquery is not yet supported whithin INSERT ON DUPLICATE KEY UPDATE statement.")));
 							}
 						}
-
+#endif
 						UpsertClause *uc = makeNode(UpsertClause);
 						uc->targetList = $5;
 						uc->location = @1;

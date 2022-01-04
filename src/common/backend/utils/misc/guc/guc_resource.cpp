@@ -1006,7 +1006,7 @@ static bool check_cgroup_name(char** newval, void** extra, GucSource source)
 
     p = *newval;
 
-    if (StringIsValid(p) && IS_PGXC_COORDINATOR && t_thrd.shemem_ptr_cxt.MyBEEntry &&
+    if (StringIsValid(p) && IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry &&
         (currentGucContext == PGC_SUSET || currentGucContext == PGC_USERSET)) {
         if (g_instance.wlm_cxt->gscgroup_init_done == 0)
             ereport(ERROR,
@@ -1035,7 +1035,7 @@ static bool check_cgroup_name(char** newval, void** extra, GucSource source)
 static void assign_cgroup_name(const char* newval, void* extra)
 {
     /* set "control_group" global variable */
-    if (IS_PGXC_COORDINATOR && t_thrd.shemem_ptr_cxt.MyBEEntry && newval && *newval) {
+    if (IS_SERVICE_NODE && t_thrd.shemem_ptr_cxt.MyBEEntry && newval && *newval) {
         if (g_instance.wlm_cxt->gscgroup_init_done == 0)
             return;
 
