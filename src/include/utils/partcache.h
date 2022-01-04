@@ -96,6 +96,7 @@ extern PartStatus PartitionGetMetadataStatus(Oid partOid, bool vacuumFlag);
 extern Datum SetWaitCleanGpiRelOptions(Datum oldOptions, bool enable);
 extern void PartitionedSetWaitCleanGpi(const char* parentName, Oid parentPartOid, bool enable, bool inplace);
 extern void PartitionSetWaitCleanGpi(Oid partOid, bool enable, bool inplace);
+extern bool PartitionLocalIndexSkipping(Datum datumPartType);
 extern bool PartitionInvisibleMetadataKeep(Datum datumRelOptions);
 extern bool PartitionParentOidIsLive(Datum parentDatum);
 extern void PartitionedSetEnabledClean(Oid parentOid);
