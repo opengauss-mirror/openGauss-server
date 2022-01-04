@@ -113,6 +113,7 @@ bool launch_agent(void)
 {
     char cmd[MAX_CMDLINE_LENGTH];
     char* ssh_argv[MAX_CMDLINE_OPTIONS];
+    char libenv[MAX_CMDLINE_LENGTH] = {0};
     int ssh_argc;
     int outfd[2];
     int infd[2];
@@ -156,6 +157,19 @@ bool launch_agent(void)
     ssh_argv[ssh_argc++] = (char *)cmd;
     ssh_argv[ssh_argc] = NULL;
 
+    if (instance_config.remote.libpath)
+    {
+#ifdef WIN32
+        rc = snprintf_s(libenv, sizeof(libenv), sizeof(libenv) - 1, "set LD_LIBRARY_PATH=%s &&",
+                     instance_config.remote.libpath);
+        securec_check_ss_c(rc, "\0", "\0");
+#else
+        rc = snprintf_s(libenv, sizeof(libenv), sizeof(libenv) - 1, "export LD_LIBRARY_PATH=%s &&",
+                     instance_config.remote.libpath);
+        securec_check_ss_c(rc, "\0", "\0");
+#endif
+    }
+
     if (instance_config.remote.path)
     {
         char const* probackup = PROGRAM_NAME_FULL;
@@ -172,27 +186,27 @@ bool launch_agent(void)
         }
         if (needs_quotes(instance_config.remote.path) || needs_quotes(PROGRAM_NAME_FULL))
         {
-            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s\\%s\" agent",
-                     instance_config.remote.path, probackup);
+            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s %s\\%s\" agent",
+                    libenv, instance_config.remote.path, probackup);
             securec_check_ss_c(rc, "\0", "\0");
         }
         else
         {
-            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "%s\\%s agent",
-                     instance_config.remote.path, probackup);
+            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "%s %s\\%s agent",
+                    libenv, instance_config.remote.path, probackup);
             securec_check_ss_c(rc, "\0", "\0");
         }
 #else
         if (needs_quotes(instance_config.remote.path) || needs_quotes(PROGRAM_NAME_FULL))
         {
-            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s/%s\" agent",
-                     instance_config.remote.path, probackup);
+            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "\"%s %s/%s\" agent",
+                    libenv, instance_config.remote.path, probackup);
             securec_check_ss_c(rc, "\0", "\0");
         }
         else
         {
-            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "%s/%s agent",
-                     instance_config.remote.path, probackup);
+            rc = snprintf_s(cmd, sizeof(cmd), sizeof(cmd) - 1, "%s %s/%s agent",
+                    libenv, instance_config.remote.path, probackup);
             securec_check_ss_c(rc, "\0", "\0");
         }
 #endif
