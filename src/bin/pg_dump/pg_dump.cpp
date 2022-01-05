@@ -4294,7 +4294,7 @@ static void dumpPublicationTable(Archive *fout, const PublicationRelInfo *pubrin
     PQExpBuffer query;
     PQExpBuffer tag;
 
-    if (dataOnly || pubrinfo->dobj.dump) {
+    if (dataOnly || !pubrinfo->dobj.dump) {
         return;
     }
 
