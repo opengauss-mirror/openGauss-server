@@ -185,7 +185,8 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
      */
     if (!t_thrd.walsender_cxt.WalSndCtl->sync_standbys_defined ||
         XLByteLE(XactCommitLSN, t_thrd.walsender_cxt.WalSndCtl->lsn[mode]) ||
-        (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !DelayIntoMostAvaSync(false)) ||
+        (t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
+         !DelayIntoMostAvaSync(false)) ||
         !SynRepWaitCatchup(XactCommitLSN)) {
         LWLockRelease(SyncRepLock);
         RESUME_INTERRUPTS();
@@ -314,8 +315,9 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         /*
          * If we  modify the syncmode dynamically, we'll stop wait
          */
-        if ((t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !DelayIntoMostAvaSync(false)) ||
-            synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        if ((t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
+             !DelayIntoMostAvaSync(false)) ||
+            u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
             ereport(WARNING,
                     (errmsg("canceling wait for synchronous replication due to syncmaster standalone."),
                      errdetail("The transaction has already committed locally, but might not have been replicated to "
