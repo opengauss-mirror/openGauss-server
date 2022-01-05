@@ -343,7 +343,7 @@ static bool ReadKeyContentFromFile(KeyMode mode, const char* cipherkeyfile, cons
         /* Note: Data Source use initdb key file by default (datasource.key.* not given) */
         global_rand_file = &g_rand_file_content[INITDB_NOCLOUDOBS_TYPE];
         global_cipher_file = &g_cipher_file_content[INITDB_NOCLOUDOBS_TYPE];
-    } else if (mode == SOURCE_MODE || mode == HADR_MODE) {
+    } else if (mode == SOURCE_MODE || mode == HADR_MODE || mode == USER_MAPPING_MODE || mode == SUBSCRIPTION_MODE) {
         /*
          * For Data Source:
          * read key from file (datasource.key.*): we do not cache these keys here
