@@ -116,6 +116,8 @@ do_add_instance(InstanceConfig *instance)
 				   SOURCE_DEFAULT);
 	config_set_opt(instance_options, &instance_config.remote.path,
 				   SOURCE_DEFAULT);
+	config_set_opt(instance_options, &instance_config.remote.libpath,
+				   SOURCE_DEFAULT);
 	config_set_opt(instance_options, &instance_config.remote.user,
 				   SOURCE_DEFAULT);
 	config_set_opt(instance_options, &instance_config.remote.ssh_options,
