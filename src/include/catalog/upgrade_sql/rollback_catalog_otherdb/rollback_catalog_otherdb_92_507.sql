@@ -777,7 +777,7 @@ BEGIN
 END$$;
 
 DROP SCHEMA IF EXISTS dbe_pldeveloper;
-DROP TYPE IF EXISTS pg_catalog.bulk_exception CASCADE;DROP INDEX IF EXISTS pg_catalog.pg_proc_proname_args_nsp_new_index;
+DROP TYPE IF EXISTS pg_catalog.bulk_exception CASCADE;
 -- ----------------------------------------------------------------
 -- rollback pg_catalog.pg_conversion 
 -- ----------------------------------------------------------------

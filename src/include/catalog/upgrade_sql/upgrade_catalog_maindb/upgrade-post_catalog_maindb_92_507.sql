@@ -4561,7 +4561,7 @@ CREATE TABLE IF NOT EXISTS pg_catalog.pg_subscription
     subenabled bool NOCOMPRESS,
     subconninfo text NOCOMPRESS,
     subslotname name NOCOMPRESS,
-    subsynccommit bool NOCOMPRESS,
+    subsynccommit text NOCOMPRESS,
     subpublications text[] NOCOMPRESS
 ) WITH OIDS TABLESPACE pg_global;
 
