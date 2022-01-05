@@ -498,6 +498,7 @@ typedef struct _SubscriptionInfo {
     char *subslotname;
     char *subsynccommit;
     char *subpublications;
+    char *subbinary;
 } SubscriptionInfo;
 
 /* global decls */

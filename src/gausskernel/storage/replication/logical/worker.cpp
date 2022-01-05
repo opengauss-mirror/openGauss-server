@@ -265,11 +265,11 @@ static void slot_store_error_callback(void *arg)
 }
 
 /*
- * Store data in C string form into slot.
- * This is similar to BuildTupleFromCStrings but TupleTableSlot fits our
- * use better.
+ * Store tuple data into slot.
+ *
+ * Incoming data can be either text or binary format.
  */
-static void slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel, char **values)
+static void slot_store_data(TupleTableSlot *slot, LogicalRepRelMapEntry *rel, LogicalRepTupleData *tupleData)
 {
     int natts = slot->tts_tupleDescriptor->natts;
     int i;
@@ -286,19 +286,52 @@ static void slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel
     errcallback.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &errcallback;
 
-    /* Call the "in" function for each non-dropped attribute */
+    /* Call the "in" function for each non-dropped, non-null attribute */
     for (i = 0; i < natts; i++) {
         Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
         int remoteattnum = rel->attrmap[i];
-        Oid typinput;
-        Oid typioparam;
 
-        if (!att->attisdropped && remoteattnum >= 0 && values[remoteattnum] != NULL) {
+        if (!att->attisdropped && remoteattnum >= 0) {
+            StringInfo colvalue = &tupleData->colvalues[remoteattnum];
             errarg.remote_attnum = remoteattnum;
 
-            getTypeInputInfo(att->atttypid, &typinput, &typioparam);
-            slot->tts_values[i] = OidInputFunctionCall(typinput, values[remoteattnum], typioparam, att->atttypmod);
-            slot->tts_isnull[i] = false;
+            if (tupleData->colstatus[remoteattnum] == LOGICALREP_COLUMN_TEXT) {
+                Oid typinput;
+                Oid typioparam;
+
+                getTypeInputInfo(att->atttypid, &typinput, &typioparam);
+                slot->tts_values[i] = OidInputFunctionCall(typinput, colvalue->data, typioparam, att->atttypmod);
+                slot->tts_isnull[i] = false;
+            } else if (tupleData->colstatus[remoteattnum] == LOGICALREP_COLUMN_BINARY) {
+                Oid typreceive;
+                Oid typioparam;
+
+                /*
+                 * In some code paths we may be asked to re-parse the same
+                 * tuple data.  Reset the StringInfo's cursor so that works.
+                 */
+                colvalue->cursor = 0;
+
+                getTypeBinaryInputInfo(att->atttypid, &typreceive, &typioparam);
+                slot->tts_values[i] = OidReceiveFunctionCall(typreceive, colvalue, typioparam, att->atttypmod);
+
+                /* Trouble if it didn't eat the whole buffer */
+                if (colvalue->cursor != colvalue->len) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_BINARY_REPRESENTATION),
+                        errmsg("incorrect binary data format in logical replication column %d", 
+                        remoteattnum + 1)));
+                }
+                slot->tts_isnull[i] = false;
+            } else {
+                /*
+                 * NULL value from remote.  (We don't expect to see
+                 * LOGICALREP_COLUMN_UNCHANGED here, but if we do, treat it as
+                 * NULL.)
+                 */
+                slot->tts_values[i] = (Datum) 0;
+                slot->tts_isnull[i] = true;
+            }
+            /* Reset attnum for error callback */
             errarg.remote_attnum = -1;
         } else {
             /*
@@ -318,18 +351,19 @@ static void slot_store_cstrings(TupleTableSlot *slot, LogicalRepRelMapEntry *rel
 }
 
 /*
- * Replace selected columns with user data provided as C strings.
+ * Replace updated columns with data from the LogicalRepTupleData struct.
  * This is somewhat similar to heap_modify_tuple but also calls the type
  * input functions on the user data.
- * "slot" is filled with a copy of the tuple in "srcslot", with
- * columns selected by the "replaces" array replaced with data values
- * from "values".
+ *
+ * "slot" is filled with a copy of the tuple in "srcslot", replacing
+ * columns provided in "tupleData" and leaving others as-is.
+ *
  * Caution: unreplaced pass-by-ref columns in "slot" will point into the
  * storage for "srcslot".  This is OK for current usage, but someday we may
  * need to materialize "slot" at the end to make it independent of "srcslot".
  */
-static void slot_modify_cstrings(TupleTableSlot *slot, TupleTableSlot *srcslot, LogicalRepRelMapEntry *rel,
-    char **values, const bool *replaces)
+static void slot_modify_data(TupleTableSlot *slot, TupleTableSlot *srcslot, LogicalRepRelMapEntry *rel,
+    LogicalRepTupleData *tupleData)
 {
     int natts = slot->tts_tupleDescriptor->natts;
     int i;
@@ -364,23 +398,47 @@ static void slot_modify_cstrings(TupleTableSlot *slot, TupleTableSlot *srcslot, 
         Form_pg_attribute att = slot->tts_tupleDescriptor->attrs[i];
         int remoteattnum = rel->attrmap[i];
 
-        if (remoteattnum < 0 || !replaces[remoteattnum]) {
+        if (remoteattnum < 0) {
             continue;
         }
 
-        if (values[remoteattnum] != NULL) {
-            Oid typinput;
-            Oid typioparam;
-
+        if (tupleData->colstatus[remoteattnum] != LOGICALREP_COLUMN_UNCHANGED) {
+            StringInfo colvalue = &tupleData->colvalues[remoteattnum];
             errarg.remote_attnum = remoteattnum;
 
-            getTypeInputInfo(att->atttypid, &typinput, &typioparam);
-            slot->tts_values[i] = OidInputFunctionCall(typinput, values[remoteattnum], typioparam, att->atttypmod);
-            slot->tts_isnull[i] = false;
+            if (tupleData->colstatus[remoteattnum] == LOGICALREP_COLUMN_TEXT) {
+                Oid typinput;
+                Oid typioparam;
+
+                getTypeInputInfo(att->atttypid, &typinput, &typioparam);
+                slot->tts_values[i] = OidInputFunctionCall(typinput, colvalue->data, typioparam, att->atttypmod);
+                slot->tts_isnull[i] = false;
+            } else if (tupleData->colstatus[remoteattnum] == LOGICALREP_COLUMN_BINARY) {
+                Oid typreceive;
+                Oid typioparam;
+
+                /*
+                 * In some code paths we may be asked to re-parse the same
+                 * tuple data.  Reset the StringInfo's cursor so that works.
+                 */
+                colvalue->cursor = 0;
+
+                getTypeBinaryInputInfo(att->atttypid, &typreceive, &typioparam);
+                slot->tts_values[i] = OidReceiveFunctionCall(typreceive, colvalue, typioparam, att->atttypmod);
+
+                /* Trouble if it didn't eat the whole buffer */
+                if (colvalue->cursor != colvalue->len) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_BINARY_REPRESENTATION),
+                        errmsg("incorrect binary data format in logical replication column %d", remoteattnum + 1)));
+                }
+                slot->tts_isnull[i] = false;
+            } else {
+                /* must be LOGICALREP_COLUMN_NULL */
+                slot->tts_values[i] = (Datum) 0;
+                slot->tts_isnull[i] = true;
+            }
+            
             errarg.remote_attnum = -1;
-        } else {
-            slot->tts_values[i] = (Datum)0;
-            slot->tts_isnull[i] = true;
         }
     }
 
@@ -516,7 +574,7 @@ static void apply_handle_insert(StringInfo s)
     PushActiveSnapshot(GetTransactionSnapshot());
     /* Process and store remote tuple in the slot */
     oldctx = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-    slot_store_cstrings(remoteslot, rel, newtup.values);
+    slot_store_data(remoteslot, rel, &newtup);
     slot_fill_defaults(rel, estate, remoteslot);
     MemoryContextSwitchTo(oldctx);
 
@@ -646,7 +704,7 @@ static void apply_handle_update(StringInfo s)
         int remoteattnum = rel->attrmap[i];
         if (!att->attisdropped && remoteattnum >= 0) {
             Assert(remoteattnum < newtup.ncols);
-            if (newtup.changed[i]) {
+            if (newtup.colstatus[i] != LOGICALREP_COLUMN_UNCHANGED) {
                 target_rte->updatedCols = bms_add_member(target_rte->updatedCols,
                                                      i + 1 - FirstLowInvalidHeapAttributeNumber);
             }
@@ -660,7 +718,7 @@ static void apply_handle_update(StringInfo s)
 
     /* Build the search tuple. */
     oldctx = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-    slot_store_cstrings(remoteslot, rel, has_oldtup ? oldtup.values : newtup.values);
+    slot_store_data(remoteslot, rel, has_oldtup ? &oldtup : &newtup);
     MemoryContextSwitchTo(oldctx);
 
     /*
@@ -683,7 +741,7 @@ static void apply_handle_update(StringInfo s)
     if (found) {
         /* Process and store remote tuple in the slot */
         oldctx = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-        slot_modify_cstrings(remoteslot, localslot, rel, newtup.values, newtup.changed);
+        slot_modify_data(remoteslot, localslot, rel, &newtup);
         MemoryContextSwitchTo(oldctx);
 
         EvalPlanQualSetSlot(&epqstate, remoteslot);
@@ -748,7 +806,7 @@ static void apply_handle_delete(StringInfo s)
 
     /* Find the tuple using the replica identity index. */
     oldctx = MemoryContextSwitchTo(GetPerTupleMemoryContext(estate));
-    slot_store_cstrings(remoteslot, rel, oldtup.values);
+    slot_store_data(remoteslot, rel, &oldtup);
     MemoryContextSwitchTo(oldctx);
 
     /*
@@ -1224,6 +1282,17 @@ static void reread_subscription(void)
         proc_exit(0);
     }
 
+    /*
+    * Exit if any parameter that affects the remote connection was changed.
+    * The launcher will start a new worker.
+    */
+    if (strcmp(newsub->name, t_thrd.applyworker_cxt.mySubscription->name) != 0 ||
+        newsub->binary != t_thrd.applyworker_cxt.mySubscription->binary) {
+            ereport(LOG, (errmsg("logical replication apply worker for subscription \"%s\" "
+                "will restart because of a parameter change", t_thrd.applyworker_cxt.mySubscription->name)));
+            proc_exit(0);
+    }
+
     /* !slotname should never happen when enabled is true. */
     Assert(newsub->slotname);
     
@@ -1447,6 +1516,7 @@ void ApplyWorkerMain()
     options.slotname = t_thrd.applyworker_cxt.mySubscription->slotname;
     options.protoVersion = LOGICALREP_PROTO_VERSION_NUM;
     options.publicationNames = t_thrd.applyworker_cxt.mySubscription->publications;
+    options.binary = t_thrd.applyworker_cxt.mySubscription->binary;
 
     /* Start streaming from the slot. */
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_startstreaming(&options);

@@ -255,8 +255,14 @@ void StartRemoteStreaming(const LibpqrcvConnectParam *options)
             stringlist_to_identifierstr(t_thrd.libwalreceiver_cxt.streamConn, options->publicationNames);
         appendStringInfo(&cmd, ", publication_names %s",
             PQescapeLiteral(t_thrd.libwalreceiver_cxt.streamConn, pubnames_str, strlen(pubnames_str)));
-        appendStringInfoChar(&cmd, ')');
         pfree(pubnames_str);
+
+        if (options->binary && PQserverVersion(t_thrd.libwalreceiver_cxt.streamConn) >= 90204) {
+            appendStringInfoString(&cmd, ", binary 'true'");
+            ereport(DEBUG5, ( errmsg("append binary true")));
+        }
+
+        appendStringInfoChar(&cmd, ')');
     }
 
     PGresult *res = libpqrcv_PQexec(cmd.data);
