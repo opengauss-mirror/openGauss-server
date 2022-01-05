@@ -142,6 +142,7 @@ static bool DispatchMotRecord(XLogReaderState* record, List* expectedTLIs, Times
 #endif
 static bool DispatchBtreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchSegpageSmgrRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
+static bool DispatchRepOriginRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 
 static bool DispatchUBTreeRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime);
 static bool DispatchUBTree2Record(XLogReaderState* record, List* expectedTLIs, TimestampTz recordXTime);
@@ -209,6 +210,7 @@ static const RmgrDispatchData g_dispatchTable[RM_MAX_ID + 1] = {
         XLOG_UBTREE2_FREEZE },
     { DispatchSegpageSmgrRecord, RmgrRecordInfoValid, RM_SEGPAGE_ID, XLOG_SEG_ATOMIC_OPERATION,
         XLOG_SEG_NEW_PAGE},
+    { DispatchRepOriginRecord, RmgrRecordInfoValid, RM_REPLORIGIN_ID, XLOG_REPLORIGIN_SET, XLOG_REPLORIGIN_DROP },
 };
 
 void UpdateDispatcherStandbyState(HotStandbyState *state)
@@ -1144,6 +1146,13 @@ static bool DispatchSegpageSmgrRecord(XLogReaderState *record, List *expectedTLI
     }
 
     return isNeedFullSync;
+}
+
+/* Run from the dispatcher thread. */
+static bool DispatchRepOriginRecord(XLogReaderState *record, List *expectedTLIs, TimestampTz recordXTime)
+{
+    DispatchTxnRecord(record, expectedTLIs, recordXTime, false);
+    return false;
 }
 
 /* Run from the dispatcher thread. */

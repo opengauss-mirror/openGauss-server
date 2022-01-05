@@ -1752,6 +1752,7 @@ static const XLogParseBlock g_xlogParseBlockTable[RM_MAX_ID + 1] = {
     { UBTreeRedoParseToBlock, RM_UBTREE_ID },
     { UBTree2RedoParseToBlock, RM_UBTREE2_ID },
     { segpage_redo_parse_to_block, RM_SEGPAGE_ID }, 
+    { NULL, RM_REPLORIGIN_ID },
 };
 inline XLogRecParseState *XLogParseToBlockCommonFunc(XLogReaderState *record, uint32 *blocknum)
 {
