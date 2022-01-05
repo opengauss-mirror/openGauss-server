@@ -102,6 +102,25 @@ install: all installdirs
 	$(INSTALL_DATA) distributelayer/streamTransportCore.h '$(DESTDIR)$(includedir_server)/distributelayer/streamTransportCore.h'
 	$(INSTALL_DATA) fmgr/fmgr_comp.h '$(DESTDIR)$(includedir_server)/fmgr/fmgr_comp.h'
 	$(INSTALL_DATA) fmgr/fmgr_core.h '$(DESTDIR)$(includedir_server)/fmgr/fmgr_core.h'
+# These headers are needed by postgis
+	$(INSTALL_DATA) access/ustore/undo/knl_uundotype.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundotype.h'
+	$(INSTALL_DATA) access/ustore/knl_uheap.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uheap.h'
+	$(INSTALL_DATA) access/ustore/knl_utuple.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_utuple.h'
+	$(INSTALL_DATA) access/ustore/knl_utype.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_utype.h'
+	$(INSTALL_DATA) access/ustore/knl_upage.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_upage.h'
+	$(INSTALL_DATA) access/ustore/knl_uredo.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uredo.h'
+	$(INSTALL_DATA) access/ustore/knl_uundovec.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uundovec.h'
+	$(INSTALL_DATA) access/ustore/knl_uundorecord.h '$(DESTDIR)$(includedir_server)/access/ustore/knl_uundorecord.h'
+	$(INSTALL_DATA) access/ustore/undo/knl_uundoxlog.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundoxlog.h'
+	$(INSTALL_DATA) access/ustore/undo/knl_uundotxn.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundotxn.h'
+	$(INSTALL_DATA) access/ustore/undo/knl_uundozone.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundozone.h'
+	$(INSTALL_DATA) access/ustore/undo/knl_uundospace.h '$(DESTDIR)$(includedir_server)/access/ustore/undo/knl_uundospace.h'
+	$(INSTALL_DATA) communication/commproxy_basic.h '$(DESTDIR)$(includedir_server)/communication/commproxy_basic.h'
+	$(INSTALL_DATA) access/parallel_recovery/page_redo.h '$(DESTDIR)$(includedir_server)/access/parallel_recovery/page_redo.h'
+	$(INSTALL_DATA) access/parallel_recovery/spsc_blocking_queue.h '$(DESTDIR)$(includedir_server)/access/parallel_recovery/spsc_blocking_queue.h'
+	$(INSTALL_DATA) executor/exec/execdesc.h '$(DESTDIR)$(includedir_server)/executor/exec/execdesc.h'
+	$(INSTALL_DATA) db4ai/matrix.h '$(DESTDIR)$(includedir_server)/db4ai/matrix.h'
+	$(INSTALL_DATA) db4ai/scores.h '$(DESTDIR)$(includedir_server)/db4ai/scores.h'
 # We don't use INSTALL_DATA for performance reasons --- there are a lot of files
 	cp $(srcdir)/*.h '$(DESTDIR)$(includedir_server)'/ || exit; \
 	chmod $(INSTALL_DATA_MODE) '$(DESTDIR)$(includedir_server)'/*.h  || exit; \
