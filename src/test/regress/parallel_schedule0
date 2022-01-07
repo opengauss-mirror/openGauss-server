@@ -194,7 +194,7 @@ test: hw_partition_hash_exchange
 test: hw_partition_list_truncate hw_partition_hash_truncate
 
 # To check min_max fuc support IP
-#test: min_max_support_IP
+test: min_max_support_IP
 
 # interval partition
 test: hw_partition_interval
