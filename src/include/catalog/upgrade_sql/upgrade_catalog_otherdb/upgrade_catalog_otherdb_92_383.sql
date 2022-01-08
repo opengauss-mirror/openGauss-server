@@ -16,3 +16,5 @@ SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0,
 CREATE UNIQUE INDEX gs_encrypted_proc_func_id_index ON pg_catalog.gs_encrypted_proc USING BTREE(func_id OID_OPS);
 
 SET LOCAL inplace_upgrade_next_system_object_oids = IUO_CATALOG, false, true, 0, 0, 0, 0;
+
+GRANT SELECT ON pg_catalog.gs_encrypted_proc TO PUBLIC;
