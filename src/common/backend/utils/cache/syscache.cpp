@@ -554,16 +554,6 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         {Anum_pgxc_slice_relid, Anum_pgxc_slice_type, Anum_pgxc_slice_relname, Anum_pgxc_slice_sindex},
         1024},
 #endif
-    {GsPolicyLabelRelationId, /* POLICYLABELNAME */
-        GsPolicyLabelNameIndexId,
-        3,
-        {Anum_gs_policy_label_labelname, Anum_gs_policy_label_fqdnnamespace, Anum_gs_policy_label_fqdnid, 0},
-        256},
-    {GsPolicyLabelRelationId, /* POLICYLABELOID */
-        GsPolicyLabelOidIndexId,
-        1,
-        {ObjectIdAttributeNumber, 0, 0, 0},
-        256},
 #ifndef ENABLE_MULTIPLE_NODES
     {ProcedureRelationId, /* PROCNAMEARGSNSP */
         ProcedureNameArgsNspNewIndexId,
@@ -672,11 +662,6 @@ static const struct cachedesc cacheinfo[] = {{AggregateRelationId, /* AGGFNOID *
         StreamingReaperStatusOidIndexId,
         1,
         {Anum_streaming_reaper_status_id, 0, 0, 0},
-        2048},
-    {StreamingReaperStatusRelationId, /* REAPERSTATUSOID */
-        StreamingCQReaperStatusOidIndexId,
-        1,
-        {ObjectIdAttributeNumber, 0, 0, 0},
         2048},
     {PgSynonymRelationId, /* SYNOID */
         SynonymOidIndexId,
