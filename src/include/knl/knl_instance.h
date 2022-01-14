@@ -74,6 +74,9 @@ const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
 const int HOTKEY_ABANDON_LENGTH = 100;
 const int MAX_GLOBAL_CACHEMEM_NUM = 128;
+#ifndef ENABLE_MULTIPLE_NODES
+const int DB_CMPT_MAX = 4;
+#endif
 
 enum knl_virtual_role {
     VUNKNOWN = 0,
@@ -1030,6 +1033,11 @@ typedef struct knl_instance_context {
     knl_g_streaming_dr_context streaming_dr_cxt;
     struct PLGlobalPackageRuntimeCache* global_session_pkg;
     pg_atomic_uint32 extensionNum;
+
+#ifndef ENABLE_MULTIPLE_NODES
+    void *raw_parser_hook[DB_CMPT_MAX];
+    void *plsql_parser_hook[DB_CMPT_MAX];
+#endif
 } knl_instance_context;
 
 extern long random();

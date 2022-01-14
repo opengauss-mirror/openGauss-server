@@ -232,6 +232,9 @@ typedef struct knl_session_attr_sql {
     int pldebugger_timeout;
 	bool for_print_tuple;
     bool numeric_out_for_format;
+#ifndef ENABLE_MULTIPLE_NODES
+    bool enable_custom_parser;
+#endif
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */
