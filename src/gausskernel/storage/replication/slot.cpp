@@ -911,7 +911,7 @@ void ReplicationSlotsComputeRequiredLSN(ReplicationSlotState *repl_slt_state)
         repl_slt_state->max_required = max_required;
         if (*standby_slots_list == InvalidXLogRecPtr) {
             repl_slt_state->quorum_min_required = InvalidXLogRecPtr;
-        } else {
+        } else if (t_thrd.syncrep_cxt.SyncRepConfig != NULL) {
             for (i = t_thrd.syncrep_cxt.SyncRepConfig->num_sync - 1; i >= 0; i--) {
                 if (standby_slots_list[i] != InvalidXLogRecPtr) {
                     repl_slt_state->quorum_min_required = standby_slots_list[i];
