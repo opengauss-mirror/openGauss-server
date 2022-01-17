@@ -2220,7 +2220,7 @@ typedef struct knl_t_replscanner_context {
 
 typedef struct knl_t_syncrepgram_context {
     /* Result of parsing is returned in one of these two variables */
-    struct SyncRepConfigData* syncrep_parse_result;
+    List* syncrep_parse_result;
 } knl_t_syncrepgram_context;
 
 typedef struct knl_t_syncrepscanner_context {
@@ -2230,7 +2230,8 @@ typedef struct knl_t_syncrepscanner_context {
 } knl_t_syncrepscanner_context;
 
 typedef struct knl_t_syncrep_context {
-    struct SyncRepConfigData* SyncRepConfig;
+    struct SyncRepConfigData** SyncRepConfig;
+    int SyncRepConfigGroups;
     bool announce_next_takeover;
 } knl_t_syncrep_context;
 
