@@ -146,21 +146,21 @@ bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum)
     return found;
 }
 
-static int OpenPcaFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo)
+static int OpenPcaFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
 {
     Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
     char dst[MAXPGPATH];
     CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCA_FILE);
-    uint32 flags = O_RDWR | PG_BINARY;
+    uint32 flags = O_RDWR | PG_BINARY | oflags;
     return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCA_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
 }
 
-static int OpenPcdFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo)
+static int OpenPcdFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
 {
     Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
     char dst[MAXPGPATH];
     CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCD_FILE);
-    uint32 flags = O_RDWR | PG_BINARY;
+    uint32 flags = O_RDWR | PG_BINARY | oflags;
     return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCD_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
 }
 
@@ -2471,12 +2471,12 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
         FileClose(fd);
         fd = -1;
-        fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno);
+        fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
         if (fd_pca < 0) {
             pfree(fullpath);
             return NULL;
         }
-        fd_pcd = OpenPcdFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno);
+        fd_pcd = OpenPcdFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
         if (fd_pcd < 0) {
             pfree(fullpath);
             return NULL;
