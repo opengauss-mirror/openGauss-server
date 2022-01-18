@@ -16540,6 +16540,8 @@ int ParallelXLogReadWorkBufRead(XLogReaderState *xlogreader, XLogRecPtr targetPa
     XLByteAdvance(RecPtr, reqLen);
 
     XLogRecPtr expectedRecPtr = CalcExpectLsn(RecPtr);
+    uint64 waitXLogCount = 0;
+    const uint64 pushLsnCount = 2;
 
     pg_atomic_write_u64(&extreme_rto::g_dispatcher->rtoXlogBufState.expectLsn, expectedRecPtr);
     for (;;) {
@@ -16582,6 +16584,7 @@ int ParallelXLogReadWorkBufRead(XLogReaderState *xlogreader, XLogRecPtr targetPa
             /* just make sure source info is correct... */
             t_thrd.xlog_cxt.readSource = XLOG_FROM_STREAM;
             t_thrd.xlog_cxt.XLogReceiptSource = XLOG_FROM_STREAM;
+            waitXLogCount = 0;
             if ((targetPagePtr / XLOG_BLCKSZ) != (t_thrd.xlog_cxt.receivedUpto / XLOG_BLCKSZ)) {
                 t_thrd.xlog_cxt.readLen = XLOG_BLCKSZ;
             } else {
@@ -16614,7 +16617,8 @@ int ParallelXLogReadWorkBufRead(XLogReaderState *xlogreader, XLogRecPtr targetPa
              */
             WaitLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch, WL_LATCH_SET | WL_TIMEOUT, 1000L);
             ResetLatch(&t_thrd.shemem_ptr_cxt.XLogCtl->recoveryWakeupLatch);
-            extreme_rto::PushToWorkerLsn(false);
+            extreme_rto::PushToWorkerLsn(waitXLogCount == pushLsnCount);
+            ++waitXLogCount;
         }
 
         RedoInterruptCallBack();
