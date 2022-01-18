@@ -698,7 +698,7 @@ static inline void pgarch_UpdateArchiveLastLsn(XLogRecPtr targetLsn)
     t_thrd.arch.last_arch_time = TIME_GET_MILLISEC(tv);
     t_thrd.arch.pitr_task_last_lsn = targetLsn;
     g_instance.archive_obs_cxt.pitr_task_last_lsn = t_thrd.arch.pitr_task_last_lsn;
-    g_instance.archive_obs_cxt.last_arch_time = t_thrd.arch.last_arch_time;
+    g_instance.archive_obs_cxt.last_arch_timestamp = GetCurrentTimestamp();
 }
 
 /*
@@ -1291,7 +1291,7 @@ Datum gs_get_archive_status(PG_FUNCTION_ARGS)
             int ret = 0;
             Datum values[ARCHIVE_STATUS_COLS];
             XLogRecPtr last_arch_lsn = g_instance.archive_obs_cxt.pitr_task_last_lsn;
-            long last_arch_time = g_instance.archive_obs_cxt.last_arch_time;
+            long last_arch_time = g_instance.archive_obs_cxt.last_arch_timestamp;
             /* get the ip address of standby */
             char remoteip[IP_LEN] = {0};
             errno_t rc = strncpy_s(remoteip, IP_LEN, (char *)walsnd->wal_sender_channel.remotehost, IP_LEN - 1);

@@ -738,7 +738,7 @@ typedef struct knl_g_archive_obs_context {
 
     /* used to show the archive status */
     volatile int sync_walsender_idx;
-    volatile long last_arch_time;
+    volatile long last_arch_timestamp;
     volatile XLogRecPtr pitr_task_last_lsn;
 
     /*
