@@ -816,6 +816,7 @@ void client_read_ended(void)
     }
 }
 
+
 /*
  * Do raw parsing (only).
  *
@@ -841,7 +842,16 @@ List* pg_parse_query(const char* query_string, List** query_string_locationlist)
 
     PGSTAT_START_TIME_RECORD();
 
-    raw_parsetree_list = raw_parser(query_string, query_string_locationlist);
+    List* (*parser_hook)(const char*, List**) = raw_parser;
+#ifndef ENABLE_MULTIPLE_NODES
+    if (u_sess->attr.attr_sql.enable_custom_parser) {
+        int id = GetCustomParserId();
+        if (id >= 0 && g_instance.raw_parser_hook[id] != NULL) {
+            parser_hook = (List* (*)(const char*, List**))g_instance.raw_parser_hook[id];
+        }
+    }
+#endif
+    raw_parsetree_list = parser_hook(query_string, query_string_locationlist);
 
     PGSTAT_END_TIME_RECORD(PARSE_TIME);
 

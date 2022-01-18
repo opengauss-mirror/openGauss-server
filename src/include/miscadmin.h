@@ -332,6 +332,10 @@ extern bool exist_logic_cluster();
 #ifdef ENABLE_MULTIPLE_NODES
 extern const char* show_nodegroup_mode(void);
 #endif
+
+#ifndef ENABLE_MULTIPLE_NODES
+extern const int GetCustomParserId();
+#endif
 extern const char* show_lcgroup_name();
 extern Oid get_pgxc_logic_groupoid(Oid roleid);
 extern Oid get_pgxc_logic_groupoid(const char* groupname);

@@ -1307,6 +1307,17 @@ static void InitSqlConfigureNamesBool()
             NULL,
             NULL,
             NULL},
+        {{"enable_custom_parser",
+             PGC_USERSET,
+             NODE_SINGLENODE,
+             UNGROUPED,
+             gettext_noop("Enables custom parser"),
+             NULL},
+            &u_sess->attr.attr_sql.enable_custom_parser,
+            false,
+            NULL,
+            NULL,
+            NULL},
 #endif
 
         {{"enable_partition_opfusion",
