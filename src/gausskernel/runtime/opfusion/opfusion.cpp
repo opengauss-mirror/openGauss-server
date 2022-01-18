@@ -471,6 +471,8 @@ void OpFusion::fusionExecute(StringInfo msg, char *completionTag, bool isTopLeve
         PG_RE_THROW();
     }
     PG_END_TRY();
+    
+    UpdateSingleNodeByPassUniqueSQLStat(isTopLevel);
 }
 
 bool OpFusion::process(int op, StringInfo msg, char *completionTag, bool isTopLevel, bool *isQueryCompleted)
