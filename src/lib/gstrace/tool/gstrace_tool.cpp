@@ -1468,6 +1468,7 @@ trace_msg_t trace_message[] = {
     {TRACE_SEQ_ERR, "Trace sequence check failed."},
     {TRACE_VERSION_ERR, "trace version not match."},
     {TRACE_CONFIG_SIZE_ERR, "invalid config size in trace file."},
+    {TRACE_PROCESS_NOT_EXIST, "The database process is not exist."},
     {TRACE_MSG_MAX, "Failed!"},
 };
 

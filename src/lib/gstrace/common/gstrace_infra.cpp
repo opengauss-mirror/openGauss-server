@@ -368,6 +368,31 @@ static void detachTraceBufferIfDisabled()
     pTrcCxt->pTrcCfg->bEnabled = false;
 }
 
+static bool checkProcess(int port)
+{
+    int ret;
+    bool procexist = false;
+    char checkcmd[MAX_PATH_LEN] = {0};
+    char buf[MAX_PATH_LEN];
+    FILE* fp = NULL;
+
+    ret = snprintf_s(checkcmd, MAX_PATH_LEN, MAX_PATH_LEN - 1, "lsof -i:%d", port);
+    securec_check_ss_c(ret, "\0", "\0");
+
+    fp = popen(checkcmd, "r");
+    if (fp == NULL) {
+        printf("popen failed. could not query database process.\n");
+        return procexist;
+    } 
+    while (fgets(buf, sizeof(buf), fp) != NULL) {
+        procexist = true;
+        break;
+    }
+    pclose(fp);
+
+    return procexist;
+}
+
 void gstrace_destory(int code, void *arg)
 {
     trace_context* pTrcCxt = getTraceContext();
@@ -547,6 +572,11 @@ trace_msg_code gstrace_start(int key, const char* mask, uint64_t bufferSize, con
 
     if (pTrcCxt->pTrcCfg->bEnabled) {
         return TRACE_ALREADY_START;
+    }
+
+    /* check if database process exist. */
+    if (!checkProcess(key)) {
+        return TRACE_PROCESS_NOT_EXIST;
     }
 
     /* set the mask if it's passed in */

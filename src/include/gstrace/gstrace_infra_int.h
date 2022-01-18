@@ -94,6 +94,7 @@ typedef enum trace_msg_code {
     TRACE_SEQ_ERR,
     TRACE_VERSION_ERR,
     TRACE_CONFIG_SIZE_ERR,
+    TRACE_PROCESS_NOT_EXIST,
     TRACE_MSG_MAX,
 } trace_msg_code;
 
