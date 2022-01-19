@@ -804,6 +804,6 @@ extern void RelationDecrementReferenceCount(Oid relationId);
 
 extern void GetTdeInfoFromRel(Relation rel, TdeInfo *tde_info);
 extern char RelationGetRelReplident(Relation r);
-
+extern void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compressOpts, const char* name);
 #endif /* REL_H */
 

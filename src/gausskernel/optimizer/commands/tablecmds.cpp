@@ -1114,18 +1114,8 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_OPTION),
                     errmsg("It is not allowed to assign version option for non-dfs table.")));
-        } else if (pg_strcasecmp(def->defname, "compresstype") == 0) {
-            tableCreateSupport.compressType = true;
-        } else if (pg_strcasecmp(def->defname, "compress_chunk_size") == 0) {
-            tableCreateSupport.compressChunkSize = true;
-        } else if (pg_strcasecmp(def->defname, "compress_prealloc_chunks") == 0) {
-            tableCreateSupport.compressPreAllocChunks = true;
-        } else if (pg_strcasecmp(def->defname, "compress_level") == 0) {
-            tableCreateSupport.compressLevel = true;
-        } else if (pg_strcasecmp(def->defname, "compress_byte_convert") == 0) {
-            tableCreateSupport.compressByteConvert = true;
-        } else if (pg_strcasecmp(def->defname, "compress_diff_convert") == 0) {
-            tableCreateSupport.compressDiffConvert = true;
+        } else {
+            SetOneOfCompressOption(def->defname, &tableCreateSupport);
         }
 
         if (pg_strcasecmp(def->defname, "orientation") == 0 && pg_strcasecmp(defGetString(def), ORIENTATION_ORC) == 0) {

@@ -2897,3 +2897,20 @@ bool is_cstore_option(char relkind, Datum reloptions)
     pfree_ext(std_opt);
     return result;
 }
+
+void SetOneOfCompressOption(const char* defname, TableCreateSupport* tableCreateSupport)
+{
+    if (pg_strcasecmp(defname, "compresstype") == 0) {
+        tableCreateSupport->compressType = true;
+    } else if (pg_strcasecmp(defname, "compress_chunk_size") == 0) {
+        tableCreateSupport->compressChunkSize = true;
+    } else if (pg_strcasecmp(defname, "compress_prealloc_chunks") == 0) {
+        tableCreateSupport->compressPreAllocChunks = true;
+    } else if (pg_strcasecmp(defname, "compress_level") == 0) {
+        tableCreateSupport->compressLevel = true;
+    } else if (pg_strcasecmp(defname, "compress_byte_convert") == 0) {
+        tableCreateSupport->compressByteConvert = true;
+    } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
+        tableCreateSupport->compressDiffConvert = true;
+    }
+}

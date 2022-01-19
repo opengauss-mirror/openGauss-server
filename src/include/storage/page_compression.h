@@ -113,22 +113,6 @@ typedef struct HeapPageCompressData {
     char data[FLEXIBLE_ARRAY_MEMBER];       /* compressed page, except for the page header */
 } HeapPageCompressData;
 
-struct TableCreateSupport {
-    bool compressType;
-    bool compressLevel;
-    bool compressChunkSize;
-    bool compressPreAllocChunks;
-    bool compressByteConvert;
-    bool compressDiffConvert;
-};
-
-inline bool HasCompressOption(TableCreateSupport *tableCreateSupport)
-{
-    return tableCreateSupport->compressLevel || tableCreateSupport->compressChunkSize ||
-           tableCreateSupport->compressPreAllocChunks || tableCreateSupport->compressByteConvert ||
-           tableCreateSupport->compressDiffConvert;
-}
-
 const uint4 CHUNK_SIZE_LIST[4] = {BLCKSZ / 2, BLCKSZ / 4, BLCKSZ / 8, BLCKSZ / 16};
 constexpr uint4 INDEX_OF_HALF_BLCKSZ = 0; 
 constexpr uint4 INDEX_OF_QUARTER_BLCKSZ = 1; 

@@ -152,8 +152,12 @@ alter index normal_test.tbl_partition_id_idx set (compress_chunk_size=2048);
 ERROR:  change compress_chunk_size OPTION is not supported
 alter index normal_test.tbl_partition_id_idx set (compress_prealloc_chunks=2);
 ERROR:  change partition compress_prealloc_chunks OPTION is not supported
+create index rolcompress_index on normal_test.tbl_pc(id) with (compress_chunk_size=4096);
+ERROR:  compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/compress_diff_convert should be used with compresstype.
+create table rolcompress_table_001(a int) with (compresstype=2, compress_prealloc_chunks=3);
+ERROR:  invalid compress_prealloc_chunks 3 , must be less than 2 for rolcompress_table_001
 -- support
-alter table normal_test.tbl_pc set (compress_prealloc_chunks=2);
+alter table normal_test.tbl_pc set (compress_prealloc_chunks=1);
 drop schema normal_test cascade;
 NOTICE:  drop cascades to 3 other objects
 DETAIL:  drop cascades to table normal_test.tbl_pc

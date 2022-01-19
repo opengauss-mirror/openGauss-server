@@ -130,6 +130,22 @@ typedef struct {
     int offset;          /* offset of field in result struct */
 } relopt_parse_elt;
 
+struct TableCreateSupport {
+    bool compressType;
+    bool compressLevel;
+    bool compressChunkSize;
+    bool compressPreAllocChunks;
+    bool compressByteConvert;
+    bool compressDiffConvert;
+};
+
+inline bool HasCompressOption(TableCreateSupport *tableCreateSupport)
+{
+    return tableCreateSupport->compressLevel || tableCreateSupport->compressChunkSize ||
+           tableCreateSupport->compressPreAllocChunks || tableCreateSupport->compressByteConvert ||
+           tableCreateSupport->compressDiffConvert;
+}
+
 /* 
  * The following are the table append modes currently supported.
  * on: mark the table on-line scaleout mode, when it is set, later data write by append mode.
@@ -284,5 +300,6 @@ extern void forbid_to_set_options_for_timeseries_tbl(List* options);
 extern List* RemoveRelOption(List* options, const char* optName, bool* removed);
 void RowTblCheckCompressionOption(List *options);
 void RowTblCheckHashBucketOption(List* options, StdRdOptions* std_opt);
+void SetOneOfCompressOption(const char *defname, TableCreateSupport *tableCreateSupport);
 #endif /* RELOPTIONS_H */
 
