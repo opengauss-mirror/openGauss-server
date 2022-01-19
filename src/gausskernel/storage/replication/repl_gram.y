@@ -445,4 +445,6 @@ replication_yylex(YYSTYPE *lvalp, YYLTYPE *llocp,
 	return replication_scanner_yylex(&(lvalp->yy_core), llocp, yyscanner);
 }
 
+#undef yylex
+
 #include "repl_scanner.inc"
