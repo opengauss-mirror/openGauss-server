@@ -67,6 +67,12 @@ static uint unsupport_func[] = {
     PGSTATGETBACKENDPIDFUNCOID,  // pg_stat_get_backend_pid
     PERCENTILECONTAGGFUNCOID,    // percentile_cont
     MODEAGGFUNCOID,              // mode
+    FLOAT8MEDIANOID,             // median(float8)
+    INTERVALMEDIANOID,           // median(interval)
+    FIRSTAGGFUNCOID,             // first
+    LASTAGGFUNCOID,              // last
+    JSONAGGFUNCOID,              // json_agg
+    JSONOBJECTAGGFUNCOID         // json_object_agg
 };
 
 /*

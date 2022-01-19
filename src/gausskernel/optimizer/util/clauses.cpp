@@ -485,7 +485,7 @@ bool need_adjust_agg_inner_func_type(Aggref* aggref)
      * You can extend here when you need support stream plan for other agg which
      * also have no collect function, e.g. array_agg,listagg and so on.
      */
-    if (aggref->aggfnoid == STRINGAGGFUNCOID)
+    if (aggref->aggfnoid == STRINGAGGFUNCOID || aggref->aggfnoid == ARRAYAGGFUNCOID)
         return false;
     else
         return true;

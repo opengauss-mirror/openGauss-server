@@ -566,6 +566,19 @@ select median(a) from t1;
    50.5
 (1 row)
 
+explain (costs off) select first(a) from t1;
+      QUERY PLAN      
+----------------------
+ Aggregate
+   ->  Seq Scan on t1
+(2 rows)
+
+select first(a) from t1;
+ first 
+-------
+     1
+(1 row)
+
 explain (costs off) select sum(b)+median(a) as result from t1;
       QUERY PLAN      
 ----------------------
