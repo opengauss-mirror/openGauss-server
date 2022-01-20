@@ -119,6 +119,19 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
     (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 
     /*
+     * Create a memory context that we will do all our work in.  We do this so
+     * that we can reset the context during error recovery and thereby avoid
+     * possible memory leaks.  Formerly this code just ran in
+     * t_thrd.top_mem_cxt, but resetting that would be a really bad idea.
+     */
+    twopc_context = AllocSetContextCreate(t_thrd.top_mem_cxt,
+        "TwoPhase Cleaner",
+        ALLOCSET_DEFAULT_MINSIZE,
+        ALLOCSET_DEFAULT_INITSIZE,
+        ALLOCSET_DEFAULT_MAXSIZE);
+    (void)MemoryContextSwitchTo(twopc_context);
+
+    /*
      * If an exception is encountered, processing resumes here.
      *
      * See notes in postgres.c about the design of this coding.
@@ -133,7 +146,17 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
         /* Report the error to the server log */
         EmitErrorReport();
 
+
+        /*
+         * Now return to normal top-level context and clear ErrorContext for
+         * next time.
+         */
+        (void)MemoryContextSwitchTo(twopc_context);
+
         FlushErrorState();
+
+        /* Flush any leaked data in the top-level context */
+        MemoryContextResetAndDeleteChildren(twopc_context);
 
         /* Now we can allow interrupts again */
         RESUME_INTERRUPTS();
@@ -142,19 +165,6 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 
     /* We can now handle ereport(ERROR) */
     t_thrd.log_cxt.PG_exception_stack = &local_sigjmp_buf;
-
-    /*
-     * Create a memory context that we will do all our work in.  We do this so
-     * that we can reset the context during error recovery and thereby avoid
-     * possible memory leaks.  Formerly this code just ran in
-     * t_thrd.top_mem_cxt, but resetting that would be a really bad idea.
-     */
-    twopc_context = AllocSetContextCreate(t_thrd.top_mem_cxt,
-        "TwoPhase Cleaner",
-        ALLOCSET_DEFAULT_MINSIZE,
-        ALLOCSET_DEFAULT_INITSIZE,
-        ALLOCSET_DEFAULT_MAXSIZE);
-    (void)MemoryContextSwitchTo(twopc_context);
 
     /* Unblock signals (they were blocked when the postmaster forked us) */
     gs_signal_setmask(&t_thrd.libpq_cxt.UnBlockSig, NULL);
@@ -270,6 +280,8 @@ NON_EXEC_STATIC void TwoPhaseCleanerMain()
 
         pgstat_report_activity(STATE_IDLE, NULL);
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, (long)10000 /* 10s */);
+
+        MemoryContextResetAndDeleteChildren(twopc_context);
 
         /*
          * Emergency bailout if postmaster has died.  This is to avoid the
