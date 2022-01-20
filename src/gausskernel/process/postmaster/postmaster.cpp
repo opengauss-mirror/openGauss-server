@@ -3750,6 +3750,9 @@ int ProcessStartupPacket(Port* port, bool SSLdone)
                     } else if (strcmp(valptr, "autonomoustransaction") == 0) {
                         clientIsAutonomousTransaction = true;
                         ereport(DEBUG5, (errmsg("autonomoustransaction connected")));
+                    } else if (strcmp(valptr, "subscription") == 0) {
+                        u_sess->proc_cxt.clientIsSubscription = true;
+                        ereport(DEBUG5, (errmsg("subscription connected")));
                     } else {
                         ereport(DEBUG5, (errmsg("application %s connected", valptr)));
                     }

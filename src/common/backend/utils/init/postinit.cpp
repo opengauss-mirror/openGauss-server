@@ -1812,8 +1812,8 @@ void PostgresInitializer::InitWAL()
 
     CheckAuthentication();
 
-    /* Don't set superuser when connection is from gs_basebackup */
-    if (u_sess->proc_cxt.clientIsGsBasebackup) {
+    /* Don't set superuser when connection is from gs_basebackup or subscription */
+    if (u_sess->proc_cxt.clientIsGsBasebackup || u_sess->proc_cxt.clientIsSubscription) {
         InitUser();
     } else {
         SetSuperUserStandalone();
