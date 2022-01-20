@@ -1630,6 +1630,10 @@ static void UHeapExecuteLockTuple(Relation relation, Buffer buffer, UHeapTuple u
     TransactionId xidOnTup = InvalidTransactionId;
     TransactionId curxid = InvalidTransactionId;
 
+    if (mode == LockTupleKeyShare || mode == LockTupleNoKeyExclusive) {
+        ereport(ERROR, (errmsg("For Key Share and For No Key Update is not support for ustore.")));
+    }
+
     if (mode == LockTupleExclusive) {
         xid = GetCurrentTransactionId();
     } else if (mode == LockTupleShared) {

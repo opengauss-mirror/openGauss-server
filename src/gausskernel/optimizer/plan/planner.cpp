@@ -4908,6 +4908,14 @@ static void preprocess_rowmarks(PlannerInfo* root)
         newrc = makeNode(PlanRowMark);
         newrc->rti = newrc->prti = rc->rti;
         newrc->rowmarkId = ++(root->glob->lastRowMarkId);
+        /* The strength of lc is not set at old version and distribution. Set it according to forUpdate. */
+        if (t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM
+#ifdef ENABLE_MULTIPLE_NODES
+        || true
+#endif
+        ) {
+            rc->strength = rc->forUpdate ? LCS_FORUPDATE : LCS_FORSHARE;
+        }
         switch (rc->strength) {
             case LCS_FORUPDATE:
                 newrc->markType = ROW_MARK_EXCLUSIVE;

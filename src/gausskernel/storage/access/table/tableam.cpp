@@ -1606,6 +1606,10 @@ TM_Result UHeapamTupleUpdate(Relation relation, Relation parentRelation, ItemPoi
     TM_Result result = UHeapUpdate(relation, parentRelation, otid, (UHeapTuple)newtup, cid, crosscheck, snapshot, wait,
         oldslot, tmfd, update_indexes, modifiedIdxAttrs, allow_inplace_update);
 
+    /* the LockTupleMode of ustore-updating must be LockTupleExclusive now */
+    if (mode != NULL) {
+        *mode = LockTupleExclusive;
+    }
     return result;
 }
 
