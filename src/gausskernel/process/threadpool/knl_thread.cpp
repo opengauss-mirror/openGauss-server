@@ -1488,6 +1488,7 @@ void knl_thread_init(knl_thread_role role)
     t_thrd.proc = NULL;
     t_thrd.pgxact = NULL;
     t_thrd.bn = NULL;
+    t_thrd.is_inited = false;
     t_thrd.myLogicTid = 10000;
     t_thrd.fake_session = NULL;
     t_thrd.threadpool_cxt.reaper_dead_session = false;

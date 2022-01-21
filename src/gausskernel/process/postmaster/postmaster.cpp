@@ -10026,6 +10026,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     /* Do this sooner rather than later... */
     IsUnderPostmaster = true; /* we are a postmaster subprocess now */
     Assert(thread_role == arg->role);
+    /* get child slot from backend_variables */
+    t_thrd.child_slot = (arg != NULL) ? ((BackendParameters*)arg->save_para)->MyPMChildSlot : -1;
     /* Check this thread will use reserved memory or not */
     is_memory_backend_reserved(arg);
     /* Initialize the Memory Protection at the thread level */
@@ -10083,6 +10085,8 @@ int GaussDbThreadMain(knl_thread_arg* arg)
     PortInitialize(&port, arg);
 
     t_thrd.bn = GetBackend(t_thrd.proc_cxt.MyPMChildSlot);
+    /* thread get backend pointer, backend list can be tracked by current thread's t_thrd.bn */
+    t_thrd.is_inited = true;
 
     /* We don't need read GUC variables */
     if (!FencedUDFMasterMode) {

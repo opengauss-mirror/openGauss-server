@@ -2816,6 +2816,8 @@ typedef struct knl_thrd_context {
     struct PGPROC* proc;
     struct PGXACT* pgxact;
     struct Backend* bn;
+    int child_slot;
+    bool is_inited; /* is new thread get new backend? */
     // we need to have a fake session to do some initialize
     knl_session_context* fake_session;
 

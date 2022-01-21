@@ -480,6 +480,12 @@ void gs_thread_exit(int code)
 
     if (t_thrd.bn != NULL) {
         t_thrd.bn->dead_end = true;
+    } else if (!t_thrd.is_inited) {
+        /* if thread has error before get backend, get backend from childSlot */
+        Backend* bn = GetBackend(t_thrd.child_slot);
+        if (bn != NULL) {
+            bn->dead_end = true;
+        }
     }
 
     /* release the signal slot in signal_base */
