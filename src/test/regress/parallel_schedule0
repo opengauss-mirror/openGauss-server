@@ -26,7 +26,7 @@ test: single_node_tablespace
 # The first group of parallel tests
 # ----------
 test: single_node_boolean single_node_char single_node_name single_node_varchar single_node_text single_node_int2 single_node_int4 single_node_int8 single_node_oid single_node_float4 single_node_float8 single_node_bit single_node_numeric single_node_txid single_node_uuid single_node_enum single_node_money
-#test: single_node_nvarchar
+test: single_node_nvarchar
 
 # Depends on things setup during char, varchar and text
 #test: single_node_strings
