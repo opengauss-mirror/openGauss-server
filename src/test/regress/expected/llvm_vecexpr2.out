@@ -834,7 +834,7 @@ explain (verbose on, costs off, analyze on) select * from llvm_vecexpr_table_03 
 --? Total runtime: .*
 (6 rows)
 
-explain (analyze on, detail on, costs off, timing off) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off) select * from llvm_vecexpr_table_03 where col_int > 4;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
  Row Adapter (actual rows=9 loops=1)
@@ -843,7 +843,7 @@ explain (analyze on, detail on, costs off, timing off) select * from llvm_vecexp
 --? Total runtime: .*
 (4 rows)
 
-explain (analyze on, detail on, costs off, timing off, format json) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off, format json) select * from llvm_vecexpr_table_03 where col_int > 4;
                      QUERY PLAN                      
 -----------------------------------------------------
  [                                                  +
@@ -874,7 +874,7 @@ explain (analyze on, detail on, costs off, timing off, format json) select * fro
  ]
 (1 row)
 
-explain (analyze on, detail on, costs off, timing off, format xml) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off, format xml) select * from llvm_vecexpr_table_03 where col_int > 4;
                                  QUERY PLAN                                 
 ----------------------------------------------------------------------------
  <explain xmlns="http://www.postgresql.org/2009/explain">                  +
@@ -905,7 +905,7 @@ explain (analyze on, detail on, costs off, timing off, format xml) select * from
  </explain>
 (1 row)
 
-explain (analyze on, detail on, costs off, timing off, format yaml) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off, format yaml) select * from llvm_vecexpr_table_03 where col_int > 4;
                    QUERY PLAN                   
 ------------------------------------------------
  - Plan:                                       +

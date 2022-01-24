@@ -349,7 +349,7 @@ select * from t11, t12 where  t12.c2   = (select min(1) from t11) + t11.c1(+) or
 ------JoinExpr and (+) not in same query level is  valid---
 --select * from (select t11.c1 a from t11,t12 where t11.c1 = t12.c2(+)) inner join t13 on (a = c3) order by 1,2,3,4;
 select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner join t13 on (a = c3) order by 1,2,3,4;
-explain (verbose on, costs off, analyze on, timing off, detail off, cpu off)
+explain (verbose on, costs off, analyze on, timing off, cpu off)
 select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner join t13 on (a = c3) order by 1,2,3,4;
 explain(verbose on, costs off)
 select * from (select t11.c1 a from t11,t12 where t11.c1 = t12.c2(+)) inner join t13 on (a = c3) order by 1,2,3,4;

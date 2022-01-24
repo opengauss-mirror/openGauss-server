@@ -12,11 +12,11 @@ analyze setop_hash_table_02;
 --test row table
 set work_mem=64;
 \o hw_setop_writefile.out
-explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
 \o
 
 select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2 limit 50;
@@ -26,11 +26,11 @@ select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02
 
 set work_mem='128MB';
 \o hw_setop_writefile.out
-explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 except all select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from setop_hash_table_01 except  select a,b from setop_hash_table_02 order by 1, 2;
 \o
 select a, b from setop_hash_table_01 intersect all select a,b from setop_hash_table_02 order by 1, 2  limit 50;
 select a, b from setop_hash_table_01 intersect  select a,b from setop_hash_table_02 order by 1, 2  limit 50;
@@ -49,11 +49,11 @@ analyze vecsetop_hash_table_02;
 
 set work_mem=64;
 \o hw_setop_writefile.out
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
 \o
 select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
 select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;
@@ -69,11 +69,11 @@ reset enable_compress_spill;
 
 set work_mem='128MB';
 \o hw_setop_writefile.out
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
-explain (analyze on, detail on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 intersect  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 except all select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
+explain (analyze on) select a, b from vec_setop_hash_table_01 except  select a,b from vecsetop_hash_table_02 order by 1, 2;
 \o
 \! rm hw_setop_writefile.out
 select a, b from vec_setop_hash_table_01 intersect all select a,b from vecsetop_hash_table_02 order by 1, 2  limit 50;

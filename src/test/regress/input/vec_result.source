@@ -139,7 +139,7 @@ select 2 from vector_result_engine.vector_result_table_01 where col_int > 500 li
 
 select count(*) from vector_result_engine.vector_result_table_01 t1 where exists (select t2.col_int from vector_result_engine.vector_result_table_01 t2 where col_int < 500);
 \o vec_result_json.o
-explain (analyze on, detail on, format json)select count(*) from vector_result_engine.vector_result_table_01 t1 where exists (select t2.col_int from vector_result_engine.vector_result_table_01 t2 where col_int < 500);
+explain (analyze on, format json)select count(*) from vector_result_engine.vector_result_table_01 t1 where exists (select t2.col_int from vector_result_engine.vector_result_table_01 t2 where col_int < 500);
 \o
 \! rm vec_result_json.o
 set enable_vector_engine=false;

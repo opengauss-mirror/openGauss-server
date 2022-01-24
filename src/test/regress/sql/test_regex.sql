@@ -11,8 +11,8 @@ create table regex_2 (
 );
 insert into regex_1 values(1, 'a', 'aaa');
 insert into regex_2 values(1, 'b', 'bbb');
-explain (costs on, verbose on, analyse on, cpu on, detail on, buffers on) select * from regex_1;
-explain (costs on, verbose on, analyse on, cpu on, detail on, buffers on) select * from regex_2;
+explain (costs on, verbose on, analyse on, cpu on, buffers on) select * from regex_1;
+explain (costs on, verbose on, analyse on, cpu on, buffers on) select * from regex_2;
 explain (costs on, verbose on) select * from (select name from regex_1 intersect select name from regex_2 order by name) limit 10;
 explain (costs on, verbose on) select * from (select name from regex_1 union select name from regex_2 order by name) limit 10;
 explain (costs on, verbose on) insert into regex_1 (select * from regex_2);
