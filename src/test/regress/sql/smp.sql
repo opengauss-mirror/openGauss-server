@@ -34,6 +34,9 @@ select a, avg(b), sum(c) from t1 group by a order by 1,2,3;
 explain (costs off) select median(a) from t1;
 select median(a) from t1;
 
+explain (costs off) select first(a) from t1;
+select first(a) from t1;
+
 explain (costs off) select sum(b)+median(a) as result from t1;
 select sum(b)+median(a) as result from t1;
 

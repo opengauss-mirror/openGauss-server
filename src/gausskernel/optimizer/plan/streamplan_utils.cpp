@@ -1088,6 +1088,12 @@ static bool is_agg_unsupport_dn_compute(Node* node)
         if (aggref->aggorder || aggref->agglevelsup ||
             (!aggref->agghas_collectfn && need_adjust_agg_inner_func_type(aggref)) ||
             IsPolymorphicType(aggref->aggtrantype)) {
+#ifndef ENABLE_MULTIPLE_NODES
+                errno_t sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
+                    NOTPLANSHIPPING_LENGTH, "aggregate %d is not supported in stream plan", aggref->aggfnoid);
+                securec_check_ss_c(sprintf_rc, "\0", "\0");
+                mark_stream_unsupport();
+#endif
                 return true;
         }
     } else {
