@@ -2807,7 +2807,7 @@ static void ExplainNode(
             Instrumentation* instr = NULL;
             if (es->detail) {
                 ExplainOpenGroup("Cpus In Detail", "Cpus In Detail", false, es);
-                int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+                int dop = planstate->plan->dop;
                 for (int i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
 #ifdef ENABLE_MULTIPLE_NODES
                     char* node_name = PGXCNodeGetNodeNameFromId(i, PGXC_NODE_DATANODE);
@@ -4314,7 +4314,7 @@ static void show_detail_filenum_info(const PlanState* planstate, ExplainState* e
     int datanode_size = 0;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
     int count_dn_writefile = 0;
 
     if (u_sess->instr_cxt.global_instr)
@@ -4471,7 +4471,7 @@ static void show_detail_execute_info(const PlanState* planstate, ExplainState* e
     int datanode_size = 0;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
 
     if (u_sess->instr_cxt.global_instr)
         datanode_size = u_sess->instr_cxt.global_instr->getInstruNodeNum();
@@ -5223,7 +5223,7 @@ static void show_datanode_buffers(ExplainState* es, PlanState* planstate)
 {
     Instrumentation* instr = NULL;
     int nodeNum = u_sess->instr_cxt.global_instr->getInstruNodeNum();
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
     int i = 0;
     int j = 0;
 
@@ -5290,7 +5290,7 @@ static void show_analyze_buffers(ExplainState* es, const PlanState* planstate, S
     instr_time blk_write_time_max, blk_write_time_min;
     bool is_execute = false;
     Instrumentation* instr = NULL;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
 
     INSTR_TIME_SET_ZERO(blk_read_time_max);
     INSTR_TIME_SET_ZERO(blk_write_time_max);
@@ -5876,7 +5876,7 @@ static void show_detail_cpu(ExplainState* es, PlanState* planstate)
     bool is_null = false;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
 
     if (u_sess->instr_cxt.global_instr->getInstruNodeNum() > 0) {
         for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
@@ -6809,7 +6809,7 @@ static void get_oper_time(ExplainState* es, PlanState* planstate, const Instrume
 static void show_stream_send_time(ExplainState* es, const PlanState* planstate)
 {
     bool isSend = false;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
 
     /* stream send time will print only es->detail is true and t_thrd.explain_cxt.explain_perf_mode is not normal */
     if (t_thrd.explain_cxt.explain_perf_mode == EXPLAIN_NORMAL || es->detail == false)
@@ -6882,7 +6882,7 @@ static void show_datanode_time(ExplainState* es, PlanState* planstate)
     bool executed = true;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
 
     if (es->detail) {
         if (es->format == EXPLAIN_FORMAT_TEXT)
@@ -7191,7 +7191,7 @@ static void show_instrumentation_count(const char* qlabel, int which, const Plan
 {
     double nfiltered = 0.0;
     Instrumentation* instr = NULL;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
 
     if (!es->analyze || !planstate->instrument)
         return;
@@ -7389,7 +7389,7 @@ static void show_analyze_dfs_info(const PlanState* planstate, ExplainState* es)
     Instrumentation* instr = NULL;
     int i = 0;
     int j = 0;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
     double total_local_block = 0.0;
     double total_remote_block = 0.0;
     double total_datacache_block_count = 0.0;
@@ -7457,7 +7457,7 @@ static void show_dfs_block_info(PlanState* planstate, ExplainState* es)
         int i = 0;
         int j = 0;
         bool has_info = false;
-        int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+        int dop = planstate->plan->dop;
 
         if (es->detail) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
@@ -7720,7 +7720,7 @@ static void show_analyze_storage_info_of_dfs(const PlanState* planstate, Explain
     uint64 total_dynamicfiles = 0;
     uint64 total_staticFiles = 0;
     Instrumentation* instr = NULL;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
     for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
         for (j = 0; j < dop; j++) {
             instr = u_sess->instr_cxt.global_instr->getInstrSlot(i, planstate->plan->plan_node_id, j);
@@ -7765,7 +7765,7 @@ static void show_analyze_storage_info_of_logft(const PlanState* planstate, Expla
     uint64 total_filename = 0;
     uint64 total_refuted_by_filename = 0;
     uint64 total_incompleted = 0;
-    int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+    int dop = planstate->plan->dop;
     Instrumentation* instr = NULL;
 
     int node_idx = 0;
@@ -7844,7 +7844,7 @@ static void show_storage_filter_info(PlanState* planstate, ExplainState* es)
         int i = 0;
         int j = 0;
         bool has_info = false;
-        int dop = planstate->plan->parallel_enabled ? u_sess->opt_cxt.query_dop : 1;
+        int dop = planstate->plan->dop;
 
         if (es->detail) {
             for (i = 0; i < u_sess->instr_cxt.global_instr->getInstruNodeNum(); i++) {
