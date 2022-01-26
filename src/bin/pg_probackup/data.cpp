@@ -33,8 +33,89 @@ typedef struct DataPage
     char    data[BLCKSZ];
 } DataPage;
 
+uint32 CHECK_STEP = 2;
 static bool get_page_header(FILE *in, const char *fullpath, BackupPageHeader* bph,
                                                 pg_crc32 *crc, bool use_crc32c);
+
+static inline uint32 pg_checksum_init(uint32 seed, uint32 value)
+{
+    CHECKSUM_COMP(seed, value);
+    return seed;
+}
+
+uint32 pg_checksum_block(char* data, uint32 size)
+{
+    uint32 sums[N_SUMS];
+    uint32* dataArr = (uint32*)data;
+    uint32 result = 0;
+    uint32 i, j;
+
+    /* ensure that the size is compatible with the algorithm */
+    Assert((size % (sizeof(uint32) * N_SUMS)) == 0);
+
+    /* initialize partial checksums to their corresponding offsets */
+    for (j = 0; j < N_SUMS; j += CHECK_STEP) {
+        sums[j] = pg_checksum_init(g_checksumBaseOffsets[j], dataArr[j]);
+        sums[j + 1] = pg_checksum_init(g_checksumBaseOffsets[j + 1], dataArr[j + 1]);
+    }
+    dataArr += N_SUMS;
+
+    /* main checksum calculation */
+    for (i = 1; i < size / (sizeof(uint32) * N_SUMS); i++) {
+        for (j = 0; j < N_SUMS; j += CHECK_STEP) {
+            CHECKSUM_COMP(sums[j], dataArr[j]);
+            CHECKSUM_COMP(sums[j + 1], dataArr[j + 1]);
+        }
+        dataArr += N_SUMS;
+    }
+
+    /* finally add in two rounds of zeroes for additional mixing */
+    for (j = 0; j < N_SUMS; j++) {
+        CHECKSUM_COMP(sums[j], 0);
+        CHECKSUM_COMP(sums[j], 0);
+
+        /* xor fold partial checksums together */
+        result ^= sums[j];
+    }
+
+    return result;
+}
+
+/*
+ * Compute the checksum for a openGauss page.  The page must be aligned on a
+ * 4-byte boundary.
+ *
+ * The checksum includes the block number (to detect the case where a page is
+ * somehow moved to a different location), the page header (excluding the
+ * checksum itself), and the page data.
+ */
+uint16 pg_checksum_page(char* page, BlockNumber blkno)
+{
+    PageHeader phdr = (PageHeader)page;
+    uint16 save_checksum;
+    uint32 checksum;
+
+    /*
+     * Save pd_checksum and temporarily set it to zero, so that the checksum
+     * calculation isn't affected by the old checksum stored on the page.
+     * Restore it after, because actually updating the checksum is NOT part of
+     * the API of this function.
+     */
+    save_checksum = phdr->pd_checksum;
+    phdr->pd_checksum = 0;
+    checksum = pg_checksum_block(page, BLCKSZ);
+    phdr->pd_checksum = save_checksum;
+
+    /* Mix in the block number to detect transposed pages */
+    checksum ^= blkno;
+
+    /*
+     * Reduce to a uint16 (to fit in the pd_checksum field) with an offset of
+     * one. That avoids checksums of zero, which seems like a good idea.
+     */
+    return (checksum % UINT16_MAX) + 1;
+}
+
 
 #ifdef HAVE_LIBZ
 /* Implementation of zlib compression method */
@@ -270,7 +351,7 @@ get_checksum_errormsg(Page page, char **errormsg, BlockNumber absolute_blkno)
          "page verification failed, "
          "calculated checksum %u but expected %u",
          phdr->pd_checksum,
-         /*pg_checksum_page(page, absolute_blkno)*/0);
+         pg_checksum_page(page, absolute_blkno));
     securec_check_ss_c(nRet, "\0", "\0");
 }
 
@@ -1426,7 +1507,7 @@ validate_one_page(Page page, BlockNumber absolute_blkno,
     }
 
     /* Verify checksum */
-    page_st->checksum = 0;//pg_checksum_page(page, absolute_blkno);
+    page_st->checksum = pg_checksum_page(page, absolute_blkno);
 
     if (checksum_version)
     {
@@ -1732,7 +1813,7 @@ validate_file_pages(pgFile *file, const char *fullpath, XLogRecPtr stop_lsn,
     {
         elog(WARNING, "Invalid CRC of backup file \"%s\": %X. Expected %X",
             fullpath, crc, file->crc);
-            //is_valid = false;
+        is_valid = false;
     }
 
     pg_free(headers);
@@ -1787,8 +1868,10 @@ get_checksum_map(const char *fullpath, uint32 checksum_version,
 
             if (rc == PAGE_IS_VALID)
             {
-                
-                checksum_map[blknum].checksum = page_st.checksum;
+                if (checksum_version)
+                    checksum_map[blknum].checksum = ((PageHeader) read_buffer)->pd_checksum;
+                else
+                    checksum_map[blknum].checksum = page_st.checksum;
                 checksum_map[blknum].lsn = page_st.lsn;
             }
         }
