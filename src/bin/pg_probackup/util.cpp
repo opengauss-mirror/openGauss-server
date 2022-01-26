@@ -36,6 +36,9 @@ static const char *statusName[] =
     "CORRUPT"
 };
 
+uint32 NUM_65536 = 65536;
+uint32 NUM_10000 = 10000;
+
 const char *
 base36enc(long unsigned int value)
 {
@@ -53,7 +56,7 @@ base36enc(long unsigned int value)
 }
 
 /*
- * Same as base36enc(), but the result must be released by the user.
+ * Same as base36enc(), but the results must be released by the user.
  */
 char *
 base36enc_dup(long unsigned int value)
@@ -77,6 +80,30 @@ base36dec(const char *text)
     return strtoul(text, NULL, 36);
 }
 
+static void
+checkControlFile(ControlFileData *ControlFile)
+{
+    pg_crc32c   crc;
+
+    /* Calculate CRC */
+    INIT_CRC32C(crc);
+    COMP_CRC32C(crc, (char *) ControlFile, offsetof(ControlFileData, crc));
+    FIN_CRC32C(crc);
+
+    /* Then compare it */
+    if (!EQ_CRC32C(crc, ControlFile->crc))
+        elog(ERROR, "Calculated CRC checksum does not match value stored in file.\n"
+             "Either the file is corrupt, or it has a different layout than this program\n"
+             "is expecting. The results below are untrustworthy.");
+
+    if ((ControlFile->pg_control_version % NUM_65536 == 0 || ControlFile->pg_control_version % NUM_65536 > NUM_10000) &&
+        ControlFile->pg_control_version / NUM_65536 != 0)
+        elog(ERROR, "possible byte ordering mismatch\n"
+                 "The byte ordering used to store the pg_control file might not match the one\n"
+                 "used by this program. In that case the results below would be incorrect, and\n"
+                 "the PostgreSQL installation would be incompatible with this data directory.");
+}
+
 /*
  * Verify control file contents in the buffer src, and copy it to *ControlFile.
  */
@@ -89,6 +116,9 @@ digestControlFile(ControlFileData *ControlFile, char *src, size_t size)
 
     errno_t rc = memcpy_s(ControlFile, sizeof(ControlFileData), src, sizeof(ControlFileData));
     securec_check_c(rc, "\0", "\0");
+
+    /* Additional checks on control file */
+    checkControlFile(ControlFile);
 }
 
 /*
