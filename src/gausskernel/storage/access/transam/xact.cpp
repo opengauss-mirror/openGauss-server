@@ -121,8 +121,6 @@ extern void uuid_struct_destroy_function();
 THR_LOCAL bool CancelStmtForReadOnly = false; /* just need cancel stmt once when DefaultXactReadOnly=true */
 THR_LOCAL bool TwoPhaseCommit = false;
 
-volatile int synchronous_commit = SYNCHRONOUS_COMMIT_ON;
-
 extern bool is_user_name_changed();
 extern void HDFSAbortCacheBlock();
 extern THR_LOCAL Oid lastUDFOid;
@@ -1921,7 +1919,8 @@ static TransactionId RecordTransactionCommit(void)
      * if all to-be-deleted tables are temporary though, since they are lost
      * anyway if we crash.)
      */
-    if ((wrote_xlog && synchronous_commit > SYNCHRONOUS_COMMIT_OFF) || t_thrd.xact_cxt.forceSyncCommit || nrels > 0) {
+    if ((wrote_xlog && u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_OFF) ||
+        t_thrd.xact_cxt.forceSyncCommit || nrels > 0) {
         /*
          * Synchronous commit case:
          *

@@ -105,9 +105,6 @@ typedef enum {
 /* Define the default setting for synchonous_commit */
 #define SYNCHRONOUS_COMMIT_ON SYNCHRONOUS_COMMIT_REMOTE_FLUSH
 
-/* Synchronous commit level */
-extern volatile int synchronous_commit;
-
 /* ----------------
  *		transaction-related XLOG entries
  * ----------------
