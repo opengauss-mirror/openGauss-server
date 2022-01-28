@@ -14,7 +14,7 @@ subdir = contrib/pagehack
 top_builddir = ../..
 include $(top_builddir)/src/Makefile.global
 enable_shared = false
-
+override CFLAGS += -lzstd
 ifeq ($(enable_debug), yes)
 	PG_CPPFLAGS += -DDEBUG
 endif

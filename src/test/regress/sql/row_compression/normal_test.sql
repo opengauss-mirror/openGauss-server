@@ -55,7 +55,9 @@ select relname, reloptions from pg_partition where parentid in (Select relfileno
 alter index normal_test.tbl_partition_id_idx set (compresstype=1);
 alter index normal_test.tbl_partition_id_idx set (compress_chunk_size=2048);
 alter index normal_test.tbl_partition_id_idx set (compress_prealloc_chunks=2);
+create index rolcompress_index on normal_test.tbl_pc(id) with (compress_chunk_size=4096);
+create table rolcompress_table_001(a int) with (compresstype=2, compress_prealloc_chunks=3);
 -- support
-alter table normal_test.tbl_pc set (compress_prealloc_chunks=2);
+alter table normal_test.tbl_pc set (compress_prealloc_chunks=1);
 
 drop schema normal_test cascade;

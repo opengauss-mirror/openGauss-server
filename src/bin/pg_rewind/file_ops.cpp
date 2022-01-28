@@ -1366,5 +1366,5 @@ void FetchCompressedFile(char* buf, BlockNumber blockNumber, int32 size)
         write_target_range(buffer_pos, seekpos, write_amount, 0, true);
     }
     pcAddr->nchunks = pcAddr->allocated_chunks;
-    pcAddr->checksum = AddrChecksum32(blockNumber, pcAddr);
+    pcAddr->checksum = AddrChecksum32(blockNumber, pcAddr, chunkSize);
 }

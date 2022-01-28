@@ -1994,8 +1994,7 @@ static void SendCompressedFile(char* readFileName, int basePathLen, struct stat&
         for (size_t i = 0; i < nchunks; i++) {
             addr->chunknos[i] = chunkIndex++;
         }
-
-        addr->checksum = AddrChecksum32(blockNum, addr);
+        addr->checksum = AddrChecksum32(blockNum, addr, chunkSize);
         totalLen += len;
     }
     ReleaseMap(map, readFileName);

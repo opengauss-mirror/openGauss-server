@@ -333,6 +333,12 @@ void CompressPagePrepareConvert(char *src, bool diff_convert, bool *real_ByteCon
     FreePointer((void*)aux_buf);
 }
 
+inline size_t CompressReservedLen(const char* page)
+{
+    auto length = offsetof(HeapPageCompressData, page_header) - offsetof(HeapPageCompressData, data);
+    return GetPageHeaderSize(page) + length;
+}
+
 /**
  * CompressPageBufferBound()
  * -- Get the destination buffer boundary to compress one page.
@@ -345,7 +351,7 @@ int CompressPageBufferBound(const char* page, uint8 algorithm)
         case COMPRESS_ALGORITHM_PGLZ:
             return BLCKSZ + 4;
         case COMPRESS_ALGORITHM_ZSTD:
-            return ZSTD_compressBound(BLCKSZ - GetPageHeaderSize(page));
+            return ZSTD_compressBound(BLCKSZ - CompressReservedLen(page));
         default:
             return -1;
     }
@@ -688,12 +694,12 @@ int pc_msync(PageCompressHeader *map)
 }
 
 
-uint32 AddrChecksum32(BlockNumber blockNumber, const PageCompressAddr* pageCompressAddr)
+uint32 AddrChecksum32(BlockNumber blockNumber, const PageCompressAddr* pageCompressAddr, uint16 chunkSize)
 {
 #define UINT_LEN sizeof(uint32)
     uint32 checkSum = 0;
     char* addr = ((char*) pageCompressAddr) + UINT_LEN;
-    size_t len = sizeof(PageCompressAddr) - UINT_LEN;
+    size_t len = SIZE_OF_PAGE_COMPRESS_ADDR(chunkSize) - UINT_LEN;
     do {
         if (len >= UINT_LEN) {
             checkSum += *((uint32*) addr);

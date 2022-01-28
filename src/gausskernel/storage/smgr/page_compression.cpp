@@ -88,7 +88,7 @@ void CheckAndRepairCompressAddress(PageCompressHeader *pcMap, uint16 chunk_size,
     /* check compress address of every pages */
     for (BlockNumber blocknum = 0; blocknum < (BlockNumber)RELSEG_SIZE; ++blocknum) {
         PageCompressAddr *pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blocknum);
-        if (pcAddr->checksum != AddrChecksum32(blocknum, pcAddr)) {
+        if (pcAddr->checksum != AddrChecksum32(blocknum, pcAddr, chunk_size)) {
             ereport(WARNING, (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid checkum %u of block %u in file \"%s\"",
                                                                       pcAddr->checksum, blocknum, path)));
             pcAddr->allocated_chunks = pcAddr->nchunks = 0;

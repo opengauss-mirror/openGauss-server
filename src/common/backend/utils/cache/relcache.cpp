@@ -1300,7 +1300,6 @@ static OpClassCacheEnt* LookupOpclassInfo(Oid operatorClassOid, StrategyNumber n
 static void RelationCacheInitFileRemoveInDir(const char* tblspcpath);
 static void unlink_initfile(const char* initfilename);
 static void SetBackendId(Relation relation);
-static void SetupPageCompressForRelation(Relation relation, PageCompressOpts *compress_options);
 /*
  *		ScanPgRelation
  *
@@ -2500,7 +2499,7 @@ static void RelationInitPhysicalAddr(Relation relation)
     // setup page compression options
     relation->rd_node.opt = 0;
     if (relation->rd_options && REL_SUPPORT_COMPRESSED(relation)) {
-        SetupPageCompressForRelation(relation, &((StdRdOptions*)(relation->rd_options))->compress);
+        SetupPageCompressForRelation(&relation->rd_node, &((StdRdOptions*)(relation->rd_options))->compress, RelationGetRelationName(relation));
     }
 }
 
@@ -4390,7 +4389,7 @@ Relation RelationBuildLocalRelation(const char* relname, Oid relnamespace, Tuple
     /* compressed option was set by RelationInitPhysicalAddr if rel->rd_options != NULL */
     if (rel->rd_options == NULL && reloptions && SUPPORT_COMPRESSED(relkind, rel->rd_rel->relam)) {
         StdRdOptions *options = (StdRdOptions *) default_reloptions(reloptions, false, RELOPT_KIND_HEAP);
-        SetupPageCompressForRelation(rel, &options->compress);
+        SetupPageCompressForRelation(&rel->rd_node, &options->compress, RelationGetRelationName(rel));
     }
 
 
@@ -7879,14 +7878,14 @@ char RelationGetRelReplident(Relation r)
     return relreplident;
 }
 
-/* setup page compress options for relation */
-static void SetupPageCompressForRelation(Relation relation, PageCompressOpts* compress_options)
+void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compress_options, const char* relationName)
 {
-    relation->rd_node.opt = 0;
     uint1 algorithm = compress_options->compressType;
-    if (algorithm != COMPRESS_TYPE_NONE) {
+    if (algorithm == COMPRESS_TYPE_NONE) {
+        node->opt = 0;
+    } else {
         if (!SUPPORT_PAGE_COMPRESSION) {
-            elog(ERROR, "unsupported page compression on this platform");
+            ereport(ERROR, (errmsg("unsupported page compression on this platform")));
         }
 
         uint1 compressLevel;
@@ -7902,20 +7901,21 @@ static void SetupPageCompressForRelation(Relation relation, PageCompressOpts* co
         bool success = false;
         uint1 chunkSize = ConvertChunkSize(compress_options->compressChunkSize, &success);
         if (!success) {
-            elog(ERROR, "invalid compress_chunk_size %d , must be one of %d, %d, %d or %d for %s",
-                 compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
-                 RelationGetRelationName(relation));
+            ereport(ERROR, (errmsg("invalid compress_chunk_size %d , must be one of %d, %d, %d or %d for %s",
+                                   compress_options->compressChunkSize, BLCKSZ / 16, BLCKSZ / 8, BLCKSZ / 4, BLCKSZ / 2,
+                                   relationName)));
         }
 
         uint1 preallocChunks;
         if (compress_options->compressPreallocChunks >= BLCKSZ / compress_options->compressChunkSize) {
-            preallocChunks = (uint1)(BLCKSZ / compress_options->compressChunkSize - 1);
+            ereport(ERROR, (errmsg("invalid compress_prealloc_chunks %d , must be less than %d for %s",
+                                   compress_options->compressPreallocChunks,
+                                   BLCKSZ / compress_options->compressChunkSize, relationName)));
         } else {
             preallocChunks = (uint1)(compress_options->compressPreallocChunks);
         }
-        Assert(preallocChunks <= MAX_PREALLOC_CHUNKS);
-        SET_COMPRESS_OPTION(relation->rd_node, compress_options->compressByteConvert,
-                            compress_options->compressDiffConvert, preallocChunks,
-                            symbol, compressLevel, algorithm, chunkSize);
+        node->opt = 0;
+        SET_COMPRESS_OPTION((*node), compress_options->compressByteConvert, compress_options->compressDiffConvert,
+                            preallocChunks, symbol, compressLevel, algorithm, chunkSize);
     }
 }

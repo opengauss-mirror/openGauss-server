@@ -247,7 +247,7 @@ int RemoteGetPage(char* remoteAddress, uint32 spcnode, uint32 dbnode, uint32 rel
 
     tnRet = snprintf_s(sqlCommands, MAX_PATH_LEN, MAX_PATH_LEN - 1,
                        "SELECT gs_read_block_from_remote(%u, %u, %u, %d, %d, %d, '%lu', %u, '%lu', false);", spcnode,
-                       dbnode, relnode, bucketnode, opt, forknum, blocknum, blocksize, lsn);
+                       dbnode, relnode, bucketnode, (int2)opt, forknum, blocknum, blocksize, lsn);
 
     securec_check_ss(tnRet, "", "");
 

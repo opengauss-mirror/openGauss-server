@@ -18,6 +18,8 @@ CREATE unlogged TABLE compressed_unlogged_table_1024(id int) WITH(compresstype=2
 -- use compress_prealloc_chunks\compress_chunk_size\compress_level without compresstype
 CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_prealloc_chunks=5);
 CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_chunk_size=1024);
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_byte_convert=true);
+CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_diff_convert=true);
 CREATE TABLE unspported_feature.compressed_table_1024(id int) WITH(compress_level=5);
 -- unspport exchange
 CREATE TABLE unspported_feature.exchange_table(id int) WITH(compresstype=2);

@@ -146,21 +146,21 @@ bool check_unlink_rel_hashtbl(RelFileNode rnode, ForkNumber forknum)
     return found;
 }
 
-static int OpenPcaFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo)
+static int OpenPcaFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
 {
     Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
     char dst[MAXPGPATH];
     CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCA_FILE);
-    uint32 flags = O_RDWR | PG_BINARY;
+    uint32 flags = O_RDWR | PG_BINARY | oflags;
     return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCA_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
 }
 
-static int OpenPcdFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo)
+static int OpenPcdFile(const char *path, const RelFileNodeBackend &node, const ForkNumber &forkNum, const uint32 &segNo, int oflags = 0)
 {
     Assert(node.node.opt != 0 && forkNum == MAIN_FORKNUM);
     char dst[MAXPGPATH];
     CopyCompressedPath(dst, path, COMPRESSED_TABLE_PCD_FILE);
-    uint32 flags = O_RDWR | PG_BINARY;
+    uint32 flags = O_RDWR | PG_BINARY | oflags;
     return DataFileIdOpenFile(dst, RelFileNodeForkNumFill(node, PCD_FORKNUM, segNo), (int)flags, S_IRUSR | S_IWUSR);
 }
 
@@ -835,7 +835,7 @@ static void mdextend_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber block
     }
 
     /* write checksum */
-    pcAddr->checksum = AddrChecksum32(blocknum, pcAddr);
+    pcAddr->checksum = AddrChecksum32(blocknum, pcAddr, chunk_size);
 
     if (pg_atomic_read_u32(&pcMap->nblocks) < blocknum % RELSEG_SIZE + 1) {
         pg_atomic_write_u32(&pcMap->nblocks, blocknum % RELSEG_SIZE + 1);
@@ -1890,11 +1890,11 @@ static void mdwrite_pc(SMgrRelation reln, ForkNumber forknum, BlockNumber blockn
     /* write checksum */
     if (mmapSync) {
         pcMap->sync = false;
-        pcAddr->checksum = AddrChecksum32(blocknum, pcAddr);
+        pcAddr->checksum = AddrChecksum32(blocknum, pcAddr, chunk_size);
     }
 
     /* write checksum */
-    pcAddr->checksum = AddrChecksum32(blocknum, pcAddr);
+    pcAddr->checksum = AddrChecksum32(blocknum, pcAddr, chunk_size);
 
     mmapSync = false;
     if (work_buffer != NULL && work_buffer != buffer) {
@@ -2225,7 +2225,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                 for (BlockNumber blk = 0; blk < RELSEG_SIZE; ++blk) {
                     pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blk);
                     pcAddr->nchunks = 0;
-                    pcAddr->checksum = AddrChecksum32(blk, pcAddr);
+                    pcAddr->checksum = AddrChecksum32(blk, pcAddr, chunk_size);
                 }
                 pg_atomic_write_u32(&pcMap->nblocks, last_seg_blocks);
                 pcMap->sync = false;
@@ -2461,7 +2461,6 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
     /* open the file */
     fd = DataFileIdOpenFile(fullpath, filenode, O_RDWR | PG_BINARY | oflags, FILE_RW_PERMISSION);
 
-    pfree(fullpath);
 
     if (fd < 0) {
         return NULL;
@@ -2472,12 +2471,12 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
     if (IS_COMPRESSED_MAINFORK(reln, forknum)) {
         FileClose(fd);
         fd = -1;
-        fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno);
+        fd_pca = OpenPcaFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
         if (fd_pca < 0) {
             pfree(fullpath);
             return NULL;
         }
-        fd_pcd = OpenPcdFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno);
+        fd_pcd = OpenPcdFile(fullpath, reln->smgr_rnode, MAIN_FORKNUM, segno, oflags);
         if (fd_pcd < 0) {
             pfree(fullpath);
             return NULL;
@@ -2485,6 +2484,7 @@ static MdfdVec *_mdfd_openseg(SMgrRelation reln, ForkNumber forknum, BlockNumber
         SetupPageCompressMemoryMap(fd_pca, reln->smgr_rnode.node, filenode);
     }
 
+    pfree(fullpath);
     /* allocate an mdfdvec entry for it */
     v = _fdvec_alloc();
 
