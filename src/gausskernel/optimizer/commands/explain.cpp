@@ -352,20 +352,18 @@ void ExplainQuery(
         else if (strcmp(opt->defname, "buffers") == 0)
             es.buffers = defGetBoolean(opt);
 #ifdef ENABLE_MULTIPLE_NODES
-#ifdef PGXC
         else if (strcmp(opt->defname, "nodes") == 0)
             es.nodes = defGetBoolean(opt);
         else if (strcmp(opt->defname, "num_nodes") == 0)
             es.num_nodes = defGetBoolean(opt);
-#endif /* PGXC */
+        else if (pg_strcasecmp(opt->defname, "detail") == 0)
+            es.detail = defGetBoolean(opt);
 #endif /* ENABLE_MULTIPLE_NODES */
         else if (strcmp(opt->defname, "timing") == 0) {
             timing_set = true;
             es.timing = defGetBoolean(opt);
         } else if (pg_strcasecmp(opt->defname, "cpu") == 0)
             es.cpu = defGetBoolean(opt);
-        else if (pg_strcasecmp(opt->defname, "detail") == 0)
-            es.detail = defGetBoolean(opt);
         else if (pg_strcasecmp(opt->defname, "performance") == 0)
             es.performance = defGetBoolean(opt);
         else if (strcmp(opt->defname, "format") == 0) {

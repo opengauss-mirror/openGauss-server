@@ -1360,7 +1360,7 @@ select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner 
  10 | 10 | 10 | 10
 (10 rows)
 
-explain (verbose on, costs off, analyze on, timing off, detail off, cpu off)
+explain (verbose on, costs off, analyze on, timing off, cpu off)
 select * from (select t11.c1 a from t11 left join t12 on t11.c1 = t12.c2) inner join t13 on (a = c3) order by 1,2,3,4;
                                    QUERY PLAN                                    
 ---------------------------------------------------------------------------------

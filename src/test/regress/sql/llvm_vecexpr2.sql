@@ -174,10 +174,10 @@ set enable_seqscan=off;
 set enable_bitmapscan=off;
 explain (verbose on, costs off, analyze on) select * from llvm_vecexpr_table_03 where col_int > 4;
 
-explain (analyze on, detail on, costs off, timing off) select * from llvm_vecexpr_table_03 where col_int > 4;
-explain (analyze on, detail on, costs off, timing off, format json) select * from llvm_vecexpr_table_03 where col_int > 4;
-explain (analyze on, detail on, costs off, timing off, format xml) select * from llvm_vecexpr_table_03 where col_int > 4;
-explain (analyze on, detail on, costs off, timing off, format yaml) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off, format json) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off, format xml) select * from llvm_vecexpr_table_03 where col_int > 4;
+explain (analyze on, costs off, timing off, format yaml) select * from llvm_vecexpr_table_03 where col_int > 4;
 reset enable_seqscan;
 
 ----
