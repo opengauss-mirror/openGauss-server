@@ -95,3 +95,70 @@ select sort_count,hash_count from get_instr_unique_sql() where query like '%sele
           1 |          0
 (1 row)
 
+drop table if exists workmem_t1;
+NOTICE:  table "workmem_t1" does not exist, skipping
+drop table if exists workmem_t2;
+NOTICE:  table "workmem_t2" does not exist, skipping
+create table workmem_t1(a int not null, b varchar(100)) with (orientation = column);;
+create table workmem_t2(a int not null, b varchar(100)) with (orientation = column);;
+insert into workmem_t1 select GENERATE_SERIES(0, 1500),'test01-'||GENERATE_SERIES(0, 1500);
+insert into workmem_t2 select GENERATE_SERIES(0, 1500)*2,'test02-'||GENERATE_SERIES(0, 1500)*2;
+select reset_unique_sql('global','ALL',0);
+ reset_unique_sql 
+------------------
+ t
+(1 row)
+
+--explain sql won't record unique sql info
+explain performance select * from workmem_t1 where a in (select a from workmem_t2) order by b limit 10;
+--?.*
+--?.*
+--? Row Adapter.*
+   Output: workmem_t1.a, workmem_t1.b
+--?   (CPU: .*)
+--?   ->  Vector Limit  (cost=.*)
+         Output: workmem_t1.a, workmem_t1.b
+--?         (CPU: .*)
+--?         ->  Vector Sort  (cost=.*)
+               Output: workmem_t1.a, workmem_t1.b
+               Sort Key: workmem_t1.b
+--?               Sort Method: top-N heapsort  Memory: .*
+--?               (Buffers: shared hit=.*)
+--?              (CPU: .*)
+--?              ->  Vector Hash Semi Join  (cost=.*)
+                     Output: workmem_t1.a, workmem_t1.b
+                     Hash Cond: (workmem_t1.a = workmem_t2.a)
+--?                     (Buffers: shared hit=.*)
+--?                     (CPU: .*)
+--?                     ->  CStore Scan on public.workmem_t1  (cost=.*)
+                           Output: workmem_t1.a, workmem_t1.b
+--?                           (Buffers: shared hit=.*)
+--?                           (CPU: .*)
+--?                     ->  CStore Scan on public.workmem_t2  (cost=.*)
+                           Output: workmem_t2.a
+--?                           (Buffers: shared hit=.*)
+--?                           (CPU: .*)
+--? Total runtime: .*
+(26 rows)
+
+select * from workmem_t1 where a in (select a from workmem_t2) order by b limit 10;
+  a   |      b      
+------+-------------
+    0 | test01-0
+   10 | test01-10
+  100 | test01-100
+ 1000 | test01-1000
+ 1002 | test01-1002
+ 1004 | test01-1004
+ 1006 | test01-1006
+ 1008 | test01-1008
+ 1010 | test01-1010
+ 1012 | test01-1012
+(10 rows)
+
+select sort_count from get_instr_unique_sql() where query like '%select * from workmem_t1 where a in (select a from workmem_t2)%';
+ sort_count 
+------------
+          1
+(1 row)
+

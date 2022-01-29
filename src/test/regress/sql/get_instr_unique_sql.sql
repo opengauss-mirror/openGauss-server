@@ -22,3 +22,15 @@ explain (costs off) select * from unique_sql_test1 where a = 66 order by b;
 select * from unique_sql_test1 where a = 66 order by b;
 
 select sort_count,hash_count from get_instr_unique_sql() where query like '%select * from unique_sql_test1 where%';
+
+drop table if exists workmem_t1;
+drop table if exists workmem_t2;
+create table workmem_t1(a int not null, b varchar(100)) with (orientation = column);;
+create table workmem_t2(a int not null, b varchar(100)) with (orientation = column);;
+insert into workmem_t1 select GENERATE_SERIES(0, 1500),'test01-'||GENERATE_SERIES(0, 1500);
+insert into workmem_t2 select GENERATE_SERIES(0, 1500)*2,'test02-'||GENERATE_SERIES(0, 1500)*2;
+select reset_unique_sql('global','ALL',0);
+--explain sql won't record unique sql info
+explain performance select * from workmem_t1 where a in (select a from workmem_t2) order by b limit 10;
+select * from workmem_t1 where a in (select a from workmem_t2) order by b limit 10;
+select sort_count from get_instr_unique_sql() where query like '%select * from workmem_t1 where a in (select a from workmem_t2)%';

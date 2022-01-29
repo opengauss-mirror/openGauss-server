@@ -470,7 +470,8 @@ void UpdateUniqueSQLHashStats(HashJoinTable hashtable, TimestampTz* start_time)
  */
 void UpdateUniqueSQLVecSortStats(Batchsortstate* state, uint64 spill_count, TimestampTz* start_time)
 {
-    if (!is_unique_sql_enabled()) {
+    /* isUniqueSQLContextInvalid happens when the query is explain xxx */
+    if (!is_unique_sql_enabled() || isUniqueSQLContextInvalid()) {
         return;
     }
     unique_sql_sorthash_instr* instr = u_sess->unique_sql_cxt.unique_sql_sort_instr;
