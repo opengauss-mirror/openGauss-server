@@ -44,7 +44,7 @@
 #include "utils/array.h"
 #include "utils/acl.h"
 
-static void ConnectPublisher(char *conninfo, char* slotname);
+static bool ConnectPublisher(char* conninfo, char* slotname);
 static void CreateSlotInPublisher(char *slotname);
 static void ValidateReplicationSlot(char *slotname, List *publications);
 
@@ -210,26 +210,82 @@ static Datum publicationListToArray(List *publist)
 }
 
 /*
- * connect publisher and create slot.
- * the input conninfo should be encrypt, we will decrypt password inside
+ * Parse the original connection string which is encrypted, poll all hosts and ports,
+ * and try to connect to the publisher.
+ * When checkRemoteMode is true, the remotemode must be normal or primary.
+ * Return true to indicate successful connection.
  */
-static void ConnectPublisher(char *conninfo, char *slotname)
+bool AttemptConnectPublisher(const char *conninfoOriginal, char* slotname, bool checkRemoteMode)
+{
+    size_t conninfoLen = strlen(conninfoOriginal) + 1;
+
+    char* conninfo = NULL;
+    StringInfoData conninfoWithoutHostport;
+    initStringInfo(&conninfoWithoutHostport);
+    HostPort* hostPortList[MAX_REPLNODE_NUM] = {NULL};
+    ParseConninfo(conninfoOriginal, &conninfoWithoutHostport, hostPortList);
+    if (hostPortList[0] == NULL) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg(
+            "invalid connection string syntax, missing host and port")));
+    }
+    bool connectSuccess = false;
+    conninfo = (char*)palloc(conninfoLen * sizeof(char));
+    for (int i = 0; i < MAX_REPLNODE_NUM; ++i) {
+        if (hostPortList[i] == NULL) {
+            break;
+        }
+        int ret = snprintf_s(conninfo, conninfoLen, conninfoLen - 1,
+            "%s host=%s port=%s", conninfoWithoutHostport.data,
+            hostPortList[i]->host, hostPortList[i]->port);
+        securec_check_ss(ret, "\0", "\0");
+
+        connectSuccess = ConnectPublisher(conninfo, slotname);
+        if (!connectSuccess) {
+            /* try next host */
+            continue;
+        }
+        if (!checkRemoteMode) {
+            break;
+        }
+        ServerMode publisherServerMde = IdentifyRemoteMode();
+        if (publisherServerMde == NORMAL_MODE || publisherServerMde == PRIMARY_MODE) {
+            break;
+        }
+        /* it's a standby, try next host */
+        (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
+        connectSuccess = false;
+    }
+    pfree_ext(conninfo);
+
+    /* clean up */
+    FreeStringInfo(&conninfoWithoutHostport);
+    for (int i = 0; i < MAX_REPLNODE_NUM; ++i) {
+        if (hostPortList[i] == NULL) {
+            break;
+        }
+        pfree_ext(hostPortList[i]->host);
+        pfree_ext(hostPortList[i]->port);
+        pfree_ext(hostPortList[i]);
+    }
+    return connectSuccess;
+}
+
+/*
+ * connect to publisher with conninfo
+ */
+static bool ConnectPublisher(char* conninfo, char* slotname)
 {
     /* Try to connect to the publisher. */
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
     SpinLockAcquire(&walrcv->mutex);
     walrcv->conn_target = REPCONNTARGET_PUBLICATION;
     SpinLockRelease(&walrcv->mutex);
-
-    char *decryptConninfo = DecryptConninfo(conninfo);
+    char* decryptConninfo = EncryptOrDecryptConninfo(conninfo, 'D');
     bool connectSuccess = (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_connect(decryptConninfo, NULL, slotname, -1);
     int rc = memset_s(decryptConninfo, strlen(decryptConninfo), 0, strlen(decryptConninfo));
     securec_check(rc, "", "");
     pfree_ext(decryptConninfo);
-
-    if (!connectSuccess) {
-        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("could not connect to the publisher")));
-    }
+    return connectSuccess;
 }
 
 /*
@@ -306,7 +362,6 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     bool enabled_given = false;
     bool enabled = true;
     char *synchronous_commit;
-    char *conninfo;
     char *slotname;
     bool slotname_given;
     bool binary;
@@ -348,11 +403,10 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
         synchronous_commit = "off";
     }
 
-    conninfo = stmt->conninfo;
     publications = stmt->publication;
 
     /* Check the connection info string. */
-    libpqrcv_check_conninfo(conninfo);
+    libpqrcv_check_conninfo(stmt->conninfo);
 
     /* Everything ok, form a new tuple. */
     rc = memset_s(values, sizeof(values), 0, sizeof(values));
@@ -367,16 +421,9 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
     values[Anum_pg_subscription_subbinary - 1] = BoolGetDatum(binary);
 
     /* encrypt conninfo */
-    List *conninfoList = ConninfoToDefList(stmt->conninfo);
-    /* Sensitive options for subscription, will be encrypted when saved to catalog. */
-    const char* sensitiveOptionsArray[] = {"password"};
-    const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
-    EncryptGenericOptions(conninfoList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
-    char *encryptConninfo = DefListToString(conninfoList);
-
+    char *encryptConninfo = EncryptOrDecryptConninfo(stmt->conninfo, 'E');
     values[Anum_pg_subscription_subconninfo - 1] = CStringGetTextDatum(encryptConninfo);
 
-    pfree_ext(conninfoList);
     if (enabled) {
         if (!slotname_given) {
             slotname = stmt->subname;
@@ -412,11 +459,14 @@ ObjectAddress CreateSubscription(CreateSubscriptionStmt *stmt, bool isTopLevel)
      */
     if (enabled) {
         Assert(slotname);
-        ConnectPublisher(encryptConninfo, slotname);
+
+        if (!AttemptConnectPublisher(encryptConninfo, slotname, true)) {
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Failed to connect to publisher.")));
+        }
+
         CreateSlotInPublisher(slotname);
         (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
     }
-
     pfree_ext(encryptConninfo);
     heap_close(rel, RowExclusiveLock);
     rc = memset_s(stmt->conninfo, strlen(stmt->conninfo), 0, strlen(stmt->conninfo));
@@ -508,23 +558,15 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     if (conninfo) {
         /* Check the connection info string. */
         libpqrcv_check_conninfo(conninfo);
-
-        /* encrypt conninfo */
-        List *conninfoList = ConninfoToDefList(conninfo);
-        /* Sensitive options for subscription, will be encrypted when saved to catalog. */
-        const char* sensitiveOptionsArray[] = {"password"};
-        const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
-        EncryptGenericOptions(conninfoList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
-        encryptConninfo = DefListToString(conninfoList);
-        needFreeConninfo = true;
-
+        encryptConninfo = EncryptOrDecryptConninfo(conninfo, 'E');
+        rc = memset_s(conninfo, strlen(conninfo), 0, strlen(conninfo));
+        securec_check(rc, "\0", "\0");
         values[Anum_pg_subscription_subconninfo - 1] = CStringGetTextDatum(encryptConninfo);
         replaces[Anum_pg_subscription_subconninfo - 1] = true;
+        needFreeConninfo = true;
 
-        pfree_ext(conninfoList);
-
+        /* need to check whether new conninfo can be used to connect to new publisher */
         if (sub->enabled || (enabled_given && enabled)) {
-            /* we need to check whether new conninfo can be used to connect to new publisher */
             checkConn = true;
         }
     }
@@ -592,16 +634,18 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     if (sub->enabled && !enabled) {
         ereport(ERROR, (errmsg("If you want to deactivate this subscription, use DROP SUBSCRIPTION.")));
     }
-    /* enable subscription */
-    if (!sub->enabled && enabled) {
-        /* if slot hasn't been created, then create it */
-        if (!sub->slotname || !*(sub->slotname)) {
+    /* enabling subscription, but slot hasn't been created,
+     * then mark createSlot to true.
+     */
+    if (!sub->enabled && enabled && (!sub->slotname || !*(sub->slotname))) {
             createSlot = true;
-        }
     }
 
     if (checkConn || createSlot || validateSlot) {
-        ConnectPublisher(encryptConninfo, finalSlotName);
+        if (!AttemptConnectPublisher(encryptConninfo, finalSlotName, true)) {
+            ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg(
+                checkConn ? "The new conninfo cannot connect to new publisher." : "Failed to connect to publisher.")));
+        }
 
         if (createSlot) {
             CreateSlotInPublisher(finalSlotName);
@@ -619,12 +663,6 @@ ObjectAddress AlterSubscription(AlterSubscriptionStmt *stmt)
     if (needFreeConninfo) {
         pfree_ext(encryptConninfo);
     }
-
-    if (conninfo) {
-        rc = memset_s(conninfo, strlen(conninfo), 0, strlen(conninfo));
-        securec_check(rc, "", "");
-    }
-
     return myself;
 }
 
@@ -775,7 +813,11 @@ void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
     initStringInfo(&cmd);
     appendStringInfo(&cmd, "DROP_REPLICATION_SLOT %s", quote_identifier(slotname));
 
-    ConnectPublisher(conninfo, slotname);
+    if (!AttemptConnectPublisher(conninfo, slotname, true)) {
+        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg(
+            "could not connect to publisher.")));
+    }
+
     PG_TRY();
     {
         int sqlstate = 0;
@@ -801,6 +843,7 @@ void DropSubscription(DropSubscriptionStmt *stmt, bool isTopLevel)
 
     (WalReceiverFuncTable[GET_FUNC_IDX]).walrcv_disconnect();
 
+    pfree_ext(conninfo);
     pfree(cmd.data);
     heap_close(rel, NoLock);
 }
@@ -929,4 +972,150 @@ void RenameSubscription(List *oldname, const char *newname)
     heap_close(rel, RowExclusiveLock);
 
     return;
+}
+
+/*
+ * Parse the host or port string into a string array,
+ * where host and port are separated by ",".
+ * input: conn --- host or port string separated by ","
+ * output: connArray --- host or port string array
+ * return: the length of connArray
+ * for example:
+ * (1):
+ * conn = 1.1.1.1,2.2.2.2,...,9.9.9.9
+ * connArray = {
+ *              1,.1.1.1,
+ *              2.2.2.2,
+ *              ...,
+ *              9.9.9.9
+ *              }
+ * return 9
+ * (2):
+ * conn = 1,2,...,9
+ * connArray = {1,2,...,9}
+ * return 9
+ */
+static int HostsPortsToArray(const char* conn, char** connArray)
+{
+    if (conn == NULL) {
+        return 0;
+    }
+    char* cp = NULL;
+    char* cur = NULL;
+    char *buf = pstrdup(conn);
+
+    cp = buf;
+    int i = 0;
+    while (*cp) {
+        cur = cp;
+        while (*cp && *cp != ',') {
+            ++cp;
+        }
+        if (*cp == ',') {
+            *cp = '\0';
+            ++cp;
+        }
+        if (i >= MAX_REPLNODE_NUM) {
+            ereport(ERROR, (errmsg("Currently, a maximum of %d servers are "
+                "supported.", MAX_REPLNODE_NUM)));
+        }
+        connArray[i++] = pstrdup(cur);
+
+        if (*cp == 0) {
+            break;
+        }
+    }
+    pfree(buf);
+    return i;
+}
+
+/*
+ * parse host and port
+ */
+static void ParseHostPort(char* hoststr, char* portstr, HostPort** hostPortList)
+{
+    char* hosts[MAX_REPLNODE_NUM] = {NULL};
+    char* ports[MAX_REPLNODE_NUM] = {NULL};
+    int hostNum = HostsPortsToArray(hoststr, hosts);
+    int portNum = HostsPortsToArray(portstr, ports);
+    if (hostNum != portNum) {
+        ereport(ERROR, (errcode(ERRCODE_SYNTAX_ERROR), errmsg("The number of host and port are inconsistent.")));
+    }
+
+    for (int i = 0; i < hostNum; ++i) {
+        hostPortList[i] = (HostPort*)palloc(sizeof(HostPort));
+        hostPortList[i]->host = hosts[i];
+        hostPortList[i]->port = ports[i];
+    }
+}
+
+/*
+ * Parse conninfo
+ * conninfo format:
+ *      'dbname=abc user=username password=xxxx host=ip1,ip2,...,ip9 port=p1,p2,...,p9'
+ * after parsing:
+ * conninfoWithoutHostPort:
+ *      'dbname=abc user=username password=xxxx'
+ * hostPortList:
+ *      {
+ *          {host=ip1, port=p1},
+ *          {host=ip2, port=p2},
+ *          ...
+ *          {host=ip9, port=p9}
+ *      }
+ */
+void ParseConninfo(const char* conninfo, StringInfoData* conninfoWithoutHostPort, HostPort** hostPortList)
+{
+    List* conninfoList = ConninfoToDefList(conninfo);
+    ListCell* l = NULL;
+
+    char* hostStr = NULL;
+    char* portStr = NULL;
+    foreach (l, conninfoList) {
+        DefElem* defel = (DefElem*)lfirst(l);
+        if (pg_strcasecmp(defel->defname, "host") == 0) {
+            hostStr = defGetString(defel);
+        } else if (pg_strcasecmp(defel->defname, "port") == 0) {
+            portStr = defGetString(defel);
+        } else {
+            appendStringInfo(conninfoWithoutHostPort, "%s=%s ", defel->defname, defGetString(defel));
+        }
+    }
+    if (hostPortList != NULL) {
+        ParseHostPort(hostStr, portStr, hostPortList);
+    }
+}
+
+/*
+ * encrypt conninfo when action = 'E'
+ * decrypt conninfo when action = 'D'
+ * conninfoNew: encrypted or decrypted conninfo
+ */
+char* EncryptOrDecryptConninfo(const char* conninfo, const char action)
+{
+    /* parse conninfo to list */
+    List *conninfoList = ConninfoToDefList(conninfo);
+    /* Sensitive options for subscription */
+    const char* sensitiveOptionsArray[] = {"password"};
+    const int sensitiveArrayLength = lengthof(sensitiveOptionsArray);
+    switch (action) {
+        /* Encrypt */
+        case 'E':
+            EncryptGenericOptions(conninfoList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
+            break;
+
+        /* Decrypt */
+        case 'D':
+            DecryptOptions(conninfoList, sensitiveOptionsArray, sensitiveArrayLength, SUBSCRIPTION_MODE);
+            break;
+
+        default:
+            break;
+    }
+
+    char* conninfoNew = DefListToString(conninfoList);
+    ClearListContent(conninfoList);
+    list_free_ext(conninfoList);
+
+    return conninfoNew;
 }

@@ -24,6 +24,7 @@ CREATE SUBSCRIPTION testsub CONNECTION 'foo';
 CREATE SUBSCRIPTION testsub PUBLICATION foo;
 -- fail - could not connect to the publisher
 create subscription testsub2 connection 'host=abc' publication pub;
+create subscription testsub2 connection 'host=abc port=12345' publication pub;
 set client_min_messages to error;
 -- fail - syntax error, invalid connection string syntax: missing "="
 CREATE SUBSCRIPTION testsub CONNECTION 'testconn' PUBLICATION testpub;
@@ -32,7 +33,10 @@ CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub
 CREATE SUBSCRIPTION testsub CONNECTION 'dbname=doesnotexist' PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
 -- create SUBSCRIPTION with conninfo in two single quote, used to check mask string bug
 CREATE SUBSCRIPTION testsub_maskconninfo CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''' PUBLICATION testpub WITH (ENABLED=false, slot_name='testsub', synchronous_commit=off);
-
+-- fail - The number of host and port are inconsistent
+create subscription sub1 connection 'dbname=postgres user=pubusr password=Huawei@123 host=192.168.0.38,192.168.0.38,192.168.0.38 port=14001,14501' publication pub1;
+-- fail - a maximum of 9 servers are supported
+create subscription sub1 connection 'dbname=postgres user=pubusr password=Huawei@123 host=192.168.0.38,192.168.0.38,192.168.0.38,192.168.0.38,192.168.0.38,192.168.0.38,192.168.0.38,192.168.0.38,192.168.0.38,192.168.0.38 port=14001,14501' publication pub1;
 -- alter connection
 ALTER SUBSCRIPTION testsub CONNECTION 'host=''1.2.3.4'' port=''12345'' user=''username'' dbname=''postgres'' password=''password_1234''';
 ALTER SUBSCRIPTION testsub CONNECTION 'dbname=does_not_exist';

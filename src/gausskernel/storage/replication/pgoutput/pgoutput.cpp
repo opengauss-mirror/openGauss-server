@@ -46,6 +46,8 @@ static bool pgoutput_origin_filter(LogicalDecodingContext *ctx, RepOriginId orig
 
 static List *LoadPublications(List *pubnames);
 static void publication_invalidation_cb(Datum arg, int cacheid, uint32 hashvalue);
+static bool ReplconninfoChanged();
+static void GetConninfo(StringInfoData* standbysInfo);
 
 /* Entry in the map used to remember which relation schemas we sent. */
 typedef struct RelationSyncEntry {
@@ -217,6 +219,22 @@ static void pgoutput_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *t
     OutputPluginPrepareWrite(ctx, true);
     logicalrep_write_commit(ctx->out, txn, commit_lsn);
     OutputPluginWrite(ctx, true);
+
+    /*
+     * Send the newest connecttion information to the subscriber,
+     * when the connection information about the standby changes.
+     */
+    if (ReplconninfoChanged()) {
+        StringInfoData standbysInfo;
+        initStringInfo(&standbysInfo);
+
+        GetConninfo(&standbysInfo);
+        OutputPluginPrepareWrite(ctx, true);
+        logicalrep_write_conninfo(ctx->out, standbysInfo.data);
+        OutputPluginWrite(ctx, true);
+
+        FreeStringInfo(&standbysInfo);
+    }
 }
 
 /*
@@ -615,4 +633,44 @@ static void rel_sync_cache_publication_cb(Datum arg, int cacheid, uint32 hashval
         entry->pubactions.pubupdate = false;
         entry->pubactions.pubdelete = false;
     }
+}
+
+static void GetConninfo(StringInfoData* standbysInfo)
+{
+    bool primaryJoined = false;
+    StringInfoData hosts;
+    StringInfoData ports;
+    initStringInfo(&hosts);
+    initStringInfo(&ports);
+    for (int i = 1; i < MAX_REPLNODE_NUM + 1; ++i) {
+        t_thrd.postmaster_cxt.ReplConnChangeType[i] = 0;
+        if (t_thrd.postmaster_cxt.ReplConnArray[i] == NULL) {
+            continue;
+        }
+        if (!primaryJoined) {
+            appendStringInfo(&hosts, "%s,%s",
+                t_thrd.postmaster_cxt.ReplConnArray[i]->localhost,
+                t_thrd.postmaster_cxt.ReplConnArray[i]->remotehost);
+            appendStringInfo(&ports, "%d,%d",
+                t_thrd.postmaster_cxt.ReplConnArray[i]->localport,
+                t_thrd.postmaster_cxt.ReplConnArray[i]->remoteport);
+            primaryJoined = true;
+        } else {
+            appendStringInfo(&hosts, ",%s",
+                t_thrd.postmaster_cxt.ReplConnArray[i]->remotehost);
+            appendStringInfo(&ports, ",%d",
+                t_thrd.postmaster_cxt.ReplConnArray[i]->remoteport);
+        }
+    }
+    appendStringInfo(standbysInfo, "host=%s port=%s", hosts.data, ports.data);
+}
+
+static inline bool ReplconninfoChanged()
+{
+    for (int i = 1; i < MAX_REPLNODE_NUM; ++i) {
+        if (t_thrd.postmaster_cxt.ReplConnChangeType[i]) {
+            return true;
+        }
+    }
+    return false;
 }
