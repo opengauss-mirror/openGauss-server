@@ -28,7 +28,7 @@ bool sub_connect(char *conninfo, XLogRecPtr *startpoint, char *appname, int chan
     /*
      * We use the expand_dbname parameter to process the connection string (or
      * URI), and pass some extra options. The deliberately undocumented
-     * parameter "replication=true" makes it a replication connection. The
+     * parameter "replication=database" makes it a replication connection. The
      * database name is ignored by the server in replication mode.
      */
     keys[i] = "dbname";
@@ -36,7 +36,7 @@ bool sub_connect(char *conninfo, XLogRecPtr *startpoint, char *appname, int chan
     keys[++i] = "replication";
     vals[i] = "database";
     keys[++i] = "fallback_application_name";
-    vals[i] = appname;
+    vals[i] = "subscription";
     keys[++i] = "client_encoding";
     vals[i] = GetDatabaseEncodingName();
     keys[++i] = NULL;

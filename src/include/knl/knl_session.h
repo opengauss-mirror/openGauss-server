@@ -1134,6 +1134,7 @@ typedef struct knl_u_proc_context {
     bool clientIsGsBasebackup;    /* gs_basebackup tool check flag */
     bool clientIsGsroach;         /* gs_roach tool check flag */
     bool clientIsGsRestore;       /* gs_restore tool check flag */
+    bool clientIsSubscription;    /* subscription client check flag */
     bool IsBinaryUpgrade;
     bool IsWLMWhiteList;          /* this proc will not be controled by WLM */
     bool gsRewindAddCount;
