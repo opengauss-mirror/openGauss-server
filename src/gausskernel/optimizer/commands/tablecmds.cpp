@@ -1148,11 +1148,7 @@ static List* AddDefaultOptionsIfNeed(List* options, const char relkind, CreateSt
     if (noSupportTable && tableCreateSupport.compressType) {
         ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION), errmsg("only row orientation table support compresstype.")));
     }
-    if (!tableCreateSupport.compressType && HasCompressOption(&tableCreateSupport)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-                        errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/"
-                               "compress_diff_convert should be used with compresstype.")));
-    }
+    CheckCompressOption(&tableCreateSupport);
 
     if (isUstore && !isCStore && !hasCompression) {
         DefElem* def = makeDefElem("compression", (Node *)makeString(COMPRESSION_NO));
@@ -14464,27 +14460,44 @@ static void ATExecSetRelOptionsToast(Oid toastid, List* defList, AlterTableType 
 /*
  * Do not modify compression parameters.
  */
-void static CheckSupportModifyCompression(Relation rel, bytea* relOoption)
+void static CheckSupportModifyCompression(Relation rel, bytea* relOoption, List* defList)
 {
-    if (!relOoption || !REL_SUPPORT_COMPRESSED(rel)) {
+    if (!relOoption) {
+        return;
+    }
+    if (!REL_SUPPORT_COMPRESSED(rel) || rel->rd_node.opt == 0) {
+        ForbidUserToSetCompressedOptions(defList);
         return;
     }
     PageCompressOpts* newCompressOpt = &(((StdRdOptions*)relOoption)->compress);
     RelFileCompressOption current;
     TransCompressOptions(rel->rd_node, &current);
     if (newCompressOpt) {
-        int1 algorithm = newCompressOpt->compressType;
-        if (algorithm != current.compressAlgorithm) {
+        if (newCompressOpt->compressType != (int)current.compressAlgorithm) {
             ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("change compresstype OPTION is not supported")));
         }
-        if (current.compressAlgorithm != COMPRESS_TYPE_NONE &&
+        if ((int)current.compressAlgorithm != COMPRESS_TYPE_NONE &&
             newCompressOpt->compressChunkSize != CHUNK_SIZE_LIST[current.compressChunkSize]) {
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("change compress_chunk_size OPTION is not supported")));
         }
+        if (!newCompressOpt->compressByteConvert && newCompressOpt->compressDiffConvert) {
+            ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                            errmsg("compress_diff_convert should be used with compress_byte_convert.")));
+        }
+        if (current.compressAlgorithm == COMPRESS_TYPE_PGLZ) {
+            ListCell *opt = NULL;
+            foreach (opt, defList) {
+                DefElem *def = (DefElem *)lfirst(opt);
+                if (pg_strcasecmp(def->defname, "compress_level") == 0) {
+                    ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                                    errmsg("compress_level should be used with ZSTD algorithm.")));
+                }
+            }
+        }
     } else {
-        if (current.compressAlgorithm != COMPRESS_TYPE_NONE) {
+        if ((int)current.compressAlgorithm != COMPRESS_TYPE_NONE) {
             ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("change compresstype OPTION is not supported")));
         }
@@ -14697,7 +14710,7 @@ static void ATExecSetRelOptions(Relation rel, List* defList, AlterTableType oper
             break;
     }
     
-    CheckSupportModifyCompression(rel, relOpt);
+    CheckSupportModifyCompression(rel, relOpt, defList);
 
     /*
      * All we need do here is update the pg_class row; the new options will be

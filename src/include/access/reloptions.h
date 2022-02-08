@@ -300,6 +300,8 @@ extern void forbid_to_set_options_for_timeseries_tbl(List* options);
 extern List* RemoveRelOption(List* options, const char* optName, bool* removed);
 void RowTblCheckCompressionOption(List *options);
 void RowTblCheckHashBucketOption(List* options, StdRdOptions* std_opt);
+void ForbidUserToSetCompressedOptions(List *options);
 void SetOneOfCompressOption(const char *defname, TableCreateSupport *tableCreateSupport);
+void CheckCompressOption(TableCreateSupport *tableCreateSupport);
 #endif /* RELOPTIONS_H */
 

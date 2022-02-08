@@ -934,11 +934,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
         SetOneOfCompressOption(defElem->defname, &indexCreateSupport);
     }
     
-    if (!indexCreateSupport.compressType && HasCompressOption(&indexCreateSupport)) {
-        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
-            errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/"
-                   "compress_diff_convert should be used with compresstype.")));
-    }
+    CheckCompressOption(&indexCreateSupport);
     /*
      * Parse AM-specific options, convert to text array form, validate.
      */
