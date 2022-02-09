@@ -147,10 +147,14 @@ void RangeScanExpressionCollector::EvaluateScanType()
     // if no expression was collected, this is an invalid scan (we do not support full scans yet)
     int columnCount = _index_op_count;
     if (_index_op_count == 0) {
+#ifdef MOT_JIT_FULL_SCAN
         MOT_LOG_TRACE("RangeScanExpressionCollector(): no expression was collected, assuming full scan");
         _index_scan->_scan_type = JIT_INDEX_SCAN_FULL;
         _index_scan->_column_count = 0;
         _index_scan->_search_exprs._count = 0;
+#else
+        MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - full scan");
+#endif
         return;
     }
 
@@ -917,20 +921,22 @@ static void freeFuncExpr(JitFuncExpr* func_expr)
 
 void freeExpr(JitExpr* expr)
 {
-    switch (expr->_expr_type) {
-        case JIT_EXPR_TYPE_OP:
-            freeOpExpr((JitOpExpr*)expr);
-            break;
+    if (expr != nullptr) {
+        switch (expr->_expr_type) {
+            case JIT_EXPR_TYPE_OP:
+                freeOpExpr((JitOpExpr*)expr);
+                break;
 
-        case JIT_EXPR_TYPE_FUNC:
-            freeFuncExpr((JitFuncExpr*)expr);
-            break;
+            case JIT_EXPR_TYPE_FUNC:
+                freeFuncExpr((JitFuncExpr*)expr);
+                break;
 
-        default:
-            break;
+            default:
+                break;
+        }
+
+        MOT::MemSessionFree(expr);
     }
-
-    MOT::MemSessionFree(expr);
 }
 
 static bool containsExpr(const JitColumnExprArray* pkey_exprs, const Expr* expr)
@@ -1409,9 +1415,14 @@ bool getRangeSearchExpressions(
     } else {
         Node* quals = query->jointree->quals;
         if (quals == nullptr) {
+#ifdef MOT_JIT_FULL_SCAN
             MOT_LOG_TRACE("No range search expressions collected (empty WHERE clause) - using a full index scan");
             index_scan->_scan_type = JIT_INDEX_SCAN_FULL;
             return true;
+#else
+            MOT_LOG_TRACE("Query is not jittable: requires full scan");
+            return false;
+#endif
         }
         if (!visitSearchExpressions(
                 query, table, index, (Expr*)&quals[0], true, &expr_collector, join_clause_type == JoinClauseImplicit)) {
