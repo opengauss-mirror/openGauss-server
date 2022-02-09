@@ -470,6 +470,11 @@ typedef struct knl_u_utils_context {
 
     struct PGLZ_HistEntry* hist_entries;
 
+    struct PGLZ_HistEntry** new_hist_start;
+
+    struct PGLZ_HistEntry* new_hist_entries;
+
+
     char* analysis_options_configure;
 
     int* guc_new_value;

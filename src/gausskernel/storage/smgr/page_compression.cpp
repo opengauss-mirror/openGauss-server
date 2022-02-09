@@ -450,20 +450,6 @@ size_t ReadAllChunkOfBlock(char *dst, size_t destLen, BlockNumber blockNumber, R
     return allocatedChunks * chunkSize;
 }
 
-CompressedFileType IsCompressedFile(char *fileName, size_t fileNameLen)
-{
-    size_t suffixLen = 4;
-    if (fileNameLen >= suffixLen) {
-        const char *suffix = fileName + fileNameLen - suffixLen;
-        if (strncmp(suffix, "_pca", suffixLen) == 0) {
-            return COMPRESSED_TABLE_PCA_FILE;
-        } else if (strncmp(suffix, "_pcd", suffixLen) == 0) {
-            return COMPRESSED_TABLE_PCD_FILE;
-        }
-    }
-    return COMPRESSED_TYPE_UNKNOWN;
-}
-
 void ReleaseMap(PageCompressHeader* map, const char* fileName)
 {
     if (map != NULL && pc_munmap(map) != 0) {

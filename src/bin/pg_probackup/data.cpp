@@ -13,6 +13,7 @@
 
 #include "storage/checksum.h"
 #include "storage/checksum_impl.h"
+#include "PageCompression.h"
 #include "pg_lzcompress.h"
 #include "file.h"
 
@@ -380,7 +381,8 @@ prepare_page(ConnectionArgs *conn_arg,
                             Page page, bool strict,
                             uint32 checksum_version,
                             const char *from_fullpath,
-                            PageState *page_st)
+                            PageState *page_st, PageCompression *pageCompression = NULL)
+
 {
     int     try_again = PAGE_READ_ATTEMPTS;
     bool        page_is_valid = false;
@@ -400,7 +402,7 @@ prepare_page(ConnectionArgs *conn_arg,
     while (!page_is_valid && try_again--)
     {
         /* read the block */
-        int read_len = fio_pread(in, page, blknum * BLCKSZ);
+        int read_len = fio_pread(in, page, blknum * BLCKSZ, pageCompression);
 
         /* The block could have been truncated. It is fine. */
         if (read_len == 0)
@@ -1512,8 +1514,9 @@ validate_one_page(Page page, BlockNumber absolute_blkno,
     if (checksum_version)
     {
         /* Checksums are enabled, so check them. */
-        if (page_st->checksum != ((PageHeader) page)->pd_checksum)
+        if (page_st->checksum != ((PageHeader) page)->pd_checksum && !PageCompression::InnerPageCompressChecksum(page)) {
             return PAGE_CHECKSUM_MISMATCH;
+        }
     }
 
     /* At this point page header is sane, if checksums are enabled - the`re ok.
@@ -2043,13 +2046,25 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     BlockNumber blknum = 0;
     datapagemap_iterator_t *iter = NULL;
     int   compressed_size = 0;
+    PageCompression* pageCompression = NULL;
+    std::unique_ptr<PageCompression> pageCompressionPtr = NULL;
 
     /* stdio buffers */
     char *in_buf = NULL;
     char *out_buf = NULL;
 
-    /* open source file for read */
-    in = fopen(from_fullpath, PG_BINARY_R);
+    if (file->compressedFile) {
+        /* init pageCompression and return pcdFd for error check */
+        pageCompression = new PageCompression();
+        pageCompressionPtr = std::unique_ptr<PageCompression>(pageCompression);
+        pageCompression->Init(from_fullpath, MAXPGPATH, file->segno, file->compressedChunkSize);
+        in = pageCompression->GetPcdFile();
+        /* force compress page if file is compressed file */
+        calg = (calg == NOT_DEFINED_COMPRESS || calg == NONE_COMPRESS) ? PGLZ_COMPRESS : calg;
+    } else {
+        /* open source file for read */
+        in = fopen(from_fullpath, PG_BINARY_R);
+    }
     if (in == NULL)
     {
         /*
@@ -2087,7 +2102,7 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
         int rc = prepare_page(conn_arg, file, prev_backup_start_lsn,
                                             blknum, in, backup_mode, curr_page,
                                             true, checksum_version,
-                                            from_fullpath, &page_st);
+                                            from_fullpath, &page_st, pageCompression);
         if (rc == PageIsTruncated)
             break;
 
@@ -2147,7 +2162,10 @@ send_pages(ConnectionArgs* conn_arg, const char *to_fullpath, const char *from_f
     if (in && fclose(in))
         elog(ERROR, "Cannot close the source file \"%s\": %s",
             to_fullpath, strerror(errno));
-
+    
+    if (pageCompressionPtr) {
+        pageCompressionPtr->ResetPcdFd();
+    }
     /* close local output file */
     if (out && fclose(out))
         elog(ERROR, "Cannot close the backup file \"%s\": %s",

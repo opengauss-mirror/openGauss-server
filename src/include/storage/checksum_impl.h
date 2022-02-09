@@ -160,5 +160,5 @@ static const uint32 g_checksumBaseOffsets[N_SUMS] = {0x5B1F36E9,
  * boundary.
  */
 uint32 pg_checksum_block(char* data, uint32 size);
-
+uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing);
 uint16 pg_checksum_page(char* page, BlockNumber blkno);

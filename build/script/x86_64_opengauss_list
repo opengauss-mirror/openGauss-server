@@ -867,7 +867,8 @@
 ./lib/libzstd.so.1
 ./lib/libzstd.so.1.5.0
 ./lib/libxgboost.so
-
+./lib/libpagecompression.so
+./lib/libpagecompression.so.1
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
 ./include/postgresql/server/pgtime.h

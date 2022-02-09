@@ -24,6 +24,7 @@
 
 #include "configuration.h"
 #include "common/fe_memutils.h"
+#include "PageCompression.h"
 
 /*
  * The contents of these directories are removed or recreated during server
@@ -228,6 +229,11 @@ pgFileInit(const char *rel_path)
     /* Number of blocks backed up during backup */
     file->n_headers = 0;
 
+    /* set uncompressed file default */
+    file->compressedFile = false;
+    file->compressedAlgorithm = 0;
+    file->compressedChunkSize = 0;
+    
     return file;
 }
 
@@ -839,6 +845,42 @@ static char check_digit_file(pgFile *file)
     return -1;
 }
 
+static inline void SetFileCompressOption(pgFile *file, char *child, size_t childLen)
+{
+    if (file->is_datafile && PageCompression::IsCompressedTableFile(child, childLen)) {
+        std::unique_ptr<PageCompression> pageCompression = std::make_unique<PageCompression>();
+        COMPRESS_ERROR_STATE state = pageCompression->Init(child, childLen, InvalidBlockNumber);
+        if (state != SUCCESS) {
+            elog(ERROR, "can not read block of '%s_pca': ", child);
+        }
+        file->compressedFile = true;
+        file->size = pageCompression->GetMaxBlockNumber() * BLCKSZ;
+        file->compressedChunkSize = pageCompression->GetChunkSize();
+        file->compressedAlgorithm = pageCompression->GetAlgorithm();
+    }
+}
+
+bool SkipSomeDirFile(pgFile *file, struct dirent *dent, bool skipHidden)
+{
+    /* Skip entries point current dir or parent dir */
+    if (S_ISDIR(file->mode) && (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0)) {
+        return false;
+    }
+    /* skip hidden files and directories */
+    if (skipHidden && file->name[0] == '.') {
+        elog(WARNING, "Skip hidden file: '%s'", file->name);
+        return false;
+    }
+    /*
+     * Add only files, directories and links. Skip sockets and other
+     * unexpected file formats.
+     */
+    if (!S_ISDIR(file->mode) && !S_ISREG(file->mode)) {
+        elog(WARNING, "Skip '%s': unexpected file format", file->name);
+        return false;
+    }
+    return true;
+}
 /*
  * List files in parent->path directory.  If "exclude" is true do not add into
  * "files" files from pgdata_exclude_files and directories from
@@ -879,34 +921,16 @@ dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
         join_path_components(child, parent_dir, dent->d_name);
         join_path_components(rel_child, parent->rel_path, dent->d_name);
 
-        file = pgFileNew(child, rel_child, follow_symlink, external_dir_num,
-                                     location);
+        /* skip real compressed file cause we mark compress flag at oid file */
+        if (PageCompression::SkipCompressedFile(child, MAXPGPATH)) {
+            continue;
+        }
+
+        file = pgFileNew(child, rel_child, follow_symlink, external_dir_num, location);
         if (file == NULL)
             continue;
 
-        /* Skip entries point current dir or parent dir */
-        if (S_ISDIR(file->mode) &&
-                (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0))
-        {
-            pgFileFree(file);
-            continue;
-        }
-
-        /* skip hidden files and directories */
-        if (skip_hidden && file->name[0] == '.')
-        {
-            elog(WARNING, "Skip hidden file: '%s'", child);
-            pgFileFree(file);
-            continue;
-        }
-
-        /*
-        * Add only files, directories and links. Skip sockets and other
-        * unexpected file formats.
-        */
-        if (!S_ISDIR(file->mode) && !S_ISREG(file->mode))
-        {
-            elog(WARNING, "Skip '%s': unexpected file format", child);
+        if (!SkipSomeDirFile(file, dent, skip_hidden)) {
             pgFileFree(file);
             continue;
         }
@@ -925,6 +949,9 @@ dir_list_file_internal(parray *files, pgFile *parent, const char *parent_dir,
                 /* We add the directory itself which content was excluded */
                 parray_append(files, file);
                 continue;
+            } else if (check_res == CHECK_TRUE) {
+                /* persistence compress option */
+                SetFileCompressOption(file, child, MAXPGPATH);
             }
         }
 
@@ -1614,6 +1641,9 @@ dir_read_file_list(const char *root, const char *external_prefix,
         file->write_size = (int64) write_size;
         file->mode = (mode_t) mode;
         file->is_datafile = is_datafile ? true : false;
+        file->compressedFile = false;
+        file->compressedChunkSize = 0;
+        file->compressedAlgorithm = 0;
         file->is_cfs = is_cfs ? true : false;
         file->crc = (pg_crc32) crc;
         file->compress_alg = parse_compress_alg(compress_alg_string);
@@ -1628,6 +1658,18 @@ dir_read_file_list(const char *root, const char *external_prefix,
         {
             file->linked = pgut_strdup(linked);
             canonicalize_path(file->linked);
+        }
+
+        /* read compress option from control file */
+        int64 compressedFile = 0;
+        if (get_control_value(buf, "compressedFile", NULL, &compressedFile, false)) {
+            file->compressedFile = true;
+            int64 compressedAlgorithm = 0;
+            int64 compressedChunkSize = 0;
+            get_control_value(buf, "compressedAlgorithm", NULL, &compressedAlgorithm, true);
+            get_control_value(buf, "compressedChunkSize", NULL, &compressedChunkSize, true);
+            file->compressedAlgorithm = (uint8)compressedAlgorithm;
+            file->compressedChunkSize = (int16)compressedChunkSize;
         }
 
         if (get_control_value(buf, "segno", NULL, &segno, false))

@@ -2382,7 +2382,7 @@ void mdtruncate(SMgrRelation reln, ForkNumber forknum, BlockNumber nblocks)
                 /* find the max used chunkno */
                 for (BlockNumber blk = (BlockNumber) 0; blk < (BlockNumber) last_seg_blocks; blk++) {
                     pcAddr = GET_PAGE_COMPRESS_ADDR(pcMap, chunk_size, blk);
- /* check allocated_chunks for one page */
+                    /* check allocated_chunks for one page */
                     if (pcAddr->allocated_chunks > BLCKSZ / chunk_size) {
                         ereport(ERROR,
                             (errcode(ERRCODE_DATA_CORRUPTED), errmsg("invalid chunks %u of block %u in file \"%s\"",

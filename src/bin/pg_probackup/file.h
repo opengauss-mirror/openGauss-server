@@ -16,6 +16,8 @@
 #include <sys/stat.h>
 #include <dirent.h>
 
+#include "PageCompression.h"
+
 #ifdef HAVE_LIBZ
 #include <zlib.h>
 #endif
@@ -47,6 +49,7 @@ typedef enum
     FIO_CLOSEDIR,
     FIO_PAGE,
     FIO_WRITE_COMPRESSED,
+    FIO_COSTRUCT_COMPRESSED,
     FIO_GET_CRC32,
     /* used for incremental restore */
     FIO_GET_CHECKSUM_MAP,
@@ -106,9 +109,10 @@ extern void    fio_communicate(int in, int out);
 extern int     fio_get_agent_version(void);
 extern FILE*   fio_fopen(char const* name, char const* mode, fio_location location);
 extern size_t  fio_fwrite(FILE* f, void const* buf, size_t size);
+extern void fio_construct_compressed(void const* buf, size_t size);
 extern ssize_t fio_fwrite_compressed(FILE* f, void const* buf, size_t size, int compress_alg);
 extern ssize_t fio_fread(FILE* f, void* buf, size_t size);
-extern int     fio_pread(FILE* f, void* buf, off_t offs);
+extern int     fio_pread(FILE* f, void* buf, off_t offs, PageCompression* pageCompression = NULL);
 extern int     fio_fprintf(FILE* f, char const* arg, ...);// pg_attribute_printf(2, 3);
 extern int     fio_fflush(FILE* f);
 extern int     fio_fseek(FILE* f, off_t offs);
@@ -141,6 +145,13 @@ extern struct dirent * fio_readdir(DIR *dirp);
 extern int     fio_closedir(DIR *dirp);
 extern FILE*   fio_open_stream(char const* name, fio_location location);
 extern int     fio_close_stream(FILE* f);
+
+struct CompressCommunicate {
+    char path[MAXPGPATH];
+    uintptr_t segmentNo;
+    int chunkSize;
+    int algorithm;
+};
 
 #ifdef HAVE_LIBZ
 extern gzFile  fio_gzopen(char const* path, char const* mode, int level, fio_location location);

@@ -16,10 +16,84 @@
 #include "knl/knl_variable.h"
 #include "storage/checksum_impl.h"
 
+void ChecksumForZeroPadding(uint32 *sums, const uint32 *dataArr, uint32 currentLeft, uint32 alignSize);
+
 static inline uint32 pg_checksum_init(uint32 seed, uint32 value)
 {
     CHECKSUM_COMP(seed, value);
     return seed;
+}
+
+uint32 DataBlockChecksum(char* data, uint32 size, bool zeroing)
+{
+    uint32 sums[N_SUMS];
+    uint32* dataArr = (uint32*)data;
+    uint32 result = 0;
+    uint32 i, j;
+    uint32 currentLeft = size;
+
+    /* ensure that the size is compatible with the algorithm */
+    uint32 alignSize = sizeof(uint32) * N_SUMS;
+    Assert(zeroing || (size % alignSize == 0));
+
+    /* initialize partial checksums to their corresponding offsets */
+    auto realSize = size < alignSize ? size : alignSize;
+
+    uint32 *initUint32 = NULL;
+    char usedForInit[sizeof(uint32) * N_SUMS] = {0};
+    if (zeroing && size < alignSize) {
+        errno_t rc = memcpy_s(usedForInit, alignSize, (char *) dataArr, realSize);
+        securec_check(rc, "", "");
+        currentLeft -= realSize;
+        initUint32 = (uint32*)usedForInit;
+    } else {
+        initUint32 = dataArr;
+        currentLeft -= alignSize;
+    }
+
+    for (j = 0; j < N_SUMS; j += 2) {
+        sums[j] = pg_checksum_init(g_checksumBaseOffsets[j], initUint32[j]);
+        sums[j + 1] = pg_checksum_init(g_checksumBaseOffsets[j + 1], initUint32[j + 1]);
+    }
+    dataArr += N_SUMS;
+
+    /* main checksum calculation */
+    for (i = 1; i < size / alignSize; i++) {
+        for (j = 0; j < N_SUMS; j += 2) {
+            CHECKSUM_COMP(sums[j], dataArr[j]);
+            CHECKSUM_COMP(sums[j + 1], dataArr[j + 1]);
+        }
+        dataArr += N_SUMS;
+    }
+
+    /* checksum for zero padding */
+    currentLeft -= alignSize * (i - 1);
+    if (currentLeft > 0 && currentLeft < alignSize && zeroing) {
+        ChecksumForZeroPadding(sums, dataArr, currentLeft, alignSize);
+    }
+
+    /* finally add in two rounds of zeroes for additional mixing */
+    for (j = 0; j < N_SUMS; j++) {
+        CHECKSUM_COMP(sums[j], 0);
+        CHECKSUM_COMP(sums[j], 0);
+
+        /* xor fold partial checksums together */
+        result ^= sums[j];
+    }
+
+    return result;
+}
+
+void ChecksumForZeroPadding(uint32 *sums, const uint32 *dataArr, uint32 currentLeft, uint32 alignSize)
+{
+    auto maxLen = sizeof(uint32) * N_SUMS;
+    char currentLeftChars[maxLen] = {0};
+    errno_t rc = memcpy_s(currentLeftChars, maxLen, (char *)dataArr, currentLeft);
+    securec_check(rc, "", "");
+    for (int j = 0; j < N_SUMS; j += 2) {
+        CHECKSUM_COMP(sums[j], ((uint32 *)currentLeftChars)[j]);
+        CHECKSUM_COMP(sums[j + 1], ((uint32 *)currentLeftChars)[j + 1]);
+    }
 }
 
 uint32 pg_checksum_block(char* data, uint32 size)

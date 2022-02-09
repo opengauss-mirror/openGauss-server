@@ -42,9 +42,9 @@ constexpr uint32 COMPRESS_ADDRESS_FLUSH_CHUNKS = 5000;
 
 #define SUPPORT_COMPRESSED(relKind, relam) \
     ((relKind) == RELKIND_RELATION || ((relKind) == RELKIND_INDEX && (relam) == BTREE_AM_OID))
-#define REL_SUPPORT_COMPRESSED(relation)                \
-    ((relation->rd_rel->relkind) == RELKIND_RELATION || \
-     ((relation->rd_rel->relkind) == RELKIND_INDEX && (relation->rd_rel->relam) == BTREE_AM_OID))
+#define REL_SUPPORT_COMPRESSED(relation)                  \
+    (((relation)->rd_rel->relkind) == RELKIND_RELATION || \
+     (((relation)->rd_rel->relkind) == RELKIND_INDEX && ((relation)->rd_rel->relam) == BTREE_AM_OID))
 
 typedef uint32 pc_chunk_number_t;
 const uint32 PAGE_COMPRESSION_VERSION = 92603;
@@ -97,6 +97,7 @@ struct ReadBlockChunksStruct {
 
 typedef struct PageCompressData {
     char page_header[SizeOfPageHeaderData]; /* page header */
+    uint32 crc32;
     uint32 size : 16;                       /* size of compressed data */
     uint32 byte_convert : 1;
     uint32 diff_convert : 1;
@@ -107,6 +108,7 @@ typedef struct PageCompressData {
 
 typedef struct HeapPageCompressData {
     char page_header[SizeOfHeapPageHeaderData]; /* page header */
+    uint32 crc32;
     uint32 size : 16;                       /* size of compressed data */
     uint32 byte_convert : 1;
     uint32 diff_convert : 1;

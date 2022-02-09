@@ -710,6 +710,8 @@
 ./lib/libcurl.so.4
 ./lib/libcurl.so.4.7.0
 ./lib/libxgboost.so
+./lib/libpagecompression.so
+./lib/libpagecompression.so.1
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
 ./lib/postgresql/euc_kr_and_mic.so

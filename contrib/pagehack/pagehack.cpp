@@ -91,8 +91,7 @@
 #include "tsdb/utils/constant_def.h"
 #endif
 
-#include "openGaussCompression.h"
-
+#include "PageCompression.h"
 
 /* Max number of pg_class oid, currently about 4000 */
 #define MAX_PG_CLASS_ID 10000
@@ -726,70 +725,6 @@ static const uint8 number_of_meta_bits[256] = {0,
     1,
     2,
     2};
-
-uint32 pg_checksum_block(char* data, uint32 size)
-{
-    uint32 sums[N_SUMS];
-    uint32(*dataArr)[N_SUMS] = (uint32(*)[N_SUMS])data;
-    uint32 result = 0;
-    errno_t rc;
-    uint32 i, j;
-
-    /* ensure that the size is compatible with the algorithm */
-    Assert((size % (sizeof(uint32) * N_SUMS)) == 0);
-
-    /* initialize partial checksums to their corresponding offsets */
-    rc = memcpy_s(sums, sizeof(sums), g_checksumBaseOffsets, sizeof(g_checksumBaseOffsets));
-    securec_check(rc, "", "");
-
-    /* main checksum calculation */
-    for (i = 0; i < size / sizeof(uint32) / N_SUMS; i++) {
-        for (j = 0; j < N_SUMS; j++) {
-            CHECKSUM_COMP(sums[j], dataArr[i][j]);
-        }
-    }
-
-    /* finally add in two rounds of zeroes for additional mixing */
-    for (i = 0; i < CHECKSUM_CACL_ROUNDS; i++) {
-        for (j = 0; j < N_SUMS; j++) {
-            CHECKSUM_COMP(sums[j], 0);
-        }
-    }
-
-    /* xor fold partial checksums together */
-    for (i = 0; i < N_SUMS; i++) {
-        result ^= sums[i];
-    }
-
-    return result;
-}
-
-uint16 pg_checksum_page(char* page, BlockNumber blkno)
-{
-    PageHeader phdr = (PageHeader)page;
-    uint16 save_checksum;
-    uint32 checksum;
-
-    /*
-     * Save pd_checksum and temporarily set it to zero, so that the checksum
-     * calculation isn't affected by the old checksum stored on the page.
-     * Restore it after, because actually updating the checksum is NOT part of
-     * the API of this function.
-     */
-    save_checksum = phdr->pd_checksum;
-    phdr->pd_checksum = 0;
-    checksum = pg_checksum_block(page, BLCKSZ);
-    phdr->pd_checksum = save_checksum;
-
-    /* Mix in the block number to detect transposed pages */
-    checksum ^= blkno;
-
-    /*
-     * Reduce to a uint16 (to fit in the pd_checksum field) with an offset of
-     * one. That avoids checksums of zero, which seems like a good idea.
-     */
-    return (checksum % UINT16_MAX) + 1;
-}
 
 /*
  * SpaceGetBlockFreeLevel
@@ -3167,55 +3102,69 @@ static BlockNumber CalculateMaxBlockNumber(BlockNumber blknum, BlockNumber start
     return number;
 }
 
-static int parse_page_file(const char* filename, SegmentType type, const uint32 start_point, const uint32 number_read)
+static void MarkBufferDirty(char *buffer, size_t len)
+{
+    int writeLen = len / 2;
+    unsigned char fill_byte[writeLen] = {0xFF};
+    for (int i = 0; i < writeLen; i++)
+        fill_byte[i] = 0xFF;
+    auto rc = memcpy_s(buffer + writeLen, BLCKSZ - writeLen, fill_byte, writeLen);
+    securec_check(rc, "", "");
+}
+
+static int parse_page_file(const char *filename, SegmentType type, const uint32 start_point, const uint32 number_read)
 {
     if (type != SEG_HEAP && type != SEG_INDEX_BTREE) {
         return parse_uncompressed_page_file(filename, type, start_point, number_read);
     }
-
-    auto openGaussCompression = new OpenGaussCompression();
-    openGaussCompression->SetFilePath(filename, SegNo);
-    bool success = openGaussCompression->TryOpen();
-    if (!success) {
-        delete openGaussCompression;
+    
+    auto pageCompression = new PageCompression();
+    if (pageCompression->Init(filename, MAXPGPATH, SegNo) != SUCCESS) {
+        delete pageCompression;
         return parse_uncompressed_page_file(filename, type, start_point, number_read);
     }
 
     BlockNumber start = start_point;
-    BlockNumber blknum = openGaussCompression->GetMaxBlockNumber();
+    BlockNumber blknum = pageCompression->GetMaxBlockNumber();
     BlockNumber number = CalculateMaxBlockNumber(blknum, start, number_read);
     if (number == InvalidBlockNumber) {
-        delete openGaussCompression;
+        delete pageCompression;
         return false;
     }
     char compressed[BLCKSZ];
-    size_t compressedLen;
+    char decompressed[BLCKSZ];
     while (start < number) {
-        if (!openGaussCompression->ReadChunkOfBlock(compressed, &compressedLen, start)) {
-            fprintf(stderr, "read block %d failed, filename: %s: %s\n", start, openGaussCompression->GetPcdFilePath(),
-                    strerror(errno));
-            delete openGaussCompression;
+        auto compressedSize = pageCompression->ReadCompressedBuffer(start, compressed, BLCKSZ);
+        if (compressedSize == 0) {
+            fprintf(stderr, "read block %d failed, filename: %s_pcd: %s\n", start, filename, strerror(errno));
+            delete pageCompression;
             return false;
         }
-        if (!parse_a_page(openGaussCompression->GetDecompressedPage(), start, blknum, type)) {
+        char *parseFile = NULL;
+        if (compressedSize < BLCKSZ) {
+            pageCompression->DecompressedPage(compressed, decompressed);
+            parseFile = decompressed;
+        } else {
+            parseFile = compressed;
+        }
+        if (!parse_a_page(parseFile, start, blknum, type)) {
             fprintf(stderr, "Error during parsing block %d/%d\n", start, blknum);
-            delete openGaussCompression;
+            delete pageCompression;
             return false;
         }
         if ((write_back && num_item) || dirty_page) {
             if (dirty_page) {
-                openGaussCompression->MarkUncompressedDirty();
+                MarkBufferDirty(parseFile, BLCKSZ);
             }
-            if (!openGaussCompression->WriteBackUncompressedData()) {
-                fprintf(stderr, "write back failed, filename: %s: %s\n", openGaussCompression->GetPcdFilePath(),
-                        strerror(errno));
-                delete openGaussCompression;
+            if (!pageCompression->WriteBackUncompressedData(compressed, compressedSize, parseFile, BLCKSZ, start)) {
+                fprintf(stderr, "write back failed, filename: %s_pcd: %s\n", filename, strerror(errno));
+                delete pageCompression;
                 return false;
             }
         }
         start++;
     }
-    delete openGaussCompression;
+    delete pageCompression;
     return true;
 }
 

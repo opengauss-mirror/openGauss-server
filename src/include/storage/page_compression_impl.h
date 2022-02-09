@@ -20,6 +20,7 @@
 #include <sys/mman.h>
 
 #include "storage/page_compression.h"
+#include "storage/checksum_impl.h"
 #include "utils/pg_lzcompress.h"
 
 #include <zstd.h>
@@ -40,8 +41,6 @@
 #define ASSERT(condition) assert(condition)
 #endif
 
-
-#ifndef FRONTEND
 
 /**
  * return data of page
@@ -420,13 +419,19 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
     char* data = GetPageCompressedData(dst, heapPageData);
 
     switch (option.compressAlgorithm) {
-        case COMPRESS_ALGORITHM_PGLZ:
+        case COMPRESS_ALGORITHM_PGLZ: {
+            bool success;
             if (real_ByteConvert) {
-                compressed_size = lz_compress(src_copy + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, data);
+                success = pglz_compress(src_copy + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, (PGLZ_Header *)data,
+                    PGLZ_strategy_default);
             } else {
-                compressed_size = lz_compress(src + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, data);
+                success = pglz_compress(src + sizeOfHeaderData, BLCKSZ - sizeOfHeaderData, (PGLZ_Header *)data,
+                    PGLZ_strategy_default);
             }
+            compressed_size = success ? VARSIZE(data) : BLCKSZ;
+            compressed_size = compressed_size < BLCKSZ ? compressed_size : BLCKSZ;
             break;
+        }
         case COMPRESS_ALGORITHM_ZSTD: {
             if (level == 0 || level < MIN_ZSTD_COMPRESSION_LEVEL || level > MAX_ZSTD_COMPRESSION_LEVEL) {
                 level = DEFAULT_ZSTD_COMPRESSION_LEVEL;
@@ -461,6 +466,7 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
         rc = memcpy_s(pcdptr->page_header, sizeOfHeaderData, src, sizeOfHeaderData);
         securec_check(rc, "", "");
         pcdptr->size = compressed_size;
+        pcdptr->crc32 = DataBlockChecksum(data, compressed_size, true);
         pcdptr->byte_convert = real_ByteConvert;
         pcdptr->diff_convert = option.diffConvert;
     } else {
@@ -468,6 +474,7 @@ int TemplateCompressPage(const char* src, char* dst, int dst_size, RelFileCompre
         rc = memcpy_s(pcdptr->page_header, sizeOfHeaderData, src, sizeOfHeaderData);
         securec_check(rc, "", "");
         pcdptr->size = compressed_size;
+        pcdptr->crc32 = DataBlockChecksum(data, compressed_size, true);
         pcdptr->byte_convert = real_ByteConvert;
         pcdptr->diff_convert = option.diffConvert;
     }
@@ -599,6 +606,7 @@ int TemplateDecompressPage(const char* src, char* dst, uint8 algorithm)
     int decompressed_size;
     char* data;
     uint32 size;
+    uint32 crc32;
     bool byte_convert, diff_convert;
     size_t headerSize = GetSizeOfHeadData(heapPageData);
     int rc = memcpy_s(dst, headerSize, src, headerSize);
@@ -607,18 +615,26 @@ int TemplateDecompressPage(const char* src, char* dst, uint8 algorithm)
     if (heapPageData) {
         data = ((HeapPageCompressData*)src)->data;
         size = ((HeapPageCompressData*)src)->size;
+        crc32 = ((HeapPageCompressData*)src)->crc32;
         byte_convert = ((HeapPageCompressData*)src)->byte_convert;
         diff_convert = ((HeapPageCompressData*)src)->diff_convert;
     } else {
         data = ((PageCompressData*)src)->data;
         size = ((PageCompressData*)src)->size;
+        crc32 = ((PageCompressData*)src)->crc32;
         byte_convert = ((PageCompressData*)src)->byte_convert;
         diff_convert = ((PageCompressData*)src)->diff_convert;
     }
 
+    if (DataBlockChecksum(data, size, true) != crc32) {
+        return -2;
+    }
     switch (algorithm) {
         case COMPRESS_ALGORITHM_PGLZ:
-            decompressed_size = lz_decompress(data, size, dst + headerSize, BLCKSZ - headerSize, false);
+            decompressed_size = pglz_decompress((const PGLZ_Header* )data, dst + headerSize);
+            if (decompressed_size == -1) {
+                return -1;
+            }
             break;
         case COMPRESS_ALGORITHM_ZSTD:
             decompressed_size = ZSTD_decompress(dst + headerSize, BLCKSZ - headerSize, data, size);
@@ -637,7 +653,6 @@ int TemplateDecompressPage(const char* src, char* dst, uint8 algorithm)
 
     return headerSize + decompressed_size;
 }
-#endif
 
 /**
  * pc_mmap() -- create memory map for page compress file's address area.
@@ -656,8 +671,8 @@ PageCompressHeader* pc_mmap(int fd, int chunk_size, bool readonly)
 extern PageCompressHeader* pc_mmap_real_size(int fd, int pc_memory_map_size, bool readonly)
 {
     PageCompressHeader* map = NULL;
-    int file_size = lseek(fd, 0, SEEK_END);
-    if (file_size != pc_memory_map_size) {
+    int fileSize = lseek(fd, 0, SEEK_END);
+    if (fileSize != pc_memory_map_size) {
         if (ftruncate(fd, pc_memory_map_size) != 0) {
             return (PageCompressHeader*) MAP_FAILED;
         }
@@ -685,11 +700,6 @@ int pc_munmap(PageCompressHeader *map)
  */
 int pc_msync(PageCompressHeader *map)
 {
-#ifndef FRONTEND
-    if (!u_sess->attr.attr_storage.enableFsync) {
-        return 0;
-    }
-#endif
     return msync(map, SIZE_OF_PAGE_COMPRESS_ADDR_FILE(map->chunk_size), MS_SYNC);
 }
 
@@ -716,6 +726,20 @@ uint32 AddrChecksum32(BlockNumber blockNumber, const PageCompressAddr* pageCompr
         }
     } while (len);
     return checkSum;
+}
+
+CompressedFileType IsCompressedFile(char *fileName, size_t fileNameLen)
+{
+    size_t suffixLen = 4;
+    if (fileNameLen >= suffixLen) {
+        const char *suffix = fileName + fileNameLen - suffixLen;
+        if (strncmp(suffix, "_pca", suffixLen) == 0) {
+            return COMPRESSED_TABLE_PCA_FILE;
+        } else if (strncmp(suffix, "_pcd", suffixLen) == 0) {
+            return COMPRESSED_TABLE_PCD_FILE;
+        }
+    }
+    return COMPRESSED_TYPE_UNKNOWN;
 }
 
 #endif

@@ -19,7 +19,7 @@
 #include "catalog/catalog.h"
 #include "catalog/pg_tablespace.h"
 #include "common/fe_memutils.h"
-#include "compressed_rewind.h"
+#include "PageCompression.h"
 #include "storage/cu.h"
 #include "storage/smgr/fd.h"
 
@@ -508,7 +508,7 @@ void process_source_file(const char* path, file_type_t type, size_t newsize, con
                 /* mod blocksize 8k to avoid half page write */
                 RewindCompressInfo oldRewindCompressInfo;
                 bool sourceCompressed = info != NULL;
-                bool targetCompressed = ProcessLocalPca(path, &oldRewindCompressInfo);
+                bool targetCompressed = isreldatafile && ProcessLocalPca(path, &oldRewindCompressInfo, pg_data);
                 if (sourceCompressed && !targetCompressed) {
                     info->compressed = false;
                     action = FILE_ACTION_REMOVE;
