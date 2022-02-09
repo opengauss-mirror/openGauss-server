@@ -156,11 +156,13 @@ static bool PartitionFindReplTupleByIndex(EState *estate, Relation rel, Relation
     ListCell *cell = NULL;
     foreach (cell, fakeRelInfo->partList) {
         Partition heapPart = (Partition)lfirst(cell);
-        Relation partionRel = partitionGetRelation(rel, heapPart);
+        Relation partionRel = RelationIsSubPartitioned(rel) ? SubPartitionGetRelation(rel, heapPart, NoLock) :
+                                                              partitionGetRelation(rel, heapPart);
         /* Get index partition of this heap partition */
         Oid idxPartOid = getPartitionIndexOid(RelationGetRelid(idxrel), heapPart->pd_id);
         Partition idxPart = partitionOpen(idxrel, idxPartOid, RowExclusiveLock);
-        Relation idxPartRel = partitionGetRelation(idxrel, idxPart);
+        Relation idxPartRel = RelationIsSubPartitioned(rel) ? SubPartitionGetRelation(idxrel, idxPart, NoLock) :
+                                                              partitionGetRelation(idxrel, idxPart);
 
         fakeRelInfo->partRel = partionRel;
         fakeRelInfo->part = heapPart;
@@ -198,7 +200,8 @@ static bool PartitionFindReplTupleSeq(Relation rel, LockTupleMode lockmode,
     ListCell *cell = NULL;
     foreach (cell, fakeRelInfo->partList) {
         Partition heapPart = (Partition)lfirst(cell);
-        Relation partionRel = partitionGetRelation(rel, heapPart);
+        Relation partionRel = RelationIsSubPartitioned(rel) ? SubPartitionGetRelation(rel, heapPart, NoLock) :
+                                                              partitionGetRelation(rel, heapPart);
 
         fakeRelInfo->partRel = partionRel;
         fakeRelInfo->part = heapPart;
