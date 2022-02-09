@@ -22,6 +22,11 @@ test: get_instr_unique_sql
 # interferes with crash-recovery testing.
 test: single_node_tablespace
 
+#test startwith...connect by
+test: sw_prepare
+test: sw_basic sw_icbc sw_siblings sw_bugfix sw_by_rownum_level
+test: sw_clearup
+
 # ----------
 # The first group of parallel tests
 # ----------

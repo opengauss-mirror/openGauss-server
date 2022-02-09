@@ -1,0 +1,180 @@
+set client_min_messages = error;
+set search_path=swtest;
+SET CLIENT_ENCODING='UTF8';
+--accepted cases
+explain (costs off)
+select * from test_area CONNECT BY LEVEL <= LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select *, LEVEL from test_area CONNECT BY LEVEL <= LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select * from test_area CONNECT BY ROWNUM <= LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select *, ROWNUM from test_area CONNECT BY ROWNUM <= LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select * from test_area CONNECT BY LEVEL < LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select *, LEVEL from test_area CONNECT BY LEVEL < LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select * from test_area CONNECT BY ROWNUM < LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select *, ROWNUM from test_area CONNECT BY ROWNUM < LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+--rejected cases
+explain (costs off)
+select *, LEVEL from test_area CONNECT BY LEVEL > LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select *, LEVEL from test_area CONNECT BY LEVEL >= LENGTH('SOME TEXT');
+                       QUERY PLAN                       
+--------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                 ->  Nested Loop
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Materialize
+                             ->  Seq Scan on test_area
+(10 rows)
+
+explain (costs off)
+select * from test_area CONNECT BY APPLE > LENGTH('SOME TEXT');
+ERROR:  column "apple" does not exist
+LINE 2: select * from test_area CONNECT BY APPLE > LENGTH('SOME TEXT...
+                                           ^
+explain (costs off)
+select * from test_area CONNECT BY APPLE < LENGTH('SOME TEXT');
+ERROR:  column "apple" does not exist
+LINE 2: select * from test_area CONNECT BY APPLE < LENGTH('SOME TEXT...
+                                           ^
+explain (costs off)
+select * from test_area CONNECT BY APPLE <= LENGTH('SOME TEXT');
+ERROR:  column "apple" does not exist
+LINE 2: select * from test_area CONNECT BY APPLE <= LENGTH('SOME TEX...
+                                           ^

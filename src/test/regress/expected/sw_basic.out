@@ -1,0 +1,630 @@
+set client_min_messages = error;
+set search_path=swtest;
+SET CLIENT_ENCODING='UTF8';
+/*
+ *
+ * START WITH .... CONNECT BY基础测试用例
+ *
+ * 测试用例表数
+ *  openGauss=# select * from swtest.test_area;
+ *   id |  name  | fatherid | name_desc
+ *  ----+--------+----------+-----------
+ *    1 | 中国   |        0 | china
+ *    2 | 湖南省 |        1 | hunan
+ *    3 | 广东省 |        1 | guangdong
+ *    4 | 海南省 |        1 | hainan
+ *    5 | 河北省 |        1 | hebei
+ *    6 | 河南省 |        1 | henan
+ *    7 | 山东省 |        1 | shandong
+ *    8 | 湖北省 |        1 | hubei
+ *    9 | 江苏省 |        1 | jiangsu
+ *   10 | 深圳市 |        3 | shenzhen
+ *   11 | 长沙市 |        2 | changsha
+ *   22 | 祁北县 |       13 | qibei
+ *   12 | 南山区 |       10 | nanshan
+ *   21 | 祁西县 |       13 | qixi
+ *   13 | 衡阳市 |        2 | hengyang
+ *   14 | 耒阳市 |       13 | leiyang
+ *   15 | 龙岗区 |       10 | longgang
+ *   16 | 福田区 |       10 | futian
+ *   17 | 宝安区 |       10 | baoan
+ *   19 | 祁东县 |       13 | qidong
+ *   18 | 常宁市 |       13 | changning
+ *   20 | 祁南县 |       13 | qinan
+ *
+ */
+-- 一、基础语法测试
+/*
+ * 用例1.1，基础用例包含所有伪列，leaf节点方向遍历查找
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '@')
+FROM test_area
+START WITH name = '中国'
+CONNECT BY PRIOR id = fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_1, array_col_4
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                       Filter: (name = '中国'::text)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(12 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '@')
+FROM test_area
+START WITH name = '中国'
+CONNECT BY PRIOR id = fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |        sys_connect_by_path         
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+------------------------------------
+  1 | 中国   |        0 | China     |     1 |                 0 |                  0 | China           | @China
+  2 | 湖南省 |        1 | Hunan     |     2 |                 0 |                  0 | China           | @China@Hunan
+  3 | 广东省 |        1 | Guangdong |     2 |                 0 |                  0 | China           | @China@Guangdong
+  4 | 海南省 |        1 | Hainan    |     2 |                 1 |                  0 | China           | @China@Hainan
+  5 | 河北省 |        1 | Hebei     |     2 |                 1 |                  0 | China           | @China@Hebei
+  6 | 河南省 |        1 | Henan     |     2 |                 1 |                  0 | China           | @China@Henan
+  7 | 山东省 |        1 | Shandong  |     2 |                 1 |                  0 | China           | @China@Shandong
+  8 | 湖北省 |        1 | Hubei     |     2 |                 1 |                  0 | China           | @China@Hubei
+  9 | 江苏省 |        1 | Jiangsu   |     2 |                 1 |                  0 | China           | @China@Jiangsu
+ 10 | 深圳市 |        3 | Shenzhen  |     3 |                 0 |                  0 | China           | @China@Guangdong@Shenzhen
+ 11 | 长沙市 |        2 | Changsha  |     3 |                 1 |                  0 | China           | @China@Hunan@Changsha
+ 13 | 衡阳市 |        2 | Hengyang  |     3 |                 0 |                  0 | China           | @China@Hunan@Hengyang
+ 22 | 祁北县 |       13 | Qibei     |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qibei
+ 12 | 南山区 |       10 | Nanshan   |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Nanshan
+ 21 | 祁西县 |       13 | Qixi      |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qixi
+ 14 | 耒阳市 |       13 | Leiyang   |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Leiyang
+ 15 | 龙岗区 |       10 | Longgang  |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Longgang
+ 16 | 福田区 |       10 | Futian    |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Futian
+ 17 | 宝安区 |       10 | Baoan     |     4 |                 1 |                  0 | China           | @China@Guangdong@Shenzhen@Baoan
+ 19 | 祁东县 |       13 | Qidong    |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qidong
+ 18 | 常宁市 |       13 | Changning |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Changning
+ 20 | 祁南县 |       13 | Qinan     |     4 |                 1 |                  0 | China           | @China@Hunan@Hengyang@Qinan
+(22 rows)
+
+/*
+ * 用例1.2，基础用例包含所有伪列，root节点方向遍历查找
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '@')
+FROM test_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_3, array_col_4
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                       Filter: (name = '耒阳市'::text)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(12 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '@')
+FROM test_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |      sys_connect_by_path      
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+-------------------------------
+ 14 | 耒阳市 |       13 | Leiyang   |     1 |                 0 |                  0 | Leiyang         | @Leiyang
+ 13 | 衡阳市 |        2 | Hengyang  |     2 |                 0 |                  0 | Leiyang         | @Leiyang@Hengyang
+  2 | 湖南省 |        1 | Hunan     |     3 |                 0 |                  0 | Leiyang         | @Leiyang@Hengyang@Hunan
+  1 | 中国   |        0 | China     |     4 |                 1 |                  0 | Leiyang         | @Leiyang@Hengyang@Hunan@China
+(4 rows)
+
+/*
+ * 用例1.3，基础用例包含所有伪列，root节点方向遍历查找（两条链）
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '@')
+FROM test_area
+START WITH name = '耒阳市' OR name = '宝安区'
+CONNECT BY id = PRIOR fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_3, array_col_4
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                       Filter: ((name = '耒阳市'::text) OR (name = '宝安区'::text))
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(12 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '@')
+FROM test_area
+START WITH name = '耒阳市' OR name = '宝安区'
+CONNECT BY id = PRIOR fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |       sys_connect_by_path       
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+---------------------------------
+ 14 | 耒阳市 |       13 | Leiyang   |     1 |                 0 |                  0 | Leiyang         | @Leiyang
+ 17 | 宝安区 |       10 | Baoan     |     1 |                 0 |                  0 | Baoan           | @Baoan
+ 10 | 深圳市 |        3 | Shenzhen  |     2 |                 0 |                  0 | Baoan           | @Baoan@Shenzhen
+ 13 | 衡阳市 |        2 | Hengyang  |     2 |                 0 |                  0 | Leiyang         | @Leiyang@Hengyang
+  2 | 湖南省 |        1 | Hunan     |     3 |                 0 |                  0 | Leiyang         | @Leiyang@Hengyang@Hunan
+  3 | 广东省 |        1 | Guangdong |     3 |                 0 |                  0 | Baoan           | @Baoan@Shenzhen@Guangdong
+  1 | 中国   |        0 | China     |     4 |                 1 |                  0 | Baoan           | @Baoan@Shenzhen@Guangdong@China
+  1 | 中国   |        0 | China     |     4 |                 1 |                  0 | Leiyang         | @Leiyang@Hengyang@Hunan@China
+(8 rows)
+
+/*
+ * 用例1.5，基础用例包含所有伪列，测试多字符串拼接
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '=>>')
+FROM test_area
+START WITH name = '中国'
+CONNECT BY PRIOR id = fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_1, array_col_4
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                       Filter: (name = '中国'::text)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(12 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '=>>')
+FROM test_area
+START WITH name = '中国'
+CONNECT BY PRIOR id = fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |            sys_connect_by_path             
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+--------------------------------------------
+  1 | 中国   |        0 | China     |     1 |                 0 |                  0 | China           | =>>China
+  2 | 湖南省 |        1 | Hunan     |     2 |                 0 |                  0 | China           | =>>China=>>Hunan
+  3 | 广东省 |        1 | Guangdong |     2 |                 0 |                  0 | China           | =>>China=>>Guangdong
+  4 | 海南省 |        1 | Hainan    |     2 |                 1 |                  0 | China           | =>>China=>>Hainan
+  5 | 河北省 |        1 | Hebei     |     2 |                 1 |                  0 | China           | =>>China=>>Hebei
+  6 | 河南省 |        1 | Henan     |     2 |                 1 |                  0 | China           | =>>China=>>Henan
+  7 | 山东省 |        1 | Shandong  |     2 |                 1 |                  0 | China           | =>>China=>>Shandong
+  8 | 湖北省 |        1 | Hubei     |     2 |                 1 |                  0 | China           | =>>China=>>Hubei
+  9 | 江苏省 |        1 | Jiangsu   |     2 |                 1 |                  0 | China           | =>>China=>>Jiangsu
+ 10 | 深圳市 |        3 | Shenzhen  |     3 |                 0 |                  0 | China           | =>>China=>>Guangdong=>>Shenzhen
+ 11 | 长沙市 |        2 | Changsha  |     3 |                 1 |                  0 | China           | =>>China=>>Hunan=>>Changsha
+ 13 | 衡阳市 |        2 | Hengyang  |     3 |                 0 |                  0 | China           | =>>China=>>Hunan=>>Hengyang
+ 22 | 祁北县 |       13 | Qibei     |     4 |                 1 |                  0 | China           | =>>China=>>Hunan=>>Hengyang=>>Qibei
+ 12 | 南山区 |       10 | Nanshan   |     4 |                 1 |                  0 | China           | =>>China=>>Guangdong=>>Shenzhen=>>Nanshan
+ 21 | 祁西县 |       13 | Qixi      |     4 |                 1 |                  0 | China           | =>>China=>>Hunan=>>Hengyang=>>Qixi
+ 14 | 耒阳市 |       13 | Leiyang   |     4 |                 1 |                  0 | China           | =>>China=>>Hunan=>>Hengyang=>>Leiyang
+ 15 | 龙岗区 |       10 | Longgang  |     4 |                 1 |                  0 | China           | =>>China=>>Guangdong=>>Shenzhen=>>Longgang
+ 16 | 福田区 |       10 | Futian    |     4 |                 1 |                  0 | China           | =>>China=>>Guangdong=>>Shenzhen=>>Futian
+ 17 | 宝安区 |       10 | Baoan     |     4 |                 1 |                  0 | China           | =>>China=>>Guangdong=>>Shenzhen=>>Baoan
+ 19 | 祁东县 |       13 | Qidong    |     4 |                 1 |                  0 | China           | =>>China=>>Hunan=>>Hengyang=>>Qidong
+ 18 | 常宁市 |       13 | Changning |     4 |                 1 |                  0 | China           | =>>China=>>Hunan=>>Hengyang=>>Changning
+ 20 | 祁南县 |       13 | Qinan     |     4 |                 1 |                  0 | China           | =>>China=>>Hunan=>>Hengyang=>>Qinan
+(22 rows)
+
+/*
+ * 用例1.6，基础用例包含所有伪列， 包含多字符拼接，多条查找链，startwith使用LIKE查找
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '-*>')
+FROM test_area
+START WITH name like '%区'
+CONNECT BY id = PRIOR fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_3, array_col_4
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                       Filter: (name ~~ '%区'::text)
+                 ->  Hash Join
+                       Hash Cond: (tmp_reuslt."test_area@fatherid" = swtest.test_area.id)
+                       ->  WorkTable Scan on tmp_reuslt
+                       ->  Hash
+                             ->  Seq Scan on test_area
+(12 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '-*>')
+FROM test_area
+START WITH name like '%区'
+CONNECT BY id = PRIOR fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |            sys_connect_by_path             
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+--------------------------------------------
+ 12 | 南山区 |       10 | Nanshan   |     1 |                 0 |                  0 | Nanshan         | -*>Nanshan
+ 15 | 龙岗区 |       10 | Longgang  |     1 |                 0 |                  0 | Longgang        | -*>Longgang
+ 16 | 福田区 |       10 | Futian    |     1 |                 0 |                  0 | Futian          | -*>Futian
+ 17 | 宝安区 |       10 | Baoan     |     1 |                 0 |                  0 | Baoan           | -*>Baoan
+ 10 | 深圳市 |        3 | Shenzhen  |     2 |                 0 |                  0 | Nanshan         | -*>Nanshan-*>Shenzhen
+ 10 | 深圳市 |        3 | Shenzhen  |     2 |                 0 |                  0 | Longgang        | -*>Longgang-*>Shenzhen
+ 10 | 深圳市 |        3 | Shenzhen  |     2 |                 0 |                  0 | Futian          | -*>Futian-*>Shenzhen
+ 10 | 深圳市 |        3 | Shenzhen  |     2 |                 0 |                  0 | Baoan           | -*>Baoan-*>Shenzhen
+  3 | 广东省 |        1 | Guangdong |     3 |                 0 |                  0 | Nanshan         | -*>Nanshan-*>Shenzhen-*>Guangdong
+  3 | 广东省 |        1 | Guangdong |     3 |                 0 |                  0 | Longgang        | -*>Longgang-*>Shenzhen-*>Guangdong
+  3 | 广东省 |        1 | Guangdong |     3 |                 0 |                  0 | Futian          | -*>Futian-*>Shenzhen-*>Guangdong
+  3 | 广东省 |        1 | Guangdong |     3 |                 0 |                  0 | Baoan           | -*>Baoan-*>Shenzhen-*>Guangdong
+  1 | 中国   |        0 | China     |     4 |                 1 |                  0 | Nanshan         | -*>Nanshan-*>Shenzhen-*>Guangdong-*>China
+  1 | 中国   |        0 | China     |     4 |                 1 |                  0 | Longgang        | -*>Longgang-*>Shenzhen-*>Guangdong-*>China
+  1 | 中国   |        0 | China     |     4 |                 1 |                  0 | Futian          | -*>Futian-*>Shenzhen-*>Guangdong-*>China
+  1 | 中国   |        0 | China     |     4 |                 1 |                  0 | Baoan           | -*>Baoan-*>Shenzhen-*>Guangdong-*>China
+(16 rows)
+
+-- 二、扩展测试
+/*
+ * 用例2.1，基础用例包含所有伪列， 包含多字符拼接，多条查找链，startwith使用IN子查询进行查找
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '/')
+FROM test_area
+START WITH name IN (select name from test_area where id < 3)
+CONNECT BY PRIOR id = fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_1, array_col_4
+           ->  Recursive Union
+                 ->  Hash Semi Join
+                       Hash Cond: (swtest.test_area.name = swtest.test_area.name)
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  Seq Scan on test_area
+                                   Filter: (id < 3)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(16 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '/')
+FROM test_area
+START WITH name IN (select name from test_area where id < 3)
+CONNECT BY PRIOR id = fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |        sys_connect_by_path         
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+------------------------------------
+  1 | 中国   |        0 | China     |     1 |                 0 |                  0 | China           | /China
+  2 | 湖南省 |        1 | Hunan     |     1 |                 0 |                  0 | Hunan           | /Hunan
+  2 | 湖南省 |        1 | Hunan     |     2 |                 0 |                  0 | China           | /China/Hunan
+  3 | 广东省 |        1 | Guangdong |     2 |                 0 |                  0 | China           | /China/Guangdong
+  4 | 海南省 |        1 | Hainan    |     2 |                 1 |                  0 | China           | /China/Hainan
+  5 | 河北省 |        1 | Hebei     |     2 |                 1 |                  0 | China           | /China/Hebei
+  6 | 河南省 |        1 | Henan     |     2 |                 1 |                  0 | China           | /China/Henan
+  7 | 山东省 |        1 | Shandong  |     2 |                 1 |                  0 | China           | /China/Shandong
+  8 | 湖北省 |        1 | Hubei     |     2 |                 1 |                  0 | China           | /China/Hubei
+  9 | 江苏省 |        1 | Jiangsu   |     2 |                 1 |                  0 | China           | /China/Jiangsu
+ 11 | 长沙市 |        2 | Changsha  |     2 |                 1 |                  0 | Hunan           | /Hunan/Changsha
+ 13 | 衡阳市 |        2 | Hengyang  |     2 |                 0 |                  0 | Hunan           | /Hunan/Hengyang
+ 10 | 深圳市 |        3 | Shenzhen  |     3 |                 0 |                  0 | China           | /China/Guangdong/Shenzhen
+ 11 | 长沙市 |        2 | Changsha  |     3 |                 1 |                  0 | China           | /China/Hunan/Changsha
+ 22 | 祁北县 |       13 | Qibei     |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qibei
+ 21 | 祁西县 |       13 | Qixi      |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qixi
+ 13 | 衡阳市 |        2 | Hengyang  |     3 |                 0 |                  0 | China           | /China/Hunan/Hengyang
+ 14 | 耒阳市 |       13 | Leiyang   |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Leiyang
+ 19 | 祁东县 |       13 | Qidong    |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qidong
+ 18 | 常宁市 |       13 | Changning |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Changning
+ 20 | 祁南县 |       13 | Qinan     |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qinan
+ 22 | 祁北县 |       13 | Qibei     |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qibei
+ 12 | 南山区 |       10 | Nanshan   |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Nanshan
+ 21 | 祁西县 |       13 | Qixi      |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qixi
+ 14 | 耒阳市 |       13 | Leiyang   |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Leiyang
+ 15 | 龙岗区 |       10 | Longgang  |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Longgang
+ 16 | 福田区 |       10 | Futian    |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Futian
+ 17 | 宝安区 |       10 | Baoan     |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Baoan
+ 19 | 祁东县 |       13 | Qidong    |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qidong
+ 18 | 常宁市 |       13 | Changning |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Changning
+ 20 | 祁南县 |       13 | Qinan     |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qinan
+(31 rows)
+
+/*
+ * 用例2.2，基础用例包含所有伪列， 包含多字符拼接，多条查找链，startwith使用IN子查询进行查找，结果集进行伪列过滤
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '/')
+FROM test_area
+WHERE LEVEL > 2
+START WITH name IN (select name from test_area where id < 3)
+CONNECT BY PRIOR id = fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   Filter: (level > 2)
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_1, array_col_4
+           ->  Recursive Union
+                 ->  Hash Semi Join
+                       Hash Cond: (swtest.test_area.name = swtest.test_area.name)
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  Seq Scan on test_area
+                                   Filter: (id < 3)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(17 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '/')
+FROM test_area
+WHERE LEVEL > 2
+START WITH name IN (select name from test_area where id < 3)
+CONNECT BY PRIOR id = fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |        sys_connect_by_path         
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+------------------------------------
+ 10 | 深圳市 |        3 | Shenzhen  |     3 |                 0 |                  0 | China           | /China/Guangdong/Shenzhen
+ 11 | 长沙市 |        2 | Changsha  |     3 |                 1 |                  0 | China           | /China/Hunan/Changsha
+ 22 | 祁北县 |       13 | Qibei     |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qibei
+ 21 | 祁西县 |       13 | Qixi      |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qixi
+ 13 | 衡阳市 |        2 | Hengyang  |     3 |                 0 |                  0 | China           | /China/Hunan/Hengyang
+ 14 | 耒阳市 |       13 | Leiyang   |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Leiyang
+ 19 | 祁东县 |       13 | Qidong    |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qidong
+ 18 | 常宁市 |       13 | Changning |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Changning
+ 20 | 祁南县 |       13 | Qinan     |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qinan
+ 22 | 祁北县 |       13 | Qibei     |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qibei
+ 12 | 南山区 |       10 | Nanshan   |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Nanshan
+ 21 | 祁西县 |       13 | Qixi      |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qixi
+ 14 | 耒阳市 |       13 | Leiyang   |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Leiyang
+ 15 | 龙岗区 |       10 | Longgang  |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Longgang
+ 16 | 福田区 |       10 | Futian    |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Futian
+ 17 | 宝安区 |       10 | Baoan     |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Baoan
+ 19 | 祁东县 |       13 | Qidong    |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qidong
+ 18 | 常宁市 |       13 | Changning |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Changning
+ 20 | 祁南县 |       13 | Qinan     |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qinan
+(19 rows)
+
+/*
+ * 用例2.3，基础用例包含所有伪列， 包含多字符拼接，多条查找链，startwith使用IN子查询进行查找，结果集进行多个伪列过滤
+ **/
+EXPLAIN (COSTS OFF)
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '/')
+FROM test_area
+WHERE LEVEL > 2 AND connect_by_iscycle IS NOT NULL
+START WITH name IN (select name from test_area where id < 3)
+CONNECT BY PRIOR id = fatherid;
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   Filter: ((connect_by_iscycle IS NOT NULL) AND (level > 2))
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_1, array_col_4
+           ->  Recursive Union
+                 ->  Hash Semi Join
+                       Hash Cond: (swtest.test_area.name = swtest.test_area.name)
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  Seq Scan on test_area
+                                   Filter: (id < 3)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(17 rows)
+
+SELECT *, LEVEL, connect_by_isleaf, connect_by_iscycle, connect_by_root(name_desc), sys_connect_by_path(name_desc, '/')
+FROM test_area
+WHERE LEVEL > 2 AND connect_by_iscycle IS NOT NULL
+START WITH name IN (select name from test_area where id < 3)
+CONNECT BY PRIOR id = fatherid;
+ id |  name  | fatherid | name_desc | level | connect_by_isleaf | connect_by_iscycle | connect_by_root |        sys_connect_by_path         
+----+--------+----------+-----------+-------+-------------------+--------------------+-----------------+------------------------------------
+ 10 | 深圳市 |        3 | Shenzhen  |     3 |                 0 |                  0 | China           | /China/Guangdong/Shenzhen
+ 11 | 长沙市 |        2 | Changsha  |     3 |                 1 |                  0 | China           | /China/Hunan/Changsha
+ 22 | 祁北县 |       13 | Qibei     |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qibei
+ 21 | 祁西县 |       13 | Qixi      |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qixi
+ 13 | 衡阳市 |        2 | Hengyang  |     3 |                 0 |                  0 | China           | /China/Hunan/Hengyang
+ 14 | 耒阳市 |       13 | Leiyang   |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Leiyang
+ 19 | 祁东县 |       13 | Qidong    |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qidong
+ 18 | 常宁市 |       13 | Changning |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Changning
+ 20 | 祁南县 |       13 | Qinan     |     3 |                 1 |                  0 | Hunan           | /Hunan/Hengyang/Qinan
+ 22 | 祁北县 |       13 | Qibei     |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qibei
+ 12 | 南山区 |       10 | Nanshan   |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Nanshan
+ 21 | 祁西县 |       13 | Qixi      |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qixi
+ 14 | 耒阳市 |       13 | Leiyang   |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Leiyang
+ 15 | 龙岗区 |       10 | Longgang  |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Longgang
+ 16 | 福田区 |       10 | Futian    |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Futian
+ 17 | 宝安区 |       10 | Baoan     |     4 |                 1 |                  0 | China           | /China/Guangdong/Shenzhen/Baoan
+ 19 | 祁东县 |       13 | Qidong    |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qidong
+ 18 | 常宁市 |       13 | Changning |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Changning
+ 20 | 祁南县 |       13 | Qinan     |     4 |                 1 |                  0 | China           | /China/Hunan/Hengyang/Qinan
+(19 rows)
+
+-- 三、 打开guc enable_startwith_debug = on测试
+/* DFX test, verify if  */
+set enable_startwith_debug=on;
+set client_min_messages=log;
+explain (costs off)
+select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+LOG:  statement: explain (costs off)
+select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+LOG:  Accept a other Const val when evaluate FakeConst to rownum/level
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> WorkTableScan(tlist_len:12) -> Hash(tlist_len:12) -> HashJoin(tlist_len:12) -> RecursiveUnion(tlist_len:12)]
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> CteScan(tlist_len:11)]
+                                        QUERY PLAN                                        
+------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_3, array_col_2, array_col_4
+           ->  Recursive Union
+                 ->  Seq Scan on test_area
+                       Filter: (name = '耒阳市'::text)
+                 ->  Hash Join
+                       Hash Cond: (swtest.test_area.id = tmp_reuslt."test_area@fatherid")
+                       ->  Seq Scan on test_area
+                       ->  Hash
+                             ->  WorkTable Scan on tmp_reuslt
+(12 rows)
+
+select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+LOG:  statement: select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '耒阳市'
+CONNECT BY id = PRIOR fatherid;
+LOG:  Accept a other Const val when evaluate FakeConst to rownum/level
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> WorkTableScan(tlist_len:12) -> Hash(tlist_len:12) -> HashJoin(tlist_len:12) -> RecursiveUnion(tlist_len:12)]
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> CteScan(tlist_len:11)]
+LOG:  StartWithDebug: LEVEL:1 array_key_1:/{13}
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{13}/{2}
+LOG:  StartWithDebug: LEVEL:3 array_key_1:/{13}/{2}/{1}
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{13}/{2}/{1}/{0}
+ id |  name  | fatherid | name_desc | level | connect_by_root |           cpath            | RUITR |    array_key_3    |        array_col_2         |          array_col_4          
+----+--------+----------+-----------+-------+-----------------+----------------------------+-------+-------------------+----------------------------+-------------------------------
+ 14 | 耒阳市 |       13 | Leiyang   |     1 | Leiyang         | /耒阳市                    |     0 | /{13}             | /耒阳市                    | /Leiyang
+ 13 | 衡阳市 |        2 | Hengyang  |     2 | Leiyang         | /耒阳市/衡阳市             |     1 | /{13}/{2}         | /耒阳市/衡阳市             | /Leiyang/Hengyang
+  2 | 湖南省 |        1 | Hunan     |     3 | Leiyang         | /耒阳市/衡阳市/湖南省      |     2 | /{13}/{2}/{1}     | /耒阳市/衡阳市/湖南省      | /Leiyang/Hengyang/Hunan
+  1 | 中国   |        0 | China     |     4 | Leiyang         | /耒阳市/衡阳市/湖南省/中国 |     3 | /{13}/{2}/{1}/{0} | /耒阳市/衡阳市/湖南省/中国 | /Leiyang/Hengyang/Hunan/China
+(4 rows)
+
+explain (costs off)
+select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+order siblings by id;
+LOG:  statement: explain (costs off)
+select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+order siblings by id;
+LOG:  Accept a other Const val when evaluate FakeConst to rownum/level
+WARNING:  Good we got siblings sort key under RU.
+WARNING:  Good we got siblings sort key under RU.
+WARNING:  Good we got siblings sort key above RU.
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> WorkTableScan(tlist_len:13) -> Hash(tlist_len:13) -> HashJoin(tlist_len:13) -> Sort(tlist_len:13) -> RecursiveUnion(tlist_len:13)]
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> CteScan(tlist_len:12)]
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ CTE Scan on tmp_reuslt
+   CTE tmp_reuslt
+     ->  StartWith Operator
+           Start With pseudo atts: RUITR, array_key_1, array_col_2, array_col_4, array_siblings
+           ->  Sort
+                 Sort Key: array_siblings
+                 ->  Recursive Union
+                       ->  Sort
+                             Sort Key: swtest.test_area.id
+                             ->  Seq Scan on test_area
+                                   Filter: (name = '中国'::text)
+                       ->  Sort
+                             Sort Key: swtest.test_area.id
+                             ->  Hash Join
+                                   Hash Cond: (swtest.test_area.fatherid = tmp_reuslt."test_area@id")
+                                   ->  Seq Scan on test_area
+                                   ->  Hash
+                                         ->  WorkTable Scan on tmp_reuslt
+(18 rows)
+
+select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+order siblings by id;
+LOG:  statement: select *, LEVEL, CONNECT_BY_ROOT(name_desc), SYS_CONNECT_BY_PATH(name, '/') cpath  from test_area
+START WITH name = '中国'
+CONNECT BY prior id = fatherid
+order siblings by id;
+LOG:  Accept a other Const val when evaluate FakeConst to rownum/level
+WARNING:  Good we got siblings sort key under RU.
+WARNING:  Good we got siblings sort key under RU.
+WARNING:  Good we got siblings sort key above RU.
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> WorkTableScan(tlist_len:13) -> Hash(tlist_len:13) -> HashJoin(tlist_len:13) -> Sort(tlist_len:13) -> RecursiveUnion(tlist_len:13)]
+WARNING:  Pushdown pseudo_tlist >>>>> [ -> CteScan(tlist_len:12)]
+LOG:  siblings key is \x01000000 current level is 1 tuple position is 1.
+LOG:  StartWithDebug: LEVEL:1 array_key_1:/{1}
+LOG:  siblings key is \x0100000001000000 current level is 2 tuple position is 1
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{2}
+LOG:  siblings key is \x0100000002000000 current level is 2 tuple position is 2
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{3}
+LOG:  siblings key is \x0100000003000000 current level is 2 tuple position is 3
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{4}
+LOG:  siblings key is \x0100000004000000 current level is 2 tuple position is 4
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{5}
+LOG:  siblings key is \x0100000005000000 current level is 2 tuple position is 5
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{6}
+LOG:  siblings key is \x0100000006000000 current level is 2 tuple position is 6
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{7}
+LOG:  siblings key is \x0100000007000000 current level is 2 tuple position is 7
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{8}
+LOG:  siblings key is \x0100000008000000 current level is 2 tuple position is 8
+LOG:  StartWithDebug: LEVEL:2 array_key_1:/{1}/{9}
+LOG:  siblings key is \x010000000200000001000000 current level is 3 tuple position is 1
+LOG:  StartWithDebug: LEVEL:3 array_key_1:/{1}/{3}/{10}
+LOG:  siblings key is \x010000000100000002000000 current level is 3 tuple position is 2
+LOG:  StartWithDebug: LEVEL:3 array_key_1:/{1}/{2}/{11}
+LOG:  siblings key is \x010000000100000003000000 current level is 3 tuple position is 3
+LOG:  StartWithDebug: LEVEL:3 array_key_1:/{1}/{2}/{13}
+LOG:  siblings key is \x01000000020000000100000001000000 current level is 4 tuple position is 1
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{3}/{10}/{12}
+LOG:  siblings key is \x01000000010000000300000002000000 current level is 4 tuple position is 2
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{2}/{13}/{14}
+LOG:  siblings key is \x01000000020000000100000003000000 current level is 4 tuple position is 3
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{3}/{10}/{15}
+LOG:  siblings key is \x01000000020000000100000004000000 current level is 4 tuple position is 4
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{3}/{10}/{16}
+LOG:  siblings key is \x01000000020000000100000005000000 current level is 4 tuple position is 5
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{3}/{10}/{17}
+LOG:  siblings key is \x01000000010000000300000006000000 current level is 4 tuple position is 6
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{2}/{13}/{18}
+LOG:  siblings key is \x01000000010000000300000007000000 current level is 4 tuple position is 7
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{2}/{13}/{19}
+LOG:  siblings key is \x01000000010000000300000008000000 current level is 4 tuple position is 8
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{2}/{13}/{20}
+LOG:  siblings key is \x01000000010000000300000009000000 current level is 4 tuple position is 9
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{2}/{13}/{21}
+LOG:  siblings key is \x0100000001000000030000000a000000 current level is 4 tuple position is 10
+LOG:  StartWithDebug: LEVEL:4 array_key_1:/{1}/{2}/{13}/{22}
+ id |  name  | fatherid | name_desc | level | connect_by_root |           cpath            | RUITR |    array_key_1     |        array_col_2         |            array_col_4             |           array_siblings           
+----+--------+----------+-----------+-------+-----------------+----------------------------+-------+--------------------+----------------------------+------------------------------------+------------------------------------
+  1 | 中国   |        0 | China     |     1 | China           | /中国                      |     0 | /{1}               | /中国                      | /China                             | \x01000000
+  2 | 湖南省 |        1 | Hunan     |     2 | China           | /中国/湖南省               |     1 | /{1}/{2}           | /中国/湖南省               | /China/Hunan                       | \x0100000001000000
+ 11 | 长沙市 |        2 | Changsha  |     3 | China           | /中国/湖南省/长沙市        |     2 | /{1}/{2}/{11}      | /中国/湖南省/长沙市        | /China/Hunan/Changsha              | \x010000000100000002000000
+ 13 | 衡阳市 |        2 | Hengyang  |     3 | China           | /中国/湖南省/衡阳市        |     2 | /{1}/{2}/{13}      | /中国/湖南省/衡阳市        | /China/Hunan/Hengyang              | \x010000000100000003000000
+ 14 | 耒阳市 |       13 | Leiyang   |     4 | China           | /中国/湖南省/衡阳市/耒阳市 |     3 | /{1}/{2}/{13}/{14} | /中国/湖南省/衡阳市/耒阳市 | /China/Hunan/Hengyang/Leiyang      | \x01000000010000000300000002000000
+ 18 | 常宁市 |       13 | Changning |     4 | China           | /中国/湖南省/衡阳市/常宁市 |     3 | /{1}/{2}/{13}/{18} | /中国/湖南省/衡阳市/常宁市 | /China/Hunan/Hengyang/Changning    | \x01000000010000000300000006000000
+ 19 | 祁东县 |       13 | Qidong    |     4 | China           | /中国/湖南省/衡阳市/祁东县 |     3 | /{1}/{2}/{13}/{19} | /中国/湖南省/衡阳市/祁东县 | /China/Hunan/Hengyang/Qidong       | \x01000000010000000300000007000000
+ 20 | 祁南县 |       13 | Qinan     |     4 | China           | /中国/湖南省/衡阳市/祁南县 |     3 | /{1}/{2}/{13}/{20} | /中国/湖南省/衡阳市/祁南县 | /China/Hunan/Hengyang/Qinan        | \x01000000010000000300000008000000
+ 21 | 祁西县 |       13 | Qixi      |     4 | China           | /中国/湖南省/衡阳市/祁西县 |     3 | /{1}/{2}/{13}/{21} | /中国/湖南省/衡阳市/祁西县 | /China/Hunan/Hengyang/Qixi         | \x01000000010000000300000009000000
+ 22 | 祁北县 |       13 | Qibei     |     4 | China           | /中国/湖南省/衡阳市/祁北县 |     3 | /{1}/{2}/{13}/{22} | /中国/湖南省/衡阳市/祁北县 | /China/Hunan/Hengyang/Qibei        | \x0100000001000000030000000a000000
+  3 | 广东省 |        1 | Guangdong |     2 | China           | /中国/广东省               |     1 | /{1}/{3}           | /中国/广东省               | /China/Guangdong                   | \x0100000002000000
+ 10 | 深圳市 |        3 | Shenzhen  |     3 | China           | /中国/广东省/深圳市        |     2 | /{1}/{3}/{10}      | /中国/广东省/深圳市        | /China/Guangdong/Shenzhen          | \x010000000200000001000000
+ 12 | 南山区 |       10 | Nanshan   |     4 | China           | /中国/广东省/深圳市/南山区 |     3 | /{1}/{3}/{10}/{12} | /中国/广东省/深圳市/南山区 | /China/Guangdong/Shenzhen/Nanshan  | \x01000000020000000100000001000000
+ 15 | 龙岗区 |       10 | Longgang  |     4 | China           | /中国/广东省/深圳市/龙岗区 |     3 | /{1}/{3}/{10}/{15} | /中国/广东省/深圳市/龙岗区 | /China/Guangdong/Shenzhen/Longgang | \x01000000020000000100000003000000
+ 16 | 福田区 |       10 | Futian    |     4 | China           | /中国/广东省/深圳市/福田区 |     3 | /{1}/{3}/{10}/{16} | /中国/广东省/深圳市/福田区 | /China/Guangdong/Shenzhen/Futian   | \x01000000020000000100000004000000
+ 17 | 宝安区 |       10 | Baoan     |     4 | China           | /中国/广东省/深圳市/宝安区 |     3 | /{1}/{3}/{10}/{17} | /中国/广东省/深圳市/宝安区 | /China/Guangdong/Shenzhen/Baoan    | \x01000000020000000100000005000000
+  4 | 海南省 |        1 | Hainan    |     2 | China           | /中国/海南省               |     1 | /{1}/{4}           | /中国/海南省               | /China/Hainan                      | \x0100000003000000
+  5 | 河北省 |        1 | Hebei     |     2 | China           | /中国/河北省               |     1 | /{1}/{5}           | /中国/河北省               | /China/Hebei                       | \x0100000004000000
+  6 | 河南省 |        1 | Henan     |     2 | China           | /中国/河南省               |     1 | /{1}/{6}           | /中国/河南省               | /China/Henan                       | \x0100000005000000
+  7 | 山东省 |        1 | Shandong  |     2 | China           | /中国/山东省               |     1 | /{1}/{7}           | /中国/山东省               | /China/Shandong                    | \x0100000006000000
+  8 | 湖北省 |        1 | Hubei     |     2 | China           | /中国/湖北省               |     1 | /{1}/{8}           | /中国/湖北省               | /China/Hubei                       | \x0100000007000000
+  9 | 江苏省 |        1 | Jiangsu   |     2 | China           | /中国/江苏省               |     1 | /{1}/{9}           | /中国/江苏省               | /China/Jiangsu                     | \x0100000008000000
+(22 rows)
+
+reset enable_startwith_debug;
+LOG:  statement: reset enable_startwith_debug;
+reset client_min_messages;
+LOG:  statement: reset client_min_messages;

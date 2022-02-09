@@ -159,6 +159,7 @@ static void CreateStartWithCTE(ParseState *pstate,
 
 static Node *makeBoolAConst(bool state, int location);
 static StartWithRewrite ChooseSWCBStrategy(StartWithTransformContext context);
+static Node *tryReplaceFakeValue(Node *node);
 
 static Node *makeBoolAConst(bool state, int location)
 {
@@ -754,17 +755,38 @@ static Node* makeIntConst(int val, int location)
     return (Node *)n;
 }
 
-static Node* tryReplaceFakeValue(Node *node)
+static Node *replaceListFakeValue(List *lst)
+{
+    List *newArgs = NIL;
+    ListCell *lc = NULL;
+    bool replaced = false;
+
+    /* replace level/rownum var attr with fake consts */
+    foreach (lc, lst) {
+        Node *n = (Node *)lfirst(lc);
+        Node *newNode = tryReplaceFakeValue(n);
+        if (newNode != n) {
+            replaced = true;
+            n = newNode;
+        }
+        newArgs = lappend(newArgs, n);
+    }
+    return replaced ? (Node *)newArgs : (Node *)lst;
+}
+
+static Node *tryReplaceFakeValue(Node *node)
 {
     if (IsA(node, Rownum)) {
         node = makeIntConst(CONNECT_BY_ROWNUM_FAKEVALUE, -1);
     } else if (is_cref_by_name(node, "level")) {
         node = makeIntConst(CONNECT_BY_LEVEL_FAKEVALUE, -1);
+    } else if (IsA(node, List)) {
+        node = replaceListFakeValue((List *) node);
     }
     return node;
 }
 
-static bool pseudo_level_rownum_walker(Node *node, Node* context_parent_node)
+static bool pseudo_level_rownum_walker(Node *node, Node *context_parent_node)
 {
     if (node == NULL) {
         return false;
@@ -789,13 +811,18 @@ static bool pseudo_level_rownum_walker(Node *node, Node* context_parent_node)
             break;
         }
         case T_TypeCast: {
-            TypeCast* tc = (TypeCast*) context_parent_node;
+            TypeCast *tc = (TypeCast *) context_parent_node;
             tc->arg = newNode;
             break;
         }
         case T_NullTest: {
-            NullTest* nt = (NullTest*) context_parent_node;
+            NullTest *nt = (NullTest *) context_parent_node;
             nt->arg = (Expr*) newNode;
+            break;
+        }
+        case T_FuncCall: {
+            FuncCall *fc = (FuncCall *) context_parent_node;
+            fc->args = (List *)newNode;
             break;
         }
         default:
@@ -1288,7 +1315,8 @@ static SelectStmt *CreateStartWithCTEInnerBranch(ParseState* pstate,
 
         if (whereClause != NULL) {
             JoinExpr *final_join = (JoinExpr *)origin_table;
-            final_join->quals = whereClause;
+            /* pushdown requires deep copying of the quals */
+            final_join->quals = (Node *)copyObject(whereClause);
         }
     }
 
@@ -1387,10 +1415,14 @@ static SelectStmt *CreateStartWithCTEOuterBranch(ParseState *pstate,
         }
     }
 
-    if (whereClause == NULL) {
-        quals = (Node *)startWithExpr;
-    } else {
-        quals = (Node *)makeA_Expr(AEXPR_AND, NULL, whereClause, (Node*)startWithExpr, -1);
+    /* push whereClause down to init part, taking care to avoid NULL in expr. */
+    quals = (Node *)startWithExpr;
+    if (quals == NULL) {
+        /* pushdown requires deep copying of the quals */
+        quals = (Node *)copyObject(whereClause);
+    } else if (whereClause != NULL) {
+        quals = (Node *)makeA_Expr(AEXPR_AND, NULL, (Node *)copyObject(whereClause),
+            (Node*)startWithExpr, -1);
     }
 
     result->fromClause = tblist;
