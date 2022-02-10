@@ -566,6 +566,7 @@ int main(int argc, char** argv)
         {"section", required_argument, NULL, 5},
         {"serializable-deferrable", no_argument, &serializable_deferrable, 1},
         {"use-set-session-authorization", no_argument, &use_setsessauth, 1},
+        {"no-security-labels", no_argument, &no_security_labels, 1},
         {"no-publications", no_argument, &no_publications, 1},
         {"no-unlogged-table-data", no_argument, &no_unlogged_table_data, 1},
         {"no-subscriptions", no_argument, &no_subscriptions, 1},
@@ -1732,7 +1733,6 @@ void help(const char* pchProgname)
     printf(_("  --exclude-table-data=TABLE                  do NOT dump data for the named table(s)\n"));
     printf(_("  --exclude-with                              do NOT dump WITH() of table(s)\n"));
     printf(_("  --inserts                                   dump data as INSERT commands, rather than COPY\n"));
-    printf(_("  --no-create-subscription-slots              do not create replication slots for subscriptions\n"));
     printf(_("  --no-publications                           do not dump publications\n"));
     printf(_("  --no-security-labels                        do not dump security label assignments\n"));
     printf(_("  --no-subscriptions                          do not dump subscriptions\n"));
