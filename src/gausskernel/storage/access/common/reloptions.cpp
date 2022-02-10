@@ -2605,6 +2605,25 @@ void ForbidUserToSetDefinedOptions(List *options)
 }
 
 /*
+ * @Description: compressed parameter cannot be changed by ALTER TABLE statement if table is uncompressed table.
+ *   this function do the checking work.
+ * @Param[IN] options: input user options
+ * @See also:
+ */
+void ForbidUserToSetCompressedOptions(List *options)
+{
+    static const char *unSupportOptions[] = {"compresstype",   "compress_chunk_size",   "compress_prealloc_chunks",
+                                             "compress_level", "compress_byte_convert", "compress_diff_convert"};
+    int firstInvalidOpt = -1;
+    if (FindInvalidOption(options, unSupportOptions, lengthof(unSupportOptions), &firstInvalidOpt)) {
+        ereport(ERROR,
+                (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+                 (errmsg("Un-support feature"), errdetail("Option \"%s\" doesn't allow ALTER on uncompressed table",
+                                                          unSupportOptions[firstInvalidOpt]))));
+    }
+}
+
+/*
  * @Description: forbid to change inner option
  *   inner options only can be used by system itself.
  *   forbid all the users to set or change the inner options.
@@ -2912,5 +2931,18 @@ void SetOneOfCompressOption(const char* defname, TableCreateSupport* tableCreate
         tableCreateSupport->compressByteConvert = true;
     } else if (pg_strcasecmp(defname, "compress_diff_convert") == 0) {
         tableCreateSupport->compressDiffConvert = true;
+    }
+}
+
+void CheckCompressOption(TableCreateSupport *tableCreateSupport)
+{
+    if (!tableCreateSupport->compressType && HasCompressOption(tableCreateSupport)) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("compress_chunk_size/compress_prealloc_chunks/compress_level/compress_byte_convert/"
+                               "compress_diff_convert should be used with compresstype.")));
+    }
+    if (!tableCreateSupport->compressByteConvert && tableCreateSupport->compressDiffConvert) {
+        ereport(ERROR, (errcode(ERRCODE_INVALID_OPTION),
+                        errmsg("compress_diff_convert should be used with compress_byte_convert.")));
     }
 }

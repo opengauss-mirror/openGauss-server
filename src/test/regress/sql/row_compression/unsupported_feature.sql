@@ -41,3 +41,12 @@ create TABLE unspported_feature.alter_table_option(id int) WITH(compresstype=2);
 ALTER TABLE unspported_feature.alter_table_option SET(compresstype=0); -- fail
 ALTER TABLE unspported_feature.alter_table_option SET(compress_chunk_size=2048); -- fail
 ALTER TABLE unspported_feature.alter_table_option SET(compress_level=2, compress_prealloc_chunks=0);
+-- alter compress_byte_convert\compress_diff_convert
+create table unspported_feature.rolcompress_table_001(a int) with (compresstype=2, compress_diff_convert=true); -- fail
+
+create table unspported_feature.t_rowcompress_0007(cid int, name varchar2) with (compresstype=1);
+alter table unspported_feature.t_rowcompress_0007 set (compress_diff_convert=true); --fail
+alter table unspported_feature.t_rowcompress_0007 set (compress_byte_convert=true, compress_diff_convert=true); --success
+alter table unspported_feature.t_rowcompress_0007 set (compress_level=31); --failed
+
+
