@@ -49,7 +49,12 @@ static bool countWhereClauseEqualsLeaves(Query* query, MOT::Table* table, MOT::I
             table->GetTableName().c_str(),
             index->GetName().c_str());
         for (int i = 0; i < index->GetNumFields(); ++i) {
-            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "%s", table->GetFieldName(index->GetColumnKeyFields()[i]));
+            int columnId = index->GetColumnKeyFields()[i];
+            if (columnId >= 0) {
+                MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "%s", table->GetFieldName(columnId));
+            } else {
+                MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, "N/A [column %d]", columnId);
+            }
             if ((i + 1) < index->GetNumFields()) {
                 MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, ", ");
             }
@@ -318,6 +323,8 @@ static bool allocFilterArray(JitFilterArray* filter_array, int filter_count)
             (unsigned)alloc_size,
             filter_count);
     } else {
+        errno_t erc = memset_s(filter_array->_scan_filters, alloc_size, 0, alloc_size);
+        securec_check(erc, "\0", "\0");
         filter_array->_filter_count = filter_count;
         result = true;
     }
