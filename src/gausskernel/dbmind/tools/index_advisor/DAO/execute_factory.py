@@ -31,7 +31,9 @@ class ExecuteFactory:
         for pos, index in enumerate(cur_table_indexes[:-1]):
             is_redundant = False
             for candidate_index in cur_table_indexes[pos + 1:]:
-                if re.match(r'%s' % index.columns, candidate_index.columns):
+                existed_index1 = list(map(str.strip, index.columns.split(',')))
+                existed_index2 = list(map(str.strip, candidate_index.columns.split(',')))
+                if existed_index1 == existed_index2[0: len(existed_index1)]:
                     is_redundant = True
                     index.redundant_obj.append(candidate_index)
             if is_redundant:
@@ -97,14 +99,19 @@ class ExecuteFactory:
             candidate_index.select_sql_num += obj.frequency
             # SELECT scenes to filter out positive
             if ind not in candidate_index.positive_pos and \
-                    any(column in obj.statement.lower() for column in candidate_index.columns):
+                    any(re.search(r'\b%s\b' % column, obj.statement.lower())
+                        for column in candidate_index.columns.split(', ')):
                 candidate_index.ineffective_pos.append(ind)
             candidate_index.total_sql_num += obj.frequency
 
     @staticmethod
     def match_last_result(table_name, index_column, history_indexes, history_invalid_indexes):
         for column in history_indexes.get(table_name, dict()):
-            if re.match(r'%s' % column, index_column):
+            history_index_column = list(map(str.strip, column.split(',')))
+            existed_index_column = list(map(str.strip, index_column.split(',')))
+            if len(history_index_column) > len(existed_index_column):
+                continue
+            if history_index_column == existed_index_column[0:len(history_index_column)]:
                 history_indexes[table_name].remove(column)
                 history_invalid_indexes[table_name] = history_invalid_indexes.get(table_name, list())
                 history_invalid_indexes[table_name].append(column)
