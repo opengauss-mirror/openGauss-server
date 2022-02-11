@@ -786,7 +786,7 @@ pgdata_basic_setup(const ConnectionOptions conn_opt, PGNodeInfo *nodeInfo)
         exclusive_backup = true;
     }
 
-    current.checksum_version = 0;
+    current.checksum_version = 1;
 
     nodeInfo->checksum_version = current.checksum_version;
 
