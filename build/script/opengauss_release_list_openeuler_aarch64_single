@@ -878,6 +878,9 @@
 ./lib/postgresql/latin2_and_win1250.so
 ./lib/postgresql/euc2004_sjis2004.so
 ./lib/libhll.so
+./lib/libzstd.so
+./lib/libzstd.so.1
+./lib/libzstd.so.1.4.4
 
 ./include/postgresql/server/postgres_ext.h
 ./include/postgresql/server/pg_config_os.h
