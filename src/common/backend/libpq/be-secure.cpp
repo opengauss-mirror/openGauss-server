@@ -344,6 +344,11 @@ ssize_t secure_write(Port* port, void* ptr, size_t len)
                 break;
             case SSL_ERROR_WANT_READ:
             case SSL_ERROR_WANT_WRITE:
+                if (port->noblock) {
+                    errno = EWOULDBLOCK;
+                    n = -1;
+                    break;
+                }
 #ifdef WIN32
                 pgwin32_waitforsinglesocket(SSL_get_fd(port->ssl),
                     (err == SSL_ERROR_WANT_READ) ? (FD_READ | FD_CLOSE) : (FD_WRITE | FD_CLOSE),
