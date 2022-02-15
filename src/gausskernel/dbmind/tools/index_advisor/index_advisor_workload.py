@@ -690,7 +690,8 @@ def complex_index_advisor(input_path, integrate_indexes, db):
     if DRIVER:
         db.close_conn()
     if MAX_INDEX_STORAGE:
-        opt_config = MCTS(workload, atomic_config_total, candidate_indexes, MAX_INDEX_STORAGE)
+        opt_config = MCTS(workload, atomic_config_total, candidate_indexes,
+                          MAX_INDEX_STORAGE, MAX_INDEX_NUM)
     else:
         opt_config = greedy_determine_opt_config(workload, atomic_config_total,
                                                  candidate_indexes, index_cost_total[0])
