@@ -158,7 +158,7 @@ class DriverExecute(ExecuteFactory):
         is_computed = False
         self.execute('SET current_schema = %s' % self.schema)
         if index_config:
-            if len(index_config) == 1 and index_config[0].positive_pos:
+            if len(index_config) == 1 and index_config[0].is_candidate:
                 is_computed = True
             # create hypo-indexes
             self.execute('SET enable_hypo_index = on')
@@ -184,6 +184,8 @@ class DriverExecute(ExecuteFactory):
                     query_cost = DriverExecute.parse_explain_plan(res, index_config, ori_indexes_name)
                     query_cost *= workload[ind].frequency
                     workload[ind].cost_list.append(query_cost)
+                    if index_config and len(index_config) == 1 and query_cost < workload[ind].cost_list[0]:
+                        index_config[0].positive_pos.append(ind)
                     total_cost += query_cost
                 else:
                     workload[ind].cost_list.append(0)

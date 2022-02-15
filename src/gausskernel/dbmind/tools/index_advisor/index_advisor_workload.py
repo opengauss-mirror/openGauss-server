@@ -93,13 +93,21 @@ class QueryItem:
 
 
 class IndexItem:
-    def __init__(self, tbl, cols, positive_pos=None):
+    instances = {}
+
+    @classmethod
+    def get_index(cls, tbl, cols):
+        if not (tbl, cols) in cls.instances:
+            cls.instances[(tbl, cols)] = cls(tbl, cols)
+        return cls.instances[(tbl, cols)]
+
+    def __init__(self, tbl, cols):
         self.table = tbl
         self.columns = cols
         self.atomic_pos = 0
         self.benefit = 0
         self.storage = 0
-        self.positive_pos = positive_pos
+        self.positive_pos = []
         self.ineffective_pos = []
         self.negative_pos = []
         self.total_sql_num = 0
@@ -107,6 +115,7 @@ class IndexItem:
         self.update_sql_num = 0
         self.delete_sql_num = 0
         self.select_sql_num = 0
+        self.is_candidate = False
 
 
 def green(text):
@@ -138,7 +147,9 @@ def filter_low_benefit(candidate_indexes, multi_iter_mode, workload):
         negative_ratio = ((index.insert_sql_num + index.delete_sql_num +
                           index.update_sql_num) / index.total_sql_num) if index.total_sql_num else 0
         # filter the candidate indexes that do not meet the conditions of optimization
-        if sql_optimzed / len(index.positive_pos) < 0.1:
+        if not index.positive_pos:
+            remove_list.append(key)
+        elif sql_optimzed / len(index.positive_pos) < 0.1:
             remove_list.append(key)
         elif sql_optimzed / len(index.positive_pos) < NEGATIVE_RATIO_THRESHOLD < negative_ratio:
             remove_list.append(key)
@@ -338,7 +349,7 @@ def generate_candidate_indexes(workload, workload_table_name, db):
             for columns in valid_index_dict[table]:
                 if len(workload[k].valid_index_list) >= FULL_ARRANGEMENT_THRESHOLD:
                     break
-                workload[k].valid_index_list.append(IndexItem(table, columns))
+                workload[k].valid_index_list.append(IndexItem.get_index(table, columns))
                 if columns in index_dict[table]:
                     index_dict[table][columns].append(k)
                 else:
@@ -352,11 +363,13 @@ def generate_candidate_indexes(workload, workload_table_name, db):
                 sorted_column_sqls[i+1][1].extend(sorted_column_sqls[i][1])
             else:
                 print("table: ", table, "columns: ", sorted_column_sqls[i][0])
-                candidate_indexes.append(IndexItem(table, sorted_column_sqls[i][0],
-                                                   sorted_column_sqls[i][1]))
+                candidate_indexes.append(IndexItem.get_index(table, sorted_column_sqls[i][0],
+                                                   ))
         print("table: ", table, "columns: ", sorted_column_sqls[-1][0])
         candidate_indexes.append(
-            IndexItem(table, sorted_column_sqls[-1][0], sorted_column_sqls[-1][1]))
+            IndexItem.get_index(table, sorted_column_sqls[-1][0]))
+    for index in candidate_indexes:
+        index.is_candidate = True
     if DRIVER:
         db.close_conn()
     return candidate_indexes
