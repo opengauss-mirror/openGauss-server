@@ -687,6 +687,9 @@ endif
 	cp '$(LIBOPENSSL_BIN_PATH)/openssl' '$(DESTDIR)$(bindir)/openssl'
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so' '$(DESTDIR)$(libdir)/libcurl.so'
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4' '$(DESTDIR)$(libdir)/libcurl.so.4'
+	cp '$(ZSTD_LIB_PATH)/libzstd.so' '$(DESTDIR)$(libdir)/libzstd.so'
+	cp '$(ZSTD_LIB_PATH)/libzstd.so.1' '$(DESTDIR)$(libdir)/libzstd.so.1'
+	cp '$(ZSTD_LIB_PATH)/libzstd.so.1.4.4' '$(DESTDIR)$(libdir)/libzstd.so.1.4.4'
 
 ifeq ($(PLAT_FORM_STR), euleros2.0_sp2_x86_64)
 	cp '$(LIBCURL_LIB_PATH)/libcurl.so.4.6.0' '$(DESTDIR)$(libdir)/libcurl.so.4.6.0'
