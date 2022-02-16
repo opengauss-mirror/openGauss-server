@@ -4,6 +4,7 @@ import random
 import copy
 
 
+MAX_INDEX_NUM = 0
 STORAGE_THRESHOLD = 0
 AVAILABLE_CHOICES = []
 ATOMIC_CHOICES = []
@@ -111,7 +112,7 @@ class State(object):
 
     def is_terminal(self):
         # the current node is a leaf node
-        return len(self.accumulation_choices) == len(AVAILABLE_CHOICES)
+        return len(self.accumulation_choices) == MAX_INDEX_NUM
 
     def compute_benefit(self):
         return self.current_benefit
@@ -367,12 +368,13 @@ def monte_carlo_tree_search(node):
     return best_next_node
 
 
-def MCTS(workload_info, atomic_choices, available_choices, storage_threshold):
-    global ATOMIC_CHOICES, STORAGE_THRESHOLD, WORKLOAD_INFO, AVAILABLE_CHOICES
+def MCTS(workload_info, atomic_choices, available_choices, storage_threshold, max_index_num):
+    global ATOMIC_CHOICES, STORAGE_THRESHOLD, WORKLOAD_INFO, AVAILABLE_CHOICES, MAX_INDEX_NUM
     WORKLOAD_INFO = workload_info
     AVAILABLE_CHOICES = available_choices
     ATOMIC_CHOICES = atomic_choices
     STORAGE_THRESHOLD = storage_threshold
+    MAX_INDEX_NUM = max_index_num if max_index_num else len(available_choices)
 
     # create the initialized state and initialized node
     init_state = State()
