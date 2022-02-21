@@ -7906,7 +7906,7 @@ void SetupPageCompressForRelation(RelFileNode* node, PageCompressOpts* compress_
                                    relationName)));
         }
 
-        uint1 preallocChunks;
+        uint1 preallocChunks = 0;
         if (compress_options->compressPreallocChunks >= BLCKSZ / compress_options->compressChunkSize) {
             ereport(ERROR, (errmsg("invalid compress_prealloc_chunks %d , must be less than %d for %s",
                                    compress_options->compressPreallocChunks,
