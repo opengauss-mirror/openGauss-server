@@ -2016,6 +2016,8 @@ void PostgresInitializer::InitSession()
 
     InitSettings();
 
+    InitExtensionVariable();
+
     FinishInit();
 
     AuditUserLogin();
