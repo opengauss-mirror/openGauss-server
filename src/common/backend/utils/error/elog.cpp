@@ -3091,8 +3091,9 @@ static void send_message_to_server_log(ErrorData* edata)
     }
 
     /* If in the syslogger process, try to write messages direct to file */
-    FILE* logfile = LOG_DESTINATION_CSVLOG ? t_thrd.logger.csvlogFile : t_thrd.logger.syslogFile;
-    if (t_thrd.role == SYSLOGGER && logfile != NULL) {
+    if (t_thrd.role == SYSLOGGER &&
+        t_thrd.log_cxt.Log_destination & LOG_DESTINATION_STDERR &&
+        t_thrd.logger.syslogFile != NULL) {
         write_syslogger_file(buf.data, buf.len, LOG_DESTINATION_STDERR);
     }
 
