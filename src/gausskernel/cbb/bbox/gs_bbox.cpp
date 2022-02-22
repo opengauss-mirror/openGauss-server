@@ -34,11 +34,6 @@
 #include "utils/guc.h"
 #include "utils/fatal_err.h"
 
-#ifndef ENABLE_MULTIPLE_NODES
-#include "storage/buf/buf_internals.h"
-static void SigbusHandler(siginfo_t *si);
-#endif
-
 #define BBOX_PATH_SIZE 512
 #define DEFAULT_BLACKLIST_MASK (0xFFFFFFFFFFFFFFFF)
 
@@ -74,11 +69,6 @@ static void coredump_handler(int sig, siginfo_t *si, void *uc)
         if (g_instance.attr.attr_common.enable_ffic_log) {
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
-#ifndef ENABLE_MULTIPLE_NODES
-        if (sig == SIGBUS) {
-            SigbusHandler(si);
-        }
-#endif
     } else {
         /*
          * Subsequent fatal error will go to here. If it comes from different thread,
@@ -108,11 +98,6 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
             (void)gen_err_msg(sig, si, (ucontext_t *)uc);
         }
 
-#ifndef ENABLE_MULTIPLE_NODES
-        if (sig == SIGBUS) {
-            SigbusHandler(si);
-        }
-#endif
 #ifndef ENABLE_MEMORY_CHECK
         sigset_t intMask;
         sigset_t oldMask;
@@ -138,62 +123,6 @@ static void bbox_handler(int sig, siginfo_t *si, void *uc)
         }
     }
 }
-#ifndef ENABLE_MULTIPLE_NODES
-/*
- * SIGBUS -- When uce failure occurs in system memory, SigbusHandler will exit according to the region
- * of its logical address.
- * 1. If the enableIncrementalCheckpoint is turned off, the uce feature no longer takes effect
- * 2. Calculate the buffer pool address range to determine whether the error address is in the buffer pool.
- * 3. For addresses outside the buffer pool range, print the PANIC log and exit
- * 4. For addresses within the buffer pool range, calculate block_id and judge whether the page is dirty
- * 5. If the page is not dirty, the thread will send SIGINT to poma, then the thread that triggers the SIGBUS
- *    exit first and print warning message. If the page is dirty, print the PANIC log and coredump.
- */
-const int SIGBUS_MCEERR_AR = 4;
-const int SIGBUS_MCEERR_AO = 5;
-static void SigbusHandler(siginfo_t *si)
-{
-    int bufId;
-    int siCode = si->si_code;
-    auto siAddr = (unsigned long long)si->si_addr;
-    /* If si_code is not 4 or 5, it is not Uncorrected Error. then gaussdb will PANIC */
-    if (siCode != SIGBUS_MCEERR_AR && siCode != SIGBUS_MCEERR_AO) {
-        write_stderr("PANIC: errcode:%u, SIGBUS signal received, Gaussdb will shut down immediately",
-                     ERRCODE_UE_COMMON_ERROR);
-        return;
-    }
-#ifdef __aarch64__
-    uint64 bufferSize = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ + PG_CACHE_LINE_SIZE;
-#else
-    uint64 bufferSize = g_instance.attr.attr_storage.NBuffers * (Size)BLCKSZ;
-#endif
-    auto startAddr = (unsigned long long)t_thrd.storage_cxt.BufferBlocks;
-    auto endAddr = startAddr + bufferSize;
-    /* Determine the range of address carried by sigbus, And print the log according to the page state. */
-    if (siAddr >= startAddr && siAddr <= endAddr) {
-        bufId = floor((siAddr - startAddr) / (Size)BLCKSZ);
-        BufferDesc *bufDesc = GetBufferDescriptor(bufId);
-        if (bufDesc->state & (BM_DIRTY | BM_JUST_DIRTIED | BM_CHECKPOINT_NEEDED)) {
-            write_stderr("PANIC: errcode:%u, Uncorrected error occurred at dirty page. The error address is: 0x%llx."
-                         "openGauss will shut down immediately.",
-                         ERRCODE_UE_DIRTY_PAGE, siAddr);
-        } else {
-            write_stderr("WARNING: errcode:%u, Uncorrected error occurred at clean/free page. The error address is:"
-                         "0x%llx. openGauss will shutdown.",
-                         ERRCODE_UE_CLEAN_PAGE, siAddr);
-        }
-    } else if (siAddr == 0) {
-        write_stderr("PANIC: errcode:%u, SIGBUS signal received, sigbus_addr is None. openGauss will"
-                     "shutdown immediately",
-                     ERRCODE_UE_COMMON_ERROR);
-    } else {
-        write_stderr("PANIC: errcode:%u, SIGBUS signal received. The error address is: 0x%llx, openGauss will"
-                     "shutdown immediately",
-                     ERRCODE_UE_COMMON_ERROR, siAddr);
-    }
-    return;
-}
-#endif
 
 /*
  * get_bbox_coredump_pattern_path - get the core dump path from the file "/proc/sys/kernel/core_pattern"
