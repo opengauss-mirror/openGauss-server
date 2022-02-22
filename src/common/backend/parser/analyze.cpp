@@ -1005,7 +1005,7 @@ static bool StorageEngineUsedWalker(Node* node, RTEDetectorContext* context)
         if (rte->rtekind == RTE_RELATION) {
             if (rte->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(rte->relid)) {
                 context->isMotTable = true;
-            } else {
+            } else if (!is_sys_table(rte->relid)) {
                 context->isPageTable = true;
             }
         }
@@ -1049,7 +1049,7 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
         if (rte->rtekind == RTE_RELATION) {
             if (rte->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(rte->relid)) {
                 context.isMotTable = true;
-            } else {
+            } else if (!is_sys_table(rte->relid)) {
                 context.isPageTable = true;
             }
         }

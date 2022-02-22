@@ -2204,6 +2204,41 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
     return (oper != KEY_OPER::READ_INVALID);
 }
 
+bool IsSameRelation(Expr* expr, uint32_t id)
+{
+    switch (expr->type) {
+        case T_Param:
+        case T_Const: {
+            return false;
+        }
+        case T_Var: {
+            return (((Var*)expr)->varno == id);
+        }
+        case T_OpExpr: {
+            OpExpr* op = (OpExpr*)expr;
+            bool l = IsSameRelation((Expr*)linitial(op->args), id);
+            bool r = IsSameRelation((Expr*)lsecond(op->args), id);
+            return (l || r);
+        }
+        case T_FuncExpr: {
+            FuncExpr* func = (FuncExpr*)expr;
+
+            if (func->funcformat == COERCE_IMPLICIT_CAST || func->funcformat == COERCE_EXPLICIT_CAST) {
+                return IsSameRelation((Expr*)linitial(func->args), id);
+            } else if (list_length(func->args) == 0) {
+                return false;
+            } else {
+                return true;
+            }
+        }
+        case T_RelabelType: {
+            return IsSameRelation(((RelabelType*)expr)->arg, id);
+        }
+        default:
+            return true;
+    }
+}
+
 bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, Expr* expr, Expr** result, bool setLocal)
 {
     /*
@@ -2261,6 +2296,10 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
                 // we have to choose as Expr t2.a cause it will be replaced later with a Param type
                 if (IsA(l, Var)) {
                     if (!IsA(r, Var)) {
+                        if (IsSameRelation(r, ((Var*)l)->varno)) {
+                            isOperatorMOTReady = false;
+                            break;
+                        }
                         v = (Var*)l;
                         e = r;
                     } else {
@@ -2276,6 +2315,10 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
                         }
                     }
                 } else if (IsA(r, Var)) {
+                    if (IsSameRelation(l, ((Var*)r)->varno)) {
+                        isOperatorMOTReady = false;
+                        break;
+                    }
                     v = (Var*)r;
                     e = l;
                     RevertKeyOperation(oper);
