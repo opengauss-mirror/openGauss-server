@@ -184,6 +184,8 @@ class GSqlExecute(ExecuteFactory):
                 query_cost = GSqlExecute.parse_plan_cost(line)
                 query_cost *= workload[select_sql_pos[i]].frequency
                 workload[select_sql_pos[i]].cost_list.append(query_cost)
+                if index_config and len(index_config) == 1 and query_cost < workload[select_sql_pos[i]].cost_list[0]:
+                    index_config[0].positive_pos.append(select_sql_pos[i])
                 total_cost += query_cost
                 found_plan = False
                 i += 1
@@ -212,7 +214,7 @@ class GSqlExecute(ExecuteFactory):
             if self.schema:
                 file.write('SET current_schema = %s;\n' % self.schema)
             if index_config:
-                if len(index_config) == 1 and index_config[0].positive_pos:
+                if len(index_config) == 1 and index_config[0].is_candidate:
                     is_computed = True
                 # create hypo-indexes
                 file.write('SET enable_hypo_index = on;\n')

@@ -72,19 +72,21 @@ class ExecuteFactory:
     def record_ineffective_negative_sql(candidate_index, obj, ind):
         cur_table = candidate_index.table
         if cur_table not in obj.statement.lower() and \
-                not re.search(r'(\.%s\s)' % cur_table.split('.')[-1], obj.statement.lower()):
+                not re.search(r'((\A|[\s\(,])%s[\s\),])' % cur_table.split('.')[-1], obj.statement.lower()):
             return
-        if any(re.match(r'(insert\sinto\s%s\s)' % table, obj.statement.lower())
+
+        if any(re.match(r'(insert\s+into\s+%s\s)' % table, obj.statement.lower())
                for table in [cur_table, cur_table.split('.')[-1]]):
             candidate_index.insert_sql_num += obj.frequency
             candidate_index.negative_pos.append(ind)
             candidate_index.total_sql_num += obj.frequency
-        elif any(re.match(r'(delete\sfrom\s%s\s)' % table, obj.statement.lower())
+        elif any(re.match(r'(delete\s+from\s+%s\s)' % table, obj.statement.lower())
+                 or re.match(r'(delete\s+%s\s)' % table, obj.statement.lower())
                  for table in [cur_table, cur_table.split('.')[-1]]):
             candidate_index.delete_sql_num += obj.frequency
             candidate_index.negative_pos.append(ind)
             candidate_index.total_sql_num += obj.frequency
-        elif any(re.match(r'(update\s%s\s)' % table, obj.statement.lower())
+        elif any(re.match(r'(update\s+%s\s)' % table, obj.statement.lower())
                  for table in [cur_table, cur_table.split('.')[-1]]):
             candidate_index.update_sql_num += obj.frequency
             # the index column appears in the UPDATE set condition, the statement is negative
@@ -94,8 +96,7 @@ class ExecuteFactory:
             else:
                 candidate_index.ineffective_pos.append(ind)
             candidate_index.total_sql_num += obj.frequency
-        elif cur_table in obj.statement.lower() or \
-                re.search(r'(\s%s\s)' % cur_table.split('.')[-1], obj.statement.lower()):
+        else:
             candidate_index.select_sql_num += obj.frequency
             # SELECT scenes to filter out positive
             if ind not in candidate_index.positive_pos and \
