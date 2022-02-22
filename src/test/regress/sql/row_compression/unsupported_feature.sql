@@ -48,5 +48,5 @@ create table unspported_feature.t_rowcompress_0007(cid int, name varchar2) with 
 alter table unspported_feature.t_rowcompress_0007 set (compress_diff_convert=true); --fail
 alter table unspported_feature.t_rowcompress_0007 set (compress_byte_convert=true, compress_diff_convert=true); --success
 alter table unspported_feature.t_rowcompress_0007 set (compress_level=31); --failed
-
-
+create table unspported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=1,compress_level=2); -- failed
+create table unspported_feature.t_rowcompress_pglz_compresslevel(id int) with (compresstype=2,compress_level=2); -- success
