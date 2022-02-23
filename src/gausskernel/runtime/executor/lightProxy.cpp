@@ -888,10 +888,10 @@ bool lightProxy::processMsg(int msgType, StringInfo msg)
     char msec_str[32];
     switch (check_log_duration(msec_str, false)) {
         case 1:
-            ereport(DEBUG1, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
+            ereport(LOG, (errmsg("duration: %s ms, queryid %ld, unique id %lu", msec_str, u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id), errhidestmt(true)));
             break;
         case 2: {
-            ereport(DEBUG1,
+            ereport(LOG,
                 (errmsg("duration: %s ms queryid %ld unique id %ld", msec_str,  u_sess->debug_query_id, u_sess->slow_query_cxt.slow_query.unique_sql_id),
                     errhidestmt(true)));
             break;
