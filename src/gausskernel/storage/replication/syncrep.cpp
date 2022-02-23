@@ -313,8 +313,11 @@ void SyncRepWaitForLSN(XLogRecPtr XactCommitLSN, bool enableHandleCancel)
         }
 
         /*
-         * If we  modify the syncmode dynamically, we'll stop wait
+         * If we modify the syncmode dynamically, we'll stop wait.
+         * Reload config file here to update most_available_sync if it's modified
+         * dynamically.
          */
+        reload_configfile();
         if ((t_thrd.walsender_cxt.WalSndCtl->sync_master_standalone && !IS_SHARED_STORAGE_MODE &&
              !DelayIntoMostAvaSync(false)) ||
             u_sess->attr.attr_storage.guc_synchronous_commit <= SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {

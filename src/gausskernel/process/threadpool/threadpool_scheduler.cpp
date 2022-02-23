@@ -40,6 +40,7 @@
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/guc.h"
+#include "replication/syncrep.h"
 
 #define SCHEDULER_TIME_UNIT 1000000  //us
 #define ENLARGE_THREAD_TIME 5
@@ -63,6 +64,9 @@ static void reloadConfigFileIfNecessary()
     if (t_thrd.threadpool_cxt.scheduler->m_getSIGHUP) {
         t_thrd.threadpool_cxt.scheduler->m_getSIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
+        /* Update most_available_sync if it's modified dynamically. */
+        most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
+        SyncRepUpdateSyncStandbysDefined();
     }
 }
 
