@@ -803,11 +803,21 @@ restart:
             }
         }
 
-        /* no member, even just a locker, alive anymore */
-        if (!MultiXactIdIsRunning(HeapTupleHeaderGetXmax(page, tuple)))
+        /*
+         * By here, the update in the Xmax is either aborted or crashed, but
+         * what about the other members?
+         */
+        if (!MultiXactIdIsRunning(HeapTupleHeaderGetXmax(page, tuple))) {
+            /*
+             * There's no member, even just a locker, alive anymore, so we can
+             * mark the Xmax as invalid.
+             */
             SetHintBits(tuple, buffer, HEAP_XMAX_INVALID, InvalidTransactionId);
-        /* it must have aborted or crashed */
-        return TM_Ok;
+            return TM_Ok;
+        } else {
+            /* There are lockers running */
+            return TM_BeingModified;
+        }
     }
 
     if (TransactionIdIsCurrentTransactionId(HeapTupleHeaderGetXmax(page, tuple))) {
