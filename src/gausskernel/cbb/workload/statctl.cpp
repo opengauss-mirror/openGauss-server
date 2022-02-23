@@ -2350,6 +2350,7 @@ void WLMReadjustUserSpaceByNameWithResetFlag(const char* username, bool resetFla
                 if (userdata->userid == uid) {
                     /* readjust user space */
                     WLMReAdjustUserSpaceWithResetFlag(userdata, resetFlag);
+                    hash_seq_term(&hash_seq);
                     break;
                 }
             }
