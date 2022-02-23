@@ -2,6 +2,7 @@ subdir = src/gausskernel/storage/replication/pgoutput
 top_builddir = ../../../../..
 include $(top_builddir)/src/Makefile.global
 
+override CPPFLAGS += $(filter-out -fstack-protector, $(CFLAGS)) -fstack-protector-all -Wl,-z,relro,-z,now -fPIC
 OBJS = \
 	$(WIN32RES) \
 	pgoutput.o
