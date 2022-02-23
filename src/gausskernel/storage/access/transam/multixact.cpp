@@ -680,9 +680,8 @@ static MultiXactId CreateMultiXactId(int nmembers, MultiXactMember *members)
         for (int i = 0; i < nmembers; ++i) {
             if (members[i].status != MultiXactStatusForShare) {
                 ereport(ERROR, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
-                    errmsg("New MultiXact feature isn't support in this version. Please upgrade to version: %d"
-                           "i: %d, members[i].status: %d",
-                        ENHANCED_TUPLE_LOCK_VERSION_NUM, i, members[i].status)));
+                    errmsg("New MultiXact feature isn't support in this version. Please upgrade to version: %d",
+                        ENHANCED_TUPLE_LOCK_VERSION_NUM)));
             }
         }
     }

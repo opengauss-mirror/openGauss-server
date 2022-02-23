@@ -4239,6 +4239,14 @@ static void transformLockingClause(ParseState* pstate, Query* qry, LockingClause
     /* make a clause we can pass down to subqueries to select all rels */
     allrels = makeNode(LockingClause);
     allrels->lockedRels = NIL; /* indicates all rels */
+    /* The strength of lc is not set at old version and distribution. Set it according to forUpdate. */
+    if (t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM
+#ifdef ENABLE_MULTIPLE_NODES
+        || true
+#endif
+    ) {
+        lc->strength = lc->forUpdate ? LCS_FORUPDATE : LCS_FORSHARE;
+    }
     allrels->strength = lc->strength;
     allrels->noWait = lc->noWait;
 
@@ -4404,6 +4412,7 @@ void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, 
          * And of course pushedDown becomes false if any clause is explicit.
          */
         rc->strength = Max(rc->strength, strength);
+        rc->forUpdate = rc->strength == LCS_FORUPDATE;
         rc->noWait = rc->noWait || noWait;
         rc->pushedDown = rc->pushedDown && pushedDown;
         return;
@@ -4413,6 +4422,7 @@ void applyLockingClause(Query* qry, Index rtindex, LockClauseStrength strength, 
     rc = makeNode(RowMarkClause);
     rc->rti = rtindex;
     rc->strength = strength;
+    rc->forUpdate = strength == LCS_FORUPDATE;
     rc->noWait = noWait;
     rc->pushedDown = pushedDown;
     qry->rowMarks = lappend(qry->rowMarks, rc);

@@ -5174,8 +5174,14 @@ l2:
      * If the tuple we're updating is locked, we need to preserve the locking
      * info in the old tuple's Xmax.  Prepare a new Xmax value for this.
      */
-    ComputeNewXmaxInfomask(HeapTupleGetRawXmax(&oldtup), oldtup.t_data->t_infomask, oldtup.t_data->t_infomask2,
-        xid, mode, true, &xmax_old_tuple, &infomask_old_tuple, &infomask2_old_tuple);
+    if (t_thrd.proc->workingVersionNum >= ENHANCED_TUPLE_LOCK_VERSION_NUM) {
+        ComputeNewXmaxInfomask(HeapTupleGetRawXmax(&oldtup), oldtup.t_data->t_infomask, oldtup.t_data->t_infomask2,
+            xid, mode, true, &xmax_old_tuple, &infomask_old_tuple, &infomask2_old_tuple);
+    } else {
+        xmax_old_tuple = xid;
+        infomask_old_tuple = 0;
+        infomask2_old_tuple = HEAP_KEYS_UPDATED;
+    }
 
     /* And also prepare an Xmax value for the new copy of the tuple */
     if ((oldtup.t_data->t_infomask & HEAP_XMAX_INVALID) || (checked_lockers && !locker_remains)) {
@@ -5199,7 +5205,7 @@ l2:
     if (t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM) {
         /* if the only locker of old tuple is ourselves, xmax_new_tuple may be xid and it would be valid */
         if (TransactionIdIsValid(xmax_new_tuple) || !TransactionIdEquals(xmax_old_tuple, xid)) {
-            ereport(WARNING, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+            ereport(DEBUG2, (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
                 errmsg("New MultiXact feature isn't support in this version. Please upgrade to version: %d",
                        ENHANCED_TUPLE_LOCK_VERSION_NUM)));
         }

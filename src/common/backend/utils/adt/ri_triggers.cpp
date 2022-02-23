@@ -212,6 +212,19 @@ Datum RI_FKey_noaction(PG_FUNCTION_ARGS);
 template <bool is_del>
 Datum RI_FKey_setdefault(PG_FUNCTION_ARGS);
 
+/*
+ * Since tuple lock has been enhanced, KeyShareLock is needed instead
+ * of ShareLock for foreign key. But ustore table still acquires ShareLock.
+ */
+static inline bool IsShareLockForForeignKey(Relation relation)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return true;
+#else
+    return RelationIsUstoreFormat(relation);
+#endif
+}
+
 /* ----------
  * RI_FKey_check -
  *
@@ -321,13 +334,10 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
              * ----------
              */
             quoteRelationName(pkrelname, pk_rel);
-#ifdef ENABLE_MULTIPLE_NODES
-            rc = snprintf_s(
-                querystr, sizeof(querystr), sizeof(querystr) - 1, "SELECT 1 FROM ONLY %s x FOR SHARE OF x", pkrelname);
-#else
+
             rc = snprintf_s(querystr, sizeof(querystr), sizeof(querystr) - 1,
+                IsShareLockForForeignKey(trigdata->tg_relation) ? "SELECT 1 FROM ONLY %s x FOR SHARE OF x" :
                 "SELECT 1 FROM ONLY %s x FOR KEY SHARE OF x", pkrelname);
-#endif
             securec_check_ss(rc, "\0", "\0");
 
             /* Prepare and save the plan */
@@ -465,11 +475,9 @@ static Datum RI_FKey_check(PG_FUNCTION_ARGS)
             querysep = "AND";
             queryoids[i] = fk_type;
         }
-#ifdef ENABLE_MULTIPLE_NODES
-        appendStringInfo(&querybuf, " FOR SHARE OF x");
-#else
-        appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
-#endif
+
+        appendStringInfo(&querybuf, IsShareLockForForeignKey(trigdata->tg_relation) ? " FOR SHARE OF x" :
+            " FOR KEY SHARE OF x");
 
         /* Prepare and save the plan */
         qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids, &qkey, fk_rel, pk_rel, true);
@@ -617,12 +625,8 @@ static bool ri_Check_Pk_Match(Relation pk_rel, Relation fk_rel, HeapTuple old_ro
             querysep = "AND";
             queryoids[i] = pk_type;
         }
-#ifdef ENABLE_MULTIPLE_NODES
-        appendStringInfo(&querybuf, " FOR SHARE OF x");
-#else
-        appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
-#endif
 
+        appendStringInfo(&querybuf, IsShareLockForForeignKey(pk_rel) ? " FOR SHARE OF x" : " FOR KEY SHARE OF x");
 
         /* Prepare and save the plan */
         qplan = ri_PlanCheck(querybuf.data, riinfo->nkeys, queryoids, &qkey, fk_rel, pk_rel, true);
@@ -793,11 +797,9 @@ Datum RI_FKey_noaction(PG_FUNCTION_ARGS)
                     querysep = "AND";
                     queryoids[i] = pk_type;
                 }
-#ifdef ENABLE_MULTIPLE_NODES
-                appendStringInfo(&querybuf, " FOR SHARE OF x");
-#else
-                appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
-#endif
+
+                appendStringInfo(&querybuf, IsShareLockForForeignKey(trigdata->tg_relation) ?
+                    " FOR SHARE OF x" : " FOR KEY SHARE OF x");
 
                 /* Prepare and save the plan */
                 qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids, &qkey, fk_rel, pk_rel, true);
@@ -1332,11 +1334,9 @@ Datum RI_FKey_restrict(PG_FUNCTION_ARGS)
                     querysep = "AND";
                     queryoids[i] = pk_type;
                 }
-#ifdef ENABLE_MULTIPLE_NODES
-                appendStringInfo(&querybuf, " FOR SHARE OF x");
-#else
-                appendStringInfo(&querybuf, " FOR KEY SHARE OF x");
-#endif
+
+                appendStringInfo(&querybuf, IsShareLockForForeignKey(trigdata->tg_relation) ?
+                    " FOR SHARE OF x" : " FOR KEY SHARE OF x");
 
                 /* Prepare and save the plan */
                 qplan = ri_PlanCheck(querybuf.data, riinfo.nkeys, queryoids, &qkey, fk_rel, pk_rel, true);
