@@ -216,7 +216,6 @@
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
 
-extern volatile int synchronous_commit;
 extern volatile bool most_available_sync;
 extern void SetThreadLocalGUC(knl_session_context* session);
 THR_LOCAL int comm_ackchk_time;
@@ -5433,7 +5432,6 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
     }
 
     ProcessConfigFile(PGC_POSTMASTER);
-    synchronous_commit = (volatile int)u_sess->attr.attr_storage.guc_synchronous_commit;
     most_available_sync = (volatile bool)u_sess->attr.attr_storage.guc_most_available_sync;
 
     /*
