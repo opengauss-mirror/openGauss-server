@@ -387,7 +387,6 @@ void CheckpointerMain(void)
             u_sess->attr.attr_storage.CheckPointTimeout = ENABLE_INCRE_CKPT
                                                               ? u_sess->attr.attr_storage.incrCheckPointTimeout
                                                               : u_sess->attr.attr_storage.fullCheckPointTimeout;
-            most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
 
             /*
              * Checkpointer is the last process to shut down, so we ask it to
@@ -715,7 +714,6 @@ void CheckpointWriteDelay(int flags, double progress)
         if (t_thrd.checkpoint_cxt.got_SIGHUP) {
             t_thrd.checkpoint_cxt.got_SIGHUP = false;
             ProcessConfigFile(PGC_SIGHUP);
-            most_available_sync = (volatile bool)u_sess->attr.attr_storage.guc_most_available_sync;
             /* update shmem copies of config variables */
             UpdateSharedMemoryConfig();
         }

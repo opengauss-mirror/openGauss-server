@@ -82,6 +82,7 @@
 #include "replication/datasender.h"
 #include "replication/walsender.h"
 #include "replication/slot.h"
+#include "replication/syncrep.h"
 #include "rewrite/rewriteHandler.h"
 #include "storage/buf/bufmgr.h"
 #include "storage/ipc.h"
@@ -6940,6 +6941,8 @@ void reload_configfile(void)
         }
         u_sess->sig_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
+        most_available_sync = (volatile bool) u_sess->attr.attr_storage.guc_most_available_sync;
+        SyncRepUpdateSyncStandbysDefined();
         if (currentOwner == NULL) {
             ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, true, true);
             ResourceOwnerRelease(t_thrd.utils_cxt.CurrentResourceOwner, RESOURCE_RELEASE_LOCKS, true, true);
