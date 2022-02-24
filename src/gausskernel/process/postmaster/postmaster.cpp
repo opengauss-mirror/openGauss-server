@@ -1,4 +1,4 @@
-/* -------------------------------------------------------------------------
+﻿/* -------------------------------------------------------------------------
  *
  * postmaster.cpp
  *	  This program acts as a clearing house for requests to the
@@ -4923,6 +4923,7 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.demotion > NoDemote &&
                 t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
                 (EXIT_STATUS_0(exitstatus) || EXIT_STATUS_1(exitstatus))) {
+                pmState = PM_WAIT_BACKENDS;
                 continue;
             }
 
@@ -7197,6 +7198,27 @@ static void handle_standby_signal(volatile HaShmemData* hashmdata)
     }
 }
 
+static void handle_cascade_standby_signal(volatile HaShmemData* hashmdata)
+{
+    if (g_instance.pid_cxt.StartupPID != 0 &&
+        (pmState == PM_STARTUP ||
+         pmState == PM_RECOVERY ||
+         pmState == PM_HOT_STANDBY ||
+         pmState == PM_WAIT_READONLY)) {
+        hashmdata->current_mode = STANDBY_MODE;
+        hashmdata->is_cascade_standby = true;
+        PMUpdateDBState(NEEDREPAIR_STATE, get_cur_mode(), get_cur_repl_num());
+        ereport(LOG,
+           (errmsg("update gaussdb state file: db state(NEEDREPAIR_STATE), server mode(%s)",
+               wal_get_role_string(get_cur_mode()))));
+        /*
+        * wakeup startup process from sleep by signal, cause we are
+        * in standby mode, the signal has no specific affect.
+        */
+        SendNotifySignal(NOTIFY_CASCADE_STANDBY, g_instance.pid_cxt.StartupPID);
+        UpdateOptsFile();
+    }
+}
 /*
  * sigusr1_handler - handle signal conditions from child processes
  */
@@ -7373,6 +7395,11 @@ static void sigusr1_handler(SIGNAL_ARGS)
 
     if (CheckStandbySignal()) {
         handle_standby_signal(hashmdata);
+    }
+
+    /* If it is cascade standby signal, then set HaShmData and send sigusr2 to startup process */
+    if (CheckCascadeStandbySignal()) {
+        handle_cascade_standby_signal(hashmdata);
     }
 
     if (CheckPostmasterSignal(PMSIGNAL_UPDATE_NORMAL)) {

@@ -144,6 +144,7 @@
 #define SWITCHOVER_SIGNAL_FILE "switchover"
 #define PRIMARY_SIGNAL_FILE "primary"
 #define STANDBY_SIGNAL_FILE "standby"
+#define CASCADE_STANDBY_SIGNAL_FILE "cascade_standby"
 #define XLOG_SWITCH_HISTORY_FILE "switch.history"
 #define MAX_PATH_LEN 1024
 #define MAX(A, B) ((B) > (A) ? (B) : (A))
@@ -16750,6 +16751,24 @@ bool CheckStandbySignal(void)
          * silently ignore any error from unlink.
          */
         (void)unlink(STANDBY_SIGNAL_FILE);
+        return true;
+    }
+    return false;
+}
+
+/*
+ * Check whether the signal is cascade standby signal
+ */
+bool CheckCascadeStandbySignal(void)
+{
+    struct stat stat_buf;
+
+    if (stat(CASCADE_STANDBY_SIGNAL_FILE, &stat_buf) == 0) {
+        /*
+         * Since we are in a signal handler, it's not safe to elog. We
+         * silently ignore any error from unlink.
+         */
+        (void)unlink(CASCADE_STANDBY_SIGNAL_FILE);
         return true;
     }
     return false;

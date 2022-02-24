@@ -389,6 +389,7 @@ extern bool CheckFinishRedoSignal(void);
 extern bool CheckPromoteSignal(void);
 extern bool CheckPrimarySignal(void);
 extern bool CheckStandbySignal(void);
+extern bool CheckCascadeStandbySignal(void);
 extern bool CheckNormalSignal(void);
 extern int CheckSwitchoverSignal(void);
 
