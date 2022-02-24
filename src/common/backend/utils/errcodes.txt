@@ -626,8 +626,3 @@ Section: Class SE - Security Error
 42714    E    ERRCODE_DUPLICATE_POLICY                                        duplicate_policy
 42715    E    ERRCODE_DUPLICATE_LABEL                                         duplicate_label
 SE001    E    ERRCODE_INVALID_AUDIT_LOG                                       invalid audit log
-
-Section: Class UE - Uncorrected Error & Warning
-UE000    E    ERRCODE_UE_COMMON_ERROR                                        uce_common_error
-UE001    E    ERRCODE_UE_DIRTY_PAGE                                          uce_dirty_page_error
-UE002    E    ERRCODE_UE_CLEAN_PAGE                                          uce_clean_page_error
