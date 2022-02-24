@@ -25802,5 +25802,6 @@ static void RemoveFillerCol(List *filler_list, List *col_list)
 #undef yyerror
 #undef yylval
 #undef yylloc
+#undef yylex
 
 #include "scan.inc"
