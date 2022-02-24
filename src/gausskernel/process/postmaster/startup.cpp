@@ -109,6 +109,8 @@ static void StartupProcSigusr2Handler(SIGNAL_ARGS)
         t_thrd.startup_cxt.primary_triggered = true;
     } else if (CheckNotifySignal(NOTIFY_STANDBY)) {
         t_thrd.startup_cxt.standby_triggered = true;
+    } else if (CheckNotifySignal(NOTIFY_CASCADE_STANDBY)) {
+        t_thrd.startup_cxt.standby_triggered = true;
     } else if (CheckNotifySignal(NOTIFY_FAILOVER)) {
         t_thrd.startup_cxt.failover_triggered = true;
         WakeupRecovery();

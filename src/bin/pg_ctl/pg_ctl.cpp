@@ -171,6 +171,7 @@ static char switchover_file[MAXPGPATH];
 static char promote_file[MAXPGPATH];
 static char primary_file[MAXPGPATH];
 static char standby_file[MAXPGPATH];
+static char cascade_standby_file[MAXPGPATH];
 static char pg_ctl_lockfile[MAXPGPATH];
 static char pg_conf_file[MAXPGPATH];
 static FILE* lockfile = NULL;
@@ -2147,6 +2148,10 @@ static void do_notify(uint32 term)
                pgha_str[strlen("primary")] == '\0') {
         notify_file = xstrdup(primary_file);
         notify_mode = PRIMARY_MODE;
+    } else if ((pgha_str != NULL) && 0 == strncmp(pgha_str, "cascade_standby", strlen("cascade_standby")) &&
+               pgha_str[strlen("cascade_standby")] == '\0') {
+        notify_file = xstrdup(cascade_standby_file);
+        notify_mode = CASCADE_STANDBY_MODE;
     } else {
         pg_log(PG_WARNING, _(" the parameter of notify is not recognized\n"));
         exit(1);
@@ -3786,6 +3791,8 @@ static char* get_localrole_string(ServerMode mode)
             return "Primary";
         case STANDBY_MODE:
             return "Standby";
+        case CASCADE_STANDBY_MODE:
+            return "Cascade Standby";
         case PENDING_MODE:
             return "Pending";
         default:
@@ -5098,6 +5105,8 @@ int main(int argc, char** argv)
         ret = snprintf_s(primary_file, MAXPGPATH, MAXPGPATH - 1, "%s/primary", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/standby", pg_data);
+        securec_check_ss_c(ret, "\0", "\0");
+        ret = snprintf_s(cascade_standby_file, MAXPGPATH, MAXPGPATH - 1, "%s/cascade_standby", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
         ret = snprintf_s(pg_ctl_lockfile, MAXPGPATH, MAXPGPATH - 1, "%s/pg_ctl.lock", pg_data);
         securec_check_ss_c(ret, "\0", "\0");
