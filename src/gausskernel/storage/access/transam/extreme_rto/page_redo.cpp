@@ -897,8 +897,21 @@ void PageManagerProcSegPipeLineSyncState(HTAB *hashMap, XLogRecParseState *parse
 
 static void WaitNextBarrier(XLogRecParseState *parseState)
 {
-    char* barrier = parseState->blockparse.extra_rec.blockbarrier.maindata;
+    const int MAINDATALEN = (int)parseState->blockparse.extra_rec.blockbarrier.maindatalen;
+    XLogRecPtr barrierLSN = parseState->blockparse.blockhead.end_ptr;
+    if (!IS_DISASTER_RECOVER_MODE || XLogRecPtrIsInvalid(t_thrd.xlog_cxt.minRecoveryPoint) ||
+        XLByteLT(barrierLSN, t_thrd.xlog_cxt.minRecoveryPoint) ||
+        t_thrd.shemem_ptr_cxt.ControlFile->backupEndRequired) {
+        XLogBlockParseStateRelease(parseState);
+        return;
+    }
+
+    char barrier[MAINDATALEN + 1];
+    errno_t rc = memcpy_s(barrier, MAINDATALEN, parseState->blockparse.extra_rec.blockbarrier.maindata, MAINDATALEN);
+    securec_check(rc, "\0", "\0");
+
     uint8 info = parseState->blockparse.blockhead.xl_info & ~XLR_INFO_MASK;
+    XLogBlockParseStateRelease(parseState);
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
 
     if (info == XLOG_BARRIER_COMMIT || !IS_DISASTER_RECOVER_MODE || !is_barrier_pausable(barrier))
@@ -989,7 +1002,6 @@ void PageManagerRedoParseState(XLogRecParseState *preState)
         case BLOCK_DATA_BARRIER_TYPE:
             RedoPageManagerDistributeBlockRecord(hashMap, preState);
             WaitNextBarrier(preState);
-            XLogBlockParseStateRelease(preState);
             break;
         default:
             XLogBlockParseStateRelease(preState);
