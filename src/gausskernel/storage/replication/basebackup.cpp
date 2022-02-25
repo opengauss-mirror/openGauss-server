@@ -1279,7 +1279,7 @@ static void SendRealFile(bool sizeOnly, char* pathbuf, size_t pathBufLen, int ba
     // we must ensure the page integrity when in IncrementalCheckpoint
     if (!sizeOnly && g_instance.attr.attr_storage.enableIncrementalCheckpoint &&
         IsCompressedFile(pathbuf, strlen(pathbuf)) != COMPRESSED_TYPE_UNKNOWN) {
-        SendCompressedFile(pathbuf, basepathlen, (*statbuf), true, &size);
+        SendCompressedFile(pathbuf, basepathlen, (*statbuf), false, &size);
     } else {
         bool sent = false;
         if (!sizeOnly) {
@@ -1951,7 +1951,8 @@ static void SendCompressedFile(char* readFileName, int basePathLen, struct stat&
     }
 
     char pcaFilePath[MAXPGPATH];
-    securec_check_c(memcpy_s(pcaFilePath, MAXPGPATH, readFileName, readFileNameLen), "", "");
+    securec_check(strcpy_s(pcaFilePath, MAXPGPATH, readFileName), "", "");
+    /* change pcd => pca */
     pcaFilePath[readFileNameLen - 1] = 'a';
 
     FILE* pcaFile = AllocateFile(pcaFilePath, "rb");
