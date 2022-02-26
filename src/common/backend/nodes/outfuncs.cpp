@@ -678,6 +678,9 @@ static void _outPruningResult(StringInfo str, PruningResult* node)
     if (t_thrd.proc->workingVersionNum >= num) {
         WRITE_NODE_FIELD(expr);
     }
+    if (t_thrd.proc->workingVersionNum >= PBESINGLEPARTITION_VERSION_NUM) {
+        WRITE_BOOL_FIELD(isPbeSinlePartition);
+    }
 }
 
 static void _outSubPartitionPruningResult(StringInfo str, SubPartitionPruningResult* node)

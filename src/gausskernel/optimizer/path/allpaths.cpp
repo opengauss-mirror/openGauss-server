@@ -874,6 +874,31 @@ static void SetPlainReSizeWithPruningRatio(RelOptInfo *rel, double pruningRatio)
 }
 
 /*
+ * This function applies only to single partition key of range partitioned tables in PBE mode.
+ */
+static bool IsPbeSinglePartition(Relation rel, RelOptInfo* relInfo)
+{
+    if (relInfo->pruning_result->paramArg == NULL) {
+        return false;
+    }
+    if (RelationIsSubPartitioned(rel)) {
+        return false;
+    }
+    if (rel->partMap->type != PART_TYPE_RANGE) {
+        return false;
+    }
+    RangePartitionMap* partMap = (RangePartitionMap*)rel->partMap;
+    int partKeyNum = partMap->partitionKey->dim1;
+    if (partKeyNum > 1) {
+        return false;
+    }
+    if (relInfo->pruning_result->isPbeSinlePartition) {
+        return true;
+    }
+    return false;
+}
+
+/*
  * set_plain_rel_size
  *	  Set size estimates for a plain relation (no subquery, no inheritance)
  */
@@ -896,8 +921,7 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 
         Assert(rel->pruning_result);
 
-     
-        if (rel->pruning_result->expr != NULL) {
+        if (IsPbeSinglePartition(relation, rel)) {
             rel->partItrs = 1;
         } else {
             /* set flag for dealing with partintioned table */

@@ -470,6 +470,8 @@ typedef struct PruningResult {
     Param* paramArg;
     OpExpr* exprPart;
     Expr* expr;
+    /* This variable applies only to single-partition key range partition tables in PBE mode. */
+    bool isPbeSinlePartition = false;
 } PruningResult;
 
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);

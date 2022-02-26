@@ -3312,6 +3312,9 @@ static PruningResult* _readPruningResult(PruningResult* local_node)
     if (t_thrd.proc->workingVersionNum >= num) {
         READ_NODE_FIELD(expr);
     }
+    IF_EXIST(isPbeSinlePartition) {
+        READ_BOOL_FIELD(isPbeSinlePartition);
+    }
 
     READ_DONE();
 }
