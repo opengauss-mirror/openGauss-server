@@ -812,6 +812,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->is_delete_function = false;
     plsql_cxt->have_error = false;
     plsql_cxt->client_info = NULL;
+    pthread_mutex_init(&plsql_cxt->client_info_lock, NULL);
     plsql_cxt->sess_cxt_htab = NULL;
     plsql_cxt->have_error = false;
     plsql_cxt->stp_savepoint_cnt = 0;

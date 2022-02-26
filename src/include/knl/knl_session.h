@@ -1537,6 +1537,7 @@ typedef struct knl_u_plpgsql_context {
     bool is_delete_function;
     bool is_package_instantiation;
     char* client_info;
+    pthread_mutex_t client_info_lock;
     char sess_cxt_name[128];
     HTAB* sess_cxt_htab;
     bool have_error;

@@ -62,6 +62,7 @@ public:
     void CheckSessionTimeout();
     void CheckPermissionForSendSignal(knl_session_context* sess, sig_atomic_t* lock);
     void getSessionMemoryDetail(Tuplestorestate* tupStore, TupleDesc tupDesc, knl_sess_control** sess);
+    void getSessionClientInfo(Tuplestorestate* tupStore, TupleDesc tupDesc);
     void getSessionMemoryContextInfo(const char* ctx_name, StringInfoData* buf, knl_sess_control** sess);
     knl_session_context* GetSessionByIdx(int idx);
     int FindCtrlIdxBySessId(uint64 id);
@@ -78,6 +79,8 @@ private:
         knl_session_context* sess, const MemoryContext context, Tuplestorestate* tupStore, TupleDesc tupDesc);
     void calculateSessMemCxtStats(
         knl_session_context* sess, const MemoryContext context, Tuplestorestate* tupStore, TupleDesc tupDesc);
+    void calculateClientInfo(
+        knl_session_context* sess, Tuplestorestate* tupStore, TupleDesc tupDesc);
 
     inline bool IsValidCtrlIndex(int ctrl_index)
     {
