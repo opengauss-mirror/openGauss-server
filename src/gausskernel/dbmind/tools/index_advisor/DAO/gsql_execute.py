@@ -86,6 +86,8 @@ class GSqlExecute(ExecuteFactory):
             return table_index_dict
 
         sql = self.make_single_advisor_sql(query)
+        # escape double quotes in query
+        sql = sql.replace('"', '\\"') if '"' in sql else sql
         result = self.run_shell_cmd([sql]).split('\n')
 
         for res in result:
@@ -110,6 +112,7 @@ class GSqlExecute(ExecuteFactory):
                     sql_list.append("SELECT hypopg_create_index('CREATE INDEX ON %s(%s)')" %
                                     (table, columns))
         sql_list.append('SELECT hypopg_display_index()')
+        query = query.replace('"', '\\"') if '"' in query else query
         sql_list.append("SET explain_perf_mode = 'normal'; explain " + query)
         sql_list.append('SELECT hypopg_reset_index()')
         result = self.run_shell_cmd(sql_list).split('\n')
@@ -192,7 +195,8 @@ class GSqlExecute(ExecuteFactory):
             if hypo_index:
                 if 'btree' in line and self.max_index_storage:
                     hypo_index = False
-                    self.update_index_storage(line, index_config, hypo_index_num)
+                    hypo_index_id = line.strip().strip('()').split(',')[0]
+                    self.update_index_storage(hypo_index_id, index_config, hypo_index_num)
                     hypo_index_num += 1
             if 'Index' in line and 'Scan' in line and not index_config:
                 ind1, ind2 = re.search(r'Index.*Scan(.*)on ([^\s]+)',
