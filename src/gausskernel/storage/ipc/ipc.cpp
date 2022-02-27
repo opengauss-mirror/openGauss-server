@@ -120,6 +120,8 @@ void WaitGraceThreadsExit(void)
     for (loop = 0; loop < WAITTIME; loop++) {
         if (0 != alive_threads_waitted) {
             pg_usleep(100);
+        } else {
+            break;
         }
     }
 }
