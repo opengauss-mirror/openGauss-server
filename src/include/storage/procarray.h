@@ -74,6 +74,7 @@ extern bool ProcArrayInstallImportedXmin(TransactionId xmin, TransactionId sourc
 extern RunningTransactions GetRunningTransactionData(void);
 
 extern bool TransactionIdIsActive(TransactionId xid);
+extern TransactionId GetOldestCatalogXmin();
 extern TransactionId GetRecentGlobalXmin(void);
 extern TransactionId GetOldestXmin(Relation rel, bool bFixRecentGlobalXmin = false,
     bool bRecentGlobalXminNoCheck = false);

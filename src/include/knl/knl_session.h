@@ -564,7 +564,7 @@ typedef struct knl_u_utils_context {
      * for the convenience of TransactionIdIsInProgress: even in bootstrap
      * mode, we don't want it to say that BootstrapTransactionId is in progress.
      *
-     * RecentGlobalXmin and RecentGlobalDataXmin are initialized to
+     * RecentGlobalXmin, RecentGlobalDataXmin, RecentGlobalCatalogXmin are initialized to
      * InvalidTransactionId, to ensure that no one tries to use a stale
      * value. Readers should ensure that it has been set to something else
      * before using it.
@@ -578,6 +578,9 @@ typedef struct knl_u_utils_context {
     TransactionId RecentGlobalXmin;
 
     TransactionId RecentGlobalDataXmin;
+
+    /* recent global catalog xmin, consider replication slot catalog xmin */
+    TransactionId RecentGlobalCatalogXmin;
 
     /* Global snapshot data */
     bool cn_xc_maintain_mode;

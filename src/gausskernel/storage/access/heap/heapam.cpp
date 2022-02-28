@@ -2373,6 +2373,15 @@ bool heap_fetch(
     return false;
 }
 
+static TransactionId inline GetOldestXminForHot(Relation relation)
+{
+    if (IsCatalogRelation(relation) || RelationIsAccessibleInLogicalDecoding(relation)) {
+        return u_sess->utils_cxt.RecentGlobalCatalogXmin;
+    } else {
+        return u_sess->utils_cxt.RecentGlobalXmin;
+    }
+}
+
 /*
  *	heap_hot_search_buffer	- search HOT chain for tuple satisfying snapshot
  *
@@ -2403,6 +2412,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
     bool at_chain_start = false;
     bool valid = false;
     bool skip = false;
+    TransactionId oldestXmin;
 
     /* If this is not the first call, previous call returned a (live!) tuple */
     if (all_dead != NULL) {
@@ -2410,6 +2420,8 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
     }
 
     Assert(TransactionIdIsValid(u_sess->utils_cxt.RecentGlobalXmin));
+
+    oldestXmin = GetOldestXminForHot(relation);
 
     Assert(ItemPointerGetBlockNumber(tid) == BufferGetBlockNumber(buffer));
     offnum = ItemPointerGetOffsetNumber(tid);
@@ -2533,7 +2545,7 @@ bool heap_hot_search_buffer(ItemPointer tid, Relation relation, Buffer buffer, S
          * request, check whether all chain members are dead to all
          * transactions.
          */
-        if (all_dead && *all_dead && !HeapTupleIsSurelyDead(heap_tuple, u_sess->utils_cxt.RecentGlobalXmin)) {
+        if (all_dead && *all_dead && !HeapTupleIsSurelyDead(heap_tuple, oldestXmin)) {
             *all_dead = false;
         }
 

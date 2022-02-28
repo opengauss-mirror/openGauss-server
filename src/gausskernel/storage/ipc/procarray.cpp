@@ -1628,6 +1628,21 @@ int GetMaxSnapshotSubxidCount(void)
 }
 
 /*
+ * returns oldest transaction for catalog that was running when any current transaction was started.
+ * take replication slot into consideration. please make sure it's safe to read replication_slot_catalog_xmin
+ * before calling this func.
+ */
+TransactionId GetOldestCatalogXmin()
+{
+    TransactionId res = u_sess->utils_cxt.RecentGlobalXmin;
+    TransactionId repSlotCatalogXmin = g_instance.proc_array_idx->replication_slot_catalog_xmin;
+    if (TransactionIdIsNormal(repSlotCatalogXmin) && TransactionIdPrecedes(repSlotCatalogXmin, res)) {
+        return repSlotCatalogXmin;
+    }
+    return res;
+}
+
+/*
  * GetSnapshotData -- returns information about running transactions.
  *
  * The returned snapshot includes xmin (lowest still-running xact ID),
@@ -1720,7 +1735,9 @@ RETRY:
                     goto RETRY;
                 }
                 u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
+                u_sess->utils_cxt.RecentGlobalCatalogXmin = GetOldestCatalogXmin();
             }
+
             return result;
         }
     }
@@ -3683,6 +3700,7 @@ static bool GetSnapshotDataDataNode(Snapshot snapshot)
                 gtm_snapshot->csn, snapshot->gtm_snapshot_type, SNAPSHOT_DIRECT);
             u_sess->utils_cxt.g_GTM_Snapshot->csn = snapshot->snapshotcsn;
             u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
+            u_sess->utils_cxt.RecentGlobalCatalogXmin = GetOldestCatalogXmin();
             return true;
         }
     }
@@ -3778,6 +3796,7 @@ static bool GetSnapshotDataCoordinator(Snapshot snapshot)
 
             u_sess->utils_cxt.g_GTM_Snapshot->csn = snapshot->snapshotcsn;
             u_sess->utils_cxt.RecentGlobalXmin = GetOldestXmin(NULL, true);
+            u_sess->utils_cxt.RecentGlobalCatalogXmin = GetOldestCatalogXmin();
         }
         if (module_logging_is_on(MOD_TRANS_SNAPSHOT)) {
             ereport(LOG, (errmodule(MOD_TRANS_SNAPSHOT),
@@ -4332,6 +4351,7 @@ Snapshot GetLocalSnapshotData(Snapshot snapshot)
         u_sess->utils_cxt.RecentGlobalXmin = replication_slot_xmin;
     }
 
+    u_sess->utils_cxt.RecentGlobalCatalogXmin = GetOldestCatalogXmin();
     u_sess->utils_cxt.RecentXmin = snapxid->xmin;
     snapshot->xmin = snapxid->xmin;
     snapshot->xmax = snapxid->xmax;

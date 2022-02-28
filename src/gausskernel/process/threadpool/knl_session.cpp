@@ -442,6 +442,7 @@ static void knl_u_utils_init(knl_u_utils_context* utils_cxt)
     utils_cxt->RecentDataXmin = FirstNormalTransactionId;
     utils_cxt->RecentGlobalXmin = InvalidTransactionId;
     utils_cxt->RecentGlobalDataXmin = InvalidTransactionId;
+    utils_cxt->RecentGlobalCatalogXmin = InvalidTransactionId;
 
     utils_cxt->cn_xc_maintain_mode = false;
     utils_cxt->snapshot_source = SNAPSHOT_UNDEFINED;
