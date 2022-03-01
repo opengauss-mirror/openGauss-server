@@ -2070,6 +2070,25 @@ static void do_autovacuum(void)
             continue;
         }
 
+        /* Here we skipped relation_support_autoavac() and relation_needs_vacanalyze() checks
+         * for Ustore partitioned tables
+         */
+        bytea *rawRelopts = extractRelOptions(tuple, pg_class_desc, InvalidOid);
+        if (rawRelopts != NULL && RelationIsTableAccessMethodUStoreType(rawRelopts) &&
+            isPartitionedRelation(classForm)) {
+            vacObj = (vacuum_object*)palloc(sizeof(vacuum_object));
+            vacObj->tab_oid = relid;
+            vacObj->parent_oid = InvalidOid;
+            vacObj->dovacuum = true;
+            vacObj->dovacuum_toast = false;
+            vacObj->doanalyze = false;
+            vacObj->need_freeze = false;
+            vacObj->is_internal_relation = false;
+            vacObj->flags = VACFLG_MAIN_PARTITION;
+            table_oids = lappend(table_oids, vacObj);
+            continue;
+        }
+
         /* Fetch reloptions for this table */
         relopts = extract_autovac_opts(tuple, pg_class_desc);
 
@@ -2176,7 +2195,6 @@ static void do_autovacuum(void)
             pfree_ext(relopts);
         }
     }
-
     tableam_scan_end(relScan);
     DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which tables to vacuum");
 
@@ -2277,7 +2295,6 @@ static void do_autovacuum(void)
             }
         }
     }
-
     /* Close the pg_partition */
     tableam_scan_end(partScan);
     heap_close(partRel, AccessShareLock);
@@ -2376,51 +2393,9 @@ static void do_autovacuum(void)
             pfree_ext(relopts);
         }
     }
-
-    tableam_scan_end(relScan);
-    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which toast tables to vacuum");
-
-     /* On the fourth pass: check USTORE GPI tables */
-    ScanKeyInit(&key[0], Anum_pg_class_relkind, BTEqualStrategyNumber, F_CHAREQ, CharGetDatum(RELKIND_GLOBAL_INDEX));
-    relScan = tableam_scan_begin(classRel, SnapshotNow, 1, &key[0]);
-    while ((tuple = (HeapTuple)tableam_scan_getnexttuple(relScan, ForwardScanDirection)) != NULL) {
-        Form_pg_class classForm = (Form_pg_class) GETSTRUCT(tuple);
-        Oid relid = HeapTupleGetOid(tuple);
-        AutoVacOpts *relopts = NULL;
-        /*
-         * We cannot safely process other backends' temp tables, so skip them.
-         */
-        if (classForm->relpersistence == RELPERSISTENCE_TEMP ||
-            classForm->relpersistence == RELPERSISTENCE_GLOBAL_TEMP)
-            continue;
-        /* only UBTree supports vacuum independently */
-        if (classForm->relam != UBTREE_AM_OID) {
-            continue;
-        }
-        /* fetch reloptions */
-        relopts = extract_autovac_opts(tuple, pg_class_desc);
-        /* only UBTree supports vacuum, and enabled will be set true */
-        if (relopts == NULL || !relopts->enabled) {
-            continue;
-        }
-        /* we skipped relation_support_autoavac() and relation_needs_vacanalyze() checks here */
-        vacObj = (vacuum_object*)palloc(sizeof(vacuum_object));
-        vacObj->tab_oid = relid;
-        vacObj->parent_oid = InvalidOid;
-        vacObj->dovacuum = true;
-        vacObj->dovacuum_toast = false;
-        vacObj->doanalyze = false;
-        vacObj->need_freeze = false;
-        vacObj->is_internal_relation = false;
-        /* VACFLG_MAIN_PARTITION makes no sense when vacuuming UBTree */
-        vacObj->flags = VACFLG_SIMPLE_HEAP; /* ignore this flag as we will not use it,
-                                             * and to be safe we can use VACFLG_SIMPLE_HEAP.
-                                             */
-        table_oids = lappend(table_oids, vacObj);
-    }
     tableam_scan_end(relScan);
     heap_close(classRel, AccessShareLock);
-    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which UBTree tables to vacuum");
+    DEBUG_MOD_STOP_TIMER(MOD_AUTOVAC, "AUTOVAC TIMER: Scan pg_class to determine which toast tables to vacuum");
 
     /*
      * Create one buffer access strategy object per buffer pool for VACUUM to use.
@@ -2754,8 +2729,7 @@ AutoVacOpts* extract_autovac_opts(HeapTuple tup, TupleDesc pg_class_desc)
 
     Assert(((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_RELATION ||
            ((Form_pg_class) GETSTRUCT(tup))->relkind == RELKIND_MATVIEW ||
-           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_TOASTVALUE ||
-           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_GLOBAL_INDEX);
+           ((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_TOASTVALUE);
 
     relopts = extractRelOptions(tup, pg_class_desc, InvalidOid);
     if (relopts == NULL)
@@ -2765,15 +2739,9 @@ AutoVacOpts* extract_autovac_opts(HeapTuple tup, TupleDesc pg_class_desc)
     rc = memcpy_s(av, sizeof(AutoVacOpts), &(((StdRdOptions*)relopts)->autovacuum), sizeof(AutoVacOpts));
     securec_check(rc, "\0", "\0");
 
-    /* autovacuum for ustore table is disabled */
+    /* autovacuum for ustore unpartitioned table is disabled */
     if (RelationIsTableAccessMethodUStoreType(relopts)) {
-        av->enabled = false;
-    }
-
-    /* force set av->enabled in ustore's GPI */
-    if ((((Form_pg_class)GETSTRUCT(tup))->relkind == RELKIND_GLOBAL_INDEX) &&
-        RelationIsTableAccessMethodUStoreType(relopts)) {
-        av->enabled = true;
+        av->enabled = isPartitionedRelation((Form_pg_class)GETSTRUCT(tup));
     }
 
     pfree_ext(relopts);
@@ -2898,8 +2866,10 @@ static autovac_table* table_recheck_autovac(
     if (!HeapTupleIsValid(classTup))
         return NULL;
     classForm = (Form_pg_class)GETSTRUCT(classTup);
-    /* this is UBTree, use another bypass */
-    if (classForm->relam == UBTREE_AM_OID) {
+    bytea *rawRelopts = extractRelOptions(classTup, pg_class_desc, InvalidOid);
+    /* this is Ustore partitioned table, use another bypass */
+    if (rawRelopts != NULL && RelationIsTableAccessMethodUStoreType(rawRelopts) &&
+        isPartitionedRelation(classForm)) {
         avopts = extract_autovac_opts(classTup, pg_class_desc);
         tab = calculate_vacuum_cost_and_freezeages(avopts, false, false);
         if (tab != NULL) {
