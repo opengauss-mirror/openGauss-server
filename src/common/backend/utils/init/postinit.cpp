@@ -66,6 +66,7 @@
 #include "storage/ipc.h"
 #include "storage/smgr/knl_usync.h"
 #include "storage/lmgr.h"
+#include "storage/predicate.h"
 #include "storage/proc.h"
 #include "storage/procarray.h"
 #include "storage/procsignal.h"
@@ -2031,7 +2032,6 @@ void PostgresInitializer::InitThread()
         on_shmem_exit(ShutdownXLOG, 0);
     }
 }
-
 void PostgresInitializer::InitLoadLocalSysCache(Oid db_oid, const char *db_name)
 {
     if(!EnableLocalSysCache()) {
@@ -2068,6 +2068,11 @@ void PostgresInitializer::InitLoadLocalSysCache(Oid db_oid, const char *db_name)
         ResourceOwnerRelease(t_thrd.lsc_cxt.lsc->local_sysdb_resowner, RESOURCE_RELEASE_LOCKS, false, true);
         ResourceOwnerRelease(t_thrd.lsc_cxt.lsc->local_sysdb_resowner, RESOURCE_RELEASE_AFTER_LOCKS, false, true);
 
+        /* we are not in transaction, so resowner cannot help us release proclocks and predicatelocks.
+         * we do nothing above except init and load syscache, so no undowork need. ProcReleaseLocks always need
+         * */
+        ProcReleaseLocks(false);
+        ReleasePredicateLocks(false);
         /* lwlocks arre released at sigsetjmp */
 
         /* recovery CurrentResourceOwner */
@@ -2590,8 +2595,9 @@ void PostgresInitializer::SetDatabasePath()
 
     ValidatePgVersion(m_fullpath);
 
-    /* This should happen only once per process */
-    Assert(!u_sess->proc_cxt.DatabasePath);
+    /* This should happen only once per process, for gsc, it may equal the pointer belongs to lsc */
+    Assert(!u_sess->proc_cxt.DatabasePath ||
+    (EnableLocalSysCache() && u_sess->proc_cxt.DatabasePath == t_thrd.lsc_cxt.lsc->my_database_path));
     u_sess->proc_cxt.DatabasePath = MemoryContextStrdup(
         SESS_GET_MEM_CXT_GROUP(MEMORY_CONTEXT_EXECUTOR), m_fullpath);
     if (EnableLocalSysCache()) {

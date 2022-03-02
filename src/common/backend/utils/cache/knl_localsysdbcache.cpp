@@ -432,7 +432,6 @@ Size *GetSizeVfdCachePtr()
     }
 }
 
-
 int GetVfdNfile()
 {
     if (EnableLocalSysCache()) {
@@ -524,19 +523,49 @@ bool LocalSysDBCache::LocalSysDBCacheNeedClearMyDB(Oid db_id, const char *db_nam
                     strcmp(t_thrd.proc_cxt.MyProgName, "BootStrap") == 0
             ));
     }
+    /* it is a weird design that we need access mydatabaseid before initsession.
+     * but for GSC mode, we do need aquire lock when cache hit and there are invalid msgs
+     * with session uninited and so u_sess->proc_cxt.MyDatabaseId is InvalidOid.
+     * 1    the publication feature will send all rels' invalmsgs even no refered ddl.
+     * 2    relations may have refcount leak, so we must rebuild them if cache hit.
+     * when we rebuild a relation, the session may be not uninited,
+     * and so u_sess->proc_cxt.MyDatabaseId is InvalidOid,
+     * so we use t_thrd.lsc_cxt.lsc->my_database_id on GSC mode */
+    Assert(CheckMyDatabaseMatch());
+    Assert(m_global_db != NULL);
+    /* if u_sess->proc_cxt.MyDatabaseId is InvalidOid, the session's status is uninit
+     * we will call SetDatabase to rewrite it.
+     * but beofre SetDatabase, we need the dbid to Accept Invalid msg */
+    bool lock_db_advance = u_sess->proc_cxt.MyDatabaseId == InvalidOid && IS_THREAD_POOL_WORKER;
 
     /* cache hit, when initsession, we lock db to avoid alter db */
-    Oid old_db_id = t_thrd.proc->databaseId;
-    if (u_sess->proc_cxt.MyDatabaseId == InvalidOid && IS_THREAD_POOL_WORKER) {
-        LockSharedObject(DatabaseRelationId, my_database_id, 0, RowExclusiveLock);
+    if (lock_db_advance) {
+        Assert(u_sess->proc_cxt.MyDatabaseTableSpace == InvalidOid);
+        Assert(u_sess->proc_cxt.DatabasePath == NULL);
+        Assert(t_thrd.proc->databaseId == InvalidOid);
+
+        u_sess->proc_cxt.MyDatabaseId = my_database_id;
+        u_sess->proc_cxt.MyDatabaseTableSpace = my_database_tablespace;
+        /* use refer not copy, it will be rewritten when initsession */
+        u_sess->proc_cxt.DatabasePath = my_database_path;
+
+        /* we dont want to accept inval msg here, so use LockSharedObjectForSession to avoid it. */
+        LockSharedObjectForSession(DatabaseRelationId, my_database_id, 0, RowExclusiveLock);
         t_thrd.proc->databaseId = my_database_id;
-        UnlockSharedObject(DatabaseRelationId, my_database_id, 0, RowExclusiveLock);
-    }
-    Assert(m_global_db != NULL);
-    if (m_global_db->m_isDead) {
-        t_thrd.proc->databaseId = old_db_id;
+        UnlockSharedObjectForSession(DatabaseRelationId, my_database_id, 0, RowExclusiveLock);
+
+        /* when we acquired the dblock, alter db transaction happened, and we should clear cache of mydb. */
+        if (m_global_db->m_isDead) {
+            t_thrd.proc->databaseId = InvalidOid;
+            u_sess->proc_cxt.MyDatabaseId = InvalidOid;
+            u_sess->proc_cxt.MyDatabaseTableSpace = InvalidOid;
+            u_sess->proc_cxt.DatabasePath = NULL;
+            return true;
+        }
+    } else if (m_global_db->m_isDead) {
         return true;
     }
+
     return false;
 }
 

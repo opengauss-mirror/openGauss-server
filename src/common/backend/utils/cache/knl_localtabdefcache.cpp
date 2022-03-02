@@ -816,8 +816,9 @@ void LocalTabDefCache::RememberToFreeTupleDescAtEOX(TupleDesc td)
 {
     if (EOXactTupleDescArray == NULL) {
         MemoryContext oldcxt = MemoryContextSwitchTo(LocalMyDBCacheMemCxt());
-        EOXactTupleDescArrayLen = 16;
-        EOXactTupleDescArray = (TupleDesc *)palloc(EOXactTupleDescArrayLen * sizeof(TupleDesc));
+        const int default_len = 16;
+        EOXactTupleDescArray = (TupleDesc *)palloc(default_len * sizeof(TupleDesc));
+        EOXactTupleDescArrayLen = default_len;
         NextEOXactTupleDescNum = 0;
         MemoryContextSwitchTo(oldcxt);
     } else if (NextEOXactTupleDescNum >= EOXactTupleDescArrayLen) {
