@@ -1217,8 +1217,8 @@ static void HandlePageWriterMainInterrupts()
     }
 
     if (t_thrd.pagewriter_cxt.sync_requested) {
-        t_thrd.pagewriter_cxt.sync_requested = false;
         PageWriterSyncWithAbsorption();
+        t_thrd.pagewriter_cxt.sync_requested = false;
     }
 
     /* main thread should finally exit. */
