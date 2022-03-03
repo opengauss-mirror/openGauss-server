@@ -474,6 +474,7 @@ static void advance_transition_function(
         *fcinfo, &(peraggstate->transfn), numTransInputs + 1, peraggstate->aggCollation, (Node*)aggstate, NULL);
     fcinfo->arg[0] = pergroupstate->transValue;
     fcinfo->argnull[0] = pergroupstate->transValueIsNull;
+    fcinfo->argTypes[0] = InvalidOid;
     fcinfo->isnull = false; /* just in case transfn doesn't set it */
 
     Node *origin_fcxt = fcinfo->context;
@@ -577,6 +578,7 @@ static void advance_collection_function(
     InitFunctionCallInfoData(*fcinfo, &(peraggstate->collectfn), 2, peraggstate->aggCollation, (Node*)aggstate, NULL);
     fcinfo->arg[0] = pergroupstate->collectValue;
     fcinfo->argnull[0] = pergroupstate->collectValueIsNull;
+    fcinfo->argTypes[0] = InvalidOid;
     newVal = FunctionCallInvoke(fcinfo);
 
     /*
@@ -665,6 +667,7 @@ static void advance_aggregates(AggState* aggstate, AggStatePerGroup pergroup)
             for (i = 0; i < numTransInputs; i++) {
                 fcinfo.arg[i + 1] = slot->tts_values[i];
                 fcinfo.argnull[i + 1] = slot->tts_isnull[i];
+                fcinfo.argTypes[i + 1] = InvalidOid;
             }
             for (setno = 0; setno < numGroupingSets; setno++) {
                 AggStatePerGroup pergroupstate = &pergroup[aggno + (setno * numAggs)];
@@ -896,6 +899,7 @@ static void finalize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, A
     foreach (lc, peraggstate->aggrefstate->aggdirectargs) {
         fcinfo.arg[args_pos] =
             ExecEvalExpr((ExprState*)lfirst(lc), aggstate->ss.ps.ps_ExprContext, &fcinfo.argnull[args_pos], NULL);
+        fcinfo.argTypes[args_pos] = ((ExprState*)lfirst(lc))->resultType;
         if (anynull == true || fcinfo.argnull[args_pos] == true)
             anynull = true;
         else
@@ -928,6 +932,7 @@ static void finalize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, A
             fcinfo, &(peraggstate->finalfn), numFinalArgs, peraggstate->aggCollation, (Node*)aggstate, NULL);
         fcinfo.arg[0] = pergroupstate->transValue;
         fcinfo.argnull[0] = pergroupstate->transValueIsNull;
+        fcinfo.argTypes[0] = InvalidOid;
         if (anynull == true || pergroupstate->transValueIsNull == true)
             anynull = true;
         else
@@ -936,6 +941,7 @@ static void finalize_aggregate(AggState* aggstate, AggStatePerAgg peraggstate, A
         while (args_pos < numFinalArgs) {
             fcinfo.arg[args_pos] = (Datum)0;
             fcinfo.argnull[args_pos] = true;
+            fcinfo.argTypes[args_pos] = InvalidOid;
             args_pos++;
             anynull = true;
         }

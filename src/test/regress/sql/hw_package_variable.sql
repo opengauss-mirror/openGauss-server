@@ -2238,6 +2238,61 @@ drop procedure pp1;
 drop package pck1;
 drop table t1;
 
+-- test package variable as in param
+create type o1 as (a int, b varchar2);
+create or replace package pck1 as
+va varchar2;
+vb varchar2 := 'vb';
+vc o1;
+procedure p1;
+end pck1;
+/
+create or replace package body pck1 as
+procedure p1 as
+begin
+va := 'hahahah';
+vc := (1,'cccc');
+end;
+end pck1;
+/
+create table testlog(a int);
+create or replace procedure insertlog() is
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+insert into testlog values(1);
+pck1.va := 'bbbbbbb';
+pck1.vc := (123,'ayayayayay');
+exception
+when others then
+raise notice 'sqlerrm:%',sqlerrm;
+raise;
+end;
+/
+create or replace procedure p1(va in varchar2, vb in varchar2, vc in o1) is
+begin
+raise info 'before auto: %,%', vb,vc;
+insertlog();
+raise info 'after auto: %,%', vb,vc;
+exception
+when others then
+raise notice 'sqlerrm:%',sqlerrm;
+raise;
+end;
+/
+declare
+begin
+pck1.p1();
+p1(150,pck1.va,pck1.vc);
+raise info 'after p1: %,%', pck1.va,pck1.vc;
+end;
+/
+ 
+drop procedure p1;
+drop procedure insertlog;
+drop package pck1;
+drop table testlog;
+drop type o1;
+
 -- clean 
 DROP SCHEMA IF EXISTS pkg_val_1 CASCADE;
 DROP SCHEMA IF EXISTS pkg_val_2 CASCADE;

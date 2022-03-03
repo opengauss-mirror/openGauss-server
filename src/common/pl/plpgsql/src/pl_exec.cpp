@@ -258,7 +258,7 @@ static PLpgSQL_rec* copyPLpgsqlRec(PLpgSQL_rec* src);
 static PLpgSQL_recfield* copyPLpgsqlRecfield(PLpgSQL_recfield* src);
 static List* invalid_depend_func_and_packgae(Oid pkgOid);
 static void ReportCompileConcurrentError(const char* objName, bool isPackage);
-
+static Datum CopyFcinfoArgValue(Oid typOid, Datum value);
 /* ----------
  * plpgsql_check_line_validity	Called by the debugger plugin for
  * validating a given linenumber
@@ -1083,12 +1083,12 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
                     while (argmodes[outArgCnt] == PROARGMODE_OUT) {
                         outArgCnt++;
                     }
-                    var->value = fcinfo->arg[outArgCnt];
+                    var->value = CopyFcinfoArgValue(fcinfo->argTypes[outArgCnt], fcinfo->arg[outArgCnt]);
                     var->isnull = fcinfo->argnull[outArgCnt];
                     var->freeval = false;
                     outArgCnt++;
                 } else {
-                    var->value = fcinfo->arg[i];
+                    var->value = CopyFcinfoArgValue(fcinfo->argTypes[i], fcinfo->arg[i]);
                     var->isnull = fcinfo->argnull[i];
                     var->freeval = false;
                 }
@@ -1467,6 +1467,25 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
      * Return the function's result
      */
     return estate.retval;
+}
+
+static Datum CopyFcinfoArgValue(Oid typOid, Datum value)
+{
+#ifdef ENABLE_MULTIPLE_NODES
+    return value;
+#endif
+    if (!OidIsValid(typOid)) {
+        return value;
+    }
+    /*
+     * For centralized database, package value may be in param.
+     * In this case, the value should be copyed, becaues the ref
+     * value may be influenced by procedure.
+     */
+    bool typByVal = false;
+    int16 typLen;
+    get_typlenbyval(typOid, &typLen, &typByVal);
+    return datumCopy(value, typByVal, typLen);
 }
 
 static void RecordSetGeneratedField(PLpgSQL_rec *recNew)
