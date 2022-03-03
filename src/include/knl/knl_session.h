@@ -1583,10 +1583,12 @@ typedef struct knl_u_plpgsql_context {
     uint64 parent_session_id;
     ThreadId parent_thread_id;
     MemoryContext parent_context; /* parent_context from parent session */
+
     Oid ActiveLobToastOid;
     struct ExceptionContext* cur_exception_cxt;
     bool pragma_autonomous; /* save autonomous flag */
     char* debug_query_string;
+    bool is_insert_gs_source; /* is doing insert gs_source? */
 } knl_u_plpgsql_context;
 
 //this is used to define functions in package

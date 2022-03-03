@@ -1478,3 +1478,66 @@ call pck1.p1(10,20);
 call pck1.p1(10,20);
 
 drop package pck1;
+
+-- anoymous block with autonomous
+create or replace package pck1 as
+type r1 is record(a int, b int);
+va int;
+vb r1;
+vc varchar2(20);
+end pck1;
+/
+
+declare
+begin
+pck1.va := 1;
+pck1.vb := (2,3);
+pck1.vc := 'before auto';
+end;
+/
+
+-- (a) autonomous anoymous block 
+declare
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+pck1.va := 11;
+pck1.vb := (22,33);
+pck1.vc := 'after auto';
+end;
+/
+
+declare
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+pck1.va := 111;
+pck1.vb := (222,333);
+pck1.vc := 'before after auto';
+end;
+/
+
+-- (b) autonomous anoymous block with error
+declare
+PRAGMA AUTONOMOUS_TRANSACTION;
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+pck1.va := 1111;
+pck1.vb := (2222,3333);
+pck1.vc := 'after after auto';
+pck1.va := 3/0;
+end;
+/
+
+declare
+begin
+raise info 'pck1.va: %',pck1.va;
+raise info 'pck1.vb: %',pck1.vb;
+raise info 'pck1.vc: %',pck1.vc;
+end;
+/

@@ -186,6 +186,7 @@ static SessionPackageRuntime* CopySessionPackageRuntime(SessionPackageRuntime *r
     sessPkgRuntime->portalContext = CopyPortalContexts(runtime->portalContext);
     sessPkgRuntime->portalData = CopyPortalDatas(runtime);
     sessPkgRuntime->funcValInfo = CopyFuncInfoDatas(runtime);
+    sessPkgRuntime->is_insert_gs_source = runtime->is_insert_gs_source;
     MemoryContextSwitchTo(oldCtx);
     return sessPkgRuntime;
 }

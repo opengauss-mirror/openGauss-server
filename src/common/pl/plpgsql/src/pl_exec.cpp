@@ -838,9 +838,7 @@ Datum plpgsql_exec_autonm_function(PLpgSQL_function* func,
 #ifndef ENABLE_MULTIPLE_NODES
     uint64 sessionId = IS_THREAD_POOL_WORKER ? u_sess->session_id : t_thrd.proc_cxt.MyProcPid;
     /* add session package values to global for autonm session, to restore package values */
-    if (OidIsValid(func->fn_oid)) {
-        BuildSessionPackageRuntimeForAutoSession(sessionId, u_sess->autonomous_parent_sessionid, &estate, func);
-    }
+    BuildSessionPackageRuntimeForAutoSession(sessionId, u_sess->autonomous_parent_sessionid, &estate, func);
 #endif
 
     /* Statement concatenation. If the block is an anonymous block, the entire anonymous block is returned. */
@@ -1011,8 +1009,7 @@ Datum plpgsql_exec_function(PLpgSQL_function* func, FunctionCallInfo fcinfo, boo
 
 #ifndef ENABLE_MULTIPLE_NODES
     check_debug(func, &estate);
-    bool isExecAutoFunc = OidIsValid(func->fn_oid) &&
-        u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0;
+    bool isExecAutoFunc = u_sess->is_autonomous_session == true && u_sess->SPI_cxt._connected == 0;
     /* when exec autonomous transaction procedure, need update package values by parent session */
     if (isExecAutoFunc) {
         initAutoSessionPkgsValue(u_sess->autonomous_parent_sessionid);

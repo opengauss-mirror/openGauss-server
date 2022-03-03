@@ -219,7 +219,9 @@ static void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* t
     {
         (void)CompileStatusSwtichTo(NONE_STATUS);
         u_sess->plsql_cxt.curr_compile_context = NULL;
+        u_sess->plsql_cxt.is_insert_gs_source = true;
         ExecuteDoStmt(stmt, true);
+        u_sess->plsql_cxt.is_insert_gs_source = false;
     }
     PG_CATCH();
     {
@@ -228,6 +230,7 @@ static void InsertGsSource(Oid objId, Oid nspid, const char* name, const char* t
         }
         (void)CompileStatusSwtichTo(save_compile_status);
         u_sess->plsql_cxt.curr_compile_context = save_compile_context;
+        u_sess->plsql_cxt.is_insert_gs_source = false;
         clearCompileContextList(save_compile_list_length);
         PG_RE_THROW();
     }
@@ -1075,6 +1078,7 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     PG_END_TRY();
     PGSTAT_END_PLSQL_TIME_RECORD(PL_COMPILATION_TIME);
 
+    func->is_insert_gs_source = u_sess->plsql_cxt.is_insert_gs_source;
     /* Mark packages the function use, so them can't be deleted from under us */
     AddPackageUseCount(func);
     /* Mark the function as busy, just pro forma */
@@ -1093,7 +1097,6 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
     fake_fcinfo.flinfo = &flinfo;
     flinfo.fn_oid = InvalidOid;
     flinfo.fn_mcxt = CurrentMemoryContext;
-
     PGSTAT_START_PLSQL_TIME_RECORD();
     /* save flag for nest plpgsql compile */
     save_compile_context = u_sess->plsql_cxt.curr_compile_context;

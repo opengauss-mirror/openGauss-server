@@ -752,6 +752,7 @@ static PLpgSQL_function* do_compile(FunctionCallInfo fcinfo, HeapTuple proc_tup,
     func->resolve_option = GetResolveOption();
     func->invalItems = NIL;
     func->is_autonomous = false;
+    func->is_insert_gs_source = false;
 
     func->pkg_oid = pkgoid;
     func->fn_searchpath->addCatalog = true;
@@ -1420,6 +1421,7 @@ PLpgSQL_function* plpgsql_compile_inline(char* proc_source)
     func->fn_retbyval = true;
     func->fn_rettyplen = sizeof(int32);
     func->is_autonomous = false;
+    func->is_insert_gs_source = false;
     getTypeInputInfo(VOIDOID, &typinput, &func->fn_rettypioparam);
     fmgr_info(typinput, &(func->fn_retinput));
 

@@ -1053,6 +1053,7 @@ typedef struct PLpgSQL_function { /* Complete compiled function	  */
 
     bool is_autonomous;
     bool is_plpgsql_func_with_outparam;
+    bool is_insert_gs_source;
 } PLpgSQL_function;
 
 class AutonomousSession;

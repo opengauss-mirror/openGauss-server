@@ -842,6 +842,7 @@ static void knl_u_plpgsql_init(knl_u_plpgsql_context* plsql_cxt)
     plsql_cxt->cur_exception_cxt = NULL;
     plsql_cxt->pragma_autonomous = false;
     plsql_cxt->ActiveLobToastOid = InvalidOid;
+    plsql_cxt->is_insert_gs_source = false;
 }
 
 static void knl_u_stat_init(knl_u_stat_context* stat_cxt)
