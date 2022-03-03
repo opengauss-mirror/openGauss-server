@@ -424,6 +424,10 @@ create view v_test as select * from test;
 CREATE OR REPLACE RULE v_delete as ON DELETE TO v_test DO INSTEAD NOTHING;
 delete from v_test;
 
+set explain_perf_mode=pretty;
+explain delete from v_test;
+reset explain_perf_mode;
+
 drop table test cascade;
 
 -- end
