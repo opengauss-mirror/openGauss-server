@@ -1017,7 +1017,7 @@ static void RequestXLogFromStream()
 
 static void barrier_redo_pause(char* barrierId)
 {
-    if (!is_barrier_pausable(barrierId)) {
+    if (!is_barrier_pausable(barrierId) || t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME_OBS) {
         return;
     }
     volatile WalRcvData *walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
@@ -1035,7 +1035,7 @@ static void barrier_redo_pause(char* barrierId)
             SpinLockRelease(&walrcv->mutex);
             pg_usleep(1000L);
             RedoInterruptCallBack();
-            if(IS_OBS_DISASTER_RECOVER_MODE) {
+            if (IS_OBS_DISASTER_RECOVER_MODE) {
                 update_recovery_barrier();
             } else if (IS_DISASTER_RECOVER_MODE) {
                 RequestXLogFromStream();
