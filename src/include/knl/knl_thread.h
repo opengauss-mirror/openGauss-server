@@ -1228,7 +1228,7 @@ typedef struct knl_t_audit_context {
     FILE *policyauditFile;
     Latch sysAuditorLatch;
     time_t last_pgaudit_start_time;
-    struct AuditIndexTable* audit_indextbl;
+    struct AuditIndexTableNew* audit_indextbl;
     char pgaudit_filepath[MAXPGPATH];
 
     int cur_thread_idx;
