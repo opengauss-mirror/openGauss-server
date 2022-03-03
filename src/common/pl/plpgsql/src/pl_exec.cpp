@@ -5916,6 +5916,9 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
     bool savedisAllowCommitRollback = false;
     bool needResetErrMsg = false;
     needResetErrMsg = stp_disable_xact_and_set_err_msg(&savedisAllowCommitRollback, STP_XACT_USED_AS_EXPR);
+#else
+    /* Saves the status of whether to send commandId. */
+    bool saveSetSendCommandId = IsSendCommandId();
 #endif
     /*
      * First we evaluate the string expression after the EXECUTE keyword. Its
@@ -6010,6 +6013,8 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
             FormatCallStack* plcallstack = t_thrd.log_cxt.call_stack;
 #ifndef ENABLE_MULTIPLE_NODES
             estate_cursor_set(plcallstack);
+#else
+            SetSendCommandId(saveSetSendCommandId);
 #endif
             if (plcallstack != NULL) {
                 t_thrd.log_cxt.call_stack = plcallstack->prev;
@@ -6019,6 +6024,10 @@ static int exec_stmt_dynexecute(PLpgSQL_execstate* estate, PLpgSQL_stmt_dynexecu
             PG_RE_THROW();
         }
         PG_END_TRY();
+
+#ifdef ENABLE_MULTIPLE_NODES
+        SetSendCommandId(saveSetSendCommandId);
+#endif
 
         /*
          * This is used for nested STP. If the transaction Id changed,
@@ -6501,7 +6510,10 @@ static int exec_stmt_open(PLpgSQL_execstate* estate, PLpgSQL_stmt_open* stmt)
                     errmsg("cursor \"%s\" already in use in OPEN statement.", curname)));
         }
     }
-
+#ifdef ENABLE_MULTIPLE_NODES
+    /* In distributed mode, the commandId is sent when a cursor is opened. */
+    SetSendCommandId(true);
+#endif
     /* ----------
      * Process the OPEN according to it's type.
      * ----------

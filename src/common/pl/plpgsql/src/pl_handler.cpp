@@ -748,6 +748,8 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         u_sess->opt_cxt.is_stream = true;
         u_sess->opt_cxt.is_stream_support = true;
     }
+    /* Saves the status of whether to send commandId. */
+    bool saveSetSendCommandId = IsSendCommandId();
 #else
     int outerDop = u_sess->opt_cxt.query_dop;
     u_sess->opt_cxt.query_dop = 1;
@@ -824,6 +826,7 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         PLpgSQL_compile_context* save_compile_context = u_sess->plsql_cxt.curr_compile_context;
         int save_compile_list_length = list_length(u_sess->plsql_cxt.compile_context_list);
         int save_compile_status = u_sess->plsql_cxt.compile_status;
+
         PG_TRY();
         {
             /*
@@ -876,7 +879,6 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
             estate_cursor_set(plcallstack);
 
 #endif
-
             if (plcallstack != NULL) {
                 t_thrd.log_cxt.call_stack = plcallstack->prev;
             }
@@ -973,7 +975,9 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
         if (u_sess->SPI_cxt._connected == 0) {
             t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
         }
-
+#ifdef ENABLE_MULTIPLE_NODES
+        SetSendCommandId(saveSetSendCommandId);
+#endif
         /* ErrorData could be allocted in SPI's MemoryContext, copy it. */
         oldContext = MemoryContextSwitchTo(oldContext);
         ErrorData *edata = CopyErrorData();
@@ -995,6 +999,10 @@ Datum plpgsql_call_handler(PG_FUNCTION_ARGS)
     if (u_sess->SPI_cxt._connected == 0) {
         t_thrd.utils_cxt.STPSavedResourceOwner = NULL;
     }
+#ifdef ENABLE_MULTIPLE_NODES
+    SetSendCommandId(saveSetSendCommandId);
+#endif
+
     /*
      * Disconnect from SPI manager
      */
@@ -1042,7 +1050,11 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
 #ifndef ENABLE_MULTIPLE_NODES
     int outerDop = u_sess->opt_cxt.query_dop;
     u_sess->opt_cxt.query_dop = 1;
+#else
+    /* Saves the status of whether to send commandId. */
+    bool saveSetSendCommandId = IsSendCommandId();
 #endif
+
 
     _PG_init();
 
@@ -1138,10 +1150,17 @@ Datum plpgsql_inline_handler(PG_FUNCTION_ARGS)
         clearCompileContextList(save_compile_list_length);
         /* AutonomousSession Disconnecting and releasing resources */
         DestoryAutonomousSession(true);
+#ifdef ENABLE_MULTIPLE_NODES
+        SetSendCommandId(saveSetSendCommandId);
+#endif
 
         PG_RE_THROW();
     }
     PG_END_TRY();
+
+#ifdef ENABLE_MULTIPLE_NODES
+    SetSendCommandId(saveSetSendCommandId);
+#endif
 
     /* Disconnecting and releasing resources */
     DestoryAutonomousSession(false);
