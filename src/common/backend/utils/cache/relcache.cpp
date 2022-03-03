@@ -2456,7 +2456,7 @@ void RelationInitPhysicalAddr(Relation relation)
          * tables and on user tables declared as additional catalog
          * tables.
          */
-        if (HistoricSnapshotActive() && RelationIsAccessibleInLogicalDecoding(relation) && IsTransactionState()) {
+        if (HistoricSnapshotActive() && RelationIsAccessibleInLogicalDecoding(relation)) {
             HeapTuple phys_tuple;
             Form_pg_class physrel;
 
