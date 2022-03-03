@@ -7433,6 +7433,10 @@ void TruncateAndRemoveXLogForRoachRestore(XLogReaderState *record)
         XLogRecPtrIsValid(t_thrd.shemem_ptr_cxt.ControlFile->backupStartPoint)) {
         ereport(FATAL, (errmsg("truncate xlog LSN is before consistent recovery point")));
     }
+
+    /* wal receiver and wal receiver writer must be stopped before we truncate xlog */
+    ShutdownWalRcv();
+
     uint32 xlogOff;
     XLogSegNo xlogsegno;
     char xlogFileName[1024] = {0};
