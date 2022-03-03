@@ -57,12 +57,13 @@ void GetCsnBarrierName(char* barrierRet, bool isSwitchoverBarrier)
     struct timeval tv;
     int rc;
     CommitSeqNo csn;
-    
-    gettimeofday(&tv, NULL);
+
     if (GTM_MODE)
         csn = GetCSNGTM();
     else
         csn = CommitCSNGTM(false);
+
+    gettimeofday(&tv, NULL);
 
     if (isSwitchoverBarrier) {
         rc = snprintf_s(barrierRet, BARRIER_NAME_LEN, BARRIER_NAME_LEN - 1, CSN_SWITCHOVER_BARRIER_PATTREN_STR, csn);
