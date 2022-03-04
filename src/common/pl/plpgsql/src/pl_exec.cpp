@@ -9438,7 +9438,7 @@ static Datum exec_eval_expr(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, bool*
 static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long maxtuples,
                            Portal* portalP, bool isCollectParam)
 {
-    ParamListInfo paramLI;
+    ParamListInfo paramLI = NULL;
     int rc;
 
     /*
@@ -9453,8 +9453,12 @@ static int exec_run_select(PLpgSQL_execstate* estate, PLpgSQL_expr* expr, long m
 
     /*
      * Set up ParamListInfo (hook function and possibly data values)
+     * For validation estate->datums should be NULL, since there is
+     * no parameter set vo validation
      */
-    paramLI = setup_param_list(estate, expr);
+    if (estate->datums) {
+        paramLI = setup_param_list(estate, expr);
+    }
 
     /*
      * If a portal was requested, put the query into the portal
