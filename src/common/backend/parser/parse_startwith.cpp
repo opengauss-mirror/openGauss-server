@@ -1091,10 +1091,12 @@ static void transformStartWithClause(StartWithTransformContext *context, SelectS
         raw_expression_tree_walker((Node*)context->connectByExpr,
             (bool (*)())pseudo_level_rownum_walker, (Node*)context->connectByExpr);
         checkConnectByExprValidity((Node*)connectByExpr);
+        StartWithWalker(context, connectByExpr);
         context->relInfoList = context->pstate->p_start_info;
-        context->connect_by_type = CONNECT_BY_LEVEL;
-        context->connectByLevelExpr = connectByExpr;
-        context->connectByOtherExpr = NULL;
+        if (context->connect_by_type != CONNECT_BY_PRIOR) {
+            context->connectByLevelExpr = connectByExpr;
+            context->connectByOtherExpr = NULL;
+        }
     }
 
     /* transform start with ... connect by's expr */
