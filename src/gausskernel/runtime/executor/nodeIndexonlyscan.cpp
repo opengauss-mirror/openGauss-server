@@ -138,7 +138,7 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     slot = node->ss.ss_ScanTupleSlot;
     isUHeap = RelationIsUstoreFormat(node->ss.ss_currentRelation);
     tmpslot = MakeSingleTupleTableSlot(RelationGetDescr(scandesc->heapRelation),
-        false, scandesc->indexRelation->rd_tam_type);
+        false, scandesc->heapRelation->rd_tam_type);
 
     /*
      * OK, now that we have what we need, fetch the next tuple.
