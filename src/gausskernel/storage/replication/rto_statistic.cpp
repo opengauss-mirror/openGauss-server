@@ -183,6 +183,7 @@ HadrRTOAndRPOData *HadrGetRTOStat(uint32 *num)
     for (i = 0; i < g_instance.attr.attr_storage.max_wal_senders; i++) {
         /* use volatile pointer to prevent code rearrangement */
         volatile WalSnd *walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
+        SpinLockAcquire(&walsnd->mutex);
         if (walsnd->pid != 0 && ((strstr(g_instance.rto_cxt.rto_standby_data[i].id, "hadr_") != NULL) ||
             (strstr(g_instance.rto_cxt.rto_standby_data[i].id, "hass") != NULL))) {
             char *standby_names = (char *)(result[readWalSnd].id);
@@ -219,6 +220,7 @@ HadrRTOAndRPOData *HadrGetRTOStat(uint32 *num)
             result[readWalSnd].target_rpo = u_sess->attr.attr_storage.hadr_recovery_point_target;
             readWalSnd++;
         }
+        SpinLockRelease(&walsnd->mutex);
     }
 
     *num = readWalSnd;
