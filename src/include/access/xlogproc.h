@@ -916,6 +916,7 @@ void HeapXlogCleanOperatorPage(
     RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen, Size* freespace, bool repairFragmentation);
 void HeapXlogFreezeOperatorPage(RedoBufferInfo* buffer, void* recorddata, void* blkdata, Size datalen,
     bool isTupleLockUpgrade);
+void HeapXlogInvalidOperatorPage(RedoBufferInfo* buffer, void* blkdata, Size datalen);
 void HeapXlogVisibleOperatorPage(RedoBufferInfo* buffer, void* recorddata);
 void HeapXlogVisibleOperatorVmpage(RedoBufferInfo* vmbuffer, void* recorddata);
 void HeapXlogDeleteOperatorPage(RedoBufferInfo* buffer, void* recorddata, TransactionId recordxid,

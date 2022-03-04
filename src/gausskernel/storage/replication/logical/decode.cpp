@@ -745,6 +745,8 @@ static void DecodeHeap3Op(LogicalDecodingContext *ctx, XLogRecordBuffer *buf)
             SnapBuildProcessNewCid(builder, xid, buf->origptr, xlrec, bucket_id);
             break;
         }
+        case XLOG_HEAP3_INVALID:
+            break;
         case XLOG_HEAP3_REWRITE:
             break;
         default:

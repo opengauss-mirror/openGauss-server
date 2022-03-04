@@ -1920,6 +1920,15 @@ double CopyUHeapDataInternal(Relation oldHeap, Relation oldIndex, Relation newHe
     return tups_vacuumed;
 }
 
+static inline bool tuple_invisible_not_hotupdate(HeapTuple tuple, Relation relation)
+{
+    if (HeapKeepInvisibleTuple(tuple, RelationGetDescr(relation)) && !HeapTupleIsHotUpdated(tuple)) {
+        return false;
+    } else {
+        return true;
+    }
+}
+
 double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation NewHeap, TransactionId OldestXmin,
     TransactionId FreezeXid, bool verbose, bool use_sort, AdaptMem* memUsage)
 {
@@ -2071,7 +2080,7 @@ double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relation New
         switch (HeapTupleSatisfiesVacuum(tuple, OldestXmin, buf)) {
             case HEAPTUPLE_DEAD:
                 /* Definitely dead */
-                isdead = true;
+                isdead = tuple_invisible_not_hotupdate(tuple, OldHeap);
                 break;
             case HEAPTUPLE_RECENTLY_DEAD:
                 tups_recently_dead += 1;

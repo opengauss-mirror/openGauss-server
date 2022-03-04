@@ -59,7 +59,7 @@ bool open_join_children = true;
 bool will_shutdown = false;
 
 /* hard-wired binary version number */
-const uint32 GRAND_VERSION_NUM = 92604;
+const uint32 GRAND_VERSION_NUM = 92605;
 
 const uint32 PREDPUSH_SAME_LEVEL_VERSION_NUM = 92522;
 const uint32 UPSERT_WHERE_VERSION_NUM = 92514;
@@ -113,6 +113,8 @@ const uint32 SUPPORT_HASH_XLOG_VERSION_NUM = 92603;
 
 /* This variable indicates wheather the instance is in progress of upgrade as a whole */
 uint32 volatile WorkingGrandVersionNum = GRAND_VERSION_NUM;
+
+const uint32 INVALID_INVISIBLE_TUPLE_VERSION = 92605;
 
 const uint32 ENHANCED_TUPLE_LOCK_VERSION_NUM = 92583;
 

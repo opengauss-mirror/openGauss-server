@@ -3454,6 +3454,34 @@ static void HeapPageShiftBase(Buffer buffer, Page page, bool multi, int64 delta)
     }
 }
 
+void heap_invalid_invisible_tuple(HeapTuple tuple)
+{
+    HeapTupleSetXmin(tuple, InvalidTransactionId);
+    HeapTupleSetXmax(tuple, InvalidTransactionId);
+    tuple->t_data->t_infomask &= ~HEAP_XMAX_BITS;
+    tuple->t_data->t_infomask &= ~HEAP_XMIN_COMMITTED;
+    tuple->t_data->t_infomask |= HEAP_XMIN_INVALID;
+
+    Assert(!HeapTupleIsHotUpdated(tuple));
+
+    ereport(LOG, (errmsg("Dead and invisible tuple: t_ctid = { ip_blkid = { bi_hi = %hu, bi_lo = %hu }, "
+        "ip_posid = %hu }, t_xmin = %u, xmax = %u, infomask = %hu",
+        tuple->t_data->t_ctid.ip_blkid.bi_hi,
+        tuple->t_data->t_ctid.ip_blkid.bi_lo,
+        tuple->t_data->t_ctid.ip_posid,
+        tuple->t_data->t_choice.t_heap.t_xmin,
+        tuple->t_data->t_choice.t_heap.t_xmin,
+        tuple->t_data->t_infomask)));
+}
+
+static inline bool heap_check_invalid_invisible_tuple(HeapTuple tuple, TupleDesc tupleDesc,
+    TransactionId cutoff_xid, Buffer buffer)
+{
+    return (t_thrd.proc->workingVersionNum >= INVALID_INVISIBLE_TUPLE_VERSION)
+        && !HeapTupleIsHotUpdated(tuple) && HeapKeepInvisibleTuple(tuple, tupleDesc)
+        && (HeapTupleSatisfiesVacuum(tuple, cutoff_xid, buffer) == HEAPTUPLE_DEAD);
+}
+
 /*
  * Freeze xids in the single heap page. Useful when we can't fit new xid even
  * with base shift.
@@ -3466,7 +3494,9 @@ static int freeze_single_heap_page(Relation relation, Buffer buffer)
     OffsetNumber maxoff = InvalidOffsetNumber;
     HeapTupleData tuple;
     int nfrozen = 0;
+    int ninvalid = 0;
     OffsetNumber frozen[MaxOffsetNumber];
+    OffsetNumber invalid[MaxOffsetNumber];
     TransactionId latest_removed_xid = InvalidTransactionId;
     TransactionId oldest_xmin = InvalidTransactionId;
     TransactionId freeze_xid = InvalidTransactionId;
@@ -3534,13 +3564,18 @@ static int freeze_single_heap_page(Relation relation, Buffer buffer)
         tuple.t_len = ItemIdGetLength(itemid);
         tuple.t_tableOid = RelationGetRelid(relation);
         tuple.t_bucketId = RelationGetBktid(relation);
+        ItemPointerSet(&(tuple.t_self), BufferGetBlockNumber(buffer), offnum);
         HeapTupleCopyBaseFromPage(&tuple, page);
 
         /*
          * Each non-removable tuple must be checked to see if it needs
          * freezing.  Note we already have exclusive buffer lock.
          */
-        if (heap_freeze_tuple(&tuple, freeze_xid, freeze_mxid, &changedMultiXid)) {
+        if (heap_check_invalid_invisible_tuple(&tuple, RelationGetDescr(relation), freeze_xid, buffer)) {
+            heap_invalid_invisible_tuple(&tuple);
+            Assert(tuple.t_tableOid == PartitionRelationId);
+            invalid[ninvalid++] = offnum;
+        } else if (heap_freeze_tuple(&tuple, freeze_xid, freeze_mxid, &changedMultiXid)) {
             frozen[nfrozen++] = offnum;
         }
     } /* scan along page */
@@ -3559,6 +3594,20 @@ static int freeze_single_heap_page(Relation relation, Buffer buffer)
             XLogRecPtr recptr = log_heap_freeze(relation, buffer, freeze_xid,
                                                 changedMultiXid ? freeze_mxid : InvalidMultiXactId,
                                                 frozen, nfrozen);
+            PageSetLSN(page, recptr);
+        }
+
+        END_CRIT_SECTION();
+    }
+
+    if (ninvalid > 0) {
+        START_CRIT_SECTION();
+
+        MarkBufferDirty(buffer);
+        /* Now WAL-log freezing if necessary */
+        if (RelationNeedsWAL(relation)) {
+            XLogRecPtr recptr = log_heap_invalid(relation, buffer, freeze_xid,
+                                                 invalid, ninvalid);
             PageSetLSN(page, recptr);
         }
 
@@ -7976,7 +8025,7 @@ XLogRecPtr log_heap_freeze(Relation reln, Buffer buffer, TransactionId cutoff_xi
     OffsetNumber* offsets, int offcnt)
 {
     xl_heap_freeze xlrec;
-    XLogRecPtr recptr;
+    XLogRecPtr recptr = InvalidXLogRecPtr;
     bool useOldXlog = t_thrd.proc->workingVersionNum < ENHANCED_TUPLE_LOCK_VERSION_NUM ||
                       !MultiXactIdIsValid(cutoff_multi);
 #ifdef ENABLE_MULTIPLE_NODES
@@ -8002,7 +8051,41 @@ XLogRecPtr log_heap_freeze(Relation reln, Buffer buffer, TransactionId cutoff_xi
     XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
     XLogRegisterBufData(0, (char*)offsets, offcnt * sizeof(OffsetNumber));
 
-    recptr = XLogInsert(RM_HEAP2_ID, useOldXlog ? XLOG_HEAP2_FREEZE : XLOG_HEAP2_FREEZE | XLOG_TUPLE_LOCK_UPGRADE_FLAG);
+    recptr = XLogInsert(RM_HEAP2_ID,
+                        useOldXlog ? XLOG_HEAP2_FREEZE : XLOG_HEAP2_FREEZE | XLOG_TUPLE_LOCK_UPGRADE_FLAG);
+
+    return recptr;
+}
+
+/*
+ * Perform XLogInsert for a heap-invalid operation.	Caller must already
+ * have modified the buffer and marked it dirty.
+ */
+XLogRecPtr log_heap_invalid(Relation reln, Buffer buffer, TransactionId cutoff_xid, OffsetNumber* offsets,
+    int offcnt)
+{
+    xl_heap_invalid xlrecInvalid;
+    XLogRecPtr recptr = InvalidXLogRecPtr;
+
+    /* Caller should not call me on a non-WAL-logged relation */
+    Assert(RelationNeedsWAL(reln));
+    /* nor when there are no tuples to invalid */
+    Assert(offcnt > 0);
+
+    xlrecInvalid.cutoff_xid = cutoff_xid;
+
+    XLogBeginInsert();
+    XLogRegisterData((char*)&xlrecInvalid, SizeOfHeapInvalid);
+
+    /*
+     * The tuple-offsets array is not actually in the buffer, but pretend that
+     * it is.  When XLogInsert stores the whole buffer, the offsets array need
+     * not be stored too.
+     */
+    XLogRegisterBuffer(0, buffer, REGBUF_STANDARD);
+    XLogRegisterBufData(0, (char*)offsets, offcnt * sizeof(OffsetNumber));
+
+    recptr = XLogInsert(RM_HEAP3_ID, XLOG_HEAP3_INVALID);
 
     return recptr;
 }
@@ -8665,6 +8748,37 @@ static void heap_xlog_freeze(XLogReaderState* record)
     }
 }
 
+static void heap_xlog_invalid(XLogReaderState* record)
+{
+    xl_heap_invalid* xlrecInvalid = (xl_heap_invalid*)XLogRecGetData(record);
+    TransactionId cutoff_xid = xlrecInvalid->cutoff_xid;
+    RedoBufferInfo buffer;
+
+    /*
+     * In Hot Standby mode, ensure that there's no queries running which still
+     * consider the frozen xids as running.
+     */
+    if (InHotStandby && g_supportHotStandby) {
+        RelFileNode rnode;
+
+        (void)XLogRecGetBlockTag(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &rnode, NULL, NULL);
+        XLogRecPtr lsn = record->EndRecPtr;
+        ResolveRecoveryConflictWithSnapshot(cutoff_xid, rnode, lsn);
+    }
+
+    if (XLogReadBufferForRedo(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &buffer) == BLK_NEEDS_REDO) {
+        Size blkdatalen;
+        char* blkdata = XLogRecGetBlockData(record, HEAP_FREEZE_ORIG_BLOCK_NUM, &blkdatalen);
+
+        HeapXlogInvalidOperatorPage(&buffer, (void*)blkdata, blkdatalen);
+        MarkBufferDirty(buffer.buf);
+
+    }
+    if (BufferIsValid(buffer.buf)) {
+        UnlockReleaseBuffer(buffer.buf);
+    }
+}
+
 /*
  * Replay XLOG_HEAP2_VISIBLE record.
  * The critical integrity requirement here is that we must never end up with
@@ -9288,6 +9402,9 @@ void heap3_redo(XLogReaderState* record)
         case XLOG_HEAP3_NEW_CID:
             break;
         case XLOG_HEAP3_REWRITE:
+            break;
+        case XLOG_HEAP3_INVALID:
+            heap_xlog_invalid(record);
             break;
         default:
             ereport(PANIC, (errmsg("heap3_redo: unknown op code %hhu", info)));

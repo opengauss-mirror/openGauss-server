@@ -290,6 +290,8 @@ extern TableScanDesc heap_beginscan_sampling(Relation relation, Snapshot snapsho
 
 extern void heapgetpage(TableScanDesc scan, BlockNumber page);
 
+extern void heap_invalid_invisible_tuple(HeapTuple tuple);
+
 extern void heap_rescan(TableScanDesc sscan, ScanKey key);
 extern void heap_endscan(TableScanDesc scan);
 extern HeapTuple heap_getnext(TableScanDesc scan, ScanDirection direction);
@@ -367,8 +369,10 @@ extern XLogRecPtr log_heap_cleanup_info(const RelFileNode* rnode, TransactionId 
 extern XLogRecPtr log_heap_clean(Relation reln, Buffer buffer, OffsetNumber* redirected, int nredirected,
     OffsetNumber* nowdead, int ndead, OffsetNumber* nowunused, int nunused, TransactionId latestRemovedXid,
     bool repair_fragmentation);
-extern XLogRecPtr log_heap_freeze(
-    Relation reln, Buffer buffer, TransactionId cutoff_xid, MultiXactId cutoff_multi, OffsetNumber* offsets, int offcnt);
+extern XLogRecPtr log_heap_freeze(Relation reln, Buffer buffer, TransactionId cutoff_xid, MultiXactId cutoff_multi,
+    OffsetNumber* offsets, int offcnt);
+extern XLogRecPtr log_heap_invalid(Relation reln, Buffer buffer, TransactionId cutoff_xid, OffsetNumber* offsets,
+    int offcnt);
 extern XLogRecPtr log_heap_visible(RelFileNode rnode, BlockNumber block, Buffer heap_buffer, Buffer vm_buffer,
     TransactionId cutoff_xid, bool free_dict);
 extern XLogRecPtr log_cu_bcm(const RelFileNode* rnode, int col, uint64 block, int status, int count);

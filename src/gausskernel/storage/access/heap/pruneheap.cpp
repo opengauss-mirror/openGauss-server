@@ -344,6 +344,7 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
     HeapTupleData tup;
     tup.t_tableOid = RelationGetRelid(relation);
     tup.t_bucketId = RelationGetBktid(relation);
+    bool keepInvisible = false;
 
     gstrace_entry(GS_TRC_ID_heap_prune_chain);
 
@@ -389,7 +390,7 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
             if (HeapTupleSatisfiesVacuum(&tup, oldest_xmin, buffer) == HEAPTUPLE_DEAD &&
                 !HeapTupleHeaderIsHotUpdated(htup)) {
 
-                if (HeapKeepInvisbleTuple(&tup, RelationGetDescr(relation))) {
+                if (HeapKeepInvisibleTuple(&tup, RelationGetDescr(relation))) {
                     return ndeleted;
                 }
 
@@ -485,9 +486,8 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
         }
         switch (HeapTupleSatisfiesVacuum(&tup, oldest_xmin, buffer)) {
             case HEAPTUPLE_DEAD:
-                if (!HeapKeepInvisbleTuple(&tup, RelationGetDescr(relation))) {
-                    tupdead = true;
-                }
+                keepInvisible = HeapKeepInvisibleTuple(&tup, RelationGetDescr(relation));
+                tupdead = true;
                 break;
 
             case HEAPTUPLE_RECENTLY_DEAD:
@@ -557,6 +557,11 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
         prior_xmax = HeapTupleGetUpdateXid(&tup);
     }
 
+    /* There is only one dead tuple that needs to be retained and no processing is performed */
+    if (keepInvisible && (nchain == 1)) {
+        latestdead = InvalidOffsetNumber;
+    }
+
     /*
      * If we found a DEAD tuple in the chain, adjust the HOT chain so that all
      * the DEAD tuples at the start of the chain are removed and the root line
@@ -571,6 +576,10 @@ static int heap_prune_chain(Relation relation, Buffer buffer, OffsetNumber rooto
          * right candidate for redirection.
          */
         for (i = 1; (i < nchain) && (chainitems[i - 1] != latestdead); i++) {
+            // The entire chain is dead, but need to keep invisble tuple
+            if (keepInvisible && (i == nchain - 1)) {
+                break;
+            }
             heap_prune_record_unused(prstate, chainitems[i]);
             ndeleted++;
         }

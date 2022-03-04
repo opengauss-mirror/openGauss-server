@@ -748,6 +748,7 @@ inline HeapTuple heaptup_alloc(Size size)
 /* XLOG_HEAP_NEW_CID with 0x30 in heap is XLOGHEAP2_NEW_CID with 0x70 in heap2 in PG9.4 */
 #define XLOG_HEAP3_NEW_CID 0x00
 #define XLOG_HEAP3_REWRITE 0x10
+#define XLOG_HEAP3_INVALID 0x20
 
 /* we used to put all xl_heap_* together, which made us run out of opcodes (quickly)
  * when trying to add a DELETE_IS_SUPER operation. Thus we split the codes carefully
@@ -979,6 +980,12 @@ typedef struct xl_heap_freeze {
 
 #define SizeOfOldHeapFreeze (offsetof(xl_heap_freeze, cutoff_xid) + sizeof(TransactionId))
 #define SizeOfHeapFreeze (offsetof(xl_heap_freeze, cutoff_multi) + sizeof(MultiXactId))
+
+typedef struct xl_heap_invalid {
+    TransactionId cutoff_xid;
+    /* TUPLE OFFSET NUMBERS FOLLOW AT THE END */
+} xl_heap_invalid;
+#define SizeOfHeapInvalid (offsetof(xl_heap_invalid, cutoff_xid) + sizeof(TransactionId))
 
 typedef struct xl_heap_freeze_tuple {
     TransactionId xmax;
@@ -1212,7 +1219,7 @@ typedef struct KeepInvisbleOpt {
     KeepInvisbleTupleFunc checkKeepFunc;
 } KeepInvisbleOpt;
 
-bool HeapKeepInvisbleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc = NULL);
+bool HeapKeepInvisibleTuple(HeapTuple tuple, TupleDesc tupleDesc, KeepInvisbleTupleFunc checkKeepFunc = NULL);
 void HeapCopyTupleNoAlloc(HeapTuple dest, HeapTuple src);
 
 // for ut test
