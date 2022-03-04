@@ -356,7 +356,8 @@ static UndoRecPtr PrepareAndInsertUndoRecordForDeleteRedo(XLogReaderState *recor
      * If the WAL stream contains undo tuple, then replace it with the
      * explicitly stored tuple.
      */
-    Size datalen = recordlen - SizeOfXLUndoHeader - SizeOfUHeapDelete - undoMetaSize - SizeOfUHeapHeader - readSize;
+    Size datalen = recordlen - SizeOfXLUndoHeader - SizeOfUHeapDelete - undoMetaSize - SizeOfUHeapHeader -
+        readSize - (hasCSN ? sizeof(CommitSeqNo) : 0);
     char *data = (char *)xlrec + SizeOfUHeapDelete + SizeOfXLUndoHeader + undoMetaSize + readSize;
 
     utup->disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf, false);
@@ -856,8 +857,8 @@ static UndoRecPtr PrepareAndInsertUndoRecordForUpdateRedo(XLogReaderState *recor
         }
 
         char *data = (char *)curxlogptr;
-        Size datalen = recordlen - SizeOfUHeapHeader - SizeOfXLUndoHeader - SizeOfUHeapUpdate - 
-            undoMetaSize - SizeOfXLUndoHeader - initPageXtraInfo - readSize;
+        Size datalen = recordlen - SizeOfUHeapHeader - SizeOfXLUndoHeader - SizeOfUHeapUpdate -
+            undoMetaSize - SizeOfXLUndoHeader - initPageXtraInfo - readSize - (hasCSN ? sizeof(CommitSeqNo) : 0);
 
         oldtup->disk_tuple = GetUHeapDiskTupleFromRedoData(data, &datalen, tbuf, false);
         oldtup->disk_tuple_size = datalen;
