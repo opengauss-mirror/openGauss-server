@@ -5967,12 +5967,11 @@ int ExecCleanTargetListLength(List* targetlist)
     return len;
 }
 
-HeapTuple get_tuple(Relation relation, ItemPointer tid, bool update_check)
+static HeapTuple get_tuple(Relation relation, ItemPointer tid)
 {
     Buffer user_buf = InvalidBuffer;
     HeapTuple tuple = NULL;
     HeapTuple new_tuple = NULL;
-    TM_Result result;
 
     /* alloc mem for old tuple and set tuple id */
     tuple = (HeapTupleData *)heaptup_alloc(BLCKSZ);
@@ -5981,11 +5980,6 @@ HeapTuple get_tuple(Relation relation, ItemPointer tid, bool update_check)
     tuple->t_self = *tid;
     
     if (heap_fetch(relation, SnapshotAny, tuple, &user_buf, false, NULL)) {
-        result = update_check ? HeapTupleSatisfiesUpdate(tuple, GetCurrentCommandId(true), user_buf, false) : TM_Ok;
-        if (result != TM_Ok) {
-            ereport(ERROR, (errcode(ERRCODE_SYSTEM_ERROR), errmsg("Failed to get tuple")));
-        }
-
         new_tuple = heapCopyTuple((HeapTuple)tuple, relation->rd_att, NULL);
         ReleaseBuffer(user_buf);
     } else {
@@ -6013,7 +6007,7 @@ Datum fetch_lob_value_from_tuple(varatt_lob_pointer* lob_pointer, Oid update_oid
     tuple_ctid.ip_blkid.bi_lo = lob_pointer->bi_lo;
     tuple_ctid.ip_posid = lob_pointer->ip_posid;
     Relation relation = heap_open(lob_pointer->relid, RowExclusiveLock);
-    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid, false);
+    HeapTuple origin_tuple = get_tuple(relation, &tuple_ctid);
     if (!HeapTupleIsValid(origin_tuple)) {
         ereport(ERROR,
             (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
