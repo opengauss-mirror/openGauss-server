@@ -425,6 +425,7 @@ static void pgarch_MainLoop(void)
                 XLogRecPtr replayPtr;
                 bool got_recptr = false;
                 bool amSync = false;
+                int retryTimes = 3;
                 /* FlushPtr <= ConsensusPtr on DCF mode */
                 if (IS_PGXC_COORDINATOR || g_instance.attr.attr_storage.dcf_attr.enable_dcf) {
                     flushPtr = GetFlushRecPtr();
@@ -441,8 +442,16 @@ static void pgarch_MainLoop(void)
                             "and init last lsn is %08X%08X", (uint32)(t_thrd.arch.pitr_task_last_lsn >> 32),
                             (uint32)t_thrd.arch.pitr_task_last_lsn)));
                     }
-                    got_recptr = SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
-                    if (got_recptr != true) {
+                    while (retryTimes--) {
+                        got_recptr =
+                            SyncRepGetSyncRecPtr(&receivePtr, &writePtr, &flushPtr, &replayPtr, &amSync, false);
+                        if (got_recptr == true) {
+                            break;
+                        } else {
+                            pg_usleep(1000000L);
+                        }
+                    }
+                    if (got_recptr == false) {
                         ereport(ERROR,
                             (errmsg("pgarch_ArchiverObsCopyLoop failed when call SyncRepGetSyncRecPtr")));
                     }

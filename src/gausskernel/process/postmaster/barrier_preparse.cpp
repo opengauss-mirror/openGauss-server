@@ -261,7 +261,8 @@ void BarrierPreParseMain(void)
         startLSN = XLogFindNextRecord(xlogreader, startLSN);
         if (XLogRecPtrIsInvalid(startLSN)) {
             startLSN = preStartLSN;
-            if (!XLByteEQ(walrcv->receiver_flush_location, startLSN)) {
+            if (!XLByteEQ(walrcv->receiver_flush_location, startLSN) &&
+                !XLByteEQ(walrcv->lastRecoveredBarrierLSN, startLSN)) {
                 /* reset startLSN */
                 startLSN = walrcv->lastRecoveredBarrierLSN;
                 ereport(LOG, (errmsg("[BarrierPreParse] reset startLSN with lastRecoveredBarrierLSN: %08X/%08X",
