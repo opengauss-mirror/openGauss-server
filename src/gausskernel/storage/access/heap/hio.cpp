@@ -379,7 +379,6 @@ Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer other_buffe
     Size save_free_space = 0;
     BlockNumber target_block, other_block;
     bool need_lock = false;
-    bool last_page_tested = false;
     Size extralen = 0;
     HeapPageHeader phdr;
 
@@ -454,7 +453,6 @@ Buffer RelationGetBufferForTuple(Relation relation, Size len, Buffer other_buffe
             if (nblocks > 0) {
                 target_block = nblocks - 1;
             }
-            last_page_tested = true;
         }
     }
     /* When in append mode, cannot use cached block which smaller than rel end block */
@@ -576,21 +574,6 @@ loop:
         ereport(DEBUG5, (errmodule(MOD_SEGMENT_PAGE),
                          errmsg("RelationGetBufferForTuple, get target block %u from FSM, nblocks in relation is %u",
                                 target_block, smgrnblocks(relation->rd_smgr, MAIN_FORKNUM))));
-
-        /*
-         * If the FSM knows nothing of the rel, try the last page before we
-         * give up and extend. This's intend to use pages that are extended
-         * one by one and not recorded in FSM as possible.
-         *
-         * The best is to record all pages into FSM using bulk-extend in later.
-         */
-        if (target_block == InvalidBlockNumber && !last_page_tested) {
-            BlockNumber nblocks = RelationGetNumberOfBlocks(relation);
-            if (nblocks > 0) {
-                target_block = nblocks - 1;
-            }
-            last_page_tested = true;
-        }
     }
 
     /*

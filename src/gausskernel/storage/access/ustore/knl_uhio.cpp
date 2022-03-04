@@ -51,7 +51,6 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
     BlockNumber     targetBlock;
     BlockNumber     otherBlock;
     bool            needLock = false;
-    bool last_page_tested = false;
 
     len = SHORTALIGN(len);
     /*
@@ -125,7 +124,6 @@ Buffer RelationGetBufferForUTuple(Relation relation, Size len, Buffer otherBuffe
             if (nblocks > 0) {
                 targetBlock = nblocks - 1;
             }
-            last_page_tested = true;
         }
     }
 
@@ -212,21 +210,6 @@ loop:
          * to try.
          */
         targetBlock = RecordAndGetPageWithFreeSpace(relation, targetBlock, pageFreeSpace, len + saveFreeSpace);
-
-        /*
-         * If the FSM knows nothing of the rel, try the last page before we
-         * give up and extend. This's intend to use pages that are extended
-         * one by one and not recorded in FSM as possible.
-         *
-         * The best is to record all pages into FSM using bulk-extend in later.
-         */
-        if (targetBlock == InvalidBlockNumber && !last_page_tested) {
-            BlockNumber nblocks = RelationGetNumberOfBlocks(relation);
-            if (nblocks > 0) {
-                targetBlock = nblocks - 1;
-            }
-            last_page_tested = true;
-        }
     }
 
     /*
