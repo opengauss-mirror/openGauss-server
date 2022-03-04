@@ -7082,6 +7082,7 @@ void RemoveTempNamespace()
                     u_sess->catalog_cxt.myTempToastNamespace = InvalidOid;
                 }
             }
+            pfree_ext(str.data);
         }
         PG_CATCH();
         {

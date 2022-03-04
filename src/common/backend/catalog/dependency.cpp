@@ -2509,6 +2509,8 @@ char* getObjectDescription(const ObjectAddress* object)
 
     initStringInfo(&buffer);
 
+    char* signature = NULL;
+
     switch (getObjectClass(object)) {
         case OCLASS_CLASS:
             getRelationDescription(&buffer, object->objectId);
@@ -2518,11 +2520,15 @@ char* getObjectDescription(const ObjectAddress* object)
             break;
 
         case OCLASS_PROC:
-            appendStringInfo(&buffer, _("function %s"), format_procedure(object->objectId));
+            signature = format_procedure(object->objectId);
+            appendStringInfo(&buffer, _("function %s"), signature);
+            pfree_ext(signature);
             break;
 
         case OCLASS_PACKAGE:
-             appendStringInfo(&buffer, _("package %s"), format_procedure(object->objectId));
+            signature = format_procedure(object->objectId);
+            appendStringInfo(&buffer, _("package %s"), signature);
+            pfree_ext(signature);
             break;
 
         case OCLASS_TYPE:
@@ -2776,7 +2782,7 @@ char* getObjectDescription(const ObjectAddress* object)
 
             initStringInfo(&opfam);
             getOpFamilyDescription(&opfam, amprocForm->amprocfamily);
-
+            signature = format_procedure(amprocForm->amproc);
             /* ------
                translator: %d is the function number, the first two %s's
                are data type names, the third %s is the description of the
@@ -2788,8 +2794,9 @@ char* getObjectDescription(const ObjectAddress* object)
                 format_type_be(amprocForm->amproclefttype),
                 format_type_be(amprocForm->amprocrighttype),
                 opfam.data,
-                format_procedure(amprocForm->amproc));
+                signature);
 
+            pfree_ext(signature);
             pfree_ext(opfam.data);
 
             systable_endscan(amscan);
